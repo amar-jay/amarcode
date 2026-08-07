@@ -26,4 +26,28 @@
 
 @layer base { * { @apply border-border outline-ring/50; } html { @apply font-sans antialiased; color-scheme: light; } html.dark { color-scheme: dark; } body { @apply m-0 min-w-80 bg-background text-foreground; } button:not(:disabled) { cursor: pointer; } }
 
+/* Menus use an inverted glass surface so they remain distinct from the workbench canvas. */
+[data-slot="select-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"] {
+  background: color-mix(in oklab, var(--foreground) 88%, transparent) !important;
+  color: var(--background) !important;
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  border-color: color-mix(in oklab, var(--background) 18%, transparent) !important;
+}
+
+[data-slot="select-content"] [data-slot="select-item"],
+[data-slot="dropdown-menu-content"] [data-slot$="-item"],
+[data-slot="dropdown-menu-sub-content"] [data-slot$="-item"] {
+  color: inherit;
+}
+
+[data-slot="select-content"] [data-slot="select-item"]:is(:focus, [data-highlighted]),
+[data-slot="dropdown-menu-content"] [data-slot$="-item"]:focus,
+[data-slot="dropdown-menu-sub-content"] [data-slot$="-item"]:focus {
+  background: color-mix(in oklab, var(--background) 16%, transparent) !important;
+  color: var(--background) !important;
+}
+
 *[data-tauri-drag-region] { app-region: drag; }

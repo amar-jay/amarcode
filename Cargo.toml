@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+  "apps/application/src-tauri",
+  "services/daemon",
+]
+default-members = [
+  "apps/application/src-tauri",
+  "services/daemon",
+]
