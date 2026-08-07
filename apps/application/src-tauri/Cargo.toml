@@ -1,8 +1,8 @@
 [package]
-name = "acp-workbench"
+name = "amarcode"
 version = "0.1.0"
 description = "A desktop workspace for ACP coding agents"
-authors = ["ACP Workbench"]
+authors = ["AMARCODE"]
 edition = "2021"
 
 [lib]

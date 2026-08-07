@@ -16,7 +16,7 @@ use tokio::{
     sync::broadcast,
 };
 
-const SERVICE_NAME: &str = "acp-workbench-daemon";
+const SERVICE_NAME: &str = "amarcode-daemon";
 
 #[derive(Debug, Deserialize)]
 struct Request {
@@ -37,7 +37,7 @@ fn data_dir() -> PathBuf {
         .unwrap_or_else(|| {
             dirs::data_local_dir()
                 .unwrap_or_else(std::env::temp_dir)
-                .join("acp-workbench")
+                .join("amarcode")
         })
 }
 fn daemon_addr() -> String {
@@ -189,7 +189,7 @@ async fn dispatch(daemon: &Daemon, request: Request) -> Result<Value, String> {
         "save_secret" => {
             let reference = required_string(&request.params, "secretRef")?;
             let value = required_string(&request.params, "value")?;
-            keyring::Entry::new("acp-workbench", reference)
+            keyring::Entry::new("amarcode", reference)
                 .map_err(|e| e.to_string())?
                 .set_password(value)
                 .map_err(|e| e.to_string())?;

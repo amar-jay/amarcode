@@ -1,5 +1,5 @@
 {
-  "name": "@acp-workbench/application",
+  "name": "@amarcode/application",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+		"tauri:dev": "tauri dev",
+		"tauri:build": "tauri build"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -62,6 +64,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "prettier": "^3.9.6",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.7.2",
     "vite": "^6.0.0",

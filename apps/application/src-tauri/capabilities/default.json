@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the primary ACP Workbench window",
+  "description": "Capabilities for the primary AMARCODE window",
   "windows": ["main"],
   "permissions": [
     "core:default",

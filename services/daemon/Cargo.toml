@@ -1,7 +1,7 @@
 [package]
-name = "acp-workbench-daemon"
+name = "amarcode-daemon"
 version = "0.1.0"
-description = "Background service for ACP Workbench"
+description = "Background service for AMARCODE"
 edition = "2021"
 
 [dependencies]

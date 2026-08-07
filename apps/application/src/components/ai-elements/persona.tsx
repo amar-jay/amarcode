@@ -30,11 +30,7 @@ const useStrictModeSafeInit = () => {
 };
 
 export type PersonaState =
-  | "idle"
-  | "listening"
-  | "thinking"
-  | "speaking"
-  | "asleep";
+  "idle" | "listening" | "thinking" | "speaking" | "asleep";
 
 interface PersonaProps {
   state: PersonaState;
@@ -159,7 +155,7 @@ const PersonaWithModel = memo(
     });
     const viewModelInstanceColor = useViewModelInstanceColor(
       "color",
-      viewModelInstance
+      viewModelInstance,
     );
 
     useEffect(() => {
@@ -172,7 +168,7 @@ const PersonaWithModel = memo(
     }, [viewModelInstanceColor, theme, source.dynamicColor]);
 
     return children;
-  }
+  },
 );
 
 PersonaWithModel.displayName = "PersonaWithModel";
@@ -182,7 +178,7 @@ interface PersonaWithoutModelProps {
 }
 
 const PersonaWithoutModel = memo(
-  ({ children }: PersonaWithoutModelProps) => children
+  ({ children }: PersonaWithoutModelProps) => children,
 );
 
 PersonaWithoutModel.displayName = "PersonaWithoutModel";
@@ -230,11 +226,11 @@ export const Persona: FC<PersonaProps> = memo(
       () => ({
         onLoad: ((loadedRive) =>
           callbacksRef.current.onLoad?.(
-            loadedRive
+            loadedRive,
           )) as RiveParameters["onLoad"],
         onLoadError: ((err) =>
           callbacksRef.current.onLoadError?.(
-            err
+            err,
           )) as RiveParameters["onLoadError"],
         onPause: ((event) =>
           callbacksRef.current.onPause?.(event)) as RiveParameters["onPause"],
@@ -244,7 +240,7 @@ export const Persona: FC<PersonaProps> = memo(
         onStop: ((event) =>
           callbacksRef.current.onStop?.(event)) as RiveParameters["onStop"],
       }),
-      []
+      [],
     );
 
     // Delay initialisation by one frame to avoid creating (and leaking)
@@ -264,13 +260,13 @@ export const Persona: FC<PersonaProps> = memo(
             src: source.source,
             stateMachines: stateMachine,
           }
-        : null
+        : null,
     );
 
     const listeningInput = useStateMachineInput(
       rive,
       stateMachine,
-      "listening"
+      "listening",
     );
     const thinkingInput = useStateMachineInput(rive, stateMachine, "thinking");
     const speakingInput = useStateMachineInput(rive, stateMachine, "speaking");
@@ -300,7 +296,7 @@ export const Persona: FC<PersonaProps> = memo(
         <RiveComponent className={cn("size-16 shrink-0", className)} />
       </Component>
     );
-  }
+  },
 );
 
 Persona.displayName = "Persona";

@@ -86,7 +86,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: ACP Workbench Latest
+          name: AMARCODE Latest
           body: |
             Automated desktop release generated from the workflow button.
           make_latest: true

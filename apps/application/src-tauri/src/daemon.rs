@@ -17,7 +17,7 @@ impl DaemonBridge {
             return;
         }
         let command = std::env::var("ACP_WORKBENCH_DAEMON_COMMAND")
-            .unwrap_or_else(|_| "acp-workbench-daemon".into());
+            .unwrap_or_else(|_| "amarcode-daemon".into());
         let _ = std::process::Command::new(command).spawn();
     }
 

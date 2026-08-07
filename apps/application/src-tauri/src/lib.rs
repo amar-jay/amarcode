@@ -140,5 +140,5 @@ pub fn run() {
             save_secret
         ])
         .run(tauri::generate_context!())
-        .expect("error while running ACP Workbench");
+        .expect("error while running AMARCODE");
 }

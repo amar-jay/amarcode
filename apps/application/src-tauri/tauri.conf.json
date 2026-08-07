@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ACP Workbench",
+  "productName": "AMARCODE",
   "version": "0.1.0",
   "identifier": "com.acpworkbench.desktop",
   "build": {
@@ -10,7 +10,16 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "ACP Workbench", "width": 1320, "height": 860, "minWidth": 980, "minHeight": 640, "decorations": false }],
+    "windows": [
+      {
+        "title": "AMARCODE",
+        "width": 1320,
+        "height": 860,
+        "minWidth": 980,
+        "minHeight": 640,
+        "decorations": false
+      }
+    ],
     "security": { "csp": null }
   },
   "bundle": { "active": true, "targets": "all", "icon": ["icons/icon.png"] }

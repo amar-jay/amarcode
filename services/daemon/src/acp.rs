@@ -78,7 +78,7 @@ impl SessionManager {
         for variable in agent.environment {
             let value = match (variable.value, variable.secret_ref) {
                 (Some(value), _) => value,
-                (None, Some(secret_ref)) => keyring::Entry::new("acp-workbench", &secret_ref)
+                (None, Some(secret_ref)) => keyring::Entry::new("amarcode", &secret_ref)
                     .map_err(|error| error.to_string())?
                     .get_password()
                     .map_err(|_| {
@@ -121,7 +121,7 @@ impl SessionManager {
                 "params": {
                     "protocolVersion": 1,
                     "clientCapabilities": {},
-                    "clientInfo": { "name": "ACP Workbench", "version": env!("CARGO_PKG_VERSION") }
+                    "clientInfo": { "name": "AMARCODE", "version": env!("CARGO_PKG_VERSION") }
                 }
             })).await?;
             wait_for_response(&mut stdout, 1, &summary.id, &self.store, &self.events).await?;
