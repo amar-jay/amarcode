@@ -14,7 +14,8 @@ import { notify } from "@/lib/notify"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger } from "@/components/ui/sidebar"
-import { WorkbenchPromptInput, type PermissionPolicy, type WorkMode } from "@/components/workbench/workbench-prompt-input"
+import { WorkbenchPromptInput, type WorkMode } from "@/components/workbench/workbench-prompt-input"
+import { SessionTimeline } from "@/components/workbench/session-timeline"
 
 const eventText = (event: AgentEvent) => event.kind === "message" ? event.data.text : event.kind === "status" ? `${event.data.status}${event.data.detail ? ` · ${event.data.detail}` : ""}` : event.kind === "protocolError" ? event.data.message : event.kind === "request" ? `${event.data.method} needs your response` : event.data.label
 
@@ -82,14 +83,15 @@ export default function App() {
     }
   }
 
-  async function submitPrompt({ text, files, mode, permission }: { text: string; files: { filename?: string }[]; mode: WorkMode; permission: PermissionPolicy }) {
+  async function submitPrompt({ text, files, sources, mode }: { text: string; files: { filename?: string }[]; sources: { title?: string; filename?: string }[]; mode: WorkMode }) {
     if (!active || (!text && files.length === 0)) return
     const attachmentNames = files.map((file) => file.filename ?? "Attachment")
     const visibleText = text || `Review the attached context: ${attachmentNames.join(", ")}`
+    const sourceNames = sources.map((source) => source.title ?? source.filename ?? "Workspace context")
     const acpPrompt = [
       `[Work mode: ${mode}]`,
-      `[Permission preference: ${permission}]`,
       attachmentNames.length ? `[Local context attachments: ${attachmentNames.join(", ")}]` : "",
+      sourceNames.length ? `[Referenced workspace context: ${sourceNames.join(", ")}]` : "",
       visibleText,
     ].filter(Boolean).join("\n\n")
     setEvents((current) => [...current, { kind: "message", data: { sessionId: active.id, role: "user", text: visibleText } }])
@@ -138,7 +140,7 @@ export default function App() {
     <SidebarInset className="min-w-0 pt-9">
       {!active ? <NewSession agent={agent} workspace={workspace} agents={agents} selectedAgent={selectedAgent} showAgentForm={showAgentForm} agentForm={agentForm} error={error} onChooseWorkspace={() => void chooseWorkspace()} onSelectAgent={setSelectedAgent} onShowAgentForm={() => setShowAgentForm((shown) => !shown)} onAgentFormChange={setAgentForm} onAddAgent={addAgent} onStart={() => void start()} /> : <>
         <SessionHeader active={active} agent={activeAgent} onCancel={() => void stopPrompt()} />
-        <ScrollArea className="min-h-0 flex-1"><div className="mx-auto w-full max-w-3xl space-y-3 px-8 py-7">{events.length === 0 && <p className="py-24 text-center text-sm text-muted-foreground">Starting agent session…</p>}{events.map((event, index) => <EventCard key={index} event={event} onRespond={(result) => { void api.respond(active.id, event.kind === "request" ? event.data.requestId : "", result).catch((reason) => setError(String(reason))) }} />)}</div></ScrollArea>
+        <div className="min-h-0 flex-1"><SessionTimeline events={events} onRespond={(event, result) => { if (event.kind === "request") void api.respond(active.id, event.data.requestId, result).catch((reason) => setError(String(reason))) }} /></div>
         <div className="sticky bottom-0 z-20 shrink-0 border-t border-border bg-background/95 px-8 py-4 backdrop-blur-sm"><WorkbenchPromptInput agent={activeAgent} workspacePath={active.workspacePath} isWorking={isPromptWorking} onStop={() => void stopPrompt()} onSubmit={submitPrompt} />{error && <p className="mx-auto mt-2 max-w-3xl text-xs text-destructive">{error}</p>}</div>
       </>}
     </SidebarInset>

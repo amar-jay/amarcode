@@ -29,7 +29,8 @@
 /* Menus use an inverted glass surface so they remain distinct from the workbench canvas. */
 [data-slot="select-content"],
 [data-slot="dropdown-menu-content"],
-[data-slot="dropdown-menu-sub-content"] {
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="hover-card-content"] {
   background: color-mix(in oklab, var(--foreground) 88%, transparent) !important;
   color: var(--background) !important;
   backdrop-filter: blur(20px) saturate(1.5);
@@ -39,13 +40,15 @@
 
 [data-slot="select-content"] [data-slot="select-item"],
 [data-slot="dropdown-menu-content"] [data-slot$="-item"],
-[data-slot="dropdown-menu-sub-content"] [data-slot$="-item"] {
+[data-slot="dropdown-menu-sub-content"] [data-slot$="-item"],
+[data-slot="hover-card-content"] [data-slot$="-item"] {
   color: inherit;
 }
 
 [data-slot="select-content"] [data-slot="select-item"]:is(:focus, [data-highlighted]),
 [data-slot="dropdown-menu-content"] [data-slot$="-item"]:focus,
-[data-slot="dropdown-menu-sub-content"] [data-slot$="-item"]:focus {
+[data-slot="dropdown-menu-sub-content"] [data-slot$="-item"]:focus,
+[data-slot="hover-card-content"] [data-slot$="-item"]:focus {
   background: color-mix(in oklab, var(--background) 16%, transparent) !important;
   color: var(--background) !important;
 }

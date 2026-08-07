@@ -5,6 +5,7 @@ export const api = {
   agents: () => invoke<AgentDefinition[]>("list_agents"),
   sessions: () => invoke<SessionSummary[]>("list_sessions"),
   events: (sessionId: string) => invoke<AgentEvent[]>("session_events", { sessionId }),
+  workspaceFiles: (workspacePath: string) => invoke<string[]>("list_workspace_files", { workspacePath }),
   saveAgent: (agent: AgentDefinition) => invoke("save_agent", { agent }),
   start: async (workspacePath: string, agent: AgentDefinition, onEvent: (event: AgentEvent) => void) => {
     const channel = new Channel<AgentEvent>();

@@ -8,6 +8,7 @@ use models::{
     AgentDefinition, AgentEvent, RespondToRequestInput, SessionSummary, StartSessionInput,
 };
 use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use store::Store;
 use tauri::{ipc::Channel, Manager, State};
 use uuid::Uuid;
@@ -38,6 +39,22 @@ fn session_events(
     session_id: String,
 ) -> Result<Vec<AgentEvent>, String> {
     state.store.events(&session_id)
+}
+
+#[tauri::command]
+fn list_workspace_files(workspace_path: String) -> Result<Vec<String>, String> {
+    fn visit(root: &Path, path: &Path, depth: usize, files: &mut Vec<String>) -> Result<(), String> {
+        if depth > 6 || files.len() >= 500 { return Ok(()); }
+        for entry in std::fs::read_dir(path).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let child = entry.path(); let name = entry.file_name();
+            if [".git", "node_modules", "target", "dist"].iter().any(|ignored| name == *ignored) { continue; }
+            if child.is_dir() { visit(root, &child, depth + 1, files)?; }
+            else if child.is_file() { if let Ok(relative) = child.strip_prefix(root) { files.push(relative.to_string_lossy().to_string()); } }
+        }
+        Ok(())
+    }
+    let root = PathBuf::from(workspace_path); let mut files = Vec::new(); visit(&root, &root, 0, &mut files)?; files.sort(); Ok(files)
 }
 
 #[tauri::command]
@@ -128,6 +145,7 @@ pub fn run() {
             save_agent,
             list_sessions,
             session_events,
+            list_workspace_files,
             start_session,
             send_prompt,
             cancel_session,
