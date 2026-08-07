@@ -171,11 +171,9 @@ impl SessionManager {
         let output_session_id = summary.id.clone();
         tokio::spawn(async move {
             while let Ok(Some(line)) = stdout.next_line().await {
-                emit_to(
-                    &output_store,
-                    &output_events,
-                    normalize_message(&output_session_id, &line),
-                );
+                if let Some(event) = normalize_message(&output_session_id, &line) {
+                    emit_to(&output_store, &output_events, event);
+                }
             }
             let event = AgentEvent::Status {
                 session_id: output_session_id.clone(),
@@ -206,19 +204,29 @@ impl SessionManager {
         Ok(summary)
     }
 
-    pub async fn prompt(&self, session_id: &str, prompt: String) -> Result<(), String> {
+    pub async fn prompt(
+        &self,
+        session_id: &str,
+        prompt: String,
+        display_text: String,
+    ) -> Result<(), String> {
         let acp_session_id = self.acp_session_id(session_id).await?;
         self.write_request(
             session_id,
             "session/prompt",
             json!({ "sessionId": acp_session_id, "prompt": [{ "type": "text", "text": prompt }] }),
         )
-        .await
+        .await?;
+        self.emit(AgentEvent::Message {
+            session_id: session_id.into(),
+            role: "user".into(),
+            text: display_text,
+        })
     }
     pub async fn respond(
         &self,
         session_id: &str,
-        request_id: &str,
+        request_id: Value,
         result: Value,
     ) -> Result<(), String> {
         self.write(
@@ -283,7 +291,9 @@ impl SessionManager {
 }
 
 fn emit_to(store: &Store, events: &broadcast::Sender<AgentEvent>, event: AgentEvent) {
-    let _ = store.save_event(&event);
+    if !matches!(event, AgentEvent::TurnComplete { .. }) {
+        let _ = store.save_event(&event);
+    }
     let _ = events.send(event);
 }
 
@@ -311,54 +321,63 @@ async fn wait_for_response(
             }
             return Ok(message.get("result").cloned().unwrap_or(Value::Null));
         }
-        emit_to(store, events, normalize_message(session_id, &line));
+        if let Some(event) = normalize_message(session_id, &line) {
+            emit_to(store, events, event);
+        }
     }
     Err("Agent closed its output stream during initialization".into())
 }
 
-pub fn normalize_message(session_id: &str, line: &str) -> AgentEvent {
+pub fn normalize_message(session_id: &str, line: &str) -> Option<AgentEvent> {
     let message: Value = match serde_json::from_str(line) {
         Ok(value) => value,
         Err(error) => {
-            return AgentEvent::ProtocolError {
+            return Some(AgentEvent::ProtocolError {
                 session_id: session_id.into(),
                 message: format!("Invalid JSON-RPC from agent: {error}"),
-            }
+            })
         }
     };
     let method = message.get("method").and_then(Value::as_str);
     let params = message.get("params").cloned().unwrap_or(Value::Null);
     match method {
-        Some("session/update") => params
-            .pointer("/update/content/text")
-            .and_then(Value::as_str)
-            .or_else(|| params.pointer("/content/text").and_then(Value::as_str))
-            .map(|text| AgentEvent::Message {
-                session_id: session_id.into(),
-                role: "agent".into(),
-                text: text.into(),
-            })
-            .unwrap_or_else(|| AgentEvent::Activity {
-                session_id: session_id.into(),
-                label: "session update".into(),
-                payload: params,
-            }),
-        Some(method) if message.get("id").is_some() => AgentEvent::Request {
+        Some("session/update") => Some(
+            params
+                .pointer("/update/content/text")
+                .and_then(Value::as_str)
+                .or_else(|| params.pointer("/content/text").and_then(Value::as_str))
+                .map(|text| AgentEvent::Message {
+                    session_id: session_id.into(),
+                    role: "agent".into(),
+                    text: text.into(),
+                })
+                .unwrap_or_else(|| AgentEvent::Activity {
+                    session_id: session_id.into(),
+                    label: "session update".into(),
+                    payload: params,
+                }),
+        ),
+        Some(method) if message.get("id").is_some() => Some(AgentEvent::Request {
             session_id: session_id.into(),
-            request_id: message.get("id").map(Value::to_string).unwrap_or_default(),
+            request_id: message.get("id").cloned().unwrap_or(Value::Null),
             method: method.into(),
             params,
-        },
-        Some(method) => AgentEvent::Activity {
+        }),
+        Some(method) => Some(AgentEvent::Activity {
             session_id: session_id.into(),
             label: method.into(),
             payload: params,
-        },
-        None => AgentEvent::Activity {
+        }),
+        // Prompt responses mark the end of a turn. They are sent to the client
+        // to stop the loading state, but are not persisted or rendered.
+        None if message.get("result").is_some() => Some(AgentEvent::TurnComplete {
             session_id: session_id.into(),
-            label: "response".into(),
-            payload: message,
-        },
+        }),
+        None if message.get("error").is_some() => Some(AgentEvent::ProtocolError {
+            session_id: session_id.into(),
+            message: format!("ACP request failed: {}", message["error"]),
+        }),
+        None => None,
     }
 }
 
@@ -368,13 +387,24 @@ mod tests {
     #[test]
     fn normalizes_agent_text_updates() {
         assert!(
-            matches!(normalize_message("s1", r#"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"content":{"text":"Hello"}}}}"#), AgentEvent::Message { text, .. } if text == "Hello")
+            matches!(normalize_message("s1", r#"{"jsonrpc":"2.0","method":"session/update","params":{"update":{"content":{"text":"Hello"}}}}"#), Some(AgentEvent::Message { text, .. }) if text == "Hello")
         );
     }
     #[test]
     fn keeps_agent_requests_actionable() {
         assert!(
-            matches!(normalize_message("s1", r#"{"jsonrpc":"2.0","id":7,"method":"fs/read","params":{"path":"a"}}"#), AgentEvent::Request { method, request_id, .. } if method == "fs/read" && request_id == "7")
+            matches!(normalize_message("s1", r#"{"jsonrpc":"2.0","id":7,"method":"fs/read","params":{"path":"a"}}"#), Some(AgentEvent::Request { method, request_id, .. }) if method == "fs/read" && request_id == 7)
         );
+    }
+
+    #[test]
+    fn turns_successful_protocol_responses_into_completion_events() {
+        assert!(matches!(
+            normalize_message(
+                "s1",
+                r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#
+            ),
+            Some(AgentEvent::TurnComplete { .. })
+        ));
     }
 }

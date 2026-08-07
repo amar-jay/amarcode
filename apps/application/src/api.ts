@@ -12,7 +12,7 @@ export const api = {
     channel.onmessage = onEvent;
     return invoke<SessionSummary>("start_session", { workspacePath, agent, onEvent: channel });
   },
-  prompt: (sessionId: string, prompt: string) => invoke("send_prompt", { sessionId, prompt }),
+  prompt: (sessionId: string, prompt: string, displayText: string) => invoke("send_prompt", { sessionId, prompt, displayText }),
   cancel: (sessionId: string) => invoke("cancel_session", { sessionId }),
-  respond: (sessionId: string, requestId: string, result: unknown) => invoke("respond_to_request", { input: { sessionId, requestId, result } }),
+  respond: (sessionId: string, requestId: string | number, result: unknown) => invoke("respond_to_request", { sessionId, requestId, result }),
 };

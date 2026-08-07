@@ -159,6 +159,7 @@ async fn dispatch(daemon: &Daemon, request: Request) -> Result<Value, String> {
                 .prompt(
                     required_string(&request.params, "sessionId")?,
                     required_string(&request.params, "prompt")?.to_owned(),
+                    required_string(&request.params, "displayText")?.to_owned(),
                 )
                 .await?;
             Ok(Value::Null)
@@ -175,7 +176,11 @@ async fn dispatch(daemon: &Daemon, request: Request) -> Result<Value, String> {
                 .sessions
                 .respond(
                     required_string(&request.params, "sessionId")?,
-                    required_string(&request.params, "requestId")?,
+                    request
+                        .params
+                        .get("requestId")
+                        .cloned()
+                        .ok_or("missing requestId")?,
                     request.params.get("result").cloned().unwrap_or(Value::Null),
                 )
                 .await?;

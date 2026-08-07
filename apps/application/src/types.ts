@@ -13,5 +13,6 @@ export type AgentEvent =
   | { kind: "status"; data: { sessionId: string; status: string; detail?: string } }
   | { kind: "message"; data: { sessionId: string; role: string; text: string } }
   | { kind: "activity"; data: { sessionId: string; label: string; payload: unknown } }
-  | { kind: "request"; data: { sessionId: string; requestId: string; method: string; params: unknown } }
-  | { kind: "protocolError"; data: { sessionId: string; message: string } };
+  | { kind: "request"; data: { sessionId: string; requestId: string | number; method: string; params: unknown } }
+  | { kind: "protocolError"; data: { sessionId: string; message: string } }
+  | { kind: "turnComplete"; data: { sessionId: string } };

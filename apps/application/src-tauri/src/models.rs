@@ -52,7 +52,7 @@ pub enum AgentEvent {
     },
     Request {
         session_id: String,
-        request_id: String,
+        request_id: serde_json::Value,
         method: String,
         params: serde_json::Value,
     },
@@ -60,12 +60,7 @@ pub enum AgentEvent {
         session_id: String,
         message: String,
     },
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RespondToRequestInput {
-    pub session_id: String,
-    pub request_id: String,
-    pub result: serde_json::Value,
+    TurnComplete {
+        session_id: String,
+    },
 }

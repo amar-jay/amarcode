@@ -51,12 +51,20 @@ export default function App() {
   const agent = useMemo(() => agents.find((candidate) => candidate.id === selectedAgent), [agents, selectedAgent])
   const activeAgent = useMemo(() => agents.find((candidate) => candidate.id === active?.agentId), [active?.agentId, agents])
   const onEvent = (event: AgentEvent) => {
-    if (event.kind !== "status" || event.data.status === "stopped") setIsPromptWorking(false)
+    if (event.kind === "turnComplete" || event.kind === "protocolError" || (event.kind === "status" && ["failed", "stopped"].includes(event.data.status))) setIsPromptWorking(false)
+    if (event.kind === "protocolError") {
+      setError(event.data.message)
+      notify(event.data.message, "error")
+    }
     if (event.kind === "status") {
       setActive((current) => current?.id === event.data.sessionId ? { ...current, status: event.data.status } : current)
       setSessions((current) => current.map((session) => session.id === event.data.sessionId ? { ...session, status: event.data.status } : session))
     }
-    setEvents((current) => [...current, event])
+    setEvents((current) => {
+      const previous = current.at(-1)
+      if (event.kind === "message" && event.data.role === "user" && previous?.kind === "message" && previous.data.role === "user" && previous.data.sessionId === event.data.sessionId && previous.data.text === event.data.text) return current
+      return [...current, event]
+    })
   }
 
   async function chooseWorkspace() {
@@ -112,7 +120,7 @@ export default function App() {
     setEvents((current) => [...current, { kind: "message", data: { sessionId: active.id, role: "user", text: visibleText } }])
     setIsPromptWorking(true)
     try {
-      await api.prompt(active.id, acpPrompt)
+      await api.prompt(active.id, acpPrompt, visibleText)
     } catch (reason) {
       setIsPromptWorking(false)
       setError(String(reason))
@@ -155,7 +163,7 @@ export default function App() {
     <SidebarInset className="min-w-0 pt-9">
       {!active ? <NewSession agent={agent} workspace={workspace} agents={agents} selectedAgent={selectedAgent} showAgentForm={showAgentForm} agentForm={agentForm} error={error} isLaunching={isLaunching} onChooseWorkspace={() => void chooseWorkspace()} onSelectAgent={setSelectedAgent} onShowAgentForm={() => setShowAgentForm((shown) => !shown)} onAgentFormChange={setAgentForm} onAddAgent={addAgent} onStart={() => void start()} /> : <>
         <SessionHeader active={active} agent={activeAgent} onCancel={() => void stopPrompt()} />
-        <div className="min-h-0 flex-1"><SessionTimeline events={events} onRespond={(event, result) => { if (event.kind === "request") void api.respond(active.id, event.data.requestId, result).catch((reason) => setError(String(reason))) }} /></div>
+        <div className="min-h-0 flex-1"><SessionTimeline events={events} isWorking={isPromptWorking} onRespond={async (event, result) => { if (event.kind === "request") { const requestId = event.data.requestId ?? (event.data as typeof event.data & { request_id?: string | number }).request_id; if (requestId === undefined) throw new Error("This agent request has no response ID. Restart the session and try again."); await api.respond(active.id, requestId, result) } }} /></div>
         <div className="sticky bottom-0 z-20 shrink-0 border-t border-border bg-background/95 px-8 py-4 backdrop-blur-sm"><WorkbenchPromptInput agent={activeAgent} workspacePath={active.workspacePath} isWorking={isPromptWorking} onStop={() => void stopPrompt()} onSubmit={submitPrompt} />{error && <p className="mx-auto mt-2 max-w-3xl text-xs text-destructive">{error}</p>}</div>
       </>}
     </SidebarInset>
@@ -185,7 +193,7 @@ function NewSession({ agent, workspace, agents, selectedAgent, showAgentForm, ag
 }
 
 function SessionHeader({ active, agent, onCancel }: { active: SessionSummary; agent?: AgentDefinition; onCancel: () => void }) {
-  return <header className="flex items-center justify-between border-b border-border px-8 py-4"><div className="min-w-0"><div className="flex items-center gap-2 text-xs text-muted-foreground"><FolderOpen className="size-3" /><span className="truncate">{active.workspacePath}</span></div><h1 className="mt-1 font-heading text-lg font-medium">{agent?.name ?? active.agentId}</h1></div><Button variant="outline" onClick={onCancel}><Square data-icon="inline-start" />Cancel</Button></header>
+  return <header>will implement later, previous implementation was horrible</header> 
 }
 
 function EventCard({ event, onRespond }: { event: AgentEvent; onRespond: (result: unknown) => void }) {

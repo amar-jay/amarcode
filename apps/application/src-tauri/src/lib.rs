@@ -2,7 +2,7 @@ mod daemon;
 mod models;
 
 use daemon::DaemonBridge;
-use models::{AgentDefinition, AgentEvent, RespondToRequestInput, SessionSummary};
+use models::{AgentDefinition, AgentEvent, SessionSummary};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use tauri::{ipc::Channel, Manager, State};
@@ -41,10 +41,14 @@ async fn start_session(
     .await
 }
 #[tauri::command]
-async fn send_prompt(session_id: String, prompt: String) -> Result<(), String> {
+async fn send_prompt(
+    session_id: String,
+    prompt: String,
+    display_text: String,
+) -> Result<(), String> {
     DaemonBridge::call(
         "send_prompt",
-        json!({ "sessionId": session_id, "prompt": prompt }),
+        json!({ "sessionId": session_id, "prompt": prompt, "displayText": display_text }),
     )
     .await
 }
@@ -53,8 +57,16 @@ async fn cancel_session(session_id: String) -> Result<(), String> {
     DaemonBridge::call("cancel_session", json!({ "sessionId": session_id })).await
 }
 #[tauri::command]
-async fn respond_to_request(input: RespondToRequestInput) -> Result<(), String> {
-    DaemonBridge::call("respond_to_request", json!({ "sessionId": input.session_id, "requestId": input.request_id, "result": input.result })).await
+async fn respond_to_request(
+    session_id: String,
+    request_id: serde_json::Value,
+    result: serde_json::Value,
+) -> Result<(), String> {
+    DaemonBridge::call(
+        "respond_to_request",
+        json!({ "sessionId": session_id, "requestId": request_id, "result": result }),
+    )
+    .await
 }
 #[tauri::command]
 async fn save_secret(secret_ref: String, value: String) -> Result<(), String> {

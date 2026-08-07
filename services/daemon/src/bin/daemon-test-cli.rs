@@ -87,6 +87,25 @@ async fn run(mut args: Vec<String>) -> Result<(), String> {
                 .map_err(|error| format!("invalid JSON result: {error}"))?;
             print_value(call(&address, "respond_to_request", json!({ "sessionId": required(&args, 0, "session id")?, "requestId": required(&args, 1, "request id")?, "result": result })).await?);
         }
+        "messages" => {
+            let mut watch_flag = false;
+            if let Some(pos) = args.iter().position(|a| a == "--watch" || a == "-w") {
+                args.remove(pos);
+                watch_flag = true;
+            }
+            let session_id = required(&args, 0, "session id")?;
+            print_value(
+                call(
+                    &address,
+                    "session_events",
+                    json!({ "sessionId": session_id }),
+                )
+                .await?,
+            );
+            if watch_flag {
+                watch(&address, Some(session_id)).await?;
+            }
+        }
         "watch" => watch(&address, args.first().map(String::as_str)).await?,
         other => return Err(format!("unknown command '{other}' (run 'help' for usage)")),
     }
@@ -159,5 +178,7 @@ fn print_value(value: Value) {
     );
 }
 fn print_usage() {
-    println!("ACP Workbench daemon test CLI\n\nUsage: cargo run -p acp-workbench-daemon --bin daemon-test-cli -- [--address HOST:PORT] <command>\n\nCommands:\n  health                         Check daemon availability\n  agents                         List installed agent definitions\n  sessions                       List persisted sessions and live status\n  events <session-id>            Print persisted events\n  start <workspace> <agent-id>   Start a configured agent\n  prompt <session-id> <text>     Send a prompt\n  cancel <session-id>            Cancel the current turn\n  respond <session> <request> <json>  Respond to an ACP request\n  watch [session-id]             Stream live daemon events\n");
+    println!(
+        "ACP Workbench daemon test CLI\n\nUsage: cargo run -p acp-workbench-daemon --bin daemon-test-cli -- [--address HOST:PORT] <command>\n\nCommands:\n  health                         Check daemon availability\n  agents                         List installed agent definitions\n  sessions                       List persisted sessions and live status\n  events <session-id>            Print persisted events\n  messages <session-id> [--watch|-w]  Print persisted events; optionally stream live with --watch\n  start <workspace> <agent-id>   Start a configured agent\n  prompt <session-id> <text>     Send a prompt\n  cancel <session-id>            Cancel the current turn\n  respond <session> <request> <json>  Respond to an ACP request\n  watch [session-id]             Stream live daemon events\n"
+    );
 }

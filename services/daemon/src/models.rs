@@ -52,13 +52,16 @@ pub enum AgentEvent {
     },
     Request {
         session_id: String,
-        request_id: String,
+        request_id: serde_json::Value,
         method: String,
         params: serde_json::Value,
     },
     ProtocolError {
         session_id: String,
         message: String,
+    },
+    TurnComplete {
+        session_id: String,
     },
 }
 
@@ -69,7 +72,8 @@ impl AgentEvent {
             | Self::Message { session_id, .. }
             | Self::Activity { session_id, .. }
             | Self::Request { session_id, .. }
-            | Self::ProtocolError { session_id, .. } => session_id,
+            | Self::ProtocolError { session_id, .. }
+            | Self::TurnComplete { session_id } => session_id,
         }
     }
 }
