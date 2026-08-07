@@ -9,6 +9,7 @@
     "test": "bun run --cwd apps/application test",
     "tauri": "bun run --cwd apps/application tauri",
     "daemon": "cargo run -p acp-workbench-daemon",
+    "daemon:cli": "cargo run -p acp-workbench-daemon --bin daemon-test-cli --",
     "daemon:check": "cargo test -p acp-workbench-daemon"
   }
 }

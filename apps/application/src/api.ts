@@ -10,7 +10,7 @@ export const api = {
   start: async (workspacePath: string, agent: AgentDefinition, onEvent: (event: AgentEvent) => void) => {
     const channel = new Channel<AgentEvent>();
     channel.onmessage = onEvent;
-    return invoke<SessionSummary>("start_session", { input: { workspacePath, agent }, onEvent: channel });
+    return invoke<SessionSummary>("start_session", { workspacePath, agent, onEvent: channel });
   },
   prompt: (sessionId: string, prompt: string) => invoke("send_prompt", { sessionId, prompt }),
   cancel: (sessionId: string) => invoke("cancel_session", { sessionId }),

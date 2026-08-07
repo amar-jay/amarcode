@@ -62,10 +62,14 @@ pub enum AgentEvent {
     },
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RespondToRequestInput {
-    pub session_id: String,
-    pub request_id: String,
-    pub result: serde_json::Value,
+impl AgentEvent {
+    pub fn session_id(&self) -> &str {
+        match self {
+            Self::Status { session_id, .. }
+            | Self::Message { session_id, .. }
+            | Self::Activity { session_id, .. }
+            | Self::Request { session_id, .. }
+            | Self::ProtocolError { session_id, .. } => session_id,
+        }
+    }
 }

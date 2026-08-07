@@ -6,29 +6,27 @@ version = 4
 name = "acp-workbench"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "chrono",
- "dirs",
- "keyring",
- "rusqlite",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
- "thiserror 2.0.19",
  "tokio",
- "uuid",
 ]
 
 [[package]]
 name = "acp-workbench-daemon"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "dirs",
+ "keyring",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

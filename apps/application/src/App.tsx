@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { Bot, ChevronRight, Cog, FolderOpen, Minus, Plus, Square, X } from "lucide-react"
@@ -27,6 +27,8 @@ export default function App() {
   const [active, setActive] = useState<SessionSummary>()
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [isPromptWorking, setIsPromptWorking] = useState(false)
+  const [isLaunching, setIsLaunching] = useState(false)
+  const isLaunchingRef = useRef(false)
   const [error, setError] = useState("")
   const [showAgentForm, setShowAgentForm] = useState(false)
   const [agentForm, setAgentForm] = useState({ name: "", command: "", arguments: "" })
@@ -50,6 +52,10 @@ export default function App() {
   const activeAgent = useMemo(() => agents.find((candidate) => candidate.id === active?.agentId), [active?.agentId, agents])
   const onEvent = (event: AgentEvent) => {
     if (event.kind !== "status" || event.data.status === "stopped") setIsPromptWorking(false)
+    if (event.kind === "status") {
+      setActive((current) => current?.id === event.data.sessionId ? { ...current, status: event.data.status } : current)
+      setSessions((current) => current.map((session) => session.id === event.data.sessionId ? { ...session, status: event.data.status } : session))
+    }
     setEvents((current) => [...current, event])
   }
 
@@ -59,7 +65,9 @@ export default function App() {
   }
 
   async function start() {
-    if (!workspace || !agent) return
+    if (!workspace || !agent || isLaunchingRef.current) return
+    isLaunchingRef.current = true
+    setIsLaunching(true)
     setError("")
     setEvents([])
     try {
@@ -70,6 +78,9 @@ export default function App() {
     } catch (reason) {
       setError(String(reason))
       notify("Unable to start the agent session", "error")
+    } finally {
+      isLaunchingRef.current = false
+      setIsLaunching(false)
     }
   }
 
@@ -85,6 +96,10 @@ export default function App() {
 
   async function submitPrompt({ text, files, sources, mode }: { text: string; files: { filename?: string }[]; sources: { title?: string; filename?: string }[]; mode: WorkMode }) {
     if (!active || (!text && files.length === 0)) return
+    if (active.status !== "running") {
+      notify("This saved session is no longer live. Start a new session to continue.", "error")
+      return
+    }
     const attachmentNames = files.map((file) => file.filename ?? "Attachment")
     const visibleText = text || `Review the attached context: ${attachmentNames.join(", ")}`
     const sourceNames = sources.map((source) => source.title ?? source.filename ?? "Workspace context")
@@ -107,7 +122,7 @@ export default function App() {
   }
 
   async function stopPrompt() {
-    if (!active) return
+    if (!active || active.status !== "running") return
     try {
       await api.cancel(active.id)
       setIsPromptWorking(false)
@@ -138,7 +153,7 @@ export default function App() {
     <TopBar active={active} />
     <WorkbenchSidebar active={active} sessions={sessions} onNewSession={() => setActive(undefined)} onRestore={restore} onSettings={() => setSettingsOpen(true)} />
     <SidebarInset className="min-w-0 pt-9">
-      {!active ? <NewSession agent={agent} workspace={workspace} agents={agents} selectedAgent={selectedAgent} showAgentForm={showAgentForm} agentForm={agentForm} error={error} onChooseWorkspace={() => void chooseWorkspace()} onSelectAgent={setSelectedAgent} onShowAgentForm={() => setShowAgentForm((shown) => !shown)} onAgentFormChange={setAgentForm} onAddAgent={addAgent} onStart={() => void start()} /> : <>
+      {!active ? <NewSession agent={agent} workspace={workspace} agents={agents} selectedAgent={selectedAgent} showAgentForm={showAgentForm} agentForm={agentForm} error={error} isLaunching={isLaunching} onChooseWorkspace={() => void chooseWorkspace()} onSelectAgent={setSelectedAgent} onShowAgentForm={() => setShowAgentForm((shown) => !shown)} onAgentFormChange={setAgentForm} onAddAgent={addAgent} onStart={() => void start()} /> : <>
         <SessionHeader active={active} agent={activeAgent} onCancel={() => void stopPrompt()} />
         <div className="min-h-0 flex-1"><SessionTimeline events={events} onRespond={(event, result) => { if (event.kind === "request") void api.respond(active.id, event.data.requestId, result).catch((reason) => setError(String(reason))) }} /></div>
         <div className="sticky bottom-0 z-20 shrink-0 border-t border-border bg-background/95 px-8 py-4 backdrop-blur-sm"><WorkbenchPromptInput agent={activeAgent} workspacePath={active.workspacePath} isWorking={isPromptWorking} onStop={() => void stopPrompt()} onSubmit={submitPrompt} />{error && <p className="mx-auto mt-2 max-w-3xl text-xs text-destructive">{error}</p>}</div>
@@ -165,8 +180,8 @@ function WorkbenchSidebar({ active, sessions, onNewSession, onRestore, onSetting
   </Sidebar>
 }
 
-function NewSession({ agent, workspace, agents, selectedAgent, showAgentForm, agentForm, error, onChooseWorkspace, onSelectAgent, onShowAgentForm, onAgentFormChange, onAddAgent, onStart }: { agent?: AgentDefinition; workspace: string; agents: AgentDefinition[]; selectedAgent: string; showAgentForm: boolean; agentForm: { name: string; command: string; arguments: string }; error: string; onChooseWorkspace: () => void; onSelectAgent: (agentId: string) => void; onShowAgentForm: () => void; onAgentFormChange: (form: { name: string; command: string; arguments: string }) => void; onAddAgent: (event: React.FormEvent) => void; onStart: () => void }) {
-  return <section className="m-auto w-full max-w-2xl px-8 py-12"><Card className="shadow-sm"><CardHeader><p className="text-[11px] font-medium uppercase tracking-[.12em] text-primary">New agent session</p><CardTitle className="text-3xl font-medium tracking-tight">A quiet place for capable agents.</CardTitle><CardDescription className="max-w-xl text-sm leading-6">Choose a local project, start any ACP-compatible coding agent, and review its work in a focused desktop workspace.</CardDescription></CardHeader><CardContent className="grid gap-5"><label className="grid gap-2 text-xs font-medium">Project folder<div className="flex gap-2"><Input value={workspace} placeholder="Choose a local project" readOnly /><Button type="button" variant="outline" onClick={onChooseWorkspace}><FolderOpen data-icon="inline-start" />Browse</Button></div></label><label className="grid gap-2 text-xs font-medium">ACP agent<select className="h-8 rounded-md border border-input bg-input/20 px-2 text-xs outline-none focus:ring-2 focus:ring-ring/30" value={selectedAgent} onChange={(event) => onSelectAgent(event.target.value)}>{agents.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label><Button type="button" variant="link" className="w-fit px-0" onClick={onShowAgentForm}><Plus data-icon="inline-start" />Add custom ACP command</Button>{showAgentForm && <form className="grid gap-2 rounded-md border border-border bg-muted/30 p-3" onSubmit={onAddAgent}><Input required placeholder="Display name" value={agentForm.name} onChange={(event) => onAgentFormChange({ ...agentForm, name: event.target.value })} /><Input required placeholder="Executable, e.g. my-agent" value={agentForm.command} onChange={(event) => onAgentFormChange({ ...agentForm, command: event.target.value })} /><Input placeholder="Arguments, space-separated" value={agentForm.arguments} onChange={(event) => onAgentFormChange({ ...agentForm, arguments: event.target.value })} /><Button className="w-fit" type="submit">Add agent</Button></form>}<Button size="lg" className="w-fit" disabled={!workspace || !agent} onClick={onStart}><Bot data-icon="inline-start" />Launch {agent?.name ?? "agent"}</Button>{error && <p className="text-xs text-destructive">{error}</p>}</CardContent></Card></section>
+function NewSession({ agent, workspace, agents, selectedAgent, showAgentForm, agentForm, error, isLaunching, onChooseWorkspace, onSelectAgent, onShowAgentForm, onAgentFormChange, onAddAgent, onStart }: { agent?: AgentDefinition; workspace: string; agents: AgentDefinition[]; selectedAgent: string; showAgentForm: boolean; agentForm: { name: string; command: string; arguments: string }; error: string; isLaunching: boolean; onChooseWorkspace: () => void; onSelectAgent: (agentId: string) => void; onShowAgentForm: () => void; onAgentFormChange: (form: { name: string; command: string; arguments: string }) => void; onAddAgent: (event: React.FormEvent) => void; onStart: () => void }) {
+  return <section className="m-auto w-full max-w-2xl px-8 py-12"><Card className="shadow-sm"><CardHeader><p className="text-[11px] font-medium uppercase tracking-[.12em] text-primary">New agent session</p><CardTitle className="text-3xl font-medium tracking-tight">A quiet place for capable agents.</CardTitle><CardDescription className="max-w-xl text-sm leading-6">Choose a local project, start any ACP-compatible coding agent, and review its work in a focused desktop workspace.</CardDescription></CardHeader><CardContent className="grid gap-5"><label className="grid gap-2 text-xs font-medium">Project folder<div className="flex gap-2"><Input value={workspace} placeholder="Choose a local project" readOnly /><Button type="button" variant="outline" onClick={onChooseWorkspace}><FolderOpen data-icon="inline-start" />Browse</Button></div></label><label className="grid gap-2 text-xs font-medium">ACP agent<select className="h-8 rounded-md border border-input bg-input/20 px-2 text-xs outline-none focus:ring-2 focus:ring-ring/30" value={selectedAgent} onChange={(event) => onSelectAgent(event.target.value)}>{agents.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label><Button type="button" variant="link" className="w-fit px-0" onClick={onShowAgentForm}><Plus data-icon="inline-start" />Add custom ACP command</Button>{showAgentForm && <form className="grid gap-2 rounded-md border border-border bg-muted/30 p-3" onSubmit={onAddAgent}><Input required placeholder="Display name" value={agentForm.name} onChange={(event) => onAgentFormChange({ ...agentForm, name: event.target.value })} /><Input required placeholder="Executable, e.g. my-agent" value={agentForm.command} onChange={(event) => onAgentFormChange({ ...agentForm, command: event.target.value })} /><Input placeholder="Arguments, space-separated" value={agentForm.arguments} onChange={(event) => onAgentFormChange({ ...agentForm, arguments: event.target.value })} /><Button className="w-fit" type="submit">Add agent</Button></form>}<Button size="lg" className="w-fit" disabled={!workspace || !agent || isLaunching} onClick={onStart}><Bot data-icon="inline-start" />{isLaunching ? "Starting session…" : `Launch ${agent?.name ?? "agent"}`}</Button>{error && <p className="text-xs text-destructive">{error}</p>}</CardContent></Card></section>
 }
 
 function SessionHeader({ active, agent, onCancel }: { active: SessionSummary; agent?: AgentDefinition; onCancel: () => void }) {
