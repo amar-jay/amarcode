@@ -14,15 +14,15 @@ use std::{
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
-        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, Sender},
+        Arc, Mutex,
     },
     thread,
     time::Duration,
 };
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::protocol::{AgentEventMethod, AgentRpcMethod, RpcDirection, RpcEnvelope};
 
@@ -32,7 +32,9 @@ pub type AcpResult<T> = Result<T, AcpError>;
 pub enum AcpError {
     Io(std::io::Error),
     Json(serde_json::Error),
-    Timeout { id: u64 },
+    Timeout {
+        id: u64,
+    },
     ConnectionClosed,
     Protocol(String),
     Remote {

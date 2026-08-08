@@ -6,16 +6,16 @@
 //! Reads → `agents` / `chats`. Agent turns → `sessions` (store-first).
 
 use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::{
-    App, Error, Result,
     protocol::rpc::{
-        CancelParams, CancelResult, CreateChatParams, GetChatParams, HealthResult,
+        methods, CancelParams, CancelResult, CreateChatParams, GetChatParams, HealthResult,
         ListAgentsResult, ListChatsParams, ListChatsResult, PromptParams, PromptResultDto,
-        RespondAgentParams, RespondAgentResult, SubscribeEventsParams, VersionResult, methods,
+        RespondAgentParams, RespondAgentResult, SubscribeEventsParams, VersionResult,
     },
     service::{ChatDetail, MessageDetail, PromptResult},
+    App, Error, Result,
 };
 
 /// Outcome of dispatching a single request.

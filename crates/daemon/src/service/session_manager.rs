@@ -20,12 +20,11 @@ use std::{
     time::Duration,
 };
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
 
 use crate::{
-    Error, Result,
     acp::{AcpClient, AcpInbound},
     protocol::{
         AgentEventMethod, AgentRpcMethod, EditorEvent, MessagePartKind, MessageRole, MessageStatus,
@@ -33,6 +32,7 @@ use crate::{
     },
     service::agent_manager::AgentManager,
     store::{AgentRun, Message, MessagePart, Store},
+    Error, Result,
 };
 
 const ACP_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
@@ -315,8 +315,7 @@ impl SessionManager {
             return Err(Error::msg("live session missing acp_session_id"));
         }
 
-        let prompt_result =
-            self.acp_request(&run_id, &client, AgentRpcMethod::Prompt, params)?;
+        let prompt_result = self.acp_request(&run_id, &client, AgentRpcMethod::Prompt, params)?;
 
         // The ACP reader sees notifications and the RPC result in order, but
         // persists notifications on a separate worker. Wait for that worker
@@ -990,9 +989,7 @@ fn complete_run(
             },
         );
     }
-    inner
-        .store
-        .update_run(run_id, status, None, error)?;
+    inner.store.update_run(run_id, status, None, error)?;
     emit(
         inner,
         EditorEvent::RunUpdated {
@@ -1059,8 +1056,7 @@ fn ensure_streaming_message(
         updated_at: now,
     };
     inner.store.create_message(&message)?;
-    live
-        .streaming_message_ids
+    live.streaming_message_ids
         .insert(stream_key.to_owned(), message.id.clone());
     live.last_streaming_message_id = Some(message.id.clone());
     Ok(message.id)
@@ -1098,7 +1094,10 @@ fn take_streaming_messages(inner: &SessionInner, chat_id: &str) -> Vec<String> {
 
 fn take_streaming_messages_from_live(live: &mut LiveRun) -> Vec<String> {
     live.last_streaming_message_id = None;
-    live.streaming_message_ids.drain().map(|(_, id)| id).collect()
+    live.streaming_message_ids
+        .drain()
+        .map(|(_, id)| id)
+        .collect()
 }
 
 fn append_text_delta(inner: &SessionInner, message_id: &str, delta: &str) -> Result<()> {
@@ -1124,7 +1123,9 @@ fn append_text_delta(inner: &SessionInner, message_id: &str, delta: &str) -> Res
         let combined = format!("{existing}{delta}");
         obj = json!({ "text": combined });
         text_part.content_json = obj.to_string();
-        inner.store.update_message(message_id, &combined, MessageStatus::Streaming)?;
+        inner
+            .store
+            .update_message(message_id, &combined, MessageStatus::Streaming)?;
         inner.store.replace_message_parts(message_id, &parts)?;
     } else {
         parts.push(MessagePart {
@@ -1149,11 +1150,7 @@ fn append_text_delta(inner: &SessionInner, message_id: &str, delta: &str) -> Res
     Ok(())
 }
 
-fn finalize_message(
-    inner: &SessionInner,
-    message_id: &str,
-    status: MessageStatus,
-) -> Result<()> {
+fn finalize_message(inner: &SessionInner, message_id: &str, status: MessageStatus) -> Result<()> {
     // Keep existing content; re-read is hard without get_message. Status-only update with empty content would wipe.
     // load parts text:
     let parts = inner.store.message_parts(message_id)?;
@@ -1202,9 +1199,7 @@ fn extract_text_delta(payload: &Value) -> Option<String> {
             if let Some(s) = v.as_str() {
                 Some(s.to_owned())
             } else if let Some(obj) = v.as_object() {
-                obj.get("text")
-                    .and_then(|t| t.as_str())
-                    .map(str::to_owned)
+                obj.get("text").and_then(|t| t.as_str()).map(str::to_owned)
             } else if let Some(arr) = v.as_array() {
                 let text = arr
                     .iter()

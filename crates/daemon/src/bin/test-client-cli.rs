@@ -14,13 +14,13 @@ use std::{
 };
 
 use amarcode_daemon::{
-    Config,
     config::DEFAULT_DAEMON_ADDR,
     protocol::rpc::methods,
     store::{AgentDefinition, Store},
+    Config,
 };
 use clap::{Parser, Subcommand};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
@@ -234,9 +234,7 @@ async fn run() -> Result<(), String> {
             );
         }
         Command::Cancel { chat_id } => {
-            print_response(
-                rpc(addr, methods::CANCEL, json!({ "chat_id": chat_id })).await?,
-            );
+            print_response(rpc(addr, methods::CANCEL, json!({ "chat_id": chat_id })).await?);
         }
         Command::RespondPermission {
             request_id,
@@ -245,8 +243,15 @@ async fn run() -> Result<(), String> {
             code,
         } => {
             print_response(
-                respond_agent(addr, methods::RESPOND_PERMISSION, request_id, result, error, code)
-                    .await?,
+                respond_agent(
+                    addr,
+                    methods::RESPOND_PERMISSION,
+                    request_id,
+                    result,
+                    error,
+                    code,
+                )
+                .await?,
             );
         }
         Command::RespondInput {
@@ -256,8 +261,15 @@ async fn run() -> Result<(), String> {
             code,
         } => {
             print_response(
-                respond_agent(addr, methods::RESPOND_INPUT, request_id, result, error, code)
-                    .await?,
+                respond_agent(
+                    addr,
+                    methods::RESPOND_INPUT,
+                    request_id,
+                    result,
+                    error,
+                    code,
+                )
+                .await?,
             );
         }
         Command::Subscribe { chat_id, run_id } => {
@@ -476,9 +488,7 @@ async fn repl(addr: &str) -> Result<(), String> {
                 rpc(addr, methods::CREATE_CHAT, params).await
             }
             "get" => {
-                let chat_id = parts
-                    .get(1)
-                    .ok_or_else(|| "get <chat_id>".to_string())?;
+                let chat_id = parts.get(1).ok_or_else(|| "get <chat_id>".to_string())?;
                 rpc(
                     addr,
                     methods::GET_CHAT,
@@ -504,9 +514,7 @@ async fn repl(addr: &str) -> Result<(), String> {
                 }
             }
             "cancel" => {
-                let chat_id = parts
-                    .get(1)
-                    .ok_or_else(|| "cancel <chat_id>".to_string())?;
+                let chat_id = parts.get(1).ok_or_else(|| "cancel <chat_id>".to_string())?;
                 rpc(addr, methods::CANCEL, json!({ "chat_id": chat_id })).await
             }
             "subscribe" => {
@@ -578,11 +586,7 @@ async fn subscribe_loop(addr: &str, params: Value) -> Result<(), String> {
     )
     .await?;
     let mut lines = BufReader::new(stream).lines();
-    while let Some(line) = lines
-        .next_line()
-        .await
-        .map_err(|e| format!("read: {e}"))?
-    {
+    while let Some(line) = lines.next_line().await.map_err(|e| format!("read: {e}"))? {
         if line.trim().is_empty() {
             continue;
         }
@@ -654,8 +658,7 @@ fn register_agent(id: &str, name: &str, command: &std::path::Path) -> Result<(),
 }
 
 fn resolve_existing_path(path: &std::path::Path) -> Result<PathBuf, String> {
-    std::fs::canonicalize(path)
-        .map_err(|error| format!("resolve {}: {error}", path.display()))
+    std::fs::canonicalize(path).map_err(|error| format!("resolve {}: {error}", path.display()))
 }
 
 fn print_response(value: Value) {

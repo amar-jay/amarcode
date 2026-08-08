@@ -28,8 +28,8 @@ pub fn resolve() -> Result<PathBuf> {
 
     #[cfg(target_os = "windows")]
     {
-        let local = env::var_os("LOCALAPPDATA")
-            .ok_or_else(|| Error::msg("LOCALAPPDATA is not set"))?;
+        let local =
+            env::var_os("LOCALAPPDATA").ok_or_else(|| Error::msg("LOCALAPPDATA is not set"))?;
         return Ok(PathBuf::from(local).join("amarcode"));
     }
 

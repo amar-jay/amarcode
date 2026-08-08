@@ -1,94 +1,117 @@
+mod config;
 mod daemon;
-mod models;
+mod protocol;
+mod state;
 
-use daemon::DaemonBridge;
-use models::{AgentDefinition, AgentEvent, SessionSummary};
-use serde_json::json;
 use std::path::{Path, PathBuf};
-use tauri::{ipc::Channel, Manager, State};
 
-struct AppState;
+use tauri::{ipc::Channel, State};
+
+use crate::{
+    protocol::{
+        events::EditorEvent,
+        rpc::{
+            CancelResult, HealthResult, PromptResultDto, RespondAgentParams, RespondAgentResult,
+            VersionResult,
+        },
+        AgentDefinition, Chat,
+    },
+    state::AppState,
+};
 
 #[tauri::command]
-async fn daemon_health() -> Result<(), String> {
-    DaemonBridge::call::<serde_json::Value>("health", json!({}))
-        .await
-        .map(|_| ())
+async fn daemon_health(state: State<'_, AppState>) -> Result<HealthResult, String> {
+    state.health().await
 }
 
 #[tauri::command]
-async fn list_agents() -> Result<Vec<AgentDefinition>, String> {
-    DaemonBridge::call("list_agents", json!({})).await
+async fn daemon_version(state: State<'_, AppState>) -> Result<VersionResult, String> {
+    state.version().await
 }
+
 #[tauri::command]
-async fn save_agent(agent: AgentDefinition) -> Result<(), String> {
-    DaemonBridge::call("save_agent", json!({ "agent": agent })).await
+async fn list_agents(state: State<'_, AppState>) -> Result<Vec<AgentDefinition>, String> {
+    state.list_agents().await
 }
+
 #[tauri::command]
-async fn list_sessions() -> Result<Vec<SessionSummary>, String> {
-    DaemonBridge::call("list_sessions", json!({})).await
-}
-#[tauri::command]
-async fn session_events(session_id: String) -> Result<Vec<AgentEvent>, String> {
-    DaemonBridge::call("session_events", json!({ "sessionId": session_id })).await
-}
-#[tauri::command]
-async fn start_session(
+async fn create_chat(
+    state: State<'_, AppState>,
     workspace_path: String,
-    agent: AgentDefinition,
-    on_event: Channel<AgentEvent>,
-) -> Result<SessionSummary, String> {
+    title: Option<String>,
+) -> Result<Chat, String> {
+    state.create_chat(workspace_path, title).await
+}
+
+#[tauri::command]
+async fn list_chats(
+    state: State<'_, AppState>,
+    workspace_path: Option<String>,
+) -> Result<Vec<Chat>, String> {
+    state.list_chats(workspace_path).await
+}
+
+#[tauri::command]
+async fn get_chat(
+    state: State<'_, AppState>,
+    chat_id: String,
+    include_messages: bool,
+) -> Result<Chat, String> {
+    state.get_chat(chat_id, include_messages).await
+}
+
+#[tauri::command]
+async fn prompt(
+    state: State<'_, AppState>,
+    chat_id: String,
+    agent_id: String,
+    text: String,
+) -> Result<PromptResultDto, String> {
+    state.prompt(chat_id, agent_id, text).await
+}
+
+#[tauri::command]
+async fn cancel(state: State<'_, AppState>, chat_id: String) -> Result<CancelResult, String> {
+    state.cancel(chat_id).await
+}
+
+#[tauri::command]
+async fn respond_permission(
+    state: State<'_, AppState>,
+    params: RespondAgentParams,
+) -> Result<RespondAgentResult, String> {
+    state.respond_permission(params).await
+}
+
+#[tauri::command]
+async fn respond_input(
+    state: State<'_, AppState>,
+    params: RespondAgentParams,
+) -> Result<RespondAgentResult, String> {
+    state.respond_input(params).await
+}
+
+/// Start one daemon event stream. The stream uses a dedicated TCP connection
+/// because `subscribe_events` permanently switches that connection to events.
+#[tauri::command]
+async fn subscribe_events(
+    state: State<'_, AppState>,
+    filter: EditorEvent,
+    on_event: Channel<EditorEvent>,
+) -> Result<(), String> {
+    let mut subscription = state.subscribe_events(filter).await?;
     tauri::async_runtime::spawn(async move {
-        let _ = DaemonBridge::forward_events(on_event).await;
+        while let Ok(event) = subscription.next::<EditorEvent>().await {
+            if on_event.send(event).is_err() {
+                break;
+            }
+        }
     });
-    DaemonBridge::call(
-        "start_session",
-        json!({ "workspacePath": workspace_path, "agent": agent }),
-    )
-    .await
-}
-#[tauri::command]
-async fn send_prompt(
-    session_id: String,
-    prompt: String,
-    display_text: String,
-) -> Result<(), String> {
-    DaemonBridge::call(
-        "send_prompt",
-        json!({ "sessionId": session_id, "prompt": prompt, "displayText": display_text }),
-    )
-    .await
-}
-#[tauri::command]
-async fn cancel_session(session_id: String) -> Result<(), String> {
-    DaemonBridge::call("cancel_session", json!({ "sessionId": session_id })).await
-}
-#[tauri::command]
-async fn respond_to_request(
-    session_id: String,
-    request_id: serde_json::Value,
-    result: serde_json::Value,
-) -> Result<(), String> {
-    DaemonBridge::call(
-        "respond_to_request",
-        json!({ "sessionId": session_id, "requestId": request_id, "result": result }),
-    )
-    .await
-}
-#[tauri::command]
-async fn save_secret(secret_ref: String, value: String) -> Result<(), String> {
-    DaemonBridge::call(
-        "save_secret",
-        json!({ "secretRef": secret_ref, "value": value }),
-    )
-    .await
+    Ok(())
 }
 
 #[tauri::command]
-fn list_workspace_files(
-    workspace_path: String,
-    _state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+fn list_workspace_files(workspace_path: String) -> Result<Vec<String>, String> {
     fn visit(
         root: &Path,
         path: &Path,
@@ -118,6 +141,7 @@ fn list_workspace_files(
         }
         Ok(())
     }
+
     let root = PathBuf::from(workspace_path);
     let mut files = Vec::new();
     visit(&root, &root, 0, &mut files)?;
@@ -129,24 +153,25 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
-            app.manage(AppState);
-            DaemonBridge::launch_if_needed();
+        .setup(|_| {
+            daemon::DaemonBridge::launch_if_needed()?;
             Ok(())
         })
+        .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             daemon_health,
+            daemon_version,
             list_agents,
-            save_agent,
-            list_sessions,
-            session_events,
+            create_chat,
+            list_chats,
+            get_chat,
+            prompt,
+            cancel,
+            respond_permission,
+            respond_input,
+            subscribe_events,
             list_workspace_files,
-            start_session,
-            send_prompt,
-            cancel_session,
-            respond_to_request,
-            save_secret
         ])
         .run(tauri::generate_context!())
-        .expect("error while running AMARCODE");
+        .expect("error while running amarcode");
 }

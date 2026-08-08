@@ -8,7 +8,7 @@
 
 use std::io::{self, BufRead, Write};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 fn main() {
     let stdin = io::stdin();
@@ -107,11 +107,7 @@ fn main() {
                         }
                     }),
                 );
-                reply(
-                    &mut stdout,
-                    id,
-                    json!({ "stopReason": "end_turn" }),
-                );
+                reply(&mut stdout, id, json!({ "stopReason": "end_turn" }));
             }
             Some("session/cancel") | Some("session/close") | Some("session/load") => {
                 reply(&mut stdout, id, json!({}));

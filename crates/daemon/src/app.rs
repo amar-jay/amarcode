@@ -15,11 +15,11 @@ use tokio::{net::TcpListener, sync::broadcast};
 use tracing::info;
 
 use crate::{
-    Config, Result,
     protocol::EditorEvent,
     rpc,
     service::{AgentManager, ChatManager, SessionManager},
     store::Store,
+    Config, Result,
 };
 
 /// Capacity of the in-process event fan-out bus.

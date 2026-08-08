@@ -2,8 +2,8 @@
 
 use rusqlite::params;
 
-use super::{AgentRun, Store, cell_parse, now, to_error};
-use crate::{Result, protocol::RunStatus};
+use super::{cell_parse, now, to_error, AgentRun, Store};
+use crate::{protocol::RunStatus, Result};
 
 impl Store {
     pub fn create_run(&self, run: &AgentRun) -> Result<()> {

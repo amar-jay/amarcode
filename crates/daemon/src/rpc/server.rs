@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
-use crate::{App, Result, rpc::connection};
+use crate::{rpc::connection, App, Result};
 
 /// Serve RPC clients on `listener` until Ctrl-C / SIGTERM.
 pub async fn run(app: Arc<App>, listener: TcpListener) -> Result<()> {

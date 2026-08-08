@@ -2,10 +2,8 @@
 
 use rusqlite::params;
 
-use super::{
-    Message, MessagePart, Store, cell_parse, map_message, now, to_error,
-};
-use crate::{Result, protocol::MessageStatus};
+use super::{cell_parse, map_message, now, to_error, Message, MessagePart, Store};
+use crate::{protocol::MessageStatus, Result};
 
 impl Store {
     pub fn create_message(&self, message: &Message) -> Result<()> {
@@ -28,12 +26,7 @@ impl Store {
         self.touch_chat(&message.chat_id)
     }
 
-    pub fn update_message(
-        &self,
-        id: &str,
-        content: &str,
-        status: MessageStatus,
-    ) -> Result<()> {
+    pub fn update_message(&self, id: &str, content: &str, status: MessageStatus) -> Result<()> {
         self.connection()?
             .execute(
                 "UPDATE messages SET content=?2, status=?3, updated_at=?4 WHERE id=?1",
@@ -58,11 +51,7 @@ impl Store {
             .map_err(to_error)
     }
 
-    pub fn replace_message_parts(
-        &self,
-        message_id: &str,
-        parts: &[MessagePart],
-    ) -> Result<()> {
+    pub fn replace_message_parts(&self, message_id: &str, parts: &[MessagePart]) -> Result<()> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction().map_err(to_error)?;
         transaction

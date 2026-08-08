@@ -2,7 +2,7 @@
 
 use rusqlite::params;
 
-use super::{Chat, Store, map_chat, to_error};
+use super::{map_chat, to_error, Chat, Store};
 use crate::Result;
 
 impl Store {

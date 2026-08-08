@@ -13,8 +13,8 @@ use std::{
 };
 
 use crate::{
-    Error, Result,
     store::{AgentDefinition, Store},
+    Error, Result,
 };
 
 /// Resolved launch plan for spawning an ACP agent process.

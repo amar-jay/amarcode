@@ -5,10 +5,10 @@
 
 use rusqlite::params;
 
-use super::{AcpEvent, Store, cell_parse, to_error};
+use super::{cell_parse, to_error, AcpEvent, Store};
 use crate::{
-    Result,
     protocol::{RpcDirection, RpcEnvelope},
+    Result,
 };
 
 impl Store {
@@ -31,11 +31,7 @@ impl Store {
     }
 
     /// Store-first helper: map envelope → row and insert.
-    pub fn save_acp_envelope(
-        &self,
-        agent_run_id: &str,
-        envelope: &RpcEnvelope,
-    ) -> Result<i64> {
+    pub fn save_acp_envelope(&self, agent_run_id: &str, envelope: &RpcEnvelope) -> Result<i64> {
         let event = AcpEvent::from_envelope(agent_run_id, envelope)?;
         self.save_acp_event(&event)
     }

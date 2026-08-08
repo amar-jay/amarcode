@@ -13,9 +13,9 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use crate::{
-    Error, Result,
     protocol::EditorEvent,
     store::{Chat, Message, MessagePart, Store},
+    Error, Result,
 };
 
 /// Chat plus ordered messages (each with parts) for restore.
@@ -42,11 +42,7 @@ impl ChatManager {
         Self { store, events }
     }
 
-    pub fn create(
-        &self,
-        workspace_path: impl Into<String>,
-        title: Option<String>,
-    ) -> Result<Chat> {
+    pub fn create(&self, workspace_path: impl Into<String>, title: Option<String>) -> Result<Chat> {
         let now = timestamp();
         let chat = Chat {
             id: uuid::Uuid::new_v4().to_string(),

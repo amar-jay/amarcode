@@ -6,7 +6,7 @@
 //! 3. build `App`
 //! 4. run until shutdown signal
 
-use amarcode_daemon::{App, Config, logging};
+use amarcode_daemon::{logging, App, Config};
 use tracing::{error, info};
 
 #[tokio::main]

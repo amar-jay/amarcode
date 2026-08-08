@@ -19,12 +19,12 @@ use tokio::{
 use tracing::{debug, warn};
 
 use crate::{
-    App, Result,
     protocol::{
-        EditorEvent, EventLine,
         rpc::{RpcRequest, RpcResponse, SubscribeEventsParams, SubscribeEventsResult},
+        EditorEvent, EventLine,
     },
     rpc::handler::{self, DispatchOutcome},
+    App, Result,
 };
 
 /// Handle one accepted client socket until disconnect or fatal I/O error.
@@ -47,8 +47,11 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
         let request = match serde_json::from_str::<RpcRequest>(line) {
             Ok(req) => req,
             Err(err) => {
-                write_response(&mut writer, &RpcResponse::err(format!("invalid request: {err}")))
-                    .await?;
+                write_response(
+                    &mut writer,
+                    &RpcResponse::err(format!("invalid request: {err}")),
+                )
+                .await?;
                 continue;
             }
         };
@@ -87,10 +90,7 @@ async fn write_response<W: AsyncWriteExt + Unpin>(
     Ok(())
 }
 
-async fn write_event<W: AsyncWriteExt + Unpin>(
-    writer: &mut W,
-    event: &EditorEvent,
-) -> Result<()> {
+async fn write_event<W: AsyncWriteExt + Unpin>(writer: &mut W, event: &EditorEvent) -> Result<()> {
     let mut line = serde_json::to_string(&EventLine {
         event: event.clone(),
     })?;

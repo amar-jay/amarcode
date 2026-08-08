@@ -17,8 +17,8 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Error, Result,
     protocol::{MessagePartKind, MessageRole, MessageStatus, RpcDirection, RpcEnvelope, RunStatus},
+    Error, Result,
 };
 
 pub mod agents;

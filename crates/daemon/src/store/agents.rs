@@ -8,7 +8,7 @@
 
 use rusqlite::params;
 
-use super::{AgentDefinition, Store, json_string, now, parse_json, to_error};
+use super::{json_string, now, parse_json, to_error, AgentDefinition, Store};
 use crate::Result;
 
 impl Store {
@@ -16,7 +16,12 @@ impl Store {
         let now = now();
         for (id, name, command, arguments) in [
             ("claude-acp", "Claude Agent ACP", "claude-agent-acp", vec![]),
-            ("copilot-acp", "GitHub Copilot ACP", "copilot", vec!["--acp"]),
+            (
+                "copilot-acp",
+                "GitHub Copilot ACP",
+                "copilot",
+                vec!["--acp"],
+            ),
             ("codex-acp", "Codex ACP", "codex-acp", vec![]),
         ] {
             self.save_agent(&AgentDefinition {

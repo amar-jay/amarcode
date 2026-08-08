@@ -29,7 +29,7 @@ use std::{
     sync::Mutex,
 };
 
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use crate::{Config, Error, Result};
 

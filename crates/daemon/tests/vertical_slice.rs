@@ -7,9 +7,13 @@
 //! Proves store-first ordering for a real TCP client against a live daemon
 //! and a mock agent binary (`mock-acp-agent`).
 
-use std::{path::PathBuf, process::{Command, Stdio}, time::Duration};
+use std::{
+    path::PathBuf,
+    process::{Command, Stdio},
+    time::Duration,
+};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
@@ -72,7 +76,9 @@ async fn create_chat_prompt_store_and_events() {
     .await;
     let sub_ack = read_rpc(&mut sub).await.expect("subscribe ack");
     assert_eq!(
-        sub_ack.pointer("/result/subscribed").and_then(|v| v.as_bool()),
+        sub_ack
+            .pointer("/result/subscribed")
+            .and_then(|v| v.as_bool()),
         Some(true),
         "subscribe ack: {sub_ack}"
     );
@@ -103,10 +109,7 @@ async fn create_chat_prompt_store_and_events() {
     )
     .await
     .expect("create_chat");
-    let chat_id = create["result"]["id"]
-        .as_str()
-        .expect("chat id")
-        .to_owned();
+    let chat_id = create["result"]["id"].as_str().expect("chat id").to_owned();
 
     let prompt = rpc(
         &addr,
@@ -212,7 +215,11 @@ async fn create_chat_prompt_store_and_events() {
         .iter()
         .filter(|m| m.role == amarcode_daemon::protocol::MessageRole::Assistant)
         .collect();
-    assert_eq!(assistant_messages.len(), 2, "distinct ACP message ids must create distinct messages");
+    assert_eq!(
+        assistant_messages.len(),
+        2,
+        "distinct ACP message ids must create distinct messages"
+    );
     assert_eq!(assistant_messages[0].content, "mock progress.");
     assert_eq!(assistant_messages[1].content, "mock echo: hello mock");
     let commentary_parts = store
@@ -239,7 +246,10 @@ async fn create_chat_prompt_store_and_events() {
         acp_events.iter().map(|e| &e.method).collect::<Vec<_>>()
     );
 
-    let run = store.get_run(&run_id).expect("get_run").expect("run exists");
+    let run = store
+        .get_run(&run_id)
+        .expect("get_run")
+        .expect("run exists");
     assert_eq!(run.chat_id, chat_id);
     assert_eq!(run.agent_id, AGENT_ID);
     assert!(
@@ -303,10 +313,7 @@ async fn rpc(addr: &str, request: Value) -> Result<Value, String> {
 async fn write_rpc(stream: &mut TcpStream, request: Value) {
     let mut line = serde_json::to_string(&request).expect("serialize");
     line.push('\n');
-    stream
-        .write_all(line.as_bytes())
-        .await
-        .expect("write rpc");
+    stream.write_all(line.as_bytes()).await.expect("write rpc");
     stream.flush().await.expect("flush");
 }
 
