@@ -3,16 +3,18 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
-    "apps/*"
+    "crates/*"
   ],
   "scripts": {
-    "dev": "bun run --cwd apps/application dev",
-    "build": "bun run --cwd apps/application build",
-    "test": "bun run --cwd apps/application test",
-    "tauri": "bun run --cwd apps/application tauri",
-    "tauri:dev": "bun run --cwd apps/application tauri:dev",
+    "dev": "bun run --cwd crates/application dev",
+    "build": "bun run --cwd crates/application build",
+    "test": "bun run --cwd crates/application test",
+    "tauri": "bun run --cwd crates/application tauri",
+    "tauri:dev": "bun run --cwd crates/application tauri:dev",
+    "tauri:build": "bun run --cwd crates/application tauri:build",
     "daemon": "cargo run -p amarcode-daemon --bin amarcode-daemon --",
-    "daemon:cli": "cargo run -p amarcode-daemon --bin daemon-test-cli --",
-    "daemon:check": "cargo test -p amarcode-daemon"
+    "daemon:check": "cargo check -p amarcode-daemon",
+    "daemon:test-cli": "cargo run -p amarcode-daemon --bin daemon-test-cli --",
+    "daemon:mock-agent": "cargo run -p amarcode-daemon --bin mock-acp-agent --"
   }
 }

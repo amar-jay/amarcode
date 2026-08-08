@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-  "apps/application/src-tauri",
-  "services/daemon",
+  "crates/application/src-tauri",
+  "crates/daemon",
 ]
 default-members = [
-  "apps/application/src-tauri",
-  "services/daemon",
+  "crates/application/src-tauri",
+  "crates/daemon",
 ]

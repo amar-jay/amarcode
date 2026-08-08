@@ -1,0 +1,33 @@
+[package]
+name = "amarcode-daemon"
+version = "0.1.0"
+description = "Background service for Amarcode"
+edition = "2021"
+
+[[bin]]
+name = "amarcode-daemon"
+path = "src/main.rs"
+
+[[bin]]
+name = "mock-acp-agent"
+path = "src/bin/mock-acp-agent.rs"
+
+[[bin]]
+name = "daemon-test-cli"
+path = "src/bin/test-client-cli.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+rusqlite = { version = "0.36", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "process", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
+uuid = { version = "1", features = ["v4"] }

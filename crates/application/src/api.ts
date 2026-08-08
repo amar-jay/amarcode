@@ -1,0 +1,31 @@
+import { Channel, invoke } from "@tauri-apps/api/core";
+import type { AgentDefinition, AgentEvent, SessionSummary } from "./types";
+
+export const api = {
+  health: () => invoke("daemon_health"),
+  agents: () => invoke<AgentDefinition[]>("list_agents"),
+  sessions: () => invoke<SessionSummary[]>("list_sessions"),
+  events: (sessionId: string) =>
+    invoke<AgentEvent[]>("session_events", { sessionId }),
+  workspaceFiles: (workspacePath: string) =>
+    invoke<string[]>("list_workspace_files", { workspacePath }),
+  saveAgent: (agent: AgentDefinition) => invoke("save_agent", { agent }),
+  start: async (
+    workspacePath: string,
+    agent: AgentDefinition,
+    onEvent: (event: AgentEvent) => void,
+  ) => {
+    const channel = new Channel<AgentEvent>();
+    channel.onmessage = onEvent;
+    return invoke<SessionSummary>("start_session", {
+      workspacePath,
+      agent,
+      onEvent: channel,
+    });
+  },
+  prompt: (sessionId: string, prompt: string, displayText: string) =>
+    invoke("send_prompt", { sessionId, prompt, displayText }),
+  cancel: (sessionId: string) => invoke("cancel_session", { sessionId }),
+  respond: (sessionId: string, requestId: string | number, result: unknown) =>
+    invoke("respond_to_request", { sessionId, requestId, result }),
+};
