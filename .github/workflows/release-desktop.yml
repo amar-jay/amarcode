@@ -38,10 +38,11 @@ jobs:
             librsvg2-dev \
             patchelf
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # tauri.conf.json beforeBuildCommand uses bun; lockfile is bun.lock
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: lts/*
+          bun-version: latest
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -49,21 +50,41 @@ jobs:
       - name: Cache Rust build artifacts
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: apps/application/src-tauri -> target
+          workspaces: |
+            . -> target
 
       - name: Install frontend dependencies
-        working-directory: apps/application
-        run: npm install
+        run: bun install
 
       - name: Build desktop app
-        working-directory: apps/application
-        run: npm run tauri build
+        run: bun run tauri:build
+
+      # Workspace Cargo.toml puts release output under the repo-root target/
+      # (older layouts used crates/application/src-tauri/target).
+      - name: Locate bundle artifacts
+        id: bundle
+        shell: bash
+        run: |
+          for candidate in \
+            target/release/bundle \
+            crates/application/src-tauri/target/release/bundle
+          do
+            if [ -d "$candidate" ]; then
+              echo "path=$candidate" >> "$GITHUB_OUTPUT"
+              echo "Found bundle at $candidate"
+              find "$candidate" -type f | head -100
+              exit 0
+            fi
+          done
+          echo "No Tauri bundle directory found" >&2
+          find . -type d -name bundle 2>/dev/null | head -50 || true
+          exit 1
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-bundles
-          path: apps/application/src-tauri/target/release/bundle
+          path: ${{ steps.bundle.outputs.path }}
           if-no-files-found: error
           retention-days: 7
 
