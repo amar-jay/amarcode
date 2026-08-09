@@ -1,4 +1,4 @@
-import { Bot, MessageSquare, Plus } from "lucide-react";
+import { Bot, Plus, Settings } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -21,6 +21,7 @@ type ChatSidebarProps = {
   chats: Chat[];
   onNewChat: () => void;
   onSelectChat: (chatId: string) => void;
+  onOpenSettings: () => void;
 };
 
 export function AppSidebar({
@@ -29,6 +30,7 @@ export function AppSidebar({
   chats,
   onNewChat,
   onSelectChat,
+  onOpenSettings,
 }: ChatSidebarProps) {
   return (
     <Sidebar
@@ -64,8 +66,8 @@ export function AppSidebar({
                     isActive={chat.id === activeChatId}
                     onClick={() => onSelectChat(chat.id)}
                     tooltip={chat.title}
+                    className="hover:bg-sidebar-accent/50"
                   >
-                    <MessageSquare className="size-4" />
                     <span>{chat.title}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -86,6 +88,14 @@ export function AppSidebar({
             {workspacePath}
           </span>
         </div>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={onOpenSettings} tooltip="Settings">
+              <Settings />
+              <span>Settings</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, Wrench, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, CircleX, LoaderCircle, Wrench, type LucideIcon } from "lucide-react";
 import { daemonApi } from "@/api";
 import {
   Conversation,
@@ -68,6 +68,28 @@ function toolSummary(part: MessagePart): { id: string; label: string } | null {
   }
 }
 
+function reasoningLabel(text: string): ReactNode {
+  const fragments = text.split(/(```[\s\S]*?```|`[^`]+`)/g);
+  return <div className="whitespace-pre-wrap">
+    {fragments.map((fragment, index) => {
+      if (fragment.startsWith("```") && fragment.endsWith("```")) {
+        return <code key={index} className="my-1 block overflow-x-auto rounded bg-muted px-1.5 py-1 font-mono text-xs">{fragment.slice(3, -3).trim()}</code>;
+      }
+      if (fragment.startsWith("`") && fragment.endsWith("`")) {
+        return <code key={index} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">{fragment.slice(1, -1)}</code>;
+      }
+      return fragment;
+    })}
+  </div>;
+}
+
+function assistantMessageTone(content: string, status: string): "warning" | "error" | null {
+  const text = content.trim();
+  if (status === "failed" || /^(error|failed|failure|unable to|cannot |can't )/i.test(text)) return "error";
+  if (/^(warning|caution|notice)/i.test(text)) return "warning";
+  return null;
+}
+
 export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRunId, initialSessionMode = "build", onChatsRefresh, daemonEvent, onAgentSelected }: LiveChatScreenProps) {
   const [activeChatId, setActiveChatId] = useState(initialChatId);
   const [activeChat, setActiveChat] = useState<ChatDetail | null>(null);
@@ -79,6 +101,7 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
   const [error, setError] = useState<string | null>(null);
   const activeChatIdRef = useRef(activeChatId);
   const runIdRef = useRef(runId);
+  const isWorking = Boolean(runId);
 
   // Sidebar selection changes the parent session without remounting this
   // screen. Reset the conversation-owned state to the newly selected chat.
@@ -100,8 +123,6 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
       const result = await daemonApi.getChat(chatId, true);
       if (isChatDetail(result)) {
         setActiveChat(result);
-        // Initial navigation happens before the long-running prompt RPC has
-        // returned. The persisted user message already carries its run ID.
         const discoveredRunId = result.messages
           .map(({ message }) => message.agent_run_id)
           .find((candidate): candidate is string => candidate !== null);
@@ -141,6 +162,8 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
       if (["completed", "stopped", "failed"].includes(daemonEvent.payload.status)) {
         setRunId(null);
         setPendingRequest(null);
+      } else {
+        setRunId(daemonEvent.payload.run_id);
       }
       return;
     }
@@ -215,8 +238,8 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
           {runStatus && <span className="ml-3 text-xs text-muted-foreground">{runStatus === "running" ? "Working…" : runStatus}</span>}
         </header>
         <Conversation>
-          <ConversationContent className="mx-auto w-full max-w-3xl px-6 py-8">
-            {activeChat?.messages.map(({ message, parts }) => {
+          <ConversationContent className="mx-auto w-full max-w-3xl py-8 gap-2">
+            {(activeChat?.messages ?? []).map(({ message, parts }) => {
               const seenTools = new Set<string>();
               const timeline: TimelineStep[] = parts
                 .filter((part) => part.kind === "thinking" || part.kind === "tool_call")
@@ -236,16 +259,23 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
                     status: message.status === "streaming" ? "active" as const : "complete" as const,
                   }];
                 });
+              const hasVisibleContent = Boolean(message.content.trim());
+              const tone = message.role === "assistant" ? assistantMessageTone(message.content, message.status) : null;
+              if (!hasVisibleContent && timeline.length === 0) return null;
               return (
-              <Message from={message.role === "user" ? "user" : "assistant"} key={message.id}>
-                <MessageContent>
-                  {timeline.length > 0 && <ChainOfThought defaultOpen={message.status === "streaming"}>
-                    <ChainOfThoughtHeader>Reasoning &amp; activity</ChainOfThoughtHeader>
-                    <ChainOfThoughtContent>
-                      {timeline.map((step) => <ChainOfThoughtStep key={`${message.id}-${step.key}`} icon={step.icon} label={<p className="whitespace-pre-wrap">{step.label}</p>} status={step.status} />)}
+              <Message from={message.role === "user" ? "user" : "assistant"} key={message.id} className="space-between">
+                <MessageContent className="w-full">
+                  {timeline.length > 0 && <ChainOfThought defaultOpen={false} className="space-y-0">
+                    <ChainOfThoughtHeader className="py-1">Reasoning...</ChainOfThoughtHeader>
+                    <ChainOfThoughtContent className="mt-0 space-y-1">
+                      {timeline.map((step) => <ChainOfThoughtStep key={`${message.id}-${step.key}`} icon={step.icon} label={reasoningLabel(step.label)} status={step.status}/>)}
                     </ChainOfThoughtContent>
                   </ChainOfThought>}
-                  {message.role === "assistant" ? <MessageResponse>{message.content}</MessageResponse> : <p className="whitespace-pre-wrap">{message.content}</p>}
+                  {hasVisibleContent && (message.role === "assistant" ? (
+                    tone === "error" ? <div className="flex gap-2 rounded-md text-xs px-3 py-2 text-destructive"><CircleX className="mt-0.5 size-4 shrink-0" /><MessageResponse>{message.content}</MessageResponse></div>
+                    : tone === "warning" ? <div className="flex gap-2 rounded-md py-2 text-xs text-amber-700 dark:text-amber-300"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><MessageResponse>{message.content}</MessageResponse></div>
+                    : <MessageResponse>{message.content}</MessageResponse>
+                  ) : <p className="whitespace-pre-wrap"><span className="mr-2 select-none text-muted-foreground">&gt;</span>{message.content}</p>)}
                 </MessageContent>
               </Message>
               );
@@ -264,7 +294,7 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
             onSendPrompt={submit}
             sessionMode={sessionMode}
             onSessionModeChange={changeSessionMode}
-            isWorking={Boolean(runId)}
+            isWorking={isWorking}
             onStop={() => void stop()}
           />
         </div>

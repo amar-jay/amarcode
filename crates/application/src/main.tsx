@@ -5,8 +5,9 @@ import App from "./App";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./index.css";
 import { SidebarProvider } from "./components/ui/sidebar";
+import { readPalette } from "@/hooks/use-theme";
 
-document.documentElement.dataset.style = "ember";
+document.documentElement.dataset.style = readPalette();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

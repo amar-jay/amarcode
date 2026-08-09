@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   Check,
+  Bot,
+  ChevronsUpDown,
   Cog,
   Monitor,
   Moon,
@@ -9,7 +11,7 @@ import {
   SlidersHorizontal,
   Sun,
 } from "lucide-react";
-import type { Theme } from "@/hooks/use-theme";
+import type { Palette as AppPalette, Theme } from "@/hooks/use-theme";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -37,12 +39,25 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 import { Switch } from "@/components/ui/switch";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import type { AgentDefinition } from "@/types";
+import type { SessionMode } from "./main-prompt-input";
 
-type SettingsPage = "appearance" | "general";
+type SettingsPage = "appearance" | "general" | "agent";
 
 const navigation: { id: SettingsPage; label: string; icon: typeof Palette }[] =
   [
     { id: "appearance", label: "Appearance", icon: Palette },
+    { id: "agent", label: "Agent defaults", icon: Bot },
     { id: "general", label: "General", icon: SlidersHorizontal },
   ];
 
@@ -62,6 +77,19 @@ const themeChoices: {
   },
 ];
 
+const paletteChoices: { value: AppPalette; label: string; description: string }[] = [
+  {
+    value: "monochrome",
+    label: "Monochrome",
+    description: "Neutral grayscale surfaces",
+  },
+  {
+    value: "ember",
+    label: "Ember",
+    description: "Warm amber accents",
+  },
+];
+
 function usePreference(key: string, defaultValue: boolean) {
   const [value, setValue] = useState(() =>
     localStorage.getItem(key) === null
@@ -77,11 +105,25 @@ export function SettingsDialog({
   onOpenChange,
   theme,
   onThemeChange,
+  palette,
+  onPaletteChange,
+  agents,
+  defaultAgentId,
+  onDefaultAgentChange,
+  defaultSessionMode,
+  onDefaultSessionModeChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
+  palette: AppPalette;
+  onPaletteChange: (palette: AppPalette) => void;
+  agents: AgentDefinition[];
+  defaultAgentId: string;
+  onDefaultAgentChange: (agentId: string) => void;
+  defaultSessionMode: SessionMode;
+  onDefaultSessionModeChange: (mode: SessionMode) => void;
 }) {
   const [page, setPage] = useState<SettingsPage>("appearance");
   const [restoreWorkspace, setRestoreWorkspace] = usePreference(
@@ -150,7 +192,20 @@ export function SettingsDialog({
             </header>
             <div className="flex flex-1 flex-col overflow-y-auto p-6">
               {page === "appearance" ? (
-                <AppearancePanel theme={theme} onThemeChange={onThemeChange} />
+                <AppearancePanel
+                  theme={theme}
+                  onThemeChange={onThemeChange}
+                  palette={palette}
+                  onPaletteChange={onPaletteChange}
+                />
+              ) : page === "agent" ? (
+                <AgentDefaultsPanel
+                  agents={agents}
+                  defaultAgentId={defaultAgentId}
+                  onDefaultAgentChange={onDefaultAgentChange}
+                  defaultSessionMode={defaultSessionMode}
+                  onDefaultSessionModeChange={onDefaultSessionModeChange}
+                />
               ) : (
                 <GeneralPanel
                   restoreWorkspace={restoreWorkspace}
@@ -167,12 +222,88 @@ export function SettingsDialog({
   );
 }
 
+function AgentDefaultsPanel({
+  agents,
+  defaultAgentId,
+  onDefaultAgentChange,
+  defaultSessionMode,
+  onDefaultSessionModeChange,
+}: {
+  agents: AgentDefinition[];
+  defaultAgentId: string;
+  onDefaultAgentChange: (agentId: string) => void;
+  defaultSessionMode: SessionMode;
+  onDefaultSessionModeChange: (mode: SessionMode) => void;
+}) {
+  const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const selectedAgent = agents.find((agent) => agent.id === defaultAgentId);
+  return <div className="mx-auto w-full max-w-[33rem]">
+    <h2 className="text-base font-medium">Agent defaults</h2>
+    <p className="mt-1 text-xs leading-5 text-muted-foreground">These choices are used when you start a new chat. Existing conversations keep their current session settings.</p>
+    <Separator className="my-6" />
+    <FieldSet className="gap-7">
+      <Field>
+        <FieldContent>
+          <FieldLabel htmlFor="default-acp-agent">Default ACP agent</FieldLabel>
+          <FieldDescription>Choose the agent preselected in the new-chat composer.</FieldDescription>
+        </FieldContent>
+        <Popover open={agentPickerOpen} onOpenChange={setAgentPickerOpen}>
+          <PopoverTrigger asChild>
+            <Button id="default-acp-agent" variant="outline" role="combobox" aria-expanded={agentPickerOpen} className="w-full justify-between font-normal">
+              {selectedAgent?.name.replace(/\s*\bACP\s*$/i, "") ?? "Choose an agent"}
+              <ChevronsUpDown className="size-4 text-muted-foreground" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+            <Command>
+              <CommandInput placeholder="Search ACP agents…" />
+              <CommandList>
+                <CommandEmpty>No matching ACP agents.</CommandEmpty>
+                <CommandGroup>
+                  {agents.map((agent) => <CommandItem 
+									 className="cursor-pointer rounded-none !w-full space-x-auto"
+									key={agent.id} value={`${agent.name} ${agent.id}`} onSelect={() => {
+                    onDefaultAgentChange(agent.id);
+                    setAgentPickerOpen(false);
+                  }}>
+										<span className="mr-auto">
+                    {agent.name.replace(/\s*\bACP\s*$/i, "")}
+										</span>
+                    <Check className={`ml-auto size-4 ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`} />
+                  </CommandItem>)}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </Field>
+      <FieldSet>
+        <FieldLegend>Default session mode</FieldLegend>
+        <FieldDescription>Controls how Codex starts new sessions.</FieldDescription>
+        <RadioGroup value={defaultSessionMode} onValueChange={(value) => onDefaultSessionModeChange(value as SessionMode)}>
+          {(["plan", "build", "ask"] as const).map((mode) => <Field key={mode} orientation="horizontal">
+            <RadioGroupItem value={mode} id={`default-mode-${mode}`} />
+            <FieldContent>
+              <FieldLabel htmlFor={`default-mode-${mode}`} className="capitalize">{mode}</FieldLabel>
+              <FieldDescription>{mode === "plan" ? "Plan before implementation" : mode === "build" ? "Work with agent access" : "Review without edits"}</FieldDescription>
+            </FieldContent>
+          </Field>)}
+        </RadioGroup>
+      </FieldSet>
+    </FieldSet>
+  </div>;
+}
+
 function AppearancePanel({
   theme,
   onThemeChange,
+  palette,
+  onPaletteChange,
 }: {
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
+  palette: AppPalette;
+  onPaletteChange: (palette: AppPalette) => void;
 }) {
   return (
     <div className="mx-auto w-full max-w-[33rem]">
@@ -194,7 +325,7 @@ function AppearancePanel({
             data-active={theme === value || undefined}
             className="group relative cursor-pointer rounded-xl border border-border p-3 transition-all hover:-translate-y-0.5 hover:shadow-sm data-active:border-primary data-active:ring-2 data-active:ring-primary/20"
           >
-            <ThemePreview theme={value} />
+            <ThemePreview theme={value} palette={palette} />
             <div className="mt-3 flex items-start gap-2">
               <RadioGroupItem
                 id={`theme-${value}`}
@@ -216,6 +347,37 @@ function AppearancePanel({
                 <Check className="size-2.5" />
               </span>
             )}
+          </label>
+        ))}
+      </RadioGroup>
+      <div className="mt-8">
+        <p className="text-sm font-medium">Palette</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          Choose the accent and surface treatment used across the app.
+        </p>
+      </div>
+      <RadioGroup
+        value={palette}
+        onValueChange={(value) => onPaletteChange(value as AppPalette)}
+        className="mt-5 grid grid-cols-2 gap-3"
+      >
+        {paletteChoices.map(({ value, label, description }) => (
+          <label
+            htmlFor={`palette-${value}`}
+            key={value}
+            data-active={palette === value || undefined}
+            className="group relative cursor-pointer rounded-xl border border-border p-3 transition-all hover:-translate-y-0.5 hover:shadow-sm data-active:border-primary data-active:ring-2 data-active:ring-primary/20"
+          >
+            <PalettePreview palette={value} />
+            <div className="mt-3 flex items-start gap-2">
+              <RadioGroupItem id={`palette-${value}`} value={value} className="mt-0.5" />
+              <span>
+                <span className="block text-xs font-medium">{label}</span>
+                <span className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">
+                  {description}
+                </span>
+              </span>
+            </div>
           </label>
         ))}
       </RadioGroup>
@@ -279,12 +441,14 @@ function GeneralPanel({
   );
 }
 
-function ThemePreview({ theme }: { theme: Theme }) {
+function ThemePreview({ theme, palette }: { theme: Theme; palette: AppPalette }) {
+  const lightCanvas = palette === "monochrome" ? "bg-[#fafafa]" : "bg-[#f8f3ea]";
+  const darkCanvas = palette === "monochrome" ? "bg-[#383838]" : "bg-[#3d342e]";
   const canvas =
     theme === "light"
-      ? "bg-[#f8f3ea]"
+      ? lightCanvas
       : theme === "dark"
-        ? "bg-[#3d342e]"
+        ? darkCanvas
         : "bg-transparent";
   return (
     <div
@@ -292,15 +456,15 @@ function ThemePreview({ theme }: { theme: Theme }) {
     >
       {theme === "system" ? (
         <div className="grid h-full grid-cols-2 overflow-hidden rounded-md">
-          <div className="bg-[#f8f3ea]" />
-          <div className="bg-[#3d342e]" />
+          <div className={lightCanvas} />
+          <div className={darkCanvas} />
         </div>
       ) : (
         <div className="grid h-full grid-cols-[1.5rem_1fr] gap-1.5">
           <div
             className={
               theme === "light"
-                ? "rounded-sm bg-[#e9dcc8]"
+                ? palette === "monochrome" ? "rounded-sm bg-[#e8e8e8]" : "rounded-sm bg-[#e9dcc8]"
                 : "rounded-sm bg-[#58493f]"
             }
           />
@@ -308,7 +472,7 @@ function ThemePreview({ theme }: { theme: Theme }) {
             <div
               className={
                 theme === "light"
-                  ? "h-3 rounded-sm bg-[#e0c9aa]"
+                  ? palette === "monochrome" ? "h-3 rounded-sm bg-[#d6d6d6]" : "h-3 rounded-sm bg-[#e0c9aa]"
                   : "h-3 rounded-sm bg-[#5a4a40]"
               }
             />
@@ -322,6 +486,20 @@ function ThemePreview({ theme }: { theme: Theme }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function PalettePreview({ palette }: { palette: AppPalette }) {
+  const colors =
+    palette === "monochrome"
+      ? ["bg-[#fafafa]", "bg-[#e8e8e8]", "bg-[#303030]"]
+      : ["bg-[#f8f3ea]", "bg-[#e0c9aa]", "bg-[#d7862f]"];
+  return (
+    <div className="flex h-16 overflow-hidden rounded-lg border border-black/10">
+      {colors.map((color) => (
+        <div className={`flex-1 ${color}`} key={color} />
+      ))}
     </div>
   );
 }
