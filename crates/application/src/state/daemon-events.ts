@@ -2,9 +2,13 @@ import { atom, getDefaultStore } from "jotai";
 import { daemonApi } from "@/api";
 import type { EditorEvent, TurnStatus } from "@/types";
 
+type JotaiStore = ReturnType<typeof getDefaultStore>;
+type EventListener = (event: EditorEvent) => void;
+
 /**
- * Latest daemon event (unfiltered stream). Components that care about a
- * specific chat should filter by id; don't fork a second subscription.
+ * Latest daemon event (debug / simple subscribers). Prefer
+ * `subscribeDaemonEvents` for anything that must see *every* event —
+ * high-frequency updates can overwrite this atom between React renders.
  */
 export const lastDaemonEventAtom = atom<EditorEvent | null>(null);
 
@@ -20,8 +24,11 @@ export type TurnSnapshot = {
 export const latestTurnByChatAtom = atom<Record<string, TurnSnapshot>>({});
 
 let streamStarted = false;
+/** Store that owns the React tree (Provider). Must not be getDefaultStore() when a Provider is used. */
+let boundStore: JotaiStore | null = null;
+const listeners = new Set<EventListener>();
 
-function rememberTurn(store: ReturnType<typeof getDefaultStore>, event: EditorEvent) {
+function rememberTurn(store: JotaiStore, event: EditorEvent) {
   if (event.type !== "turnUpdated") return;
   const prev = store.get(latestTurnByChatAtom);
   store.set(latestTurnByChatAtom, {
@@ -36,25 +43,54 @@ function rememberTurn(store: ReturnType<typeof getDefaultStore>, event: EditorEv
   });
 }
 
+function activeStore(fallback?: JotaiStore): JotaiStore {
+  return boundStore ?? fallback ?? getDefaultStore();
+}
+
 /**
- * Start the shared daemon event stream once. Safe under React Strict Mode —
- * only the first call opens the subscription; later calls no-op.
+ * Start the shared daemon event stream once, writing into the **same** jotai
+ * store React uses (pass `useStore()` from under `JotaiProvider`).
+ *
+ * Using `getDefaultStore()` while the app mounts `<Provider>` silently
+ * orphans events — the UI stays stuck on "Thinking…" forever.
  */
-export function ensureDaemonEventStream() {
+export function ensureDaemonEventStream(store: JotaiStore) {
+  boundStore = store;
   if (streamStarted) return;
   streamStarted = true;
-  const store = getDefaultStore();
+
   void daemonApi
     .subscribeEvents({}, (event) => {
-      rememberTurn(store, event);
-      store.set(lastDaemonEventAtom, event);
+      const s = activeStore(store);
+      rememberTurn(s, event);
+      s.set(lastDaemonEventAtom, event);
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch (error) {
+          console.error("daemon event listener failed", error);
+        }
+      }
     })
     .catch((error: unknown) => {
+      // Allow a future reconnect to call ensure again.
+      streamStarted = false;
       console.error("daemon event stream disconnected", error);
     });
 }
 
+/**
+ * Subscribe to every daemon event (not just the latest atom value).
+ * Returns an unsubscribe function.
+ */
+export function subscribeDaemonEvents(listener: EventListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 /** Snapshot of the last turnUpdated for a chat, if any were observed this session. */
 export function getLatestTurnForChat(chatId: string): TurnSnapshot | null {
-  return getDefaultStore().get(latestTurnByChatAtom)[chatId] ?? null;
+  return activeStore().get(latestTurnByChatAtom)[chatId] ?? null;
 }

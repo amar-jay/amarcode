@@ -23,7 +23,6 @@ import {
   activeSessionAtom,
   applyLiveChatEventAtom,
   bindSessionAgentAtom,
-  lastDaemonEventAtom,
   liveChatAtom,
   liveChatIsWorkingAtom,
   loadLiveChatAtom,
@@ -33,6 +32,7 @@ import {
   setLiveSessionModeAtom,
   stopLiveChatAtom,
   submitLivePromptAtom,
+  subscribeDaemonEvents,
   type SessionMode,
 } from "@/state";
 
@@ -125,7 +125,6 @@ export function LiveChatScreen() {
   const live = useAtomValue(liveChatAtom);
   const isWorking = useAtomValue(liveChatIsWorkingAtom);
   const agent = useAtomValue(selectedAgentAtom) ?? session?.agent;
-  const daemonEvent = useAtomValue(lastDaemonEventAtom);
   const workspacePath = session?.chat.workspace_path ?? "";
 
   const openLiveChat = useSetAtom(openLiveChatAtom);
@@ -137,22 +136,14 @@ export function LiveChatScreen() {
   const respond = useSetAtom(respondLiveRequestAtom);
   const bindAgent = useSetAtom(bindSessionAgentAtom);
 
-  // Open / re-open only when the selected chat identity changes — not when
-  // agent/mode fields on the same session object are patched.
+  // Open only when chat identity changes. Seed (turn-active, mode) is read
+  // from activeSessionAtom inside the write atom — don't re-open on those.
   const chatId = session?.chat.id;
-  const initialRunId = session?.initialRunId;
-  const initialTurnActive = session?.initialTurnActive;
-  const sessionMode = session?.sessionMode;
 
   useEffect(() => {
     if (!chatId) return;
-    openLiveChat({
-      chatId,
-      initialRunId,
-      initialTurnActive,
-      sessionMode,
-    });
-  }, [chatId, initialRunId, initialTurnActive, sessionMode, openLiveChat]);
+    openLiveChat(chatId);
+  }, [chatId, openLiveChat]);
 
   // Initial + id-change load.
   useEffect(() => {
@@ -160,11 +151,12 @@ export function LiveChatScreen() {
     void loadLiveChat(live.chatId);
   }, [live?.chatId, loadLiveChat]);
 
-  // Shared stream → live chat reducer.
+  // Every daemon event → live chat reducer (not just the latest atom value).
   useEffect(() => {
-    if (!daemonEvent) return;
-    applyEvent(daemonEvent);
-  }, [daemonEvent, applyEvent]);
+    return subscribeDaemonEvents((event) => {
+      applyEvent(event);
+    });
+  }, [applyEvent]);
 
   if (!session || !live || live.chatId !== session.chat.id) {
     return (

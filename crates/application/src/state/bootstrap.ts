@@ -1,9 +1,9 @@
 import { useEffect } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { toast } from "sonner";
 import { loadAgentsAtom, selectedAgentAtom, selectedAgentIdAtom } from "./agents";
 import { refreshChatsAtom } from "./chats";
-import { ensureDaemonEventStream, lastDaemonEventAtom } from "./daemon-events";
+import { ensureDaemonEventStream, subscribeDaemonEvents } from "./daemon-events";
 import { defaultAgentIdAtom, defaultSessionModeAtom, paletteAtom, themeAtom } from "./preferences";
 import { composerSessionModeAtom } from "./navigation";
 
@@ -12,13 +12,13 @@ import { composerSessionModeAtom } from "./navigation";
  * Mount once near the root of `App`.
  */
 export function useAppBootstrap() {
+  const store = useStore();
   const theme = useAtomValue(themeAtom);
   const palette = useAtomValue(paletteAtom);
   const defaultAgentId = useAtomValue(defaultAgentIdAtom);
   const defaultSessionMode = useAtomValue(defaultSessionModeAtom);
   const selectedAgent = useAtomValue(selectedAgentAtom);
   const selectedAgentId = useAtomValue(selectedAgentIdAtom);
-  const lastEvent = useAtomValue(lastDaemonEventAtom);
 
   const loadAgents = useSetAtom(loadAgentsAtom);
   const refreshChats = useSetAtom(refreshChatsAtom);
@@ -43,9 +43,9 @@ export function useAppBootstrap() {
     document.documentElement.dataset.style = palette;
   }, [palette]);
 
-  // Catalogs + event stream
+  // Catalogs + event stream bound to the Provider store (not getDefaultStore).
   useEffect(() => {
-    ensureDaemonEventStream();
+    ensureDaemonEventStream(store);
     void loadAgents().catch((error: unknown) => {
       console.error("Failed to load agents:", error);
     });
@@ -53,12 +53,14 @@ export function useAppBootstrap() {
       console.error("Failed to load chats:", error);
       toast.error("Failed to load chats. Please try again.");
     });
-  }, [loadAgents, refreshChats]);
+  }, [store, loadAgents, refreshChats]);
 
-  // Keep sidebar list fresh when any chat metadata changes.
+  // Keep sidebar list fresh when any chat metadata changes (every event).
   useEffect(() => {
-    if (lastEvent?.type === "chatUpdated") void refreshChats();
-  }, [lastEvent, refreshChats]);
+    return subscribeDaemonEvents((event) => {
+      if (event.type === "chatUpdated") void refreshChats();
+    });
+  }, [refreshChats]);
 
   // Seed selection from defaults once agents are known.
   useEffect(() => {
@@ -67,7 +69,6 @@ export function useAppBootstrap() {
     }
   }, [selectedAgent, selectedAgentId, setSelectedAgentId]);
 
-  // Prefer default agent when the setting changes and nothing is selected yet.
   useEffect(() => {
     if (!selectedAgentId) setSelectedAgentId(defaultAgentId);
   }, [defaultAgentId, selectedAgentId, setSelectedAgentId]);

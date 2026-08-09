@@ -5,6 +5,7 @@ import type { PendingAgentRequest } from "@/components/pending-agent-request";
 import type { SessionMode } from "./session-mode";
 import { getLatestTurnForChat } from "./daemon-events";
 import { refreshChatsAtom } from "./chats";
+import { activeSessionAtom } from "./navigation";
 
 function isChatDetail(value: Chat | ChatDetail): value is ChatDetail {
   return "messages" in value;
@@ -51,20 +52,47 @@ export type OpenLiveChatInput = {
   sessionMode?: SessionMode;
 };
 
-/** Reset conversation-owned state when the sidebar / home opens a chat. */
-export const openLiveChatAtom = atom(null, (_get, set, input: OpenLiveChatInput) => {
-  const cached = getLatestTurnForChat(input.chatId);
-  set(
-    liveChatAtom,
-    emptyLiveChat(input.chatId, {
-      runId: cached?.run_id ?? input.initialRunId ?? null,
-      runStatus: input.initialRunId || cached ? "starting" : null,
-      turnStatus: cached?.status ?? (input.initialTurnActive ? "started" : null),
-      sessionMode: input.sessionMode ?? "build",
-      loading: true,
-    }),
-  );
-});
+/**
+ * Reset conversation-owned state when navigation selects a chat.
+ * Prefer calling with just `chatId` — seed fields are read from
+ * `activeSessionAtom` so the live-chat effect only depends on identity.
+ */
+export const openLiveChatAtom = atom(
+  null,
+  (get, set, input: string | OpenLiveChatInput) => {
+    const session = get(activeSessionAtom);
+    const chatId = typeof input === "string" ? input : input.chatId;
+    const seed: OpenLiveChatInput =
+      typeof input === "string"
+        ? {
+            chatId,
+            initialRunId: session?.initialRunId,
+            initialTurnActive: session?.initialTurnActive,
+            sessionMode: session?.sessionMode,
+          }
+        : input;
+
+    // Same chat already open — don't wipe streaming state on incidental re-renders.
+    // (The live-chat effect only depends on chatId, so this mainly guards Strict Mode.)
+    const existing = get(liveChatAtom);
+    if (existing?.chatId === chatId && existing.detail) return;
+
+    const cached = getLatestTurnForChat(chatId);
+    const turnStatus =
+      cached?.status ?? (seed.initialTurnActive ? "started" : null);
+    set(
+      liveChatAtom,
+      emptyLiveChat(chatId, {
+        runId: cached?.run_id ?? seed.initialRunId ?? null,
+        runStatus: turnStatus === "started" ? "running" : null,
+        // Prefer observed turn status over the navigation "just started" flag.
+        turnStatus,
+        sessionMode: seed.sessionMode ?? "build",
+        loading: true,
+      }),
+    );
+  },
+);
 
 export const clearLiveChatAtom = atom(null, (_get, set) => {
   set(liveChatAtom, null);
