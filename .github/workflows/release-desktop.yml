@@ -76,23 +76,52 @@ jobs:
 
       # Workspace Cargo.toml puts release output under the repo-root target/
       # (older layouts used crates/application/src-tauri/target).
+      #
+      # Note: GH Actions runs bash with `pipefail`. `find | head` then fails with
+      # "Broken pipe" once head closes the pipe — even when the bundle exists.
       - name: Locate bundle artifacts
         id: bundle
         shell: bash
         run: |
+          set -euo pipefail
+
           for candidate in \
             target/release/bundle \
             crates/application/src-tauri/target/release/bundle
           do
             if [ -d "$candidate" ]; then
-              echo "path=$candidate" >> "$GITHUB_OUTPUT"
-              echo "Found bundle at $candidate"
-              find "$candidate" -type f | head -100
+              # Prefer shippable installers over intermediate AppDir trees.
+              mapfile -t files < <(
+                find "$candidate" -type f \
+                  \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
+                     -o -name '*.dmg' -o -name '*.app.tar.gz' \
+                     -o -name '*.msi' -o -name '*.exe' -o -name '*.nsis.zip' \) \
+                  2>/dev/null | sort
+              )
+
+              if [ "${#files[@]}" -eq 0 ]; then
+                mapfile -t files < <(find "$candidate" -type f 2>/dev/null | sort | head -n 100 || true)
+              fi
+
+              if [ "${#files[@]}" -eq 0 ]; then
+                echo "Bundle directory exists but is empty: $candidate" >&2
+                continue
+              fi
+
+              {
+                echo "path=$candidate"
+                echo "count=${#files[@]}"
+              } >> "$GITHUB_OUTPUT"
+
+              echo "Found bundle at $candidate (${#files[@]} file(s)):"
+              printf '  %s\n' "${files[@]}"
               exit 0
             fi
           done
+
           echo "No Tauri bundle directory found" >&2
-          find . -type d -name bundle 2>/dev/null | head -50 || true
+          # Diagnostic only — never let a broken pipe fail the job here.
+          find . -type d -name bundle 2>/dev/null | head -n 50 || true
           exit 1
 
       - name: Upload build artifacts
@@ -122,7 +151,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: AMARCODE Latest
+          name: amarcode Latest
           body: |
             Automated desktop release generated from the workflow button.
           make_latest: true
