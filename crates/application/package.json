@@ -36,6 +36,7 @@
     "date-fns": "^4.4.0",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
+    "jotai": "^2.20.2",
     "lucide-react": "^1.30.0",
     "media-chrome": "^4.19.2",
     "motion": "^13.0.0",

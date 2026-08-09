@@ -14,7 +14,7 @@ use crate::{
             CancelResult, HealthResult, PromptResultDto, RespondAgentParams, RespondAgentResult,
             VersionResult,
         },
-        AgentDefinition, Chat,
+        AgentDefinition, Chat, GetChatResult,
     },
     state::AppState,
 };
@@ -56,7 +56,7 @@ async fn get_chat(
     state: State<'_, AppState>,
     chat_id: String,
     include_messages: bool,
-) -> Result<Chat, String> {
+) -> Result<GetChatResult, String> {
     state.get_chat(chat_id, include_messages).await
 }
 
@@ -96,7 +96,7 @@ async fn respond_input(
 #[tauri::command]
 async fn subscribe_events(
     state: State<'_, AppState>,
-    filter: EditorEvent,
+    filter: crate::protocol::rpc::SubscribeEventsParams,
     on_event: Channel<EditorEvent>,
 ) -> Result<(), String> {
     let mut subscription = state.subscribe_events(filter).await?;

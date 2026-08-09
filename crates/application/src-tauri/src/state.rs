@@ -13,12 +13,11 @@ use tokio::sync::Mutex;
 use crate::{
     daemon::{DaemonBridge, EventSubscription},
     protocol::{
-        events::EditorEvent,
         rpc::{
             methods, CancelResult, HealthResult, ListAgentsResult, ListChatsResult,
             PromptResultDto, RespondAgentParams, RespondAgentResult, VersionResult,
         },
-        AgentDefinition, Chat,
+        AgentDefinition, Chat, GetChatResult,
     },
 };
 
@@ -70,7 +69,11 @@ impl AppState {
             .chats)
     }
 
-    pub async fn get_chat(&self, chat_id: String, include_messages: bool) -> Result<Chat, String> {
+    pub async fn get_chat(
+        &self,
+        chat_id: String,
+        include_messages: bool,
+    ) -> Result<GetChatResult, String> {
         self.call(
             methods::GET_CHAT,
             json!({ "chat_id": chat_id, "include_messages": include_messages }),
@@ -114,7 +117,10 @@ impl AppState {
     /// Opens a separate, read-only event connection.  The daemon turns this
     /// socket into a stream after the acknowledgement, so it must not share
     /// the regular request/response bridge.
-    pub async fn subscribe_events(&self, filter: EditorEvent) -> Result<EventSubscription, String> {
+    pub async fn subscribe_events(
+        &self,
+        filter: crate::protocol::rpc::SubscribeEventsParams,
+    ) -> Result<EventSubscription, String> {
         DaemonBridge::subscribe(serde_json::to_value(filter).map_err(|error| error.to_string())?)
             .await
     }

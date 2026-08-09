@@ -25,3 +25,42 @@ pub struct Chat {
     pub updated_at: String,
     pub archived_at: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub id: String,
+    pub chat_id: String,
+    pub agent_run_id: Option<String>,
+    pub role: types::MessageRole,
+    pub content: String,
+    pub status: types::MessageStatus,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessagePart {
+    pub message_id: String,
+    pub ordinal: i64,
+    pub kind: types::MessagePartKind,
+    pub content_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageDetail {
+    pub message: Message,
+    pub parts: Vec<MessagePart>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatDetail {
+    pub chat: Chat,
+    pub messages: Vec<MessageDetail>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum GetChatResult {
+    Detail(ChatDetail),
+    Chat(Chat),
+}

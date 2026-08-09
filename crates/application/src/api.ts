@@ -40,9 +40,21 @@ export const daemonApi = {
     requestId: string,
     response: AgentResponse,
   ): Promise<RespondAgentResult> =>
-    invoke("respond_permission", { requestId, response }),
+    invoke("respond_permission", {
+      params: {
+        request_id: requestId,
+        result: response.result ?? null,
+        error: response.error ?? null,
+      },
+    }),
   respondInput: (requestId: string, response: AgentResponse): Promise<RespondAgentResult> =>
-    invoke("respond_input", { requestId, response }),
+    invoke("respond_input", {
+      params: {
+        request_id: requestId,
+        result: response.result ?? null,
+        error: response.error ?? null,
+      },
+    }),
 
   subscribeEvents: async (
     filter: EventFilter,

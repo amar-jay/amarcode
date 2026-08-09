@@ -16,7 +16,7 @@ use tokio::{
     net::TcpStream,
     sync::broadcast,
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     protocol::{
@@ -33,7 +33,7 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".to_string());
-    debug!(%peer, "client connected");
+    info!(%peer, "client connected");
 
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
@@ -75,7 +75,7 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
         }
     }
 
-    debug!(%peer, "client disconnected");
+    info!(%peer, "client disconnected");
     Ok(())
 }
 

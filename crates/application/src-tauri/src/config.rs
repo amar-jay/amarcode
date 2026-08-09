@@ -57,7 +57,7 @@ fn resolve_daemon_command() -> String {
         }
     }
 
-		// temporary hack: try to find the daemon binary in the target/debug directory relative to this crate
+    // temporary hack: try to find the daemon binary in the target/debug directory relative to this crate
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let candidates = [
         manifest_dir.join("../../../target/debug/amarcode-daemon"),
