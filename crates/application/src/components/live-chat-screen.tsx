@@ -307,7 +307,7 @@ export function LiveChatScreen({
 
   return (
     <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center border-b px-6">
+        <header className="flex py-1 items-center border-b px-6 mr-2">
           <h1 className="truncate text-sm font-medium">{activeChat?.chat.title ?? "Loading chat"}</h1>
           {loading && <LoaderCircle className="ml-2 size-4 animate-spin text-muted-foreground" />}
           {isWorking && <span className="ml-3 text-xs text-muted-foreground">Working…</span>}

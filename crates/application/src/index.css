@@ -240,6 +240,204 @@
   app-region: drag;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Streamdown markdown code blocks                                            */
+/* Compact header + ghost actions; no reserved empty 200px shells.            */
+/* -------------------------------------------------------------------------- */
+
+[data-streamdown="code-block"] {
+  /* Streamdown sets contain-intrinsic-size: auto 200px — that leaves a tall
+     blank card when a fence is empty or still streaming. Size to content. */
+  content-visibility: visible !important;
+  contain-intrinsic-size: none !important;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin-block: 0.75rem;
+  gap: 0;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 0;
+  box-shadow: none;
+}
+
+[data-streamdown="code-block"][data-incomplete] {
+  border-style: dashed;
+  opacity: 0.95;
+}
+
+/* Language label row — reserve right side for copy/download */
+[data-streamdown="code-block-header"] {
+  display: flex;
+  align-items: center;
+  min-height: 2rem;
+  height: 2rem;
+  padding: 0 2.75rem 0 0.65rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--muted) 65%, var(--card));
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  letter-spacing: 0.03em;
+}
+
+[data-streamdown="code-block-header"] > span {
+  margin-left: 0;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+/* Empty language → show a sensible default label */
+[data-streamdown="code-block-header"] > span:empty::before {
+  content: "code";
+  opacity: 0.85;
+}
+
+/*
+ * Streamdown places actions in a sticky overlay sibling with -mt-10.
+ * Pin them to the top-right of the card so they sit in the header band,
+ * inside the border — not floating above the block.
+ */
+[data-streamdown="code-block"] > .pointer-events-none.sticky,
+[data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]) {
+  position: absolute !important;
+  top: 0 !important;
+  right: 0 !important;
+  left: auto !important;
+  bottom: auto !important;
+  z-index: 3;
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  width: auto !important;
+  height: 2rem !important;
+  margin: 0 !important;
+  padding: 0 0.35rem 0 0 !important;
+  pointer-events: none;
+  transform: none !important;
+}
+
+[data-streamdown="code-block-actions"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.05rem;
+  border: 0 !important;
+  border-radius: 0.3rem;
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  pointer-events: auto;
+}
+
+[data-streamdown="code-block-actions"] button {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.3rem;
+  padding: 0;
+  color: var(--muted-foreground);
+  transition:
+    color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+[data-streamdown="code-block-actions"] button:hover:not(:disabled) {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+[data-streamdown="code-block-actions"] button:disabled {
+  opacity: 0.4;
+}
+
+/* Code body */
+[data-streamdown="code-block-body"] {
+  overflow-x: auto;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: var(--background) !important;
+  color: var(--foreground);
+  padding: 0.65rem 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  min-height: 0;
+}
+
+/* Don't leave a tall empty body when the fence has no lines yet */
+[data-streamdown="code-block-body"]:has(code:empty),
+[data-streamdown="code-block-body"]:has(pre:empty) {
+  display: none;
+}
+
+[data-streamdown="code-block-body"] pre {
+  margin: 0;
+  background: transparent !important;
+  color: inherit;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: inherit;
+  line-height: inherit;
+  tab-size: 2;
+}
+
+[data-streamdown="code-block-body"] code {
+  display: block;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  /* Fallback when shiki token vars fail to resolve */
+  --sdm-c: var(--foreground);
+  --shiki-dark: var(--foreground);
+}
+
+/* Line numbers — only when there is real content on the line */
+[data-streamdown="code-block-body"] code > span.block {
+  min-height: 0;
+}
+
+[data-streamdown="code-block-body"] code > span.block:not(:empty) {
+  min-height: 1.5em;
+}
+
+[data-streamdown="code-block-body"] code > span.block::before {
+  width: 1.5rem !important;
+  margin-right: 0.75rem !important;
+  color: color-mix(in oklab, var(--muted-foreground) 50%, transparent) !important;
+  font-size: 0.6875rem !important;
+  line-height: inherit;
+  opacity: 0.8;
+}
+
+/* Token spans: never disappear into the background */
+[data-streamdown="code-block-body"] code span[style*="--sdm-c"] {
+  color: var(--sdm-c, var(--foreground));
+}
+
+.dark [data-streamdown="code-block"] {
+  background: var(--card);
+  border-color: var(--border);
+}
+
+.dark [data-streamdown="code-block-header"] {
+  background: color-mix(in oklab, var(--muted) 40%, var(--card));
+}
+
+.dark [data-streamdown="code-block-body"] {
+  background: color-mix(in oklab, var(--background) 85%, var(--card)) !important;
+}
+
+.dark [data-streamdown="code-block-actions"] button:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
 /* Home watermark: strongest at rest; recedes on hover, further on focus. */
 [data-home-stage] [data-watermark-mark] {
   opacity: 0.26;

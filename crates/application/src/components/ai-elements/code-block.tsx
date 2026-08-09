@@ -78,14 +78,15 @@ const TokenSpan = ({ token }: { token: ThemedToken }) => (
 
 // Line number styles using CSS counters
 const LINE_NUMBER_CLASSES = cn(
-  "block",
+  "block min-h-[1.55em]",
   "before:content-[counter(line)]",
   "before:inline-block",
   "before:[counter-increment:line]",
-  "before:w-8",
-  "before:mr-4",
+  "before:w-7",
+  "before:mr-3.5",
   "before:text-right",
-  "before:text-muted-foreground/50",
+  "before:text-[0.7rem]",
+  "before:text-muted-foreground/45",
   "before:font-mono",
   "before:select-none",
 );
@@ -271,14 +272,14 @@ const CodeBlockBody = memo(
     return (
       <pre
         className={cn(
-          "dark:!bg-[var(--shiki-dark-bg)] dark:!text-[var(--shiki-dark)] m-0 p-4 text-sm",
+          "dark:!bg-[var(--shiki-dark-bg)] dark:!text-[var(--shiki-dark)] m-0 overflow-x-auto bg-background/50 p-3.5 text-[0.8rem] leading-relaxed",
           className,
         )}
         style={preStyle}
       >
         <code
           className={cn(
-            "font-mono text-sm",
+            "font-mono text-[0.8rem]",
             showLineNumbers &&
               "[counter-increment:line_0] [counter-reset:line]",
           )}
@@ -310,15 +311,11 @@ export const CodeBlockContainer = ({
 }: HTMLAttributes<HTMLDivElement> & { language: string }) => (
   <div
     className={cn(
-      "group relative w-full overflow-hidden rounded-md border bg-background text-foreground",
+      "group relative w-full overflow-hidden rounded-lg border border-border bg-card text-foreground",
       className,
     )}
     data-language={language}
-    style={{
-      containIntrinsicSize: "auto 200px",
-      contentVisibility: "auto",
-      ...style,
-    }}
+    style={style}
     {...props}
   />
 );
@@ -330,7 +327,7 @@ export const CodeBlockHeader = ({
 }: HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "flex items-center justify-between border-b bg-muted/80 px-3 py-2 text-muted-foreground text-xs",
+      "flex h-9 items-center justify-between border-b border-border/70 bg-muted/45 px-3 text-[0.7rem] font-medium tracking-wide text-muted-foreground uppercase",
       className,
     )}
     {...props}

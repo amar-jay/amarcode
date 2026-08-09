@@ -328,6 +328,9 @@ export const MessageResponse = memo(
         className,
       )}
       plugins={streamdownPlugins}
+      // Dual theme so shiki tokens track light/dark app chrome.
+      shikiTheme={["github-light", "github-dark"]}
+      lineNumbers
       {...props}
     />
   ),
