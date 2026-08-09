@@ -13,7 +13,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <JotaiProvider>
       <TooltipProvider>
-        <SidebarProvider>
+        <SidebarProvider className="h-full min-h-0">
           <App />
         </SidebarProvider>
       </TooltipProvider>

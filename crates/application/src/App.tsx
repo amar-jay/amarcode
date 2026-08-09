@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import MainPromptInput, { type SessionMode } from "@/components/main-prompt-input";
 import { AppSidebar } from "@/components/app-sidebar";
+import { HomeWatermark } from "@/components/home-watermark";
 import { LiveChatScreen } from "@/components/live-chat-screen";
 import { TopBar } from "@/components/top-bar";
 import { SettingsDialog } from "@/components/settings-dialog";
@@ -75,9 +76,9 @@ export default function App() {
   };
 
   return (
-    <>
+    <div className="flex h-full w-full flex-col overflow-hidden">
       <TopBar />
-      <div className="flex h-svh pt-9 w-full">
+      <div className="flex min-h-0 flex-1 w-full">
         <AppSidebar
           activeChatId={chatSession?.chat.id ?? null}
           workspacePath={workspacePath}
@@ -102,25 +103,31 @@ export default function App() {
             }}
           />
         ) : (
-          <main className="m-auto w-full max-w-2xl px-8 py-12">
-            <MainPromptInput
-              workspacePath={workspacePath}
-              onWorkspacePathChange={selectWorkspace}
-              selectedAgentId={selectedAgent?.id ?? ""}
-              onAgentSelected={setSelectedAgent}
-              sessionMode={newChatMode}
-              onSessionModeChange={setNewChatMode}
-              onChatStarted={(chat, agent, _workspacePath, sessionMode) => {
-                setChatSession({
-                  chat,
-                  agent,
-                  initialRunId: null,
-                  initialTurnActive: true,
-                  sessionMode,
-                });
-                void refresh();
-              }}
-            />
+          <main
+            data-home-stage
+            className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden px-8 py-12"
+          >
+            <HomeWatermark />
+            <div data-prompt-shell className="relative z-10 w-full max-w-2xl">
+              <MainPromptInput
+                workspacePath={workspacePath}
+                onWorkspacePathChange={selectWorkspace}
+                selectedAgentId={selectedAgent?.id ?? ""}
+                onAgentSelected={setSelectedAgent}
+                sessionMode={newChatMode}
+                onSessionModeChange={setNewChatMode}
+                onChatStarted={(chat, agent, _workspacePath, sessionMode) => {
+                  setChatSession({
+                    chat,
+                    agent,
+                    initialRunId: null,
+                    initialTurnActive: true,
+                    sessionMode,
+                  });
+                  void refresh();
+                }}
+              />
+            </div>
           </main>
         )}
       </div>
@@ -147,6 +154,6 @@ export default function App() {
         defaultSessionMode={defaultSessionMode}
         onDefaultSessionModeChange={setDefaultSessionMode}
       />
-    </>
+    </div>
   );
 }

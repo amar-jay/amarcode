@@ -184,6 +184,13 @@
   body {
     @apply m-0 overflow-hidden bg-background text-foreground;
   }
+  /* Thin frame for the borderless Tauri window — on #root so top bar is inside it. */
+  #root {
+    box-sizing: border-box;
+    border: 1px solid
+      color-mix(in oklab, var(--foreground) 28%, var(--background));
+    overflow: hidden;
+  }
   button:not(:disabled) {
     cursor: pointer;
   }
@@ -231,4 +238,43 @@
 
 *[data-tauri-drag-region] {
   app-region: drag;
+}
+
+/* Home watermark: strongest at rest; recedes on hover, further on focus. */
+[data-home-stage] [data-watermark-mark] {
+  opacity: 0.26;
+  transform: scale(1.035);
+  transition:
+    opacity 0.45s ease,
+    transform 0.5s ease;
+}
+[data-home-stage] [data-watermark-glow] {
+  opacity: 1;
+  transition: opacity 0.45s ease;
+}
+
+[data-home-stage]:has([data-prompt-shell]:hover) [data-watermark-mark] {
+  opacity: 0.16;
+  transform: scale(1.02);
+}
+[data-home-stage]:has([data-prompt-shell]:hover) [data-watermark-glow] {
+  opacity: 0.85;
+}
+
+[data-home-stage]:has([data-prompt-shell]:focus-within) [data-watermark-mark] {
+  opacity: 0.09;
+  transform: scale(1);
+}
+[data-home-stage]:has([data-prompt-shell]:focus-within) [data-watermark-glow] {
+  opacity: 0.65;
+}
+
+.dark [data-home-stage] [data-watermark-mark] {
+  opacity: 0.34;
+}
+.dark [data-home-stage]:has([data-prompt-shell]:hover) [data-watermark-mark] {
+  opacity: 0.22;
+}
+.dark [data-home-stage]:has([data-prompt-shell]:focus-within) [data-watermark-mark] {
+  opacity: 0.14;
 }
