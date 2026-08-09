@@ -331,7 +331,9 @@ async fn respond_agent(
     } else {
         let result = match result {
             Some(raw) => parse_json(&raw)?,
-            None if method == methods::RESPOND_PERMISSION => json!({ "allow": true }),
+            None if method == methods::RESPOND_PERMISSION => json!({
+                "outcome": { "outcome": "selected", "optionId": "allow-once" }
+            }),
             None => json!({}),
         };
         json!({

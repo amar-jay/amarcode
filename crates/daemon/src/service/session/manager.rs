@@ -12,8 +12,8 @@ use tokio::sync::broadcast;
 use crate::{
     acp::AcpClient,
     protocol::{
-        AgentRpcMethod, EditorEvent, MessagePartKind, MessageRole, MessageStatus, RpcDirection,
-        RpcEnvelope, RunStatus, TurnStatus,
+        AgentEventMethod, AgentRpcMethod, EditorEvent, MessagePartKind, MessageRole, MessageStatus,
+        RpcDirection, RpcEnvelope, RunStatus, TurnStatus,
     },
     service::agent_manager::AgentManager,
     store::{AgentRun, Message, MessagePart, Store},
@@ -26,7 +26,7 @@ use super::{
     types::{
         LiveRun, PendingAgentRequest, PromptResult, SessionInner, ACP_REQUEST_TIMEOUT,
     },
-    util::{extract_session_id, extract_stop_reason, timestamp},
+    util::{extract_session_id, extract_stop_reason, normalize_permission_result, timestamp},
 };
 
 pub struct SessionManager {
@@ -511,6 +511,16 @@ impl SessionManager {
                 .get(&pending.chat_id)
                 .map(|live| Arc::clone(&live.client))
                 .ok_or_else(|| Error::msg("live session gone for pending request"))?
+        };
+
+        // ACP permission replies must use `outcome.optionId`. Translate
+        // convenience shapes from the UI/CLI so agents don't abort the turn.
+        let result = if pending.method == AgentEventMethod::PermissionRequested.as_str()
+            || pending.method == "permission.requested"
+        {
+            normalize_permission_result(&pending.params, result)
+        } else {
+            result
         };
 
         let envelope = RpcEnvelope {
