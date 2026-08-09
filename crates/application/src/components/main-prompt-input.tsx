@@ -64,10 +64,11 @@ import {
   CommandShortcut,
 } from "@/components/ui/command"
 import { Button } from "./ui/button";
-import { useApi } from "@/hooks/useApi";
+import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { toast } from "sonner";
 import { open } from "@tauri-apps/plugin-dialog";
+import type { AgentDefinition, Chat, PromptResult } from "@/types";
 
 const handleSubmit = () => {
   // Handle submit
@@ -94,12 +95,13 @@ const modeIcons: Record<SetMode, typeof Ruler> = {
 export function AgentSelection({
   setSelectedAgent,
   selectedAgent,
+  agents,
 }: {
   setSelectedAgent: (agentId: string) => void;
   selectedAgent: string;
+  agents: AgentDefinition[];
 }) {
   const [open, setOpen] = useState(false);
-  const agents = useApi(daemonApi.listAgents, []);
 
   const selectedName =
     agents.find((agent) => agent.id === selectedAgent)?.name ?? "Agent";
@@ -150,11 +152,17 @@ function stripAcpSuffix(value: string): string {
 }
 
 
-const MainPromptInput = () => {
+type MainPromptInputProps = {
+  onChatStarted?: (chat: Chat, agent: AgentDefinition, prompt: PromptResult, workspacePath: string) => void;
+  workspacePath: string;
+  onWorkspacePathChange: (workspacePath: string) => void;
+  selectedAgentId: string;
+  onAgentSelected: (agent: AgentDefinition) => void;
+};
+
+const MainPromptInput = ({ onChatStarted, workspacePath, onWorkspacePathChange, selectedAgentId, onAgentSelected }: MainPromptInputProps) => {
   const [mode, setMode] = useState<SetMode>("build");
   const ModeIcon = modeIcons[mode];
-	const [selectedAgent, setSelectedAgent] = useState<string>("");
-	const [workspacePath, setWorkspacePath] = useState<string>("");
 
 	const openDirectory = async () => {
 		try {
@@ -165,7 +173,7 @@ const MainPromptInput = () => {
 			});
 
 			if (typeof path === "string") {
-				setWorkspacePath(path);
+				onWorkspacePathChange(path);
 			}
 		} catch (error) {
 			console.error("Error choosing workspace directory:", error);
@@ -173,15 +181,26 @@ const MainPromptInput = () => {
 		}
 	};
 
-	const handleSubmit = async (message: PromptInputMessage, event: React.FormEvent<HTMLFormElement>) => {
+	const handleSubmit = async (message: PromptInputMessage) => {
+		if (!workspacePath || !selectedAgentId || !message.text.trim()) {
+			toast.error("Choose a workspace and agent, then enter a prompt.");
+			return;
+		}
 		try{
-		const chat = await daemonApi.createChat(workspacePath, message.text)
-		await daemonApi.prompt(chat.id, selectedAgent, message.text)
+		const chat = await daemonApi.createChat(workspacePath, message.text.trim().slice(0, 72))
+		const prompt = await daemonApi.prompt(chat.id, selectedAgentId, message.text)
+		const agent = agents.find((candidate) => candidate.id === selectedAgentId);
+		if (agent) onChatStarted?.(chat, agent, prompt, workspacePath);
 		} catch (error) {
 			console.error("Error submitting prompt:", error);
 			toast.error("An error occurred while submitting the prompt.");
 		}
 	}
+	const agents = useAgentCatalog();
+	const selectAgent = (agentId: string) => {
+		const agent = agents.find((candidate) => candidate.id === agentId);
+		if (agent) onAgentSelected(agent);
+	};
   return (
     <PromptInput onSubmit={handleSubmit}>
       <PromptInputBody>
@@ -216,8 +235,9 @@ const MainPromptInput = () => {
             </DropdownMenuContent>
           </DropdownMenu>
 					<AgentSelection
-							setSelectedAgent={setSelectedAgent}
-							selectedAgent={selectedAgent}
+							setSelectedAgent={selectAgent}
+							selectedAgent={selectedAgentId}
+							agents={agents}
 					/>
           <PromptInputButton
 							tooltip={{
@@ -232,7 +252,7 @@ const MainPromptInput = () => {
 							)}
           </PromptInputButton>
         </PromptInputTools>
-        <PromptInputSubmit disabled={!selectedAgent} />
+        <PromptInputSubmit disabled={!selectedAgentId || !workspacePath} />
       </PromptInputFooter>
     </PromptInput>
   );

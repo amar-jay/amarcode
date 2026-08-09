@@ -5,10 +5,6 @@ description = "Background service for Amarcode"
 edition = "2021"
 
 [[bin]]
-name = "amarcode-daemon"
-path = "src/main.rs"
-
-[[bin]]
 name = "mock-acp-agent"
 path = "src/bin/mock-acp-agent.rs"
 

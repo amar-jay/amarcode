@@ -6,7 +6,7 @@ interface TopBarProps {
 
 export function TopBar({}: TopBarProps) {
   return (
-    <div className="fixed inset-x-0 top-0 z-[60] flex h-9 items-center border-b border-border bg-card">
+    <div className="fixed inset-x-0 top-0 z-[60] flex h-9 items-center border-b border-border bg-sidebar">
       <div
         data-tauri-drag-region
         className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 select-none"

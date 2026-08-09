@@ -14,31 +14,22 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import type { Chat } from "@/types";
-import { useCallback, useState } from "react";
-import { daemonApi } from "@/api";
 
 type ChatSidebarProps = {
-  chats: Chat[];
   activeChatId: string | null;
   workspacePath: string;
-  onSelectChat: (chatId: string) => void;
+  chats: Chat[];
   onNewChat: () => void;
+  onSelectChat: (chatId: string) => void;
 };
 
-export function ChatSidebar({
-  // chats,
+export function AppSidebar({
   activeChatId,
   workspacePath,
-  onSelectChat,
+  chats,
   onNewChat,
+  onSelectChat,
 }: ChatSidebarProps) {
-	const [chats, setChats] = useState<Chat[]>([]);
-
-  const loadChats = useCallback(async () => {
-    const next = await daemonApi.listChats(workspacePath);
-    setChats(next);
-  }, [workspacePath]);
-
   return (
     <Sidebar
       variant="floating"
@@ -46,11 +37,8 @@ export function ChatSidebar({
       className="inset-y-auto! top-9! bottom-0! h-auto!"
     >
       <SidebarHeader className="gap-0 border-b border-sidebar-border p-0">
-        <div className="flex items-center gap-1 px-2 py-1">
+        <div className="flex items-center gap-1 pr-3 py-1 ml-auto">
           <SidebarTrigger />
-          <span className="font-heading text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">
-            AMARCODE
-          </span>
         </div>
         <SidebarMenu className="px-2 pb-2">
           <SidebarMenuItem>
@@ -84,7 +72,7 @@ export function ChatSidebar({
                 ))}
               {!chats.length && (
                 <p className="px-2 py-3 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-                  No saved chats yet.
+									No chats yet.
                 </p>
               )}
             </SidebarMenu>
