@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "AMARCODE",
+  "productName": "amarcode",
   "version": "0.1.0",
   "identifier": "com.acpworkbench.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "AMARCODE",
+        "title": "amarcode",
         "width": 1320,
         "height": 860,
         "resizable": true,

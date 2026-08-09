@@ -18,52 +18,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-	BellIcon,
 	BotIcon,
-	CalculatorIcon,
-	CalendarIcon,
 	Check,
-  ClipboardPasteIcon,
-  CodeIcon,
-  CopyIcon,
-  CreditCardIcon,
-  FileTextIcon,
-  FolderIcon,
   FolderOpen,
-  FolderOpenDot,
-  FolderPlusIcon,
-  GlobeIcon,
-  HelpCircleIcon,
-  HomeIcon,
-  ImageIcon,
-  InboxIcon,
-  LayoutGridIcon,
-  ListIcon,
   MessageCircle,
-  PaperclipIcon,
-  PlusIcon,
   Ruler,
-  ScissorsIcon,
-  SettingsIcon,
-  TrashIcon,
-  UserIcon,
   Wrench,
-	ZoomInIcon,
-	ZoomOutIcon,
 } from "lucide-react";
-import { DialogTrigger, DialogContent, Dialog, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import {
   Command,
   CommandDialog,
   CommandEmpty,
-  CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator,
-  CommandShortcut,
 } from "@/components/ui/command"
-import { Button } from "./ui/button";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { toast } from "sonner";

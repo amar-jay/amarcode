@@ -140,7 +140,7 @@ export function SettingsDialog({
       <DialogContent className="!h-[500px] !w-[800px] !max-w-[800px] overflow-hidden p-0">
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <DialogDescription className="sr-only">
-          Customize your AMARCODE preferences.
+          Customize your amarcode preferences.
         </DialogDescription>
         <SidebarProvider
           className="h-full min-h-0 items-start"

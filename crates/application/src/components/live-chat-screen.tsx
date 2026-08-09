@@ -15,10 +15,11 @@ import {
 } from "@/components/ai-elements/chain-of-thought";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import type { AgentDefinition, Chat, ChatDetail, EditorEvent, JsonValue, MessagePart, RunStatus, TurnStatus } from "@/types";
+import type { AgentDefinition, Chat, ChatDetail, EditorEvent, JsonValue, MessagePart, PromptAttachment, RunStatus, TurnStatus } from "@/types";
 import { getLatestTurnForChat } from "@/hooks/use-daemon-events";
 import AppPromptInput, { type SessionMode } from "./main-prompt-input";
 import { PendingAgentRequestCard, type PendingAgentRequest } from "./pending-agent-request";
+import { DiffArtifactCard, diffArtifacts } from "./diff-artifact-card";
 
 type LiveChatScreenProps = {
   workspacePath: string;
@@ -338,12 +339,14 @@ export function LiveChatScreen({
                   }];
                 });
               const hasVisibleContent = Boolean(message.content.trim());
+              const diffs = diffArtifacts(parts);
               const isStreamingAssistant =
                 message.role === "assistant" &&
                 (message.status === "streaming" || (isWorking && message.id === lastMessage?.id));
               const tone = message.role === "assistant" ? assistantMessageTone(message.content, message.status) : null;
               // Empty stream row: keep a slot so the turn doesn't look frozen.
-              if (!hasVisibleContent && timeline.length === 0) {
+              // Diff-only tool payloads are visible content even without text/timeline.
+              if (!hasVisibleContent && timeline.length === 0 && diffs.length === 0) {
                 if (message.role === "assistant" && isStreamingAssistant) {
                   return <TurnLoadingIndicator key={message.id} label={waitingLabel} />;
                 }
@@ -367,6 +370,7 @@ export function LiveChatScreen({
                       {timeline.map((step) => <ChainOfThoughtStep key={`${message.id}-${step.key}`} icon={step.icon} label={reasoningLabel(step.label)} status={step.status}/>)}
                     </ChainOfThoughtContent>
                   </ChainOfThought>}
+                  {diffs.map((artifact) => <DiffArtifactCard key={artifact.key} artifact={artifact} />)}
                   {hasVisibleContent && (message.role === "assistant" ? (
                     tone === "error" ? <div className="flex gap-2 rounded-md text-xs px-3 py-2 text-destructive"><CircleX className="mt-0.5 size-4 shrink-0" /><MessageResponse>{message.content}</MessageResponse></div>
                     : tone === "warning" ? <div className="flex gap-2 rounded-md py-2 text-xs text-amber-700 dark:text-amber-300"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><MessageResponse>{message.content}</MessageResponse></div>

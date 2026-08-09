@@ -241,6 +241,28 @@
 }
 
 /* -------------------------------------------------------------------------- */
+/* Streamdown link-safety dialog                                              */
+/* max-w-md lives in streamdown's node_modules and isn't always scanned by    */
+/* Tailwind — without it, w-full stretches the confirm card edge-to-edge.     */
+/* -------------------------------------------------------------------------- */
+
+[data-streamdown="link-safety-modal"] {
+  z-index: 60;
+}
+
+[data-streamdown="link-safety-modal"] > div {
+  width: min(100%, 28rem);
+  max-width: 28rem; /* ~ max-w-md */
+  margin-inline: 1rem;
+}
+
+[data-streamdown="link-safety-modal"] > div > div.break-all,
+[data-streamdown="link-safety-modal"] > div [class*="break-all"] {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Streamdown markdown code blocks                                            */
 /* Compact header + ghost actions; no reserved empty 200px shells.            */
 /* -------------------------------------------------------------------------- */
@@ -393,9 +415,9 @@
   font-family: inherit;
   font-size: inherit;
   color: inherit;
-  /* Fallback when shiki token vars fail to resolve */
+  /* Fallback only for --sdm-c (light). Do NOT set --shiki-dark here —
+     that would clobber per-token dark colors from shiki dual themes. */
   --sdm-c: var(--foreground);
-  --shiki-dark: var(--foreground);
 }
 
 /* Line numbers — only when there is real content on the line */
@@ -416,9 +438,24 @@
   opacity: 0.8;
 }
 
-/* Token spans: never disappear into the background */
-[data-streamdown="code-block-body"] code span[style*="--sdm-c"] {
+/*
+ * Streamdown dual themes store light color in --sdm-c and dark in --shiki-dark
+ * on each token span. Always forcing --sdm-c made dark mode look like light
+ * theme tokens on a dark card.
+ */
+[data-streamdown="code-block-body"] code span[style*="--sdm-c"],
+[data-streamdown="code-block-body"] code span[style*="--shiki-dark"] {
   color: var(--sdm-c, var(--foreground));
+}
+
+.dark [data-streamdown="code-block-body"] code span[style*="--sdm-c"],
+.dark [data-streamdown="code-block-body"] code span[style*="--shiki-dark"] {
+  color: var(--shiki-dark, var(--sdm-c, var(--foreground)));
+}
+
+.dark [data-streamdown="code-block-body"] code span[style*="--shiki-dark-bg"],
+.dark [data-streamdown="code-block-body"] code span[style*="--sdm-tbg"] {
+  background-color: var(--shiki-dark-bg, var(--sdm-tbg, transparent));
 }
 
 .dark [data-streamdown="code-block"] {
@@ -432,6 +469,7 @@
 
 .dark [data-streamdown="code-block-body"] {
   background: color-mix(in oklab, var(--background) 85%, var(--card)) !important;
+  color: var(--foreground);
 }
 
 .dark [data-streamdown="code-block-actions"] button:hover:not(:disabled) {
