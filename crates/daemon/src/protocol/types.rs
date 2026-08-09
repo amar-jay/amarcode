@@ -267,7 +267,7 @@ impl fmt::Display for AgentRpcMethod {
 /// Inbound methods/notifications from an agent (or legacy mock names).
 ///
 /// Real ACP streams most turn progress as `session/update` notifications.
-/// Payload JSON stays flexible; `session_manager` interprets `sessionUpdate`.
+/// Payload JSON stays flexible; `service::session` interprets `sessionUpdate`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentEventMethod {
     /// `session/update` — primary streaming path (chunks, tools, commands, …).

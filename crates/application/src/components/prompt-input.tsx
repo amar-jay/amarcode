@@ -10,23 +10,13 @@ import {
 import {
   PromptInput,
   PromptInputActionAddAttachments,
-  PromptInputActionAddScreenshot,
   PromptInputActionMenu,
   PromptInputActionMenuContent,
   PromptInputActionMenuTrigger,
   PromptInputBody,
   PromptInputButton,
-  PromptInputCommand,
-  PromptInputCommandEmpty,
-  PromptInputCommandGroup,
-  PromptInputCommandInput,
-  PromptInputCommandItem,
-  PromptInputCommandList,
   PromptInputFooter,
   PromptInputHeader,
-  PromptInputHoverCard,
-  PromptInputHoverCardContent,
-  PromptInputHoverCardTrigger,
   type PromptInputMessage,
   PromptInputProvider,
   PromptInputSubmit,
@@ -48,7 +38,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { AgentDefinition } from "@/types";
-import { api } from "@/api";
 import {
   AtSign,
   Bot,
@@ -140,10 +129,10 @@ function ContextPicker({ workspacePath }: { workspacePath: string }) {
   const refs = usePromptInputReferencedSources();
   const [files, setFiles] = useState<string[]>([]);
   useEffect(() => {
-    void api
-      .workspaceFiles(workspacePath)
-      .then(setFiles)
-      .catch(() => setFiles([]));
+    // void api
+    //   .workspaceFiles(workspacePath)
+    //   .then(setFiles)
+    //   .catch(() => setFiles([]));
   }, [workspacePath]);
   const sources: SourceDocumentUIPart[] = files.map((filename) => ({
     type: "source-document",

@@ -5,7 +5,7 @@
 //! - resolve an agent row to a concrete command (managed install under
 //!   app data dir vs custom PATH command)
 //!
-//! Does not own live ACP sessions — that is `session_manager`.
+//! Does not own live ACP sessions — that is `session`.
 
 use std::{
     path::{Path, PathBuf},

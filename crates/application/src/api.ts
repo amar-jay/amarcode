@@ -1,31 +1,55 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { AgentDefinition, AgentEvent, SessionSummary } from "./types";
+import type {
+  AgentDefinition,
+  AgentResponse,
+  CancelResult,
+  Chat,
+  DaemonVersion,
+  EditorEvent,
+  EventFilter,
+  GetChatResult,
+  Health,
+  PromptResult,
+  RespondAgentResult,
+} from "./types";
 
-export const api = {
-  health: () => invoke("daemon_health"),
-  agents: () => invoke<AgentDefinition[]>("list_agents"),
-  sessions: () => invoke<SessionSummary[]>("list_sessions"),
-  events: (sessionId: string) =>
-    invoke<AgentEvent[]>("session_events", { sessionId }),
-  workspaceFiles: (workspacePath: string) =>
-    invoke<string[]>("list_workspace_files", { workspacePath }),
-  saveAgent: (agent: AgentDefinition) => invoke("save_agent", { agent }),
-  start: async (
-    workspacePath: string,
-    agent: AgentDefinition,
-    onEvent: (event: AgentEvent) => void,
-  ) => {
-    const channel = new Channel<AgentEvent>();
+/**
+ * Typed bindings for the daemon-backed Tauri commands.
+ *
+ * This is intentionally a direct mirror of `src-tauri/src/lib.rs`; no
+ * session-era compatibility methods live here.
+ */
+export const daemonApi = {
+  health: (): Promise<Health> => invoke("daemon_health"),
+  version: (): Promise<DaemonVersion> => invoke("daemon_version"),
+
+  listAgents: (): Promise<AgentDefinition[]> => invoke("list_agents"),
+
+  createChat: (workspacePath: string, title?: string): Promise<Chat> =>
+    invoke("create_chat", { workspacePath, title }),
+  listChats: (workspacePath?: string): Promise<Chat[]> =>
+    invoke("list_chats", { workspacePath }),
+  getChat: (chatId: string, includeMessages = true): Promise<GetChatResult> =>
+    invoke("get_chat", { chatId, includeMessages }),
+
+  prompt: (chatId: string, agentId: string, text: string): Promise<PromptResult> =>
+    invoke("prompt", { chatId, agentId, text }),
+  cancel: (chatId: string): Promise<CancelResult> => invoke("cancel", { chatId }),
+
+  respondPermission: (
+    requestId: string,
+    response: AgentResponse,
+  ): Promise<RespondAgentResult> =>
+    invoke("respond_permission", { requestId, response }),
+  respondInput: (requestId: string, response: AgentResponse): Promise<RespondAgentResult> =>
+    invoke("respond_input", { requestId, response }),
+
+  subscribeEvents: async (
+    filter: EventFilter,
+    onEvent: (event: EditorEvent) => void,
+  ): Promise<void> => {
+    const channel = new Channel<EditorEvent>();
     channel.onmessage = onEvent;
-    return invoke<SessionSummary>("start_session", {
-      workspacePath,
-      agent,
-      onEvent: channel,
-    });
+    await invoke("subscribe_events", { filter, onEvent: channel });
   },
-  prompt: (sessionId: string, prompt: string, displayText: string) =>
-    invoke("send_prompt", { sessionId, prompt, displayText }),
-  cancel: (sessionId: string) => invoke("cancel_session", { sessionId }),
-  respond: (sessionId: string, requestId: string | number, result: unknown) =>
-    invoke("respond_to_request", { sessionId, requestId, result }),
-};
+} as const;

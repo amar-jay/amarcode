@@ -1,136 +1,163 @@
 /**
- * Frontend mirror of the daemon's AgentDefinition RPC payload.
- * Keep field names aligned with Rust's camelCase serialization; this type is
- * compile-time only and does not define persistence.
+ * The daemon wire contract exposed by the Tauri command layer.
+ *
+ * Field names deliberately follow Rust/serde output (`snake_case`).  Do not
+ * reshape these into view models here; UI-specific adapters belong above this
+ * boundary.
  */
-export type AgentDefinition = {
-  /** Stable agent id used for persistence and lookups. */
-  id: string;
 
-  /** Human-readable label shown in the agent picker. */
-  name: string;
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
-  /** Executable the daemon starts for this agent. */
-  command: string;
-
-  /** Command-line arguments appended to the executable. */
-  arguments: string[];
-
-  /**
-   * Environment variables passed to the process.
-   * A variable can use a literal value or point at a secret reference that the
-   * daemon resolves at launch time.
-   */
-  environment: {
-    /** Environment variable name, for example API_KEY or RUST_LOG. */
-    name: string;
-    /** Optional secret store reference used instead of a literal value. */
-    secretRef?: string;
-    /** Literal value written directly into the child process environment. */
-    value?: string;
-  }[];
-
-  /** True for built-in seeded agents; false for user-created agents. */
-  isPreset: boolean;
-};
-
-/** Lightweight frontend mirror of the daemon's session-summary RPC payload. */
-export type SessionSummary = {
-  /** Session id used to fetch events and send follow-up requests. */
-  id: string;
-
-  /** Workspace root the session is attached to. */
-  workspacePath: string;
-
-  /** Agent id that launched the session. */
-  agentId: string;
-
-  /** Current lifecycle state reported by the daemon. */
+export type Health = {
   status: string;
-
-  /** RFC 3339 timestamp for when the session was created. */
-  createdAt: string;
-
-  /** RFC 3339 timestamp for the last status change. */
-  updatedAt: string;
+  version: string;
+  addr: string;
 };
 
-/**
- * Frontend mirror of the daemon's streamed `AgentEvent` wire union.
- * `kind` is the transport discriminator; `clientId` is the only UI-local
- * field and is never sent back to the daemon.
- */
-export type AgentEvent =
-  /** Session lifecycle changes such as starting, running, paused, or stopped. */
+export type DaemonVersion = {
+  version: string;
+};
+
+export type AgentDefinition = {
+  id: string;
+  name: string;
+  command: string;
+  arguments: string[];
+  environment: [name: string, value: string][];
+  is_preset: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Chat = {
+  id: string;
+  workspace_path: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+};
+
+export type MessageRole = "system" | "user" | "assistant" | "tool";
+export type MessageStatus = "streaming" | "complete" | "interrupted" | "failed";
+export type MessagePartKind =
+  | "text"
+  | "tool_call"
+  | "tool_result"
+  | "thinking"
+  | "file"
+  | "image";
+export type RunStatus = "starting" | "running" | "completed" | "stopped" | "failed";
+
+export type Message = {
+  id: string;
+  chat_id: string;
+  agent_run_id: string | null;
+  role: MessageRole;
+  content: string;
+  status: MessageStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MessagePart = {
+  message_id: string;
+  ordinal: number;
+  kind: MessagePartKind;
+  /** JSON encoded by the daemon; parsing is a presentation concern. */
+  content_json: string;
+};
+
+export type MessageDetail = {
+  message: Message;
+  parts: MessagePart[];
+};
+
+export type ChatDetail = {
+  chat: Chat;
+  messages: MessageDetail[];
+};
+
+/** `get_chat` returns a `Chat` when `include_messages` is false. */
+export type GetChatResult = Chat | ChatDetail;
+
+export type PromptResult = {
+  run_id: string;
+  chat_id: string;
+  agent_id: string;
+  user_message_id: string;
+  acp_session_id: string | null;
+};
+
+export type CancelResult = {
+  cancelled: boolean;
+  chat_id: string;
+};
+
+export type AgentResponseError = {
+  code: number;
+  message: string;
+  data?: JsonValue;
+};
+
+/** Exactly one of `result` or `error` should be supplied. */
+export type AgentResponse =
+  | { result: JsonValue; error?: never }
+  | { result?: never; error: AgentResponseError };
+
+export type RespondAgentResult = {
+  ok: boolean;
+  request_id: string;
+};
+
+export type EventFilter = {
+  chat_id?: string;
+  run_id?: string;
+  /** Reserved by the daemon; current events do not carry a session id. */
+  session_id?: string;
+};
+
+export type EditorEvent =
+  | { type: "chatUpdated"; payload: { chat_id: string } }
   | {
-      kind: "status";
-      data: {
-        /** Session that produced the status update. */
-        sessionId: string;
-        /** New lifecycle state reported by the daemon. */
-        status: string;
-        /** Optional extra context shown in the UI. */
-        detail?: string;
+      type: "runUpdated";
+      payload: {
+        run_id: string;
+        status: RunStatus;
+        error_message: string | null;
       };
     }
-  /** Conversation messages from the user or assistant. */
   | {
-      kind: "message";
-      data: {
-        /** Session that produced the message. */
-        sessionId: string;
-        /** Message author; the UI treats non-user messages as assistant output. */
-        role: string;
-        /** Text content for the transcript and timeline. */
-        text: string;
-        /**
-         * Local optimistic prompt id used to reconcile a user message with the
-         * eventual server-acknowledged copy.
-         */
-        clientId?: string;
-      };
+      type: "messageUpdated";
+      payload: { message_id: string; status: MessageStatus };
     }
-  /** Non-conversational activity records that feed the timeline/work groups. */
   | {
-      kind: "activity";
-      data: {
-        /** Session that emitted the activity. */
-        sessionId: string;
-        /** Short label used for grouping and display. */
-        label: string;
-        /** Opaque payload carried through for debugging or richer UI details. */
-        payload: unknown;
-      };
+      type: "messagePartAdded";
+      payload: { message_id: string; ordinal: number; kind: MessagePartKind };
     }
-  /** Tool or approval requests that wait for a response from the UI. */
   | {
-      kind: "request";
-      data: {
-        /** Session that owns the request. */
-        sessionId: string;
-        /** Request id returned back to the daemon when responding. */
-        requestId: string | number;
-        /** Tool or RPC method being requested. */
-        method: string;
-        /** Opaque request payload passed through from the runtime. */
-        params: unknown;
-      };
+      type: "approvalRequired";
+      payload: { run_id: string; request_id: string; details: JsonValue };
     }
-  /** Transport or protocol failures that should be surfaced as errors. */
   | {
-      kind: "protocolError";
-      data: {
-        /** Session that encountered the failure. */
-        sessionId: string;
-        /** Human-readable error message. */
-        message: string;
-      };
+      type: "questionRequired";
+      payload: { run_id: string; request_id: string; details: JsonValue };
     }
-  /** Turn boundary marker emitted after the assistant finishes responding. */
   | {
-      kind: "turnComplete";
-      data: {
-        /** Session that finished the turn. */
-        sessionId: string;
+      type: "workspaceFilesChanged";
+      payload: { workspace_path: string; paths: string[] };
+    }
+  | {
+      type: "agentConnectionChanged";
+      payload: {
+        agent_id: string;
+        connected: boolean;
+        error_message: string | null;
       };
     };

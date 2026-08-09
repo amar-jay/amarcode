@@ -44,8 +44,9 @@ impl DaemonBridge {
         match std::net::TcpStream::connect(daemon_addr) {
             Ok(_) => Ok(()),
             Err(_) => {
-                std::process::Command::new(daemon_command).spawn()?;
-                Ok(())
+                // std::process::Command::new(daemon_command).spawn()?;
+                // Ok(())
+								Err(io::Error::other("YOU NEED TO LAUNCH THE DAEMON MANUALLY FOR NOW. THIS IS A TEMPORARY HACK."))
             }
         }
     }

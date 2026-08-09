@@ -4,7 +4,7 @@
 //! `{ "event": { "type": "runUpdated", "payload": { ... } } }`.
 //!
 //! These are the stable editor-facing events. ACP agent notifications are
-//! translated into this shape by `service::session_manager`.
+//! translated into this shape by `service::session`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

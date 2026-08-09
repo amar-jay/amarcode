@@ -1,7 +1,7 @@
 //! Persistence for the `acp_events` raw traffic log.
 //!
 //! Rows are the durable form of [`crate::protocol::RpcEnvelope`]. Prefer
-//! [`Store::save_acp_envelope`] from session_manager after each ACP unit.
+//! [`Store::save_acp_envelope`] from `service::session` after each ACP unit.
 
 use rusqlite::params;
 

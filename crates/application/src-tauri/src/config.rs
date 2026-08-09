@@ -39,8 +39,7 @@ impl Config {
             let daemon_addr = std::env::var("AMARCODE_DAEMON_ADDR")
                 .unwrap_or_else(|_| DEFAULT_DAEMON_ADDR.to_string());
 
-            let daemon_command = std::env::var("AMARCODE_DAEMON_COMMAND")
-                .unwrap_or_else(|_| DEFAULT_DAEMON_COMMAND.into());
+            let daemon_command = resolve_daemon_command();
 
             Self {
                 app_dir,
@@ -49,4 +48,31 @@ impl Config {
             }
         })
     }
+}
+
+fn resolve_daemon_command() -> String {
+    if let Some(command) = std::env::var_os("AMARCODE_DAEMON_COMMAND") {
+        if !command.is_empty() {
+            return command.to_string_lossy().into_owned();
+        }
+    }
+
+		// temporary hack: try to find the daemon binary in the target/debug directory relative to this crate
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let candidates = [
+        manifest_dir.join("../../../target/debug/amarcode-daemon"),
+        manifest_dir.join("../../target/debug/amarcode-daemon"),
+    ];
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return candidate
+                .canonicalize()
+                .unwrap_or(candidate)
+                .to_string_lossy()
+                .into_owned();
+        }
+    }
+
+    DEFAULT_DAEMON_COMMAND.into()
 }

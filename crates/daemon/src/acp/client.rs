@@ -2,10 +2,10 @@
 //!
 //! Basic synchronous adapter: spawn an agent, exchange newline-delimited
 //! JSON-RPC on stdio, correlate responses, and surface notifications on a
-//! channel for `service::session_manager` to drain.
+//! channel for `service::session` to drain.
 //!
 //! Owns process lifecycle + framing + id correlation. Does not touch SQLite
-//! or TCP — session_manager persists (`store`) and fans out after each unit.
+//! or TCP — `service::session` persists (`store`) and fans out after each unit.
 
 use std::{
     collections::HashMap,

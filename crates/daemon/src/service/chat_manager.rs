@@ -5,7 +5,7 @@
 //! - update titles
 //! - load message history for UI restore (via store)
 //!
-//! Starting an agent run belongs to `session_manager`. Mutations that change
+//! Starting an agent run belongs to `session`. Mutations that change
 //! durable chat state emit `EditorEvent::ChatUpdated` **after** the store write.
 
 use std::sync::Arc;

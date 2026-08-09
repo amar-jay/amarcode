@@ -6,7 +6,7 @@
 //! Submodules:
 //! - [`agent_manager`] — agent definitions and binary resolution
 //! - [`chat_manager`] — chat CRUD and workspace-scoped listing
-//! - [`session_manager`] — live runs, prompts, ACP sessions, event fan-out
+//! - [`session`] — live runs, prompts, ACP sessions, event fan-out
 //!
 //! ## Orchestration contract
 //!
@@ -15,12 +15,12 @@
 //! When a client RPC involves an agent, or when the agent pushes inbound
 //! traffic, durable product state is written to the store **before** any
 //! live `EditorEvent` or RPC `result` that depends on that state.
-//! See [`session_manager`] and the crate README ("Store-first write path").
+//! See [`session`] and the crate README ("Store-first write path").
 
 pub mod agent_manager;
 pub mod chat_manager;
-pub mod session_manager;
+pub mod session;
 
 pub use agent_manager::{AgentManager, ResolvedAgent};
 pub use chat_manager::{ChatDetail, ChatManager, MessageDetail};
-pub use session_manager::{PendingAgentRequest, PromptResult, SessionManager};
+pub use session::{PendingAgentRequest, PromptResult, SessionManager};

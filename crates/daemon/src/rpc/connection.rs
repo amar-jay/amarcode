@@ -102,7 +102,7 @@ async fn write_event<W: AsyncWriteExt + Unpin>(writer: &mut W, event: &EditorEve
 
 /// After subscribe ack: forward matching events until the client goes away.
 ///
-/// Event production is owned by `service::session_manager` (broadcast). Until
+/// Event production is owned by `service::session` (broadcast). Until
 /// that lands, this waits on the shared bus (or client disconnect) so the
 /// protocol shape is already correct.
 async fn stream_events<R, W>(

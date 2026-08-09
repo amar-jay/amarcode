@@ -74,7 +74,7 @@ TCP line
 
 `store` and `acp` are **segmented on purpose** — neither imports the other.
 That does **not** mean writes are unordered. Orchestration lives in
-`service` (especially `session_manager`), and the durability rule is:
+`service` (especially `session`), and the durability rule is:
 
 > **After ACP produces a meaningful result (or inbound notification),
 > persist to the store first, then notify the client.**
@@ -88,7 +88,7 @@ what the UI already saw.
 ```
 RPC prompt(chat_id, text, agent_id)
   │
-  ▼ service::session_manager
+  ▼ service::session
   │
   ├─ 1. STORE first (intent)
   │     create/update run → starting|running
@@ -110,7 +110,7 @@ the whole turn. Further agent output is handled on the inbound loop below.
 
 #### 2. Agent-initiated stream (ACP inbound → UI)
 
-Reader thread / event loop receives `AcpInbound` → `session_manager`:
+Reader thread / event loop receives `AcpInbound` → `session`:
 
 ```
 AcpInbound::Notification | Request
@@ -204,7 +204,7 @@ One JSON object per line. No HTTP, no length prefixes.
 ### Live events (`EditorEvent`)
 
 Stable **editor-facing** events (camelCase `type` + `payload`), produced by
-`session_manager` once wired:
+`session` once wired:
 
 - `chatUpdated`, `runUpdated`, `messageUpdated`, `messagePartAdded`
 - `approvalRequired`, `questionRequired`
@@ -237,7 +237,7 @@ SQLite file, embedded migrations under `migrations/`.
 Talks to an external agent binary over **stdio**, one JSON-RPC message per line.
 
 ```
-service::session_manager
+service::session
         │
         ▼
    AcpClient::spawn(command, args, env, cwd)
@@ -267,7 +267,7 @@ Implementation is `acp::client` only (`AcpClient`).
 |---------|------|
 | `agent_manager` | List/save/create agents, resolve executable (`tools_dir` / PATH) |
 | `chat_manager` | Create/list/archive/title chats, load history + parts; emits `ChatUpdated` after store |
-| `session_manager` | Start run, own live `AcpClient`, prompt/cancel, store-first ACP inbound → `EditorEvent` |
+| `session` | Start run, own live `AcpClient`, prompt/cancel, store-first ACP inbound → `EditorEvent` |
 
 Wired on `App` as `agents`, `chats`, `sessions`. Client RPC methods dispatch into these managers (reads → agents/chats; agent turns → sessions).
 
