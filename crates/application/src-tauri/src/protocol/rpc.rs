@@ -22,6 +22,7 @@ pub mod methods {
     pub const GET_CHAT: &str = "get_chat";
 
     pub const PROMPT: &str = "prompt";
+    pub const SET_SESSION_MODE: &str = "set_session_mode";
     pub const CANCEL: &str = "cancel";
 
     pub const RESPOND_PERMISSION: &str = "respond_permission";
@@ -140,6 +141,10 @@ pub struct PromptParams {
     pub chat_id: String,
     pub agent_id: String,
     pub text: String,
+    #[serde(default)]
+    pub plan_mode: bool,
+    #[serde(default)]
+    pub session_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

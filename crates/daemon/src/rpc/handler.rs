@@ -12,7 +12,7 @@ use crate::{
     protocol::rpc::{
         methods, CancelParams, CancelResult, CreateChatParams, GetChatParams, HealthResult,
         ListAgentsResult, ListChatsParams, ListChatsResult, PromptParams, PromptResultDto,
-        RespondAgentParams, RespondAgentResult, SubscribeEventsParams, VersionResult,
+        RespondAgentParams, RespondAgentResult, SetSessionModeParams, SubscribeEventsParams, VersionResult,
     },
     service::{ChatDetail, MessageDetail, PromptResult},
     App, Error, Result,
@@ -48,6 +48,7 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
 
         // sessions (ACP — may block; run off the async worker)
         methods::PROMPT => Ok(DispatchOutcome::Result(prompt(app, params).await?)),
+        methods::SET_SESSION_MODE => Ok(DispatchOutcome::Result(set_session_mode(app, params).await?)),
         methods::CANCEL => Ok(DispatchOutcome::Result(cancel(app, params).await?)),
         methods::RESPOND_PERMISSION | methods::RESPOND_INPUT => {
             Ok(DispatchOutcome::Result(respond_agent(app, params).await?))
@@ -143,10 +144,19 @@ async fn prompt(app: &App, params: Value) -> Result<Value> {
     let chat_id = p.chat_id;
     let agent_id = p.agent_id;
     let text = p.text;
+    let session_mode = p.session_mode.or_else(|| p.plan_mode.then(|| "plan".to_owned()));
 
     // ACP spawn/request is blocking; keep the async runtime free.
-    let result = tokio::task::block_in_place(|| app.sessions.prompt(&chat_id, &agent_id, text))?;
+    let result = tokio::task::block_in_place(|| {
+        app.sessions.prompt(&chat_id, &agent_id, text, session_mode.as_deref())
+    })?;
     to_value(prompt_dto(result))
+}
+
+async fn set_session_mode(app: &App, params: Value) -> Result<Value> {
+    let p: SetSessionModeParams = parse_params(params)?;
+    tokio::task::block_in_place(|| app.sessions.set_session_mode(&p.chat_id, &p.mode))?;
+    Ok(json!({ "chat_id": p.chat_id, "mode": p.mode }))
 }
 
 async fn cancel(app: &App, params: Value) -> Result<Value> {

@@ -4,26 +4,17 @@ import { useCallback, useRef, useState } from "react";
 
 export type OnSelectChatSession = (session: { chat: Chat; agent?: AgentDefinition; initialRunId: string | null } | null) => void;
 
-export function useChats(workspacePath: string, onSelectChatSession: OnSelectChatSession) {
+export function useChats(onSelectChatSession: OnSelectChatSession) {
 	const [chats, setChats] = useState<Chat[]>([]);
-	const requests = useRef(new Map<string, Promise<void>>());
-	const latestWorkspace = useRef(workspacePath);
-	latestWorkspace.current = workspacePath;
+	const request = useRef<Promise<void> | null>(null);
 
-  const loadChats = useCallback(async () => {
-		// The global sidebar starts with every chat, then narrows to the selected
-		// workspace once the prompt screen chooses one.
-		const requestKey = workspacePath || "__all_workspaces__";
-		const existing = requests.current.get(requestKey);
-		if (existing) return existing;
-		const request = daemonApi.listChats(workspacePath || undefined)
-			.then((next) => {
-				if (latestWorkspace.current === workspacePath) setChats(next);
-			})
-			.finally(() => requests.current.delete(requestKey));
-		requests.current.set(requestKey, request);
-		return request;
-  }, [workspacePath]);
+  const loadChats = useCallback((): Promise<void> => {
+		if (request.current) return request.current;
+		request.current = daemonApi.listChats()
+			.then(setChats)
+			.finally(() => { request.current = null; });
+		return request.current;
+  }, []);
 
 	const handleSelectChat = (chatId: string) => {
       const chat = chats.find((item) => item.id === chatId);

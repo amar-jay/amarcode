@@ -4,11 +4,8 @@
 //! model.  Tauri commands should delegate here; no command may invent an RPC
 //! method or change a daemon parameter name.
 
-use std::sync::Arc;
-
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tokio::sync::Mutex;
 
 use crate::{
     daemon::{DaemonBridge, EventSubscription},
@@ -22,14 +19,11 @@ use crate::{
 };
 
 pub struct AppState {
-    bridge: Arc<Mutex<DaemonBridge>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
-        Self {
-            bridge: Arc::new(Mutex::new(DaemonBridge::new())),
-        }
+        Self {}
     }
 
     pub async fn health(&self) -> Result<HealthResult, String> {
@@ -86,12 +80,27 @@ impl AppState {
         chat_id: String,
         agent_id: String,
         text: String,
+        session_mode: Option<String>,
     ) -> Result<PromptResultDto, String> {
         self.call(
             methods::PROMPT,
-            json!({ "chat_id": chat_id, "agent_id": agent_id, "text": text }),
+            json!({
+                "chat_id": chat_id,
+                "agent_id": agent_id,
+                "text": text,
+                "session_mode": session_mode,
+            }),
         )
         .await
+    }
+
+    pub async fn set_session_mode(&self, chat_id: String, mode: String) -> Result<(), String> {
+        self.call::<Value>(
+            methods::SET_SESSION_MODE,
+            json!({ "chat_id": chat_id, "mode": mode }),
+        )
+        .await
+        .map(|_| ())
     }
 
     pub async fn cancel(&self, chat_id: String) -> Result<CancelResult, String> {
@@ -143,6 +152,9 @@ impl AppState {
         method: &str,
         params: Value,
     ) -> Result<T, String> {
-        self.bridge.lock().await.call(method, params).await
+        // A prompt may legitimately remain open for an entire agent turn.
+        // Each RPC gets its own request/response connection so reads, cancel,
+        // and agent responses remain available while that request is pending.
+        DaemonBridge::new().call(method, params).await
     }
 }

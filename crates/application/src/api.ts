@@ -32,8 +32,14 @@ export const daemonApi = {
   getChat: (chatId: string, includeMessages = true): Promise<GetChatResult> =>
     invoke("get_chat", { chatId, includeMessages }),
 
-  prompt: (chatId: string, agentId: string, text: string): Promise<PromptResult> =>
-    invoke("prompt", { chatId, agentId, text }),
+  prompt: (
+    chatId: string,
+    agentId: string,
+    text: string,
+    sessionMode?: "plan" | "build" | "ask",
+  ): Promise<PromptResult> => invoke("prompt", { chatId, agentId, text, sessionMode }),
+  setSessionMode: (chatId: string, mode: "plan" | "build" | "ask"): Promise<void> =>
+    invoke("set_session_mode", { chatId, mode }),
   cancel: (chatId: string): Promise<CancelResult> => invoke("cancel", { chatId }),
 
   respondPermission: (

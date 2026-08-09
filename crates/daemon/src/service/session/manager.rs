@@ -52,7 +52,12 @@ impl SessionManager {
     }
 
     /// Start a new agent run for a chat (spawns ACP, initialize + createSession).
-    pub fn start_run(&self, chat_id: &str, agent_id: &str) -> Result<AgentRun> {
+    pub fn start_run(
+        &self,
+        chat_id: &str,
+        agent_id: &str,
+        session_mode: Option<&str>,
+    ) -> Result<AgentRun> {
         let chat = self
             .inner
             .store
@@ -111,7 +116,14 @@ impl SessionManager {
             AgentRpcMethod::Initialize,
             json!({
                 "protocolVersion": 1,
-                "clientCapabilities": {},
+                // Advertise only the elicitation mode the desktop client can
+                // actually render and answer. Agents commonly disable their
+                // ask-user flow when this is absent.
+                "clientCapabilities": {
+                    "elicitation": {
+                        "form": {}
+                    }
+                },
                 "clientInfo": {
                     "name": "amarcode-daemon",
                     "title": "Amarcode Daemon",
@@ -142,6 +154,17 @@ impl SessionManager {
                 return Err(err);
             }
         };
+
+        // Codex exposes its `request_user_input` tool only in collaboration
+        // plan mode. Make that an explicit first-prompt choice rather than a
+        // hidden default; other ACP agents keep their own configuration.
+        if let Some(mode) = session_mode.filter(|_| resolved.command.file_name().is_some_and(|name| name == "codex-acp")) {
+            if let Err(err) = self.configure_codex_session(&run.id, &client, acp_session_id.as_deref(), mode) {
+                let _ = client.kill();
+                let _ = self.fail_run(&run.id, &err.to_string());
+                return Err(err);
+            }
+        }
 
         self.inner.store.update_run(
             &run.id,
@@ -186,6 +209,7 @@ impl SessionManager {
         chat_id: &str,
         agent_id: &str,
         text: impl AsRef<str>,
+        session_mode: Option<&str>,
     ) -> Result<PromptResult> {
         let text = text.as_ref().trim();
         if text.is_empty() {
@@ -204,7 +228,7 @@ impl SessionManager {
             }
         };
         if needs_start {
-            self.start_run(chat_id, agent_id)?;
+            self.start_run(chat_id, agent_id, session_mode)?;
         }
 
         let (run_id, client, session_id) = {
@@ -303,6 +327,51 @@ impl SessionManager {
             user_message_id: user_message.id,
             acp_session_id: session_id,
         })
+    }
+
+    /// Change the active Codex session's collaboration/permission preset.
+    pub fn set_session_mode(&self, chat_id: &str, mode: &str) -> Result<()> {
+        let (run_id, client, session_id, agent_id) = {
+            let guard = self.inner.by_chat.lock().map_err(|_| Error::msg("session lock poisoned"))?;
+            let live = guard.get(chat_id).ok_or_else(|| Error::msg("no active session for this chat"))?;
+            (live.run_id.clone(), Arc::clone(&live.client), live.acp_session_id.clone(), live.agent_id.clone())
+        };
+        let resolved = self.agents.resolve(&agent_id)?;
+        if !resolved.command.file_name().is_some_and(|name| name == "codex-acp") {
+            return Err(Error::msg("this agent does not expose Codex session modes"));
+        }
+        self.configure_codex_session(&run_id, &client, session_id.as_deref(), mode)
+    }
+
+    fn configure_codex_session(
+        &self,
+        run_id: &str,
+        client: &AcpClient,
+        session_id: Option<&str>,
+        mode: &str,
+    ) -> Result<()> {
+        let session_id = session_id.ok_or_else(|| Error::msg("Codex session has not started"))?;
+        let (collaboration_mode, agent_mode) = match mode {
+            "plan" => ("plan", Some("agent")),
+            "build" => ("default", Some("agent")),
+            "ask" => ("default", Some("read-only")),
+            _ => return Err(Error::msg("mode must be plan, build, or ask")),
+        };
+        self.acp_request(run_id, client, AgentRpcMethod::Other("session/set_config_option".to_owned()), json!({
+            "sessionId": session_id,
+            "configId": "collaboration_mode",
+            "type": "id",
+            "value": collaboration_mode,
+        }))?;
+        if let Some(agent_mode) = agent_mode {
+            self.acp_request(run_id, client, AgentRpcMethod::Other("session/set_config_option".to_owned()), json!({
+                "sessionId": session_id,
+                "configId": "mode",
+                "type": "id",
+                "value": agent_mode,
+            }))?;
+        }
+        Ok(())
     }
 
     /// Cancel the live run for a chat.

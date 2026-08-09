@@ -66,8 +66,18 @@ async fn prompt(
     chat_id: String,
     agent_id: String,
     text: String,
+    session_mode: Option<String>,
 ) -> Result<PromptResultDto, String> {
-    state.prompt(chat_id, agent_id, text).await
+    state.prompt(chat_id, agent_id, text, session_mode).await
+}
+
+#[tauri::command]
+async fn set_session_mode(
+    state: State<'_, AppState>,
+    chat_id: String,
+    mode: String,
+) -> Result<(), String> {
+    state.set_session_mode(chat_id, mode).await
 }
 
 #[tauri::command]
@@ -166,6 +176,7 @@ pub fn run() {
             list_chats,
             get_chat,
             prompt,
+            set_session_mode,
             cancel,
             respond_permission,
             respond_input,
