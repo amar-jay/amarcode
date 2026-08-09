@@ -13,7 +13,7 @@ use crate::{
     acp::AcpClient,
     protocol::{
         AgentRpcMethod, EditorEvent, MessagePartKind, MessageRole, MessageStatus, RpcDirection,
-        RpcEnvelope, RunStatus,
+        RpcEnvelope, RunStatus, TurnStatus,
     },
     service::agent_manager::AgentManager,
     store::{AgentRun, Message, MessagePart, Store},
@@ -26,7 +26,7 @@ use super::{
     types::{
         LiveRun, PendingAgentRequest, PromptResult, SessionInner, ACP_REQUEST_TIMEOUT,
     },
-    util::{extract_session_id, timestamp},
+    util::{extract_session_id, extract_stop_reason, timestamp},
 };
 
 pub struct SessionManager {
@@ -190,6 +190,7 @@ impl SessionManager {
             acp_session_id: acp_session_id.clone(),
             streaming_message_ids: HashMap::new(),
             last_streaming_message_id: None,
+            active_user_message_id: None,
         };
         self.inner
             .by_chat
@@ -276,6 +277,27 @@ impl SessionManager {
             chat_id: chat_id.to_owned(),
         });
 
+        // Mark the turn open before the blocking ACP prompt so subscribers can
+        // show working state without waiting for the RPC to return.
+        {
+            let mut guard = self
+                .inner
+                .by_chat
+                .lock()
+                .map_err(|_| Error::msg("session lock poisoned"))?;
+            if let Some(live) = guard.get_mut(chat_id) {
+                live.active_user_message_id = Some(user_message.id.clone());
+            }
+        }
+        self.emit(EditorEvent::TurnUpdated {
+            chat_id: chat_id.to_owned(),
+            run_id: run_id.clone(),
+            user_message_id: user_message.id.clone(),
+            status: TurnStatus::Started,
+            stop_reason: None,
+            error_message: None,
+        });
+
         // ACP session/prompt: prompt is an array of content blocks.
         let mut params = json!({
             "prompt": [{ "type": "text", "text": text }],
@@ -286,17 +308,47 @@ impl SessionManager {
                 .expect("params object")
                 .insert("sessionId".into(), json!(sid));
         } else {
+            self.finish_turn(
+                chat_id,
+                &run_id,
+                &user_message.id,
+                TurnStatus::Failed,
+                None,
+                Some("live session missing acp_session_id"),
+            );
             return Err(Error::msg("live session missing acp_session_id"));
         }
 
-        let prompt_result = self.acp_request(&run_id, &client, AgentRpcMethod::Prompt, params)?;
+        let prompt_result =
+            match self.acp_request(&run_id, &client, AgentRpcMethod::Prompt, params) {
+                Ok(value) => value,
+                Err(err) => {
+                    self.finish_turn(
+                        chat_id,
+                        &run_id,
+                        &user_message.id,
+                        TurnStatus::Failed,
+                        None,
+                        Some(&err.to_string()),
+                    );
+                    return Err(err);
+                }
+            };
 
         // The ACP reader sees notifications and the RPC result in order, but
         // persists notifications on a separate worker. Wait for that worker
         // before finalizing the messages from this turn.
-        client
-            .sync_inbound(ACP_REQUEST_TIMEOUT)
-            .map_err(|err| Error::msg(err.to_string()))?;
+        if let Err(err) = client.sync_inbound(ACP_REQUEST_TIMEOUT) {
+            self.finish_turn(
+                chat_id,
+                &run_id,
+                &user_message.id,
+                TurnStatus::Failed,
+                None,
+                Some(&err.to_string()),
+            );
+            return Err(Error::msg(err.to_string()));
+        }
 
         // Turn finished (stopReason typically end_turn). Finalize any streaming
         // assistant message that arrived via session/update chunks.
@@ -318,7 +370,16 @@ impl SessionManager {
                 status: MessageStatus::Complete,
             });
         }
-        let _ = prompt_result;
+
+        let stop_reason = extract_stop_reason(&prompt_result);
+        self.finish_turn(
+            chat_id,
+            &run_id,
+            &user_message.id,
+            TurnStatus::Completed,
+            stop_reason,
+            None,
+        );
 
         Ok(PromptResult {
             run_id,
@@ -389,8 +450,11 @@ impl SessionManager {
             return Err(Error::msg(format!("no live run for chat: {chat_id}")));
         };
 
+        let active_user_message_id = live.active_user_message_id.clone();
+        let run_id = live.run_id.clone();
+
         let _ = self.acp_notify(
-            &live.run_id,
+            &run_id,
             &live.client,
             AgentRpcMethod::Cancel,
             json!({ "sessionId": live.acp_session_id }),
@@ -398,11 +462,22 @@ impl SessionManager {
         // Prefer session/close when the agent advertised it; cancel is enough for now.
         let _ = live.client.kill();
 
+        if let Some(user_message_id) = active_user_message_id {
+            self.emit(EditorEvent::TurnUpdated {
+                chat_id: chat_id.to_owned(),
+                run_id: run_id.clone(),
+                user_message_id,
+                status: TurnStatus::Cancelled,
+                stop_reason: Some("cancelled".into()),
+                error_message: None,
+            });
+        }
+
         self.inner
             .store
-            .update_run(&live.run_id, RunStatus::Stopped, None, None)?;
+            .update_run(&run_id, RunStatus::Stopped, None, None)?;
         self.emit(EditorEvent::RunUpdated {
-            run_id: live.run_id,
+            run_id,
             status: RunStatus::Stopped,
             error_message: None,
         });
@@ -564,6 +639,29 @@ impl SessionManager {
     }
 
     fn fail_run(&self, run_id: &str, error: &str) -> Result<()> {
+        // If a prompt turn is open on this run, close it as failed first.
+        if let Ok(mut guard) = self.inner.by_chat.lock() {
+            let hit = guard.iter_mut().find_map(|(chat_id, live)| {
+                if live.run_id == run_id {
+                    live.active_user_message_id
+                        .take()
+                        .map(|user_message_id| (chat_id.clone(), user_message_id))
+                } else {
+                    None
+                }
+            });
+            if let Some((chat_id, user_message_id)) = hit {
+                drop(guard);
+                self.emit(EditorEvent::TurnUpdated {
+                    chat_id,
+                    run_id: run_id.to_owned(),
+                    user_message_id,
+                    status: TurnStatus::Failed,
+                    stop_reason: None,
+                    error_message: Some(error.to_owned()),
+                });
+            }
+        }
         self.inner
             .store
             .update_run(run_id, RunStatus::Failed, None, Some(error))?;
@@ -575,6 +673,35 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Clear the open turn on the live chat (if it matches) and notify clients.
+    fn finish_turn(
+        &self,
+        chat_id: &str,
+        run_id: &str,
+        user_message_id: &str,
+        status: TurnStatus,
+        stop_reason: Option<String>,
+        error_message: Option<&str>,
+    ) {
+        if let Ok(mut guard) = self.inner.by_chat.lock() {
+            if let Some(live) = guard.get_mut(chat_id) {
+                if live.run_id == run_id
+                    && live.active_user_message_id.as_deref() == Some(user_message_id)
+                {
+                    live.active_user_message_id = None;
+                }
+            }
+        }
+        self.emit(EditorEvent::TurnUpdated {
+            chat_id: chat_id.to_owned(),
+            run_id: run_id.to_owned(),
+            user_message_id: user_message_id.to_owned(),
+            status,
+            stop_reason,
+            error_message: error_message.map(str::to_owned),
+        });
+    }
+
     fn detach_chat(&self, chat_id: &str) {
         let removed = self
             .inner
@@ -584,6 +711,16 @@ impl SessionManager {
             .and_then(|mut guard| guard.remove(chat_id));
         if let Some(live) = removed {
             let _ = live.client.kill();
+            if let Some(user_message_id) = live.active_user_message_id {
+                let _ = self.inner.events.send(EditorEvent::TurnUpdated {
+                    chat_id: chat_id.to_owned(),
+                    run_id: live.run_id.clone(),
+                    user_message_id,
+                    status: TurnStatus::Cancelled,
+                    stop_reason: Some("replaced".into()),
+                    error_message: Some("replaced by new run".into()),
+                });
+            }
             let _ = self.inner.store.update_run(
                 &live.run_id,
                 RunStatus::Stopped,

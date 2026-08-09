@@ -49,6 +49,8 @@ pub(super) struct LiveRun {
     /// Most recent visible assistant message. Thought chunks do not always use
     /// the same ACP message id, so attach them here when possible.
     pub(super) last_streaming_message_id: Option<String>,
+    /// User message id for the in-flight prompt turn, if any.
+    pub(super) active_user_message_id: Option<String>,
 }
 
 /// Shared pieces used by SessionManager methods and inbound worker threads.

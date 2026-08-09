@@ -23,6 +23,12 @@ impl Store {
                 vec!["--acp"],
             ),
             ("codex-acp", "Codex ACP", "codex-acp", vec![]),
+            (
+                "grok-acp",
+                "Grok ACP",
+                "grok",
+                vec!["agent", "stdio"],
+            )
         ] {
             self.save_agent(&AgentDefinition {
                 id: id.into(),

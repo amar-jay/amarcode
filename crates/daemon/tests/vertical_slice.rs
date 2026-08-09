@@ -142,6 +142,8 @@ async fn create_chat_prompt_store_and_events() {
     let mut saw_chat_updated = false;
     let mut saw_message_updated = false;
     let mut saw_run_updated = false;
+    let mut saw_turn_started = false;
+    let mut saw_turn_completed = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     while tokio::time::Instant::now() < deadline {
         match timeout(Duration::from_millis(200), event_rx.recv()).await {
@@ -154,24 +156,40 @@ async fn create_chat_prompt_store_and_events() {
                     "chatUpdated" => saw_chat_updated = true,
                     "messageUpdated" => saw_message_updated = true,
                     "runUpdated" => saw_run_updated = true,
+                    "turnUpdated" => {
+                        let status = line
+                            .pointer("/event/payload/status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if status == "started" {
+                            saw_turn_started = true;
+                        }
+                        if status == "completed" {
+                            saw_turn_completed = true;
+                        }
+                    }
                     _ => {}
                 }
             }
             Ok(None) => break,
             Err(_) => continue,
         }
-        if saw_chat_updated && saw_message_updated && saw_run_updated {
+        if saw_turn_started && saw_turn_completed && (saw_message_updated || saw_run_updated) {
             break;
         }
     }
 
     assert!(
-        saw_chat_updated || saw_message_updated || saw_run_updated,
+        saw_chat_updated || saw_message_updated || saw_run_updated || saw_turn_completed,
         "expected at least one EditorEvent on subscribe socket"
     );
     assert!(
-        saw_message_updated || saw_run_updated,
-        "expected message or run event after prompt (got only chat? chat={saw_chat_updated})"
+        saw_turn_started,
+        "expected turnUpdated started after prompt begins"
+    );
+    assert!(
+        saw_turn_completed,
+        "expected turnUpdated completed when the agent returns stopReason"
     );
 
     // Store truth: reopen SQLite and check durable rows.

@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 
 use crate::{
-    protocol::{EditorEvent, MessagePartKind, MessageRole, MessageStatus, RunStatus},
+    protocol::{EditorEvent, MessagePartKind, MessageRole, MessageStatus, RunStatus, TurnStatus},
     store::{Message, MessagePart},
     Error, Result,
 };
@@ -54,6 +54,41 @@ pub(super) fn complete_run(
             EditorEvent::MessageUpdated {
                 message_id,
                 status: MessageStatus::Complete,
+            },
+        );
+    }
+    let active_user_message_id = if let Ok(mut guard) = inner.by_chat.lock() {
+        if guard
+            .get(chat_id)
+            .map(|l| l.run_id == run_id)
+            .unwrap_or(false)
+        {
+            guard
+                .get_mut(chat_id)
+                .and_then(|live| live.active_user_message_id.take())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    if let Some(user_message_id) = active_user_message_id {
+        let turn_status = if status == RunStatus::Failed {
+            TurnStatus::Failed
+        } else if status == RunStatus::Stopped {
+            TurnStatus::Cancelled
+        } else {
+            TurnStatus::Completed
+        };
+        emit(
+            inner,
+            EditorEvent::TurnUpdated {
+                chat_id: chat_id.to_owned(),
+                run_id: run_id.to_owned(),
+                user_message_id,
+                status: turn_status,
+                stop_reason: None,
+                error_message: error.map(str::to_owned),
             },
         );
     }

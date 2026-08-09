@@ -15,5 +15,5 @@ pub mod types;
 pub use events::{EditorEvent, EventLine};
 pub use types::{
     AgentEventMethod, AgentRpcMethod, MessagePartKind, MessageRole, MessageStatus, RpcDirection,
-    RpcEnvelope, RunStatus,
+    RpcEnvelope, RunStatus, TurnStatus,
 };

@@ -26,7 +26,7 @@ editor / CLI.
                                         ┌─────────────────┐
                                         │  ACP agent bin  │
                                         │ (claude, copilot│
-                                        │  codex, …)      │
+                                        │  codex, grok, …)│
                                         └─────────────────┘
 ```
 
@@ -206,9 +206,13 @@ One JSON object per line. No HTTP, no length prefixes.
 Stable **editor-facing** events (camelCase `type` + `payload`), produced by
 `session` once wired:
 
-- `chatUpdated`, `runUpdated`, `messageUpdated`, `messagePartAdded`
+- `chatUpdated`, `runUpdated`, `turnUpdated`, `messageUpdated`, `messagePartAdded`
 - `approvalRequired`, `questionRequired`
 - `workspaceFilesChanged`, `agentConnectionChanged`
+
+`turnUpdated` is the client signal for “is this prompt still running?”
+(`started` → `completed` | `cancelled` | `failed`). Prefer it over `runUpdated`
+for composer busy state — a run/session can span many turns.
 
 These are **not** raw ACP notifications. ACP traffic is translated in service.
 

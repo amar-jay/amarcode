@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::types::{MessagePartKind, MessageStatus, RunStatus};
+use super::types::{MessagePartKind, MessageStatus, RunStatus, TurnStatus};
 
 /// Wire envelope written after a successful `subscribe_events`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +27,17 @@ pub enum EditorEvent {
     RunUpdated {
         run_id: String,
         status: RunStatus,
+        error_message: Option<String>,
+    },
+    /// One user prompt → agent stopReason lifecycle.
+    TurnUpdated {
+        chat_id: String,
+        run_id: String,
+        user_message_id: String,
+        status: TurnStatus,
+        #[serde(default)]
+        stop_reason: Option<String>,
+        #[serde(default)]
         error_message: Option<String>,
     },
     MessageUpdated {

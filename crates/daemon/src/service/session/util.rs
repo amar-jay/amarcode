@@ -19,6 +19,14 @@ pub(super) fn extract_session_id(value: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
+pub(super) fn extract_stop_reason(value: &Value) -> Option<String> {
+    value
+        .get("stopReason")
+        .or_else(|| value.get("stop_reason"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+}
+
 pub(super) fn extract_text_delta(payload: &Value) -> Option<String> {
     // Prefer ACP content block: { "content": { "type": "text", "text": "..." } }
     if let Some(text) = payload

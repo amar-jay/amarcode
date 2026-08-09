@@ -54,6 +54,8 @@ export type MessagePartKind =
   | "file"
   | "image";
 export type RunStatus = "starting" | "running" | "completed" | "stopped" | "failed";
+/** One user prompt turn (not the multi-turn ACP run/session). */
+export type TurnStatus = "started" | "completed" | "cancelled" | "failed";
 
 export type Message = {
   id: string;
@@ -130,6 +132,17 @@ export type EditorEvent =
       payload: {
         run_id: string;
         status: RunStatus;
+        error_message: string | null;
+      };
+    }
+  | {
+      type: "turnUpdated";
+      payload: {
+        chat_id: string;
+        run_id: string;
+        user_message_id: string;
+        status: TurnStatus;
+        stop_reason: string | null;
         error_message: string | null;
       };
     }

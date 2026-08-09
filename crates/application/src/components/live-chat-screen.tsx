@@ -14,14 +14,19 @@ import {
   ChainOfThoughtStep,
 } from "@/components/ai-elements/chain-of-thought";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import type { AgentDefinition, Chat, ChatDetail, EditorEvent, JsonValue, MessagePart, RunStatus } from "@/types";
+import { Shimmer } from "@/components/ai-elements/shimmer";
+import type { AgentDefinition, Chat, ChatDetail, EditorEvent, JsonValue, MessagePart, RunStatus, TurnStatus } from "@/types";
+import { getLatestTurnForChat } from "@/hooks/use-daemon-events";
 import AppPromptInput, { type SessionMode } from "./main-prompt-input";
 import { PendingAgentRequestCard, type PendingAgentRequest } from "./pending-agent-request";
+
 type LiveChatScreenProps = {
   workspacePath: string;
   agent: AgentDefinition | undefined;
   initialChatId: string;
   initialRunId: string | null;
+  /** True when a prompt was just kicked off for this chat (e.g. home composer). */
+  initialTurnActive?: boolean;
   initialSessionMode?: SessionMode;
   onChatsRefresh: () => Promise<void>;
   daemonEvent: EditorEvent | null;
@@ -90,18 +95,54 @@ function assistantMessageTone(content: string, status: string): "warning" | "err
   return null;
 }
 
-export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRunId, initialSessionMode = "build", onChatsRefresh, daemonEvent, onAgentSelected }: LiveChatScreenProps) {
+function TurnLoadingIndicator({ label = "Thinking" }: { label?: string }) {
+  return (
+    <Message from="assistant" className="space-between">
+      <MessageContent className="w-full">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LoaderCircle className="size-3.5 shrink-0 animate-spin" />
+          <Shimmer className="text-sm" duration={1.4}>
+            {`${label}…`}
+          </Shimmer>
+        </div>
+      </MessageContent>
+    </Message>
+  );
+}
+
+function StreamingCaret() {
+  return (
+    <span
+      aria-hidden
+      className="ml-0.5 inline-block h-[1em] w-1.5 translate-y-[0.1em] animate-pulse rounded-sm bg-foreground/70 align-text-bottom"
+    />
+  );
+}
+
+export function LiveChatScreen({
+  workspacePath,
+  agent,
+  initialChatId,
+  initialRunId,
+  initialTurnActive = false,
+  initialSessionMode = "build",
+  onChatsRefresh,
+  daemonEvent,
+  onAgentSelected,
+}: LiveChatScreenProps) {
   const [activeChatId, setActiveChatId] = useState(initialChatId);
   const [activeChat, setActiveChat] = useState<ChatDetail | null>(null);
   const [runId, setRunId] = useState<string | null>(initialRunId);
   const [runStatus, setRunStatus] = useState<RunStatus | null>(initialRunId ? "starting" : null);
+  const [turnStatus, setTurnStatus] = useState<TurnStatus | null>(initialTurnActive ? "started" : null);
   const [pendingRequest, setPendingRequest] = useState<PendingAgentRequest | null>(null);
   const [sessionMode, setSessionMode] = useState<SessionMode>(initialSessionMode);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const activeChatIdRef = useRef(activeChatId);
   const runIdRef = useRef(runId);
-  const isWorking = Boolean(runId);
+  // Busy = open prompt turn. Run/session can stay alive across many turns.
+  const isWorking = turnStatus === "started";
 
   // Sidebar selection changes the parent session without remounting this
   // screen. Reset the conversation-owned state to the newly selected chat.
@@ -110,9 +151,18 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
     setActiveChat(null);
     setRunId(initialRunId);
     setRunStatus(initialRunId ? "starting" : null);
+    // Prefer a turnUpdated already observed on the shared stream (home
+    // composer can finish before this screen mounts).
+    const cached = getLatestTurnForChat(initialChatId);
+    if (cached) {
+      setTurnStatus(cached.status);
+      setRunId(cached.run_id);
+    } else {
+      setTurnStatus(initialTurnActive ? "started" : null);
+    }
     setPendingRequest(null);
     setSessionMode(initialSessionMode);
-  }, [initialChatId, initialRunId, initialSessionMode]);
+  }, [initialChatId, initialRunId, initialTurnActive, initialSessionMode]);
 
   useEffect(() => { activeChatIdRef.current = activeChatId; }, [activeChatId]);
   useEffect(() => { runIdRef.current = runId; }, [runId]);
@@ -123,13 +173,6 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
       const result = await daemonApi.getChat(chatId, true);
       if (isChatDetail(result)) {
         setActiveChat(result);
-        const discoveredRunId = result.messages
-          .map(({ message }) => message.agent_run_id)
-          .find((candidate): candidate is string => candidate !== null);
-        if (discoveredRunId) {
-          setRunId((current) => current ?? discoveredRunId);
-          setRunStatus((current) => current ?? "running");
-        }
       }
       setError(null);
     } catch (cause) {
@@ -156,18 +199,33 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
       void onChatsRefresh();
       return;
     }
+    if (daemonEvent.type === "turnUpdated" && daemonEvent.payload.chat_id === activeChatIdRef.current) {
+      setTurnStatus(daemonEvent.payload.status);
+      setRunId(daemonEvent.payload.run_id);
+      scheduleRefresh();
+      if (daemonEvent.payload.status === "failed" && daemonEvent.payload.error_message) {
+        setError(daemonEvent.payload.error_message);
+      }
+      if (daemonEvent.payload.status !== "started") {
+        setPendingRequest(null);
+      }
+      return;
+    }
     if (daemonEvent.type === "runUpdated" && daemonEvent.payload.run_id === runIdRef.current) {
       setRunStatus(daemonEvent.payload.status);
       scheduleRefresh();
       if (["completed", "stopped", "failed"].includes(daemonEvent.payload.status)) {
-        setRunId(null);
+        // Session ended; any open turn is gone with it.
+        setTurnStatus((current) => (current === "started" ? "cancelled" : current));
         setPendingRequest(null);
-      } else {
-        setRunId(daemonEvent.payload.run_id);
       }
       return;
     }
-    if ((daemonEvent.type === "approvalRequired" || daemonEvent.type === "questionRequired") && daemonEvent.payload.run_id === runIdRef.current) {
+    if (
+      (daemonEvent.type === "approvalRequired" || daemonEvent.type === "questionRequired") &&
+      (daemonEvent.payload.run_id === runIdRef.current || turnStatus === "started")
+    ) {
+      setRunId(daemonEvent.payload.run_id);
       setPendingRequest({
         kind: daemonEvent.type === "approvalRequired" ? "approval" : "input",
         requestId: daemonEvent.payload.request_id,
@@ -179,17 +237,22 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
     // make the already-visible streaming state feel immediate; ChatDetail is
     // still the source of rendered message text.
     if (daemonEvent.type === "messageUpdated" || daemonEvent.type === "messagePartAdded") scheduleRefresh();
-  }, [daemonEvent, onChatsRefresh, scheduleRefresh]);
+  }, [daemonEvent, onChatsRefresh, scheduleRefresh, turnStatus]);
 
   const submit = async (text: string, mode: SessionMode) => {
-    if (!agent || !text.trim()) return;
+    if (!agent || !text.trim() || isWorking) return;
+    setTurnStatus("started");
+    setError(null);
     try {
       const result = await daemonApi.prompt(activeChatId, agent.id, text.trim(), mode);
       setRunId(result.run_id);
-      setRunStatus("starting");
+      // If turnUpdated was missed (e.g. race on mount), the blocking RPC
+      // return means the turn finished — clear unless a newer event already did.
+      setTurnStatus((current) => (current === "started" ? "completed" : current));
       await onChatsRefresh();
       await loadChat(activeChatId);
     } catch (cause) {
+      setTurnStatus("failed");
       setError(cause instanceof Error ? cause.message : "Unable to send prompt.");
     }
   };
@@ -208,8 +271,8 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
   const stop = async () => {
     try {
       await daemonApi.cancel(activeChatId);
-      setRunId(null);
-      setRunStatus(null);
+      setTurnStatus((current) => (current === "started" ? "cancelled" : current));
+      setPendingRequest(null);
       await loadChat(activeChatId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to cancel the run.");
@@ -230,16 +293,31 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
     }
   };
 
+  const messages = activeChat?.messages ?? [];
+  const lastMessage = messages[messages.length - 1]?.message;
+  // Only when nothing has been streamed yet for this turn (still on the user msg).
+  // Empty/streaming assistant rows render their own indicator in the map below.
+  const showTurnPlaceholder =
+    isWorking && (!lastMessage || lastMessage.role === "user");
+  const waitingLabel = pendingRequest
+    ? pendingRequest.kind === "approval"
+      ? "Waiting for approval"
+      : "Waiting for input"
+    : "Thinking";
+
   return (
     <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center border-b px-6">
           <h1 className="truncate text-sm font-medium">{activeChat?.chat.title ?? "Loading chat"}</h1>
           {loading && <LoaderCircle className="ml-2 size-4 animate-spin text-muted-foreground" />}
-          {runStatus && <span className="ml-3 text-xs text-muted-foreground">{runStatus === "running" ? "Working…" : runStatus}</span>}
+          {isWorking && <span className="ml-3 text-xs text-muted-foreground">Working…</span>}
+          {!isWorking && runStatus && runStatus !== "running" && (
+            <span className="ml-3 text-xs text-muted-foreground">{runStatus}</span>
+          )}
         </header>
         <Conversation>
           <ConversationContent className="mx-auto w-full max-w-3xl py-8 gap-2">
-            {(activeChat?.messages ?? []).map(({ message, parts }) => {
+            {messages.map(({ message, parts }) => {
               const seenTools = new Set<string>();
               const timeline: TimelineStep[] = parts
                 .filter((part) => part.kind === "thinking" || part.kind === "tool_call")
@@ -260,13 +338,31 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
                   }];
                 });
               const hasVisibleContent = Boolean(message.content.trim());
+              const isStreamingAssistant =
+                message.role === "assistant" &&
+                (message.status === "streaming" || (isWorking && message.id === lastMessage?.id));
               const tone = message.role === "assistant" ? assistantMessageTone(message.content, message.status) : null;
-              if (!hasVisibleContent && timeline.length === 0) return null;
+              // Empty stream row: keep a slot so the turn doesn't look frozen.
+              if (!hasVisibleContent && timeline.length === 0) {
+                if (message.role === "assistant" && isStreamingAssistant) {
+                  return <TurnLoadingIndicator key={message.id} label={waitingLabel} />;
+                }
+                return null;
+              }
               return (
               <Message from={message.role === "user" ? "user" : "assistant"} key={message.id} className="space-between">
                 <MessageContent className="w-full">
-                  {timeline.length > 0 && <ChainOfThought defaultOpen={false} className="space-y-0">
-                    <ChainOfThoughtHeader className="py-1">Reasoning...</ChainOfThoughtHeader>
+                  {timeline.length > 0 && <ChainOfThought defaultOpen={message.status === "streaming"} className="space-y-0">
+                    <ChainOfThoughtHeader className="py-1">
+                      {message.status === "streaming" ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <LoaderCircle className="size-3 animate-spin" />
+                          Reasoning…
+                        </span>
+                      ) : (
+                        "Reasoning..."
+                      )}
+                    </ChainOfThoughtHeader>
                     <ChainOfThoughtContent className="mt-0 space-y-1">
                       {timeline.map((step) => <ChainOfThoughtStep key={`${message.id}-${step.key}`} icon={step.icon} label={reasoningLabel(step.label)} status={step.status}/>)}
                     </ChainOfThoughtContent>
@@ -274,13 +370,27 @@ export function LiveChatScreen({ workspacePath, agent, initialChatId, initialRun
                   {hasVisibleContent && (message.role === "assistant" ? (
                     tone === "error" ? <div className="flex gap-2 rounded-md text-xs px-3 py-2 text-destructive"><CircleX className="mt-0.5 size-4 shrink-0" /><MessageResponse>{message.content}</MessageResponse></div>
                     : tone === "warning" ? <div className="flex gap-2 rounded-md py-2 text-xs text-amber-700 dark:text-amber-300"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><MessageResponse>{message.content}</MessageResponse></div>
-                    : <MessageResponse>{message.content}</MessageResponse>
+                    : (
+                      <div>
+                        <MessageResponse>{message.content}</MessageResponse>
+                        {isStreamingAssistant && <StreamingCaret />}
+                      </div>
+                    )
                   ) : <p className="whitespace-pre-wrap"><span className="mr-2 select-none text-muted-foreground">&gt;</span>{message.content}</p>)}
+                  {!hasVisibleContent && timeline.length > 0 && isStreamingAssistant && (
+                    <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+                      <LoaderCircle className="size-3.5 shrink-0 animate-spin" />
+                      <Shimmer className="text-sm" duration={1.4}>{`${waitingLabel}…`}</Shimmer>
+                    </div>
+                  )}
                 </MessageContent>
               </Message>
               );
             })}
-            {!loading && !activeChat?.messages.length && <ConversationEmptyState title="This chat is ready" description="Send a prompt to start working with your agent." />}
+            {showTurnPlaceholder && <TurnLoadingIndicator label={waitingLabel} />}
+            {!loading && !messages.length && !isWorking && (
+              <ConversationEmptyState title="This chat is ready" description="Send a prompt to start working with your agent." />
+            )}
           </ConversationContent>
           <ConversationScrollButton />
         </Conversation>

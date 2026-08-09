@@ -35,6 +35,7 @@ export default function App() {
     chat: Chat;
     agent?: AgentDefinition;
     initialRunId: string | null;
+    initialTurnActive?: boolean;
     sessionMode?: SessionMode;
   } | null>(null);
   const { chats, handleNewChat, handleSelectChat, refresh } = useChats(setChatSession);
@@ -90,6 +91,7 @@ export default function App() {
             agent={chatSession.agent ?? selectedAgent}
             initialChatId={chatSession.chat.id}
             initialRunId={chatSession.initialRunId}
+            initialTurnActive={chatSession.initialTurnActive}
             initialSessionMode={chatSession.sessionMode}
             workspacePath={workspacePath}
             onChatsRefresh={refresh}
@@ -109,7 +111,13 @@ export default function App() {
               sessionMode={newChatMode}
               onSessionModeChange={setNewChatMode}
               onChatStarted={(chat, agent, _workspacePath, sessionMode) => {
-                setChatSession({ chat, agent, initialRunId: null, sessionMode });
+                setChatSession({
+                  chat,
+                  agent,
+                  initialRunId: null,
+                  initialTurnActive: true,
+                  sessionMode,
+                });
                 void refresh();
               }}
             />

@@ -9,7 +9,7 @@ use crate::{
     acp::AcpInbound,
     protocol::{
         AgentEventMethod, EditorEvent, MessagePartKind, MessageStatus, RpcDirection, RpcEnvelope,
-        RunStatus,
+        RunStatus, TurnStatus,
     },
     store::MessagePart,
     Error, Result,
@@ -126,16 +126,29 @@ fn handle_inbound(
                     .unwrap_or(false)
             };
             if still_live {
-                let agent_id = {
+                let (agent_id, active_user_message_id) = {
                     let mut guard = inner
                         .by_chat
                         .lock()
                         .map_err(|_| Error::msg("session lock poisoned"))?;
                     guard
                         .remove(chat_id)
-                        .map(|live| live.agent_id)
+                        .map(|live| (live.agent_id, live.active_user_message_id))
                         .unwrap_or_default()
                 };
+                if let Some(user_message_id) = active_user_message_id {
+                    emit(
+                        inner,
+                        EditorEvent::TurnUpdated {
+                            chat_id: chat_id.to_owned(),
+                            run_id: run_id.to_owned(),
+                            user_message_id,
+                            status: TurnStatus::Failed,
+                            stop_reason: None,
+                            error_message: Some("agent disconnected".into()),
+                        },
+                    );
+                }
                 inner.store.update_run(
                     run_id,
                     RunStatus::Stopped,
