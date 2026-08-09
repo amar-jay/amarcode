@@ -22,6 +22,7 @@ export type LiveChatState = {
   runStatus: RunStatus | null;
   turnStatus: TurnStatus | null;
   pendingRequest: PendingAgentRequest | null;
+  contextRestoration: string | null;
   sessionMode: SessionMode;
   loading: boolean;
   error: string | null;
@@ -34,6 +35,7 @@ const emptyLiveChat = (chatId: string, seed?: Partial<LiveChatState>): LiveChatS
   runStatus: null,
   turnStatus: null,
   pendingRequest: null,
+  contextRestoration: null,
   sessionMode: "build",
   loading: true,
   error: null,
@@ -173,6 +175,7 @@ export const applyLiveChatEventAtom = atom(null, (get, set, event: import("@/typ
       turnStatus: event.payload.status,
       runId: event.payload.run_id,
       pendingRequest: event.payload.status !== "started" ? null : live.pendingRequest,
+      contextRestoration: event.payload.status !== "started" ? null : live.contextRestoration,
       error:
         event.payload.status === "failed" && event.payload.error_message
           ? event.payload.error_message
@@ -180,6 +183,15 @@ export const applyLiveChatEventAtom = atom(null, (get, set, event: import("@/typ
     };
     set(liveChatAtom, next);
     void set(scheduleLiveChatRefreshAtom);
+    return;
+  }
+
+  if (event.type === "contextRestoration" && event.payload.chat_id === live.chatId) {
+    set(liveChatAtom, {
+      ...live,
+      runId: event.payload.run_id,
+      contextRestoration: event.payload.source,
+    });
     return;
   }
 

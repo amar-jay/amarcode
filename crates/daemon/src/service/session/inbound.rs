@@ -337,7 +337,7 @@ fn apply_session_update(
         .unwrap_or("");
 
     match kind {
-        "agent_message_chunk" | "user_message_chunk" => {
+        "agent_message_chunk" => {
             let message_id = ensure_streaming_message(
                 inner,
                 run_id,
@@ -354,6 +354,12 @@ fn apply_session_update(
                     status: MessageStatus::Streaming,
                 },
             );
+        }
+        "user_message_chunk" => {
+            // The submitted prompt has already been persisted as a user
+            // message before `session/prompt` is sent. Some ACP agents echo
+            // it back as a session update; never turn that echo into an
+            // assistant message. The raw notification remains in acp_events.
         }
         "agent_thought_chunk" => {
             let message_id = ensure_context_message(inner, run_id, chat_id)?;

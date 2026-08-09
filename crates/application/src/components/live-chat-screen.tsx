@@ -157,6 +157,14 @@ function assistantMessageTone(content: string, status: string): "warning" | "err
   return null;
 }
 
+/** Hide the exact prompt echo produced by older daemon versions. */
+function removeLeadingPromptEcho(content: string, prompt: string): string {
+  const echoedPrompt = prompt.trim();
+  return echoedPrompt && content.startsWith(echoedPrompt)
+    ? content.slice(echoedPrompt.length).trimStart()
+    : content;
+}
+
 /** Keep an initial notice distinct from the assistant's actual response. */
 function splitLeadingWarning(content: string): { warning: string; response: string } | null {
   const paragraphs = content.trim().split(/\n\s*\n/);
@@ -261,12 +269,22 @@ function groupChatBlocks(
   }
 
   // Materialize merged fields.
-  for (const block of blocks) {
+  for (const [index, block] of blocks.entries()) {
     if (block.kind !== "assistant") continue;
     block.content = block.items
       .map((item) => item.message.content)
       .filter((text) => text.trim())
       .join("\n\n");
+    const previous = blocks[index - 1];
+    if (
+      previous?.kind === "user" &&
+      previous.item.message.agent_run_id === block.items[0]?.message.agent_run_id
+    ) {
+      block.content = removeLeadingPromptEcho(
+        block.content,
+        previous.item.message.content,
+      );
+    }
     block.streaming = block.items.some(
       (item) =>
         item.message.status === "streaming" ||
@@ -392,6 +410,11 @@ export function LiveChatScreen() {
           <LoaderCircle className="ml-2 size-4 animate-spin text-muted-foreground" />
         )}
         {isWorking && <span className="ml-3 text-xs text-muted-foreground">Working…</span>}
+        {live.contextRestoration && (
+          <span className="ml-3 text-xs text-muted-foreground">
+            {live.contextRestoration}…
+          </span>
+        )}
         {!isWorking && live.runStatus && live.runStatus !== "running" && (
           <span className="ml-3 text-xs text-muted-foreground">{live.runStatus}</span>
         )}

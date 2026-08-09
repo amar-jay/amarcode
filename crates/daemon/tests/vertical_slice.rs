@@ -240,6 +240,14 @@ async fn create_chat_prompt_store_and_events() {
     );
     assert_eq!(assistant_messages[0].content, "mock progress.");
     assert_eq!(assistant_messages[1].content, "mock echo: hello mock");
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message.role == amarcode_daemon::protocol::MessageRole::User)
+            .count(),
+        1,
+        "an ACP user_message_chunk echo must not create a duplicate message",
+    );
     let commentary_parts = store
         .message_parts(&assistant_messages[0].id)
         .expect("commentary parts");

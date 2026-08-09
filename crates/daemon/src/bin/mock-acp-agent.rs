@@ -69,6 +69,22 @@ fn main() {
                 let text = extract_prompt_text(&params);
                 let reply_text = format!("mock echo: {text}");
 
+                // Some ACP agents echo the prompt as a user-message update.
+                // Clients already persist the submitted prompt, so this must
+                // not create an assistant message.
+                notify(
+                    &mut stdout,
+                    "session/update",
+                    json!({
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "user_message_chunk",
+                            "messageId": "mock-user-echo",
+                            "content": { "type": "text", "text": text }
+                        }
+                    }),
+                );
+
                 // Use separate ACP message ids to model a progress/commentary
                 // message followed by a final answer.
                 notify(

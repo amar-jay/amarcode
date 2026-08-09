@@ -9,11 +9,7 @@ use std::{
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-use crate::{
-    acp::AcpClient,
-    protocol::EditorEvent,
-    store::Store,
-};
+use crate::{acp::AcpClient, protocol::EditorEvent, store::Store};
 
 pub(super) const ACP_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -42,6 +38,9 @@ pub(super) struct LiveRun {
     pub(super) agent_id: String,
     pub(super) client: Arc<AcpClient>,
     pub(super) acp_session_id: Option<String>,
+    /// A newly created session needs the persisted chat transcript before its
+    /// first prompt because resuming a prior ACP session was unavailable.
+    pub(super) needs_history_hydration: bool,
     /// Assistant messages currently being streamed, keyed by the upstream ACP
     /// message id. A turn may contain distinct commentary and final-answer
     /// messages, so they must not be collapsed into one row.

@@ -168,6 +168,7 @@ fn event_matches(event: &EditorEvent, filter: &SubscribeEventsParams) -> bool {
 
     let chat_id = match event {
         EditorEvent::ChatUpdated { chat_id } => Some(chat_id.as_str()),
+        EditorEvent::ContextRestoration { chat_id, .. } => Some(chat_id.as_str()),
         _ => None,
     };
 

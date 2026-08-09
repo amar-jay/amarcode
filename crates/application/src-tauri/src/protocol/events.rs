@@ -40,6 +40,11 @@ pub enum EditorEvent {
         #[serde(default)]
         error_message: Option<String>,
     },
+    ContextRestoration {
+        chat_id: String,
+        run_id: String,
+        source: String,
+    },
     MessageUpdated {
         message_id: String,
         status: MessageStatus,

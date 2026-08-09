@@ -41,6 +41,12 @@ pub enum EditorEvent {
         #[serde(default)]
         error_message: Option<String>,
     },
+    /// A reconnect is restoring the selected chat's context before prompting.
+    ContextRestoration {
+        chat_id: String,
+        run_id: String,
+        source: String,
+    },
     MessageUpdated {
         message_id: String,
         status: MessageStatus,

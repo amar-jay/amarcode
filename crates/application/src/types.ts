@@ -147,6 +147,10 @@ export type EditorEvent =
       };
     }
   | {
+      type: "contextRestoration";
+      payload: { chat_id: string; run_id: string; source: string };
+    }
+  | {
       type: "messageUpdated";
       payload: { message_id: string; status: MessageStatus };
     }

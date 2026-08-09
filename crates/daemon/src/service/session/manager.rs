@@ -1,13 +1,10 @@
 //! `SessionManager` — public API for runs, prompts, cancel, and agent replies.
 
-use std::{
-    collections::HashMap,
-    path::Path,
-    sync::Arc,
-};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
+use tracing::debug;
 
 use crate::{
     acp::AcpClient,
@@ -23,9 +20,7 @@ use crate::{
 use super::{
     inbound::spawn_inbound_worker,
     messages::{finalize_message, take_streaming_messages_from_live},
-    types::{
-        LiveRun, PendingAgentRequest, PromptResult, SessionInner, ACP_REQUEST_TIMEOUT,
-    },
+    types::{LiveRun, PendingAgentRequest, PromptResult, SessionInner, ACP_REQUEST_TIMEOUT},
     util::{extract_session_id, extract_stop_reason, normalize_permission_result, timestamp},
 };
 
@@ -51,7 +46,7 @@ impl SessionManager {
         }
     }
 
-    /// Start a new agent run for a chat (spawns ACP, initialize + createSession).
+    /// Start a new agent run for a chat (spawns ACP, initialize + resume/new session).
     pub fn start_run(
         &self,
         chat_id: &str,
@@ -84,6 +79,13 @@ impl SessionManager {
             status: RunStatus::Starting,
             error_message: None,
         });
+
+        let has_persisted_history = self
+            .inner
+            .store
+            .messages(chat_id)?
+            .iter()
+            .any(|message| !message.content.trim().is_empty());
 
         let cwd = Path::new(&chat.workspace_path);
         let command = resolved.command.to_string_lossy().into_owned();
@@ -136,18 +138,62 @@ impl SessionManager {
             return Err(err);
         }
 
-        let session_result = self.acp_request(
-            &run.id,
-            &client,
-            AgentRpcMethod::CreateSession,
-            json!({
-                "cwd": chat.workspace_path,
-                "mcpServers": [],
-            }),
-        );
-
-        let acp_session_id = match session_result {
-            Ok(value) => extract_session_id(&value),
+        let previous_session_id = self
+            .inner
+            .store
+            .list_runs_for_chat(chat_id)?
+            .into_iter()
+            .filter(|previous| previous.id != run.id && previous.agent_id == agent_id)
+            .find_map(|previous| previous.acp_session_id);
+        let session_setup = (|| -> Result<(Option<String>, bool)> {
+            if let Some(session_id) = previous_session_id {
+                self.emit(EditorEvent::ContextRestoration {
+                    chat_id: chat_id.to_owned(),
+                    run_id: run.id.clone(),
+                    source: "Resuming saved agent session".into(),
+                });
+                match self.acp_request(
+                    &run.id,
+                    &client,
+                    AgentRpcMethod::ResumeSession,
+                    json!({
+                        "sessionId": session_id,
+                        "cwd": chat.workspace_path,
+                        "mcpServers": [],
+                    }),
+                ) {
+                    // ACP may acknowledge a resume without recreating model
+                    // context. Durable chat history remains authoritative.
+                    Ok(_) => Ok((Some(session_id), has_persisted_history)),
+                    Err(error) => {
+                        debug!(%chat_id, %agent_id, %error, "ACP session resume unavailable; creating a hydrated session");
+                        let value = self.acp_request(
+                            &run.id,
+                            &client,
+                            AgentRpcMethod::CreateSession,
+                            json!({
+                                "cwd": chat.workspace_path,
+                                "mcpServers": [],
+                            }),
+                        )?;
+                        Ok((extract_session_id(&value), has_persisted_history))
+                    }
+                }
+            } else {
+                let value = self.acp_request(
+                    &run.id,
+                    &client,
+                    AgentRpcMethod::CreateSession,
+                    json!({
+                        "cwd": chat.workspace_path,
+                        "mcpServers": [],
+                    }),
+                )?;
+                Ok((extract_session_id(&value), has_persisted_history))
+            }
+        })();
+        let (acp_session_id, needs_history_hydration) = match session_setup {
+            Ok(value) => value,
             Err(err) => {
                 let _ = client.kill();
                 let _ = self.fail_run(&run.id, &err.to_string());
@@ -158,8 +204,15 @@ impl SessionManager {
         // Codex exposes its `request_user_input` tool only in collaboration
         // plan mode. Make that an explicit first-prompt choice rather than a
         // hidden default; other ACP agents keep their own configuration.
-        if let Some(mode) = session_mode.filter(|_| resolved.command.file_name().is_some_and(|name| name == "codex-acp")) {
-            if let Err(err) = self.configure_codex_session(&run.id, &client, acp_session_id.as_deref(), mode) {
+        if let Some(mode) = session_mode.filter(|_| {
+            resolved
+                .command
+                .file_name()
+                .is_some_and(|name| name == "codex-acp")
+        }) {
+            if let Err(err) =
+                self.configure_codex_session(&run.id, &client, acp_session_id.as_deref(), mode)
+            {
                 let _ = client.kill();
                 let _ = self.fail_run(&run.id, &err.to_string());
                 return Err(err);
@@ -188,6 +241,7 @@ impl SessionManager {
             agent_id: agent_id.to_owned(),
             client,
             acp_session_id: acp_session_id.clone(),
+            needs_history_hydration,
             streaming_message_ids: HashMap::new(),
             last_streaming_message_id: None,
             active_user_message_id: None,
@@ -232,19 +286,20 @@ impl SessionManager {
             self.start_run(chat_id, agent_id, session_mode)?;
         }
 
-        let (run_id, client, session_id) = {
-            let guard = self
+        let (run_id, client, session_id, needs_history_hydration) = {
+            let mut guard = self
                 .inner
                 .by_chat
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             let live = guard
-                .get(chat_id)
+                .get_mut(chat_id)
                 .ok_or_else(|| Error::msg("no live session after start_run"))?;
             (
                 live.run_id.clone(),
                 Arc::clone(&live.client),
                 live.acp_session_id.clone(),
+                std::mem::take(&mut live.needs_history_hydration),
             )
         };
 
@@ -299,8 +354,18 @@ impl SessionManager {
         });
 
         // ACP session/prompt: prompt is an array of content blocks.
+        let prompt_text = if needs_history_hydration {
+            self.emit(EditorEvent::ContextRestoration {
+                chat_id: chat_id.to_owned(),
+                run_id: run_id.clone(),
+                source: "Restoring saved chat context".into(),
+            });
+            self.hydrated_prompt(chat_id, &user_message.id, text)?
+        } else {
+            text.to_owned()
+        };
         let mut params = json!({
-            "prompt": [{ "type": "text", "text": text }],
+            "prompt": [{ "type": "text", "text": prompt_text }],
         });
         if let Some(sid) = &session_id {
             params
@@ -319,21 +384,21 @@ impl SessionManager {
             return Err(Error::msg("live session missing acp_session_id"));
         }
 
-        let prompt_result =
-            match self.acp_request(&run_id, &client, AgentRpcMethod::Prompt, params) {
-                Ok(value) => value,
-                Err(err) => {
-                    self.finish_turn(
-                        chat_id,
-                        &run_id,
-                        &user_message.id,
-                        TurnStatus::Failed,
-                        None,
-                        Some(&err.to_string()),
-                    );
-                    return Err(err);
-                }
-            };
+        let prompt_result = match self.acp_request(&run_id, &client, AgentRpcMethod::Prompt, params)
+        {
+            Ok(value) => value,
+            Err(err) => {
+                self.finish_turn(
+                    chat_id,
+                    &run_id,
+                    &user_message.id,
+                    TurnStatus::Failed,
+                    None,
+                    Some(&err.to_string()),
+                );
+                return Err(err);
+            }
+        };
 
         // The ACP reader sees notifications and the RPC result in order, but
         // persists notifications on a separate worker. Wait for that worker
@@ -393,12 +458,27 @@ impl SessionManager {
     /// Change the active Codex session's collaboration/permission preset.
     pub fn set_session_mode(&self, chat_id: &str, mode: &str) -> Result<()> {
         let (run_id, client, session_id, agent_id) = {
-            let guard = self.inner.by_chat.lock().map_err(|_| Error::msg("session lock poisoned"))?;
-            let live = guard.get(chat_id).ok_or_else(|| Error::msg("no active session for this chat"))?;
-            (live.run_id.clone(), Arc::clone(&live.client), live.acp_session_id.clone(), live.agent_id.clone())
+            let guard = self
+                .inner
+                .by_chat
+                .lock()
+                .map_err(|_| Error::msg("session lock poisoned"))?;
+            let live = guard
+                .get(chat_id)
+                .ok_or_else(|| Error::msg("no active session for this chat"))?;
+            (
+                live.run_id.clone(),
+                Arc::clone(&live.client),
+                live.acp_session_id.clone(),
+                live.agent_id.clone(),
+            )
         };
         let resolved = self.agents.resolve(&agent_id)?;
-        if !resolved.command.file_name().is_some_and(|name| name == "codex-acp") {
+        if !resolved
+            .command
+            .file_name()
+            .is_some_and(|name| name == "codex-acp")
+        {
             return Err(Error::msg("this agent does not expose Codex session modes"));
         }
         self.configure_codex_session(&run_id, &client, session_id.as_deref(), mode)
@@ -418,21 +498,75 @@ impl SessionManager {
             "ask" => ("default", Some("read-only")),
             _ => return Err(Error::msg("mode must be plan, build, or ask")),
         };
-        self.acp_request(run_id, client, AgentRpcMethod::Other("session/set_config_option".to_owned()), json!({
-            "sessionId": session_id,
-            "configId": "collaboration_mode",
-            "type": "id",
-            "value": collaboration_mode,
-        }))?;
-        if let Some(agent_mode) = agent_mode {
-            self.acp_request(run_id, client, AgentRpcMethod::Other("session/set_config_option".to_owned()), json!({
+        self.acp_request(
+            run_id,
+            client,
+            AgentRpcMethod::Other("session/set_config_option".to_owned()),
+            json!({
                 "sessionId": session_id,
-                "configId": "mode",
+                "configId": "collaboration_mode",
                 "type": "id",
-                "value": agent_mode,
-            }))?;
+                "value": collaboration_mode,
+            }),
+        )?;
+        if let Some(agent_mode) = agent_mode {
+            self.acp_request(
+                run_id,
+                client,
+                AgentRpcMethod::Other("session/set_config_option".to_owned()),
+                json!({
+                    "sessionId": session_id,
+                    "configId": "mode",
+                    "type": "id",
+                    "value": agent_mode,
+                }),
+            )?;
         }
         Ok(())
+    }
+
+    /// Provide an isolated fallback when an agent cannot resume its own saved
+    /// session. The transcript contains only rows from this chat and excludes
+    /// the message about to be sent, which is appended once as the live prompt.
+    fn hydrated_prompt(
+        &self,
+        chat_id: &str,
+        current_message_id: &str,
+        prompt: &str,
+    ) -> Result<String> {
+        const MAX_HISTORY_CHARS: usize = 60_000;
+
+        let mut turns = self
+            .inner
+            .store
+            .messages(chat_id)?
+            .into_iter()
+            .filter(|message| {
+                message.id != current_message_id && !message.content.trim().is_empty()
+            })
+            .filter_map(|message| match message.role {
+                MessageRole::User => Some(format!("User: {}", message.content.trim())),
+                MessageRole::Assistant => Some(format!("Assistant: {}", message.content.trim())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        let mut history = turns.join("\n\n");
+        if history.len() > MAX_HISTORY_CHARS {
+            while history.len() > MAX_HISTORY_CHARS && !turns.is_empty() {
+                turns.remove(0);
+                history = turns.join("\n\n");
+            }
+            history = format!("[Earlier conversation omitted for context length.]\n\n{history}");
+        }
+
+        if history.is_empty() {
+            return Ok(prompt.to_owned());
+        }
+
+        Ok(format!(
+            "Continue this conversation for the current chat only. Treat the transcript as prior context; respond to the final user message normally.\n\n<chat-history>\n{history}\n</chat-history>\n\nUser: {prompt}"
+        ))
     }
 
     /// Cancel the live run for a chat.
