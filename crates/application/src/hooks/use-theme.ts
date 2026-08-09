@@ -1,43 +1,15 @@
-import { useEffect, useState } from "react";
+/**
+ * @deprecated Prefer `@/state` theme/palette atoms.
+ * Kept as a thin re-export so existing imports keep working.
+ */
+export type { Theme, Palette } from "@/state/preferences";
+export { readPalette, themeAtom, paletteAtom } from "@/state/preferences";
 
-export type Theme = "light" | "dark" | "system";
-export type Palette = "monochrome" | "ember";
-
-function readTheme(): Theme {
-  const stored = localStorage.getItem("amarcode-theme");
-  return stored === "light" || stored === "dark" || stored === "system"
-    ? stored
-    : "system";
-}
-
-export function readPalette(): Palette {
-  const stored = localStorage.getItem("amarcode-palette");
-  return stored === "ember" || stored === "monochrome"
-    ? stored
-    : "monochrome";
-}
+import { useAtom } from "jotai";
+import { paletteAtom, themeAtom } from "@/state/preferences";
 
 export function useTheme() {
-  const [theme, setTheme] = useState<Theme>(readTheme);
-  const [palette, setPalette] = useState<Palette>(readPalette);
-
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () =>
-      document.documentElement.classList.toggle(
-        "dark",
-        theme === "dark" || (theme === "system" && media.matches),
-      );
-    apply();
-    localStorage.setItem("amarcode-theme", theme);
-    media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
-  }, [theme]);
-
-  useEffect(() => {
-    document.documentElement.dataset.style = palette;
-    localStorage.setItem("amarcode-palette", palette);
-  }, [palette]);
-
+  const [theme, setTheme] = useAtom(themeAtom);
+  const [palette, setPalette] = useAtom(paletteAtom);
   return { theme, setTheme, palette, setPalette };
 }

@@ -11,7 +11,7 @@ import {
   SlidersHorizontal,
   Sun,
 } from "lucide-react";
-import type { Palette as AppPalette, Theme } from "@/hooks/use-theme";
+import type { Palette as AppPalette, Theme } from "@/state";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -50,7 +50,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import type { AgentDefinition } from "@/types";
-import type { SessionMode } from "./main-prompt-input";
+import type { SessionMode } from "@/state";
 
 type SettingsPage = "appearance" | "general" | "agent";
 

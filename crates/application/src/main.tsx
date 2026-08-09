@@ -5,7 +5,7 @@ import App from "./App";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./index.css";
 import { SidebarProvider } from "./components/ui/sidebar";
-import { readPalette } from "@/hooks/use-theme";
+import { readPalette } from "@/state";
 
 document.documentElement.dataset.style = readPalette();
 

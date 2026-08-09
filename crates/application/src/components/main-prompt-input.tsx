@@ -38,15 +38,10 @@ import { daemonApi } from "@/api";
 import { toast } from "sonner";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AgentDefinition, Chat } from "@/types";
+import { SESSION_MODES, type SessionMode } from "@/state";
 
-const handleSubmit = () => {
-  // Handle submit
-
-};
-
-const SET_MODES = ["plan", "build", "ask"] as const;
-const SET_MODELS = ["codex", "gemini", "claude"] as const;
-export type SessionMode = (typeof SET_MODES)[number];
+export type { SessionMode };
+const SET_MODES = SESSION_MODES;
 
 const modeLabels: Record<SessionMode, string> = {
   plan: "Plan",

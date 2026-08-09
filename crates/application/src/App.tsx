@@ -1,107 +1,79 @@
-import { useEffect, useState } from "react";
-import MainPromptInput, { type SessionMode } from "@/components/main-prompt-input";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import MainPromptInput from "@/components/main-prompt-input";
 import { AppSidebar } from "@/components/app-sidebar";
 import { HomeWatermark } from "@/components/home-watermark";
 import { LiveChatScreen } from "@/components/live-chat-screen";
 import { TopBar } from "@/components/top-bar";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Toaster } from "@/components/ui/sonner";
-import { useChats } from "@/hooks/use-chats";
-import { useDaemonEvents } from "@/hooks/use-daemon-events";
-import { useTheme } from "@/hooks/use-theme";
-import { useAgentCatalog } from "@/hooks/use-agent-catalog";
-import { toast } from "sonner";
-import type { AgentDefinition, Chat } from "@/types";
+import {
+  activeSessionAtom,
+  agentsAtom,
+  chatsAtom,
+  composerSessionModeAtom,
+  defaultAgentIdAtom,
+  defaultSessionModeAtom,
+  openStartedChatAtom,
+  paletteAtom,
+  refreshChatsAtom,
+  selectAgentByIdAtom,
+  selectedAgentAtom,
+  selectChatAtom,
+  setWorkspacePathAtom,
+  settingsOpenAtom,
+  startNewChatAtom,
+  themeAtom,
+  useAppBootstrap,
+  workspacePathAtom,
+} from "@/state";
 
 /**
- * Deliberately minimal application shell.
- *
- * The previous session/sidebar/controller composition was tied to RPC methods
- * that no longer exist. New chat state will be introduced here only after the
- * daemon-backed controller layer is designed.
+ * Shell only: route home vs live chat and host chrome.
+ * Domain state lives in `src/state/*` (jotai).
  */
 export default function App() {
-  const { theme, setTheme, palette, setPalette } = useTheme();
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [workspacePath, setWorkspacePath] = useState("");
-  const [defaultAgentId, setDefaultAgentId] = useState(() => localStorage.getItem("amarcode-default-agent") ?? "codex-acp");
-  const [defaultSessionMode, setDefaultSessionMode] = useState<SessionMode>(() => {
-    const saved = localStorage.getItem("amarcode-default-session-mode");
-    return saved === "plan" || saved === "build" || saved === "ask" ? saved : "build";
-  });
-  const [newChatMode, setNewChatMode] = useState<SessionMode>(defaultSessionMode);
-  const [selectedAgent, setSelectedAgent] = useState<AgentDefinition>();
-  const agents = useAgentCatalog();
-  const [chatSession, setChatSession] = useState<{
-    chat: Chat;
-    agent?: AgentDefinition;
-    initialRunId: string | null;
-    initialTurnActive?: boolean;
-    sessionMode?: SessionMode;
-  } | null>(null);
-  const { chats, handleNewChat, handleSelectChat, refresh } = useChats(setChatSession);
-  const daemonEvent = useDaemonEvents();
+  useAppBootstrap();
 
-  useEffect(() => {
-    void refresh().catch((error: unknown) => {
-      console.error("Failed to load chats:", error);
-      toast.error("Failed to load chats. Please try again.");
-    });
-  }, [refresh]);
+  const [theme, setTheme] = useAtom(themeAtom);
+  const [palette, setPalette] = useAtom(paletteAtom);
+  const [settingsOpen, setSettingsOpen] = useAtom(settingsOpenAtom);
+  const workspacePath = useAtomValue(workspacePathAtom);
+  const setWorkspacePath = useSetAtom(setWorkspacePathAtom);
+  const agents = useAtomValue(agentsAtom);
+  const selectedAgent = useAtomValue(selectedAgentAtom);
+  const [defaultAgentId, setDefaultAgentId] = useAtom(defaultAgentIdAtom);
+  const [defaultSessionMode, setDefaultSessionMode] = useAtom(defaultSessionModeAtom);
+  const [composerMode, setComposerMode] = useAtom(composerSessionModeAtom);
+  const chats = useAtomValue(chatsAtom);
+  const activeSession = useAtomValue(activeSessionAtom);
 
-  useEffect(() => {
-    if (daemonEvent?.type === "chatUpdated") void refresh();
-  }, [daemonEvent, refresh]);
+  const toasterTheme =
+    theme === "system"
+      ? typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light"
+      : theme;
 
-  useEffect(() => { localStorage.setItem("amarcode-default-agent", defaultAgentId); }, [defaultAgentId]);
-  useEffect(() => {
-    localStorage.setItem("amarcode-default-session-mode", defaultSessionMode);
-    setNewChatMode(defaultSessionMode);
-  }, [defaultSessionMode]);
-  useEffect(() => {
-    if (!selectedAgent && agents.length) {
-      setSelectedAgent(agents.find((agent) => agent.id === defaultAgentId) ?? agents[0]);
-    }
-  }, [agents, defaultAgentId, selectedAgent]);
-
-  const selectWorkspace = (path: string) => {
-    setWorkspacePath(path);
-    setChatSession(null);
-  };
-
-  const startNewChat = () => {
-    setSelectedAgent(agents.find((agent) => agent.id === defaultAgentId) ?? agents[0]);
-    setNewChatMode(defaultSessionMode);
-    handleNewChat();
-  };
+  const selectChat = useSetAtom(selectChatAtom);
+  const startNewChat = useSetAtom(startNewChatAtom);
+  const openStartedChat = useSetAtom(openStartedChatAtom);
+  const selectAgentById = useSetAtom(selectAgentByIdAtom);
+  const refreshChats = useSetAtom(refreshChatsAtom);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       <TopBar />
       <div className="flex min-h-0 flex-1 w-full">
         <AppSidebar
-          activeChatId={chatSession?.chat.id ?? null}
+          activeChatId={activeSession?.chat.id ?? null}
           workspacePath={workspacePath}
           chats={chats}
-          onNewChat={startNewChat}
-          onSelectChat={handleSelectChat}
+          onNewChat={() => startNewChat()}
+          onSelectChat={(chatId) => selectChat(chatId)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
-        {chatSession ? (
-          <LiveChatScreen
-            agent={chatSession.agent ?? selectedAgent}
-            initialChatId={chatSession.chat.id}
-            initialRunId={chatSession.initialRunId}
-            initialTurnActive={chatSession.initialTurnActive}
-            initialSessionMode={chatSession.sessionMode}
-            workspacePath={workspacePath}
-            onChatsRefresh={refresh}
-            daemonEvent={daemonEvent}
-            onAgentSelected={(agent) => {
-              setSelectedAgent(agent);
-              setChatSession((session) => session ? { ...session, agent } : session);
-            }}
-          />
+        {activeSession ? (
+          <LiveChatScreen />
         ) : (
           <main
             data-home-stage
@@ -111,20 +83,14 @@ export default function App() {
             <div data-prompt-shell className="relative z-10 w-full max-w-2xl">
               <MainPromptInput
                 workspacePath={workspacePath}
-                onWorkspacePathChange={selectWorkspace}
+                onWorkspacePathChange={setWorkspacePath}
                 selectedAgentId={selectedAgent?.id ?? ""}
-                onAgentSelected={setSelectedAgent}
-                sessionMode={newChatMode}
-                onSessionModeChange={setNewChatMode}
+                onAgentSelected={(agent) => selectAgentById(agent.id)}
+                sessionMode={composerMode}
+                onSessionModeChange={setComposerMode}
                 onChatStarted={(chat, agent, _workspacePath, sessionMode) => {
-                  setChatSession({
-                    chat,
-                    agent,
-                    initialRunId: null,
-                    initialTurnActive: true,
-                    sessionMode,
-                  });
-                  void refresh();
+                  openStartedChat({ chat, agent, sessionMode });
+                  void refreshChats();
                 }}
               />
             </div>
@@ -134,7 +100,7 @@ export default function App() {
       <Toaster
         position="bottom-right"
         closeButton
-        theme={theme}
+        theme={toasterTheme}
         className="pointer-events-auto !z-[100]"
       />
       <SettingsDialog
@@ -148,8 +114,7 @@ export default function App() {
         defaultAgentId={defaultAgentId}
         onDefaultAgentChange={(agentId) => {
           setDefaultAgentId(agentId);
-          const agent = agents.find((candidate) => candidate.id === agentId);
-          if (agent) setSelectedAgent(agent);
+          selectAgentById(agentId);
         }}
         defaultSessionMode={defaultSessionMode}
         onDefaultSessionModeChange={setDefaultSessionMode}
