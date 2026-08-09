@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useAtom } from "jotai";
 import {
   Check,
   Bot,
@@ -12,6 +13,7 @@ import {
   Sun,
 } from "lucide-react";
 import type { Palette as AppPalette, Theme } from "@/state";
+import { verboseReasoningAtom } from "@/state";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -134,6 +136,7 @@ export function SettingsDialog({
     "amarcode-show-timestamps",
     false,
   );
+  const [verboseReasoning, setVerboseReasoning] = useAtom(verboseReasoningAtom);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -212,6 +215,8 @@ export function SettingsDialog({
                   setRestoreWorkspace={setRestoreWorkspace}
                   timestamps={timestamps}
                   setTimestamps={setTimestamps}
+                  verboseReasoning={verboseReasoning}
+                  setVerboseReasoning={setVerboseReasoning}
                 />
               )}
             </div>
@@ -394,11 +399,15 @@ function GeneralPanel({
   setRestoreWorkspace,
   timestamps,
   setTimestamps,
+  verboseReasoning,
+  setVerboseReasoning,
 }: {
   restoreWorkspace: boolean;
   setRestoreWorkspace: (value: boolean) => void;
   timestamps: boolean;
   setTimestamps: (value: boolean) => void;
+  verboseReasoning: boolean;
+  setVerboseReasoning: (value: boolean) => void;
 }) {
   return (
     <div className="mx-auto w-full max-w-[33rem]">
@@ -420,6 +429,12 @@ function GeneralPanel({
           checked={timestamps}
           onCheckedChange={setTimestamps}
         />
+        <PreferenceRow
+          title="Verbose reasoning"
+          description="Show full tool commands and untruncated thought steps in the chain of thought."
+          checked={verboseReasoning}
+          onCheckedChange={setVerboseReasoning}
+        />
       </div>
       <div className="mt-6 flex items-center justify-between">
         <p className="text-[11px] text-muted-foreground">
@@ -431,6 +446,7 @@ function GeneralPanel({
           onClick={() => {
             setRestoreWorkspace(true);
             setTimestamps(false);
+            setVerboseReasoning(false);
           }}
         >
           <RotateCcw data-icon="inline-start" />

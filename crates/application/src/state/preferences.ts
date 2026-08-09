@@ -40,3 +40,14 @@ export const defaultSessionModeAtom = atomWithStorage<SessionMode>(
   undefined,
   { getOnInit: true },
 );
+
+/**
+ * When true, reasoning chain shows full tool titles / shell commands and
+ * untruncated thought text. Default is compact.
+ */
+export const verboseReasoningAtom = atomWithStorage<boolean>(
+  "amarcode-verbose-reasoning",
+  false,
+  undefined,
+  { getOnInit: true },
+);
