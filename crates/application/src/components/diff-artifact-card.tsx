@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ChevronRight } from "lucide-react";
 import type { MessagePart } from "@/types";
 
 type DiffChange = {
@@ -225,6 +227,7 @@ export function diffArtifacts(parts: MessagePart[]): DiffArtifact[] {
 }
 
 export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
+  const [expanded, setExpanded] = useState(false);
   const changedFiles = artifact.changes.length;
   const additionCount =
     artifact.patch?.split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++"))
@@ -241,7 +244,17 @@ export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
 
   return (
     <section className="mt-3 overflow-hidden rounded-lg border border-border/80 bg-muted/25">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-xs">
+      <button
+        type="button"
+        className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-left text-xs transition-colors hover:bg-muted/50"
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Collapse" : "Expand"} ${artifact.title.toLowerCase()}`}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <ChevronRight
+          className={`size-3.5 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+          aria-hidden
+        />
         <span className="font-medium">{artifact.title}</span>
         <span className="text-muted-foreground">{summary}</span>
         {artifact.patch && (
@@ -250,8 +263,8 @@ export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
             <span className="text-red-600 dark:text-red-400">−{deletionCount}</span>
           </span>
         )}
-      </div>
-      {artifact.changes.length > 0 && (
+      </button>
+      {expanded && artifact.changes.length > 0 && (
         <div className="border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">
           {artifact.changes.map((change) => (
             <div key={`${change.operation}-${change.path}`} className="font-mono">
@@ -260,7 +273,7 @@ export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
           ))}
         </div>
       )}
-      {artifact.patch && (
+      {expanded && artifact.patch && (
         <pre className="max-h-80 overflow-auto border-t border-border/60 bg-background/60 p-3 font-mono text-xs leading-relaxed">
           {artifact.patch.split("\n").map((line, index) => (
             <span
