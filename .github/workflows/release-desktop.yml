@@ -77,58 +77,98 @@ jobs:
       # Workspace Cargo.toml puts release output under the repo-root target/
       # (older layouts used crates/application/src-tauri/target).
       #
-      # Note: GH Actions runs bash with `pipefail`. `find | head` then fails with
-      # "Broken pipe" once head closes the pipe — even when the bundle exists.
-      - name: Locate bundle artifacts
+      # Important: never upload the whole bundle tree. Linux AppImage builds leave
+      # an AppDir full of shared libs (libwebkit…, dozens of "copyright" files,
+      # duplicate basenames). Publishing that to a GitHub Release races the API
+      # and blows past asset limits. Only ship final installers.
+      - name: Stage installers
         id: bundle
         shell: bash
         run: |
           set -euo pipefail
 
+          stage=dist-installers
+          rm -rf "$stage"
+          mkdir -p "$stage"
+
+          bundle=
           for candidate in \
             target/release/bundle \
             crates/application/src-tauri/target/release/bundle
           do
             if [ -d "$candidate" ]; then
-              # Prefer shippable installers over intermediate AppDir trees.
-              mapfile -t files < <(
-                find "$candidate" -type f \
-                  \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
-                     -o -name '*.dmg' -o -name '*.app.tar.gz' \
-                     -o -name '*.msi' -o -name '*.exe' -o -name '*.nsis.zip' \) \
-                  2>/dev/null | sort
-              )
-
-              if [ "${#files[@]}" -eq 0 ]; then
-                mapfile -t files < <(find "$candidate" -type f 2>/dev/null | sort | head -n 100 || true)
-              fi
-
-              if [ "${#files[@]}" -eq 0 ]; then
-                echo "Bundle directory exists but is empty: $candidate" >&2
-                continue
-              fi
-
-              {
-                echo "path=$candidate"
-                echo "count=${#files[@]}"
-              } >> "$GITHUB_OUTPUT"
-
-              echo "Found bundle at $candidate (${#files[@]} file(s)):"
-              printf '  %s\n' "${files[@]}"
-              exit 0
+              bundle=$candidate
+              break
             fi
           done
 
-          echo "No Tauri bundle directory found" >&2
-          # Diagnostic only — never let a broken pipe fail the job here.
-          find . -type d -name bundle 2>/dev/null | head -n 50 || true
-          exit 1
+          if [ -z "$bundle" ]; then
+            echo "No Tauri bundle directory found" >&2
+            find . -type d -name bundle 2>/dev/null | head -n 50 || true
+            exit 1
+          fi
+
+          echo "Scanning installers under $bundle"
+
+          # Final packages only — skip AppDir/ payload trees and bare binaries.
+          mapfile -t files < <(
+            find "$bundle" -type f \
+              \( \
+                -name '*.AppImage' -o \
+                -name '*.deb' -o \
+                -name '*.rpm' -o \
+                -name '*.dmg' -o \
+                -name '*.app.tar.gz' -o \
+                -name '*.msi' -o \
+                -name '*-setup.exe' -o \
+                -name '*.nsis.zip' \
+              \) \
+              ! -path '*/AppDir/*' \
+              ! -path '*/appimage_deb/*' \
+              2>/dev/null | sort
+          )
+
+          # Windows NSIS often emits a plain *.exe that is not always *-setup.exe.
+          # Pick top-level nsis/msi products; still exclude AppDir-style trees.
+          if [ "${#files[@]}" -eq 0 ]; then
+            mapfile -t files < <(
+              find "$bundle" -type f \
+                \( -path '*/nsis/*.exe' -o -path '*/msi/*.msi' -o -path '*/msi/*.exe' \) \
+                2>/dev/null | sort
+            )
+          fi
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No installer packages found under $bundle" >&2
+            echo "Directory listing (depth 3):" >&2
+            find "$bundle" -maxdepth 3 \( -type d -o -type f \) 2>/dev/null | head -n 80 || true
+            exit 1
+          fi
+
+          for src in "${files[@]}"; do
+            base=$(basename "$src")
+            dest="$stage/$base"
+            # Disambiguate if two platforms produce the same basename (unlikely
+            # in a per-OS job, but keep staging deterministic).
+            if [ -e "$dest" ]; then
+              dest="$stage/${RUNNER_OS:-os}-$base"
+            fi
+            cp -f "$src" "$dest"
+            echo "  staged $dest  ($(du -h "$dest" | cut -f1))"
+          done
+
+          {
+            echo "path=$stage"
+            echo "count=${#files[@]}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Staged ${#files[@]} installer(s) into $stage"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-bundles
-          path: ${{ steps.bundle.outputs.path }}
+          path: ${{ steps.bundle.outputs.path }}/*
           if-no-files-found: error
           retention-days: 7
 
@@ -147,6 +187,23 @@ jobs:
           pattern: "*-bundles"
           merge-multiple: true
 
+      - name: List release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Publishing only these files:"
+          find release-artifacts -type f | sort
+          count=$(find release-artifacts -type f | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "No installer artifacts downloaded" >&2
+            exit 1
+          fi
+          # Guardrail: if someone reintroduces AppDir upload, fail loudly.
+          if find release-artifacts -type f -name '*.so' | grep -q .; then
+            echo "Refusing to publish shared libraries — stage installers only" >&2
+            exit 1
+          fi
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -154,6 +211,9 @@ jobs:
           name: amarcode Latest
           body: |
             Automated desktop release generated from the workflow button.
+
+            Download the installer for your platform (`.AppImage` / `.deb` on Linux, `.msi` / setup `.exe` on Windows).
           make_latest: true
           overwrite_files: true
-          files: release-artifacts/**
+          # Staging already filtered to installers only (flat copy).
+          files: release-artifacts/*
