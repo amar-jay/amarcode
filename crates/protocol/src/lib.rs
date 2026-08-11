@@ -67,7 +67,12 @@ mod tests {
     #[test]
     fn checked_in_typescript_bindings_are_current() {
         let checked_in = include_str!("../../application/src/generated/protocol.ts");
-        assert_eq!(checked_in, super::typescript_bindings());
+        let generated = super::typescript_bindings();
+
+        assert_eq!(
+            checked_in.replace("\r\n", "\n"),
+            generated.replace("\r\n", "\n")
+        );
     }
 
     #[test]
