@@ -1,10 +1,12 @@
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import MainPromptInput from "@/components/main-prompt-input";
 import { AppSidebar } from "@/components/app-sidebar";
 import { HomeWatermark } from "@/components/home-watermark";
 import { LiveChatScreen } from "@/components/live-chat-screen";
 import { TopBar } from "@/components/top-bar";
 import { SettingsDialog } from "@/components/settings-dialog";
+import { DaemonConnectionDialog } from "@/components/daemon-connection-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import {
   activeSessionAtom,
@@ -32,7 +34,7 @@ import {
  * Domain state lives in `src/state/*` (jotai).
  */
 export default function App() {
-  useAppBootstrap();
+  const { daemonConnection, retryDaemon } = useAppBootstrap();
 
   const [theme, setTheme] = useAtom(themeAtom);
   const [palette, setPalette] = useAtom(paletteAtom);
@@ -42,14 +44,17 @@ export default function App() {
   const agents = useAtomValue(agentsAtom);
   const selectedAgent = useAtomValue(selectedAgentAtom);
   const [defaultAgentId, setDefaultAgentId] = useAtom(defaultAgentIdAtom);
-  const [defaultSessionMode, setDefaultSessionMode] = useAtom(defaultSessionModeAtom);
+  const [defaultSessionMode, setDefaultSessionMode] = useAtom(
+    defaultSessionModeAtom,
+  );
   const [composerMode, setComposerMode] = useAtom(composerSessionModeAtom);
   const chats = useAtomValue(chatsAtom);
   const activeSession = useAtomValue(activeSessionAtom);
 
   const toasterTheme =
     theme === "system"
-      ? typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? typeof window !== "undefined" &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches
         ? "dark"
         : "light"
       : theme;
@@ -119,6 +124,13 @@ export default function App() {
         defaultSessionMode={defaultSessionMode}
         onDefaultSessionModeChange={setDefaultSessionMode}
       />
+      {daemonConnection.status !== "ready" && (
+        <DaemonConnectionDialog
+          status={daemonConnection}
+          onRetry={retryDaemon}
+          onCloseApplication={() => void getCurrentWindow().close()}
+        />
+      )}
     </div>
   );
 }

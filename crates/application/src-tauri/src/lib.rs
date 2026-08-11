@@ -6,7 +6,7 @@ mod state;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::{ipc::Channel, State};
+use tauri::{ipc::Channel, AppHandle, Manager, State};
 
 use crate::{
     protocol::{
@@ -19,6 +19,23 @@ use crate::{
     },
     state::AppState,
 };
+
+#[tauri::command]
+async fn daemon_bootstrap(
+    app: AppHandle,
+    manager: State<'_, daemon::DaemonManager>,
+    on_status: Channel<daemon::DaemonBootstrapStatus>,
+) -> Result<HealthResult, String> {
+    match manager.bootstrap(&app, &on_status).await {
+        Ok(health) => Ok(health),
+        Err(error) => {
+            let _ = on_status.send(daemon::DaemonBootstrapStatus::Failed {
+                error: error.clone(),
+            });
+            Err(error)
+        }
+    }
+}
 
 #[tauri::command]
 async fn daemon_health(state: State<'_, AppState>) -> Result<HealthResult, String> {
@@ -178,15 +195,13 @@ fn list_workspace_files(workspace_path: String) -> Result<Vec<String>, String> {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|_| {
-            daemon::DaemonBridge::launch_if_needed()?;
-            Ok(())
-        })
+        .manage(daemon::DaemonManager::new())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
+            daemon_bootstrap,
             daemon_health,
             daemon_version,
             list_agents,
@@ -201,6 +216,12 @@ pub fn run() {
             subscribe_events,
             list_workspace_files,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running amarcode");
+        .build(tauri::generate_context!())
+        .expect("error while building amarcode");
+
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            app_handle.state::<daemon::DaemonManager>().stop();
+        }
+    });
 }

@@ -7,9 +7,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import type { DaemonBootstrapStatus } from "@/api";
 
 type DaemonConnectionDialogProps = {
-  status: "connecting" | "error";
+  status: Exclude<DaemonBootstrapStatus, { status: "ready" }>;
   onRetry: () => void;
   onCloseApplication: () => void;
 };
@@ -19,11 +20,30 @@ export function DaemonConnectionDialog({
   onRetry,
   onCloseApplication,
 }: DaemonConnectionDialogProps) {
-  const isConnecting = status === "connecting";
+  const isError = status.status === "failed";
+  const title =
+    status.status === "downloading"
+      ? "Downloading daemon..."
+      : status.status === "verifying"
+        ? "Verifying daemon..."
+        : status.status === "installing"
+          ? "Installing daemon..."
+          : status.status === "starting"
+            ? "Starting daemon..."
+            : isError
+              ? "Connection failed"
+              : "Checking daemon...";
+  const description =
+    status.status === "downloading"
+      ? status.total > 0
+        ? Math.round((status.received / status.total) * 100) + "% downloaded"
+        : "Downloading the daemon for this platform."
+      : isError
+        ? status.error
+        : "Preparing the local daemon service.";
 
   return (
-    <Dialog open
-		 >
+    <Dialog open>
       <DialogContent
         showCloseButton={false}
         className="max-w-xs gap-6 p-7 text-center"
@@ -42,28 +62,28 @@ export function DaemonConnectionDialog({
             src="/connection.svg"
             alt=""
             className={
-              isConnecting
+              !isError
                 ? "size-full animate-[pulse_1.8s_ease-in-out_infinite] dark:invert"
                 : "size-full dark:invert"
             }
           />
         </div>
         <DialogHeader className="items-center gap-2">
-          <DialogTitle className="text-base">
-            {isConnecting ? "Connecting..." : "Connection failed"}
-          </DialogTitle>
+          <DialogTitle className="text-base">{title}</DialogTitle>
           <DialogDescription className="max-w-[18rem]">
-            {isConnecting
-              ? "Looking for the local daemon service."
-              : "The local daemon service is unavailable."}
+            {description}
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-2">
-	          <Button className={buttonVariants({variant: !isConnecting ? "default" : "outline"})} onClick={onRetry} disabled={isConnecting}>
-	          {isConnecting ? 
-								"Connecting..." : "Try again"
-						}
-	          </Button>
+          <Button
+            className={buttonVariants({
+              variant: isError ? "default" : "outline",
+            })}
+            onClick={onRetry}
+            disabled={!isError}
+          >
+            {!isError ? "Please wait..." : "Try again"}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

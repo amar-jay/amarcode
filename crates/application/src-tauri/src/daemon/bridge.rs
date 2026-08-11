@@ -1,4 +1,4 @@
-use std::{io, time::Duration};
+use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -31,25 +31,6 @@ impl DaemonBridge {
         Self {
             reader: None,
             writer: None,
-        }
-    }
-
-    pub fn launch_if_needed() -> io::Result<()> {
-        let Config {
-            daemon_command,
-            daemon_addr,
-            ..
-        } = Config::get();
-
-        match std::net::TcpStream::connect(daemon_addr) {
-            Ok(_) => Ok(()),
-            Err(_) => {
-                // std::process::Command::new(daemon_command).spawn()?;
-                // Ok(())
-                Err(io::Error::other(
-                    "YOU NEED TO LAUNCH THE DAEMON MANUALLY FOR NOW. THIS IS A TEMPORARY HACK.",
-                ))
-            }
         }
     }
 

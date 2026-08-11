@@ -1,11 +1,23 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { toast } from "sonner";
-import { daemonApi } from "@/api";
-import { loadAgentsAtom, selectedAgentAtom, selectedAgentIdAtom } from "./agents";
+import { daemonApi, type DaemonBootstrapStatus } from "@/api";
+import {
+  loadAgentsAtom,
+  selectedAgentAtom,
+  selectedAgentIdAtom,
+} from "./agents";
 import { refreshChatsAtom } from "./chats";
-import { ensureDaemonEventStream, subscribeDaemonEvents } from "./daemon-events";
-import { defaultAgentIdAtom, defaultSessionModeAtom, paletteAtom, themeAtom } from "./preferences";
+import {
+  ensureDaemonEventStream,
+  subscribeDaemonEvents,
+} from "./daemon-events";
+import {
+  defaultAgentIdAtom,
+  defaultSessionModeAtom,
+  paletteAtom,
+  themeAtom,
+} from "./preferences";
 import { composerSessionModeAtom } from "./navigation";
 
 /**
@@ -13,6 +25,11 @@ import { composerSessionModeAtom } from "./navigation";
  * Mount once near the root of `App`.
  */
 export function useAppBootstrap() {
+  const [daemonConnection, setDaemonConnection] =
+    useState<DaemonBootstrapStatus>({
+      status: "checking",
+    });
+  const [daemonAttempt, setDaemonAttempt] = useState(0);
   const store = useStore();
   const theme = useAtomValue(themeAtom);
   const palette = useAtomValue(paletteAtom);
@@ -25,6 +42,10 @@ export function useAppBootstrap() {
   const refreshChats = useSetAtom(refreshChatsAtom);
   const setSelectedAgentId = useSetAtom(selectedAgentIdAtom);
   const setComposerMode = useSetAtom(composerSessionModeAtom);
+  const retryDaemon = useCallback(
+    () => setDaemonAttempt((attempt) => attempt + 1),
+    [],
+  );
 
   // Theme → <html class="dark">
   useEffect(() => {
@@ -49,29 +70,32 @@ export function useAppBootstrap() {
     let cancelled = false;
     void (async () => {
       try {
-        // `daemon_health` validates the shared wire protocol version in the
-        // Tauri layer. Do not start subscriptions or catalogs against an
-        // incompatible daemon.
-        await daemonApi.health();
+        // Tauri installs, launches, and validates the daemon before catalogs
+        // or event subscriptions are allowed to start.
+        setDaemonConnection({ status: "checking" });
+        await daemonApi.bootstrap((status) => {
+          if (!cancelled) setDaemonConnection(status);
+        });
         if (cancelled) return;
         ensureDaemonEventStream(store);
         await Promise.all([loadAgents(), refreshChats()]);
       } catch (error) {
         if (cancelled) return;
         console.error("Daemon bootstrap failed:", error);
-        toast.error(
+        const message =
           error instanceof Error
             ? error.message
             : typeof error === "string"
               ? error
-              : "Unable to connect to a compatible daemon.",
-        );
+              : "Unable to install or start a compatible daemon.";
+        setDaemonConnection({ status: "failed", error: message });
+        toast.error(message);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [store, loadAgents, refreshChats]);
+  }, [store, loadAgents, refreshChats, daemonAttempt]);
 
   // Keep sidebar list fresh when any chat metadata changes (every event).
   useEffect(() => {
@@ -95,4 +119,6 @@ export function useAppBootstrap() {
   useEffect(() => {
     setComposerMode(defaultSessionMode);
   }, [defaultSessionMode, setComposerMode]);
+
+  return { daemonConnection, retryDaemon };
 }
