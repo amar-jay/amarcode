@@ -24,6 +24,7 @@ use crate::{
         EditorEvent, EventLine,
     },
     rpc::handler::{self, DispatchOutcome},
+    store::Store,
     App, Result,
 };
 
@@ -68,7 +69,14 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
                 // subscriber instead of falling into a registration gap.
                 let receiver = acknowledge_subscription(&mut writer, &app.events).await?;
                 debug!(%peer, ?filter, "entering event subscription mode");
-                return stream_events(&mut writer, &mut lines, filter, receiver).await;
+                return stream_events(
+                    &mut writer,
+                    &mut lines,
+                    filter,
+                    receiver,
+                    Arc::clone(&app.store),
+                )
+                .await;
             }
             Err(err) => {
                 write_response(&mut writer, &RpcResponse::err(err.to_string())).await?;
@@ -125,6 +133,7 @@ async fn stream_events<R, W>(
     lines: &mut tokio::io::Lines<R>,
     filter: SubscribeEventsParams,
     mut rx: broadcast::Receiver<EditorEvent>,
+    store: Arc<Store>,
 ) -> Result<()>
 where
     R: tokio::io::AsyncBufRead + Unpin,
@@ -152,7 +161,7 @@ where
             msg = rx.recv() => {
                 match msg {
                     Ok(event) => {
-                        if event_matches(&event, &filter) {
+                        if event_matches(&event, &filter, &store)? {
                             write_event(writer, &event).await?;
                         }
                     }
@@ -169,11 +178,92 @@ where
     }
 }
 
+#[derive(Default)]
+struct EventScope {
+    chat_id: Option<String>,
+    run_id: Option<String>,
+    session_id: Option<String>,
+}
+
+fn event_matches(
+    event: &EditorEvent,
+    filter: &SubscribeEventsParams,
+    store: &Store,
+) -> Result<bool> {
+    if filter.chat_id.is_none() && filter.run_id.is_none() && filter.session_id.is_none() {
+        return Ok(true);
+    }
+
+    let mut scope = match event {
+        EditorEvent::ChatUpdated { chat_id } => EventScope {
+            chat_id: Some(chat_id.clone()),
+            ..EventScope::default()
+        },
+        EditorEvent::TurnUpdated {
+            chat_id, run_id, ..
+        }
+        | EditorEvent::ContextRestoration {
+            chat_id, run_id, ..
+        } => EventScope {
+            chat_id: Some(chat_id.clone()),
+            run_id: Some(run_id.clone()),
+            session_id: None,
+        },
+        EditorEvent::RunUpdated { run_id, .. }
+        | EditorEvent::ApprovalRequired { run_id, .. }
+        | EditorEvent::QuestionRequired { run_id, .. } => EventScope {
+            run_id: Some(run_id.clone()),
+            ..EventScope::default()
+        },
+        EditorEvent::MessageUpdated { message_id, .. }
+        | EditorEvent::MessagePartAdded { message_id, .. } => {
+            let Some(message) = store.get_message(message_id)? else {
+                return Ok(false);
+            };
+            EventScope {
+                chat_id: Some(message.chat_id),
+                run_id: message.agent_run_id,
+                session_id: None,
+            }
+        }
+        EditorEvent::WorkspaceFilesChanged { .. } | EditorEvent::AgentConnectionChanged { .. } => {
+            return Ok(false)
+        }
+    };
+
+    // Run rows provide the relationships omitted from compact event payloads.
+    // This keeps the wire contract stable while making all three filters useful.
+    if let Some(run_id) = scope.run_id.as_deref() {
+        if let Some(run) = store.get_run(run_id)? {
+            scope.chat_id.get_or_insert(run.chat_id);
+            scope.session_id = run.acp_session_id;
+        }
+    }
+
+    Ok(filter
+        .chat_id
+        .as_ref()
+        .is_none_or(|want| scope.chat_id.as_ref() == Some(want))
+        && filter
+            .run_id
+            .as_ref()
+            .is_none_or(|want| scope.run_id.as_ref() == Some(want))
+        && filter
+            .session_id
+            .as_ref()
+            .is_none_or(|want| scope.session_id.as_ref() == Some(want)))
+}
+
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{sync::Arc, time::Duration};
 
     use tokio::io::{duplex, AsyncBufReadExt, BufReader};
+
+    use crate::{
+        protocol::{MessageRole, MessageStatus, RunStatus, TurnStatus},
+        store::{AgentRun, Chat, Message},
+    };
 
     use super::*;
 
@@ -216,41 +306,97 @@ mod tests {
             other => panic!("unexpected queued event: {other:?}"),
         }
     }
-}
 
-fn event_matches(event: &EditorEvent, filter: &SubscribeEventsParams) -> bool {
-    if filter.chat_id.is_none() && filter.run_id.is_none() && filter.session_id.is_none() {
-        return true;
+    #[test]
+    fn turn_event_matches_chat_and_run_filters() {
+        let store = Store::open(std::path::Path::new(":memory:")).expect("in-memory store");
+        let event = EditorEvent::TurnUpdated {
+            chat_id: "chat-1".into(),
+            run_id: "run-1".into(),
+            user_message_id: "message-1".into(),
+            status: TurnStatus::Started,
+            stop_reason: None,
+            error_message: None,
+        };
+
+        assert!(event_matches(
+            &event,
+            &SubscribeEventsParams {
+                chat_id: Some("chat-1".into()),
+                run_id: Some("run-1".into()),
+                session_id: None,
+            },
+            &store,
+        )
+        .expect("filter event"));
     }
 
-    // session_id is not present on EditorEvent yet.
-    if filter.session_id.is_some() {
-        return false;
+    #[test]
+    fn persisted_relationships_filter_run_message_and_session_events() {
+        let store =
+            Arc::new(Store::open(std::path::Path::new(":memory:")).expect("in-memory store"));
+        store.seed_presets().expect("seed agents");
+        let agent_id = store.agents().expect("agents")[0].id.clone();
+        store
+            .create_chat(&Chat {
+                id: "chat-1".into(),
+                workspace_path: "/tmp/workspace".into(),
+                title: "test".into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+                archived_at: None,
+            })
+            .expect("create chat");
+        store
+            .create_run(&AgentRun {
+                id: "run-1".into(),
+                chat_id: "chat-1".into(),
+                agent_id,
+                acp_session_id: Some("session-1".into()),
+                status: RunStatus::Running,
+                started_at: "2026-01-01T00:00:00Z".into(),
+                finished_at: None,
+                error_message: None,
+            })
+            .expect("create run");
+        store
+            .create_message(&Message {
+                id: "message-1".into(),
+                chat_id: "chat-1".into(),
+                agent_run_id: Some("run-1".into()),
+                role: MessageRole::Assistant,
+                content: "hello".into(),
+                status: MessageStatus::Complete,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .expect("create message");
+
+        let session_filter = SubscribeEventsParams {
+            chat_id: None,
+            run_id: None,
+            session_id: Some("session-1".into()),
+        };
+        let run_event = EditorEvent::RunUpdated {
+            run_id: "run-1".into(),
+            status: RunStatus::Running,
+            error_message: None,
+        };
+        let message_event = EditorEvent::MessageUpdated {
+            message_id: "message-1".into(),
+            status: MessageStatus::Complete,
+        };
+
+        assert!(event_matches(&run_event, &session_filter, &store).expect("filter run"));
+        assert!(event_matches(&message_event, &session_filter, &store).expect("filter message"));
+        assert!(!event_matches(
+            &message_event,
+            &SubscribeEventsParams {
+                chat_id: Some("another-chat".into()),
+                ..SubscribeEventsParams::default()
+            },
+            &store,
+        )
+        .expect("filter unrelated chat"));
     }
-
-    let chat_id = match event {
-        EditorEvent::ChatUpdated { chat_id } => Some(chat_id.as_str()),
-        EditorEvent::ContextRestoration { chat_id, .. } => Some(chat_id.as_str()),
-        _ => None,
-    };
-
-    let run_id = match event {
-        EditorEvent::RunUpdated { run_id, .. }
-        | EditorEvent::ApprovalRequired { run_id, .. }
-        | EditorEvent::QuestionRequired { run_id, .. } => Some(run_id.as_str()),
-        _ => None,
-    };
-
-    if let Some(want) = filter.chat_id.as_deref() {
-        if chat_id != Some(want) {
-            return false;
-        }
-    }
-    if let Some(want) = filter.run_id.as_deref() {
-        if run_id != Some(want) {
-            return false;
-        }
-    }
-
-    true
 }

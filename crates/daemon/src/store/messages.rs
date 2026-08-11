@@ -36,6 +36,23 @@ impl Store {
         Ok(())
     }
 
+    pub fn get_message(&self, id: &str) -> Result<Option<Message>> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id,chat_id,agent_run_id,role,content,status,created_at,updated_at
+                 FROM messages WHERE id=?1",
+            )
+            .map_err(to_error)?;
+        let mut rows = statement
+            .query_map(params![id], super::map_message)
+            .map_err(to_error)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row.map_err(to_error)?)),
+            None => Ok(None),
+        }
+    }
+
     pub fn messages(&self, chat_id: &str) -> Result<Vec<Message>> {
         let connection = self.connection()?;
         let mut statement = connection
