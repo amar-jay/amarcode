@@ -14,6 +14,7 @@ fn main() {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut session_id = String::from("mock-session-1");
+    let mut session_mode = String::from("ask");
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -69,7 +70,34 @@ fn main() {
                 if let Some(cwd) = params.get("cwd").and_then(|v| v.as_str()) {
                     session_id = format!("mock-session-{}", simple_hash(cwd));
                 }
-                reply(&mut stdout, id, json!({ "sessionId": session_id }));
+                reply(
+                    &mut stdout,
+                    id,
+                    json!({
+                        "sessionId": session_id,
+                        "configOptions": mode_config_options(&session_mode),
+                    }),
+                );
+            }
+            Some("session/set_config_option") => {
+                if params.get("configId").and_then(Value::as_str) != Some("mode") {
+                    reply_error(&mut stdout, id, -32602, "Unknown config option");
+                    continue;
+                }
+                let Some(value) = params.get("value").and_then(Value::as_str) else {
+                    reply_error(&mut stdout, id, -32602, "Mode value must be an id");
+                    continue;
+                };
+                if !matches!(value, "ask" | "code") {
+                    reply_error(&mut stdout, id, -32602, "Unsupported mode");
+                    continue;
+                }
+                session_mode = value.to_owned();
+                reply(
+                    &mut stdout,
+                    id,
+                    json!({ "configOptions": mode_config_options(&session_mode) }),
+                );
             }
             Some("session/prompt") => {
                 let text = extract_prompt_text(&params);
@@ -147,6 +175,20 @@ fn main() {
             None => {}
         }
     }
+}
+
+fn mode_config_options(current: &str) -> Value {
+    json!([{
+        "id": "mode",
+        "name": "Session mode",
+        "category": "mode",
+        "type": "select",
+        "currentValue": current,
+        "options": [
+            { "value": "ask", "name": "Ask" },
+            { "value": "code", "name": "Code" }
+        ]
+    }])
 }
 
 fn extract_prompt_text(params: &Value) -> String {

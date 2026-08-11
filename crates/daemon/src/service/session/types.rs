@@ -11,6 +11,8 @@ use tokio::sync::broadcast;
 
 use crate::{acp::AcpClient, protocol::EditorEvent, store::Store};
 
+use super::session_config::SessionConfiguration;
+
 pub(super) const ACP_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Result of starting a run / sending a prompt.
@@ -41,6 +43,10 @@ pub(super) struct LiveRun {
     pub(super) agent_id: String,
     pub(super) client: Arc<AcpClient>,
     pub(super) acp_session_id: Option<String>,
+    /// Configuration options advertised by this ACP session. Option ids and
+    /// values are agent-defined, so mode changes must be planned from these
+    /// capabilities rather than from the executable name.
+    pub(super) session_configuration: SessionConfiguration,
     /// A newly created session needs the persisted chat transcript before its
     /// first prompt because resuming a prior ACP session was unavailable.
     pub(super) needs_history_hydration: bool,

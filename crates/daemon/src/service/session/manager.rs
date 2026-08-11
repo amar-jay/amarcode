@@ -22,6 +22,7 @@ use super::{
     messages::{
         finalize_message, remove_pending_requests_for_run, take_streaming_messages_from_live,
     },
+    session_config::{configure_session, SessionConfiguration},
     types::{LiveRun, PendingAgentRequest, PromptResult, SessionInner, ACP_REQUEST_TIMEOUT},
     util::{extract_session_id, extract_stop_reason, normalize_permission_result, timestamp},
 };
@@ -134,6 +135,7 @@ impl SessionManager {
                     agent_id: agent_id.to_owned(),
                     client: Arc::clone(&client),
                     acp_session_id: None,
+                    session_configuration: SessionConfiguration::default(),
                     needs_history_hydration: false,
                     streaming_message_ids: HashMap::new(),
                     last_streaming_message_id: None,
@@ -159,6 +161,11 @@ impl SessionManager {
                 // actually render and answer. Agents commonly disable their
                 // ask-user flow when this is absent.
                 "clientCapabilities": {
+                    "session": {
+                        "configOptions": {
+                            "boolean": {}
+                        }
+                    },
                     "elicitation": {
                         "form": {}
                     }
@@ -183,7 +190,7 @@ impl SessionManager {
             .into_iter()
             .filter(|previous| previous.id != run.id && previous.agent_id == agent_id)
             .find_map(|previous| previous.acp_session_id);
-        let session_setup = (|| -> Result<(Option<String>, bool)> {
+        let session_setup = (|| -> Result<(Option<String>, bool, SessionConfiguration)> {
             if let Some(session_id) = previous_session_id {
                 self.emit(EditorEvent::ContextRestoration {
                     chat_id: chat_id.to_owned(),
@@ -202,7 +209,11 @@ impl SessionManager {
                 ) {
                     // ACP may acknowledge a resume without recreating model
                     // context. Durable chat history remains authoritative.
-                    Ok(_) => Ok((Some(session_id), has_persisted_history)),
+                    Ok(value) => Ok((
+                        Some(session_id),
+                        has_persisted_history,
+                        SessionConfiguration::from_response(&value),
+                    )),
                     Err(error) => {
                         debug!(%chat_id, %agent_id, %error, "ACP session resume unavailable; creating a hydrated session");
                         let value = self.acp_request(
@@ -214,7 +225,11 @@ impl SessionManager {
                                 "mcpServers": [],
                             }),
                         )?;
-                        Ok((extract_session_id(&value), has_persisted_history))
+                        Ok((
+                            extract_session_id(&value),
+                            has_persisted_history,
+                            SessionConfiguration::from_response(&value),
+                        ))
                     }
                 }
             } else {
@@ -227,35 +242,48 @@ impl SessionManager {
                         "mcpServers": [],
                     }),
                 )?;
-                Ok((extract_session_id(&value), has_persisted_history))
+                Ok((
+                    extract_session_id(&value),
+                    has_persisted_history,
+                    SessionConfiguration::from_response(&value),
+                ))
             }
         })();
-        let (acp_session_id, needs_history_hydration) = match session_setup {
-            Ok(value) => value,
-            Err(err) => {
-                self.remove_live_run(chat_id, &run.id);
-                let _ = client.kill();
-                let _ = self.fail_run(&run.id, &err.to_string());
-                return Err(err);
-            }
-        };
+        let (acp_session_id, needs_history_hydration, mut session_configuration) =
+            match session_setup {
+                Ok(value) => value,
+                Err(err) => {
+                    self.remove_live_run(chat_id, &run.id);
+                    let _ = client.kill();
+                    let _ = self.fail_run(&run.id, &err.to_string());
+                    return Err(err);
+                }
+            };
 
-        // Codex exposes its `request_user_input` tool only in collaboration
-        // plan mode. Make that an explicit first-prompt choice rather than a
-        // hidden default; other ACP agents keep their own configuration.
-        if let Some(mode) = session_mode.filter(|_| {
-            resolved
-                .command
-                .file_name()
-                .is_some_and(|name| name == "codex-acp")
-        }) {
-            if let Err(err) =
-                self.configure_codex_session(&run.id, &client, acp_session_id.as_deref(), mode)
-            {
-                self.remove_live_run(chat_id, &run.id);
-                let _ = client.kill();
-                let _ = self.fail_run(&run.id, &err.to_string());
-                return Err(err);
+        if let (Some(mode), Some(session_id)) = (session_mode, acp_session_id.as_deref()) {
+            match configure_session(
+                session_id,
+                &mut session_configuration,
+                mode,
+                |method, params| {
+                    self.acp_request(
+                        &run.id,
+                        &client,
+                        AgentRpcMethod::Other(method.to_owned()),
+                        params,
+                    )
+                },
+            ) {
+                Ok(true) => {}
+                Ok(false) => {
+                    debug!(%agent_id, %mode, "agent does not advertise a compatible session mode; retaining its default");
+                }
+                Err(err) => {
+                    self.remove_live_run(chat_id, &run.id);
+                    let _ = client.kill();
+                    let _ = self.fail_run(&run.id, &err.to_string());
+                    return Err(err);
+                }
             }
         }
 
@@ -286,6 +314,7 @@ impl SessionManager {
             .filter(|live| live.run_id == run.id)
             .ok_or_else(|| Error::msg("agent disconnected during session startup"))?;
         live.acp_session_id = acp_session_id.clone();
+        live.session_configuration = session_configuration;
         live.needs_history_hydration = needs_history_hydration;
         drop(live_runs);
 
@@ -515,9 +544,9 @@ impl SessionManager {
         Ok(lock)
     }
 
-    /// Change the active Codex session's collaboration/permission preset.
+    /// Change an active ACP session using the configuration it advertised.
     pub fn set_session_mode(&self, chat_id: &str, mode: &str) -> Result<()> {
-        let (run_id, client, session_id, agent_id) = {
+        let (run_id, client, session_id, mut configuration) = {
             let guard = self
                 .inner
                 .by_chat
@@ -530,59 +559,39 @@ impl SessionManager {
                 live.run_id.clone(),
                 Arc::clone(&live.client),
                 live.acp_session_id.clone(),
-                live.agent_id.clone(),
+                live.session_configuration.clone(),
             )
         };
-        let resolved = self.agents.resolve(&agent_id)?;
-        if !resolved
-            .command
-            .file_name()
-            .is_some_and(|name| name == "codex-acp")
-        {
-            return Err(Error::msg("this agent does not expose Codex session modes"));
+        let session_id = session_id.ok_or_else(|| Error::msg("ACP session has not started"))?;
+        let applied =
+            configure_session(&session_id, &mut configuration, mode, |method, params| {
+                self.acp_request(
+                    &run_id,
+                    &client,
+                    AgentRpcMethod::Other(method.to_owned()),
+                    params,
+                )
+            })?;
+        if !applied {
+            return Err(Error::msg(
+                "agent does not advertise a compatible session mode configuration",
+            ));
         }
-        self.configure_codex_session(&run_id, &client, session_id.as_deref(), mode)
-    }
 
-    fn configure_codex_session(
-        &self,
-        run_id: &str,
-        client: &AcpClient,
-        session_id: Option<&str>,
-        mode: &str,
-    ) -> Result<()> {
-        let session_id = session_id.ok_or_else(|| Error::msg("Codex session has not started"))?;
-        let (collaboration_mode, agent_mode) = match mode {
-            "plan" => ("plan", Some("agent")),
-            "build" => ("default", Some("agent")),
-            "ask" => ("default", Some("read-only")),
-            _ => return Err(Error::msg("mode must be plan, build, or ask")),
-        };
-        self.acp_request(
-            run_id,
-            client,
-            AgentRpcMethod::Other("session/set_config_option".to_owned()),
-            json!({
-                "sessionId": session_id,
-                "configId": "collaboration_mode",
-                "type": "id",
-                "value": collaboration_mode,
-            }),
-        )?;
-        if let Some(agent_mode) = agent_mode {
-            self.acp_request(
-                run_id,
-                client,
-                AgentRpcMethod::Other("session/set_config_option".to_owned()),
-                json!({
-                    "sessionId": session_id,
-                    "configId": "mode",
-                    "type": "id",
-                    "value": agent_mode,
-                }),
-            )?;
+        let mut live_runs = self
+            .inner
+            .by_chat
+            .lock()
+            .map_err(|_| Error::msg("session lock poisoned"))?;
+        if let Some(live) = live_runs
+            .get_mut(chat_id)
+            .filter(|live| live.run_id == run_id)
+        {
+            live.session_configuration = configuration;
+            Ok(())
+        } else {
+            Err(Error::msg("session was replaced while changing its mode"))
         }
-        Ok(())
     }
 
     /// Provide an isolated fallback when an agent cannot resume its own saved
@@ -1072,6 +1081,7 @@ mod tests {
                 agent_id: "agent".to_owned(),
                 client: sleeping_client(),
                 acp_session_id: Some("new-session".to_owned()),
+                session_configuration: SessionConfiguration::default(),
                 needs_history_hydration: false,
                 streaming_message_ids: HashMap::new(),
                 last_streaming_message_id: None,
@@ -1171,6 +1181,7 @@ mod tests {
                 agent_id: "codex-acp".to_owned(),
                 client: sleeping_client(),
                 acp_session_id: Some("session-1".to_owned()),
+                session_configuration: SessionConfiguration::default(),
                 needs_history_hydration: false,
                 streaming_message_ids: HashMap::from([(
                     "upstream".to_owned(),

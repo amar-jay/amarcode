@@ -23,6 +23,7 @@
 mod inbound;
 mod manager;
 mod messages;
+mod session_config;
 mod types;
 mod util;
 

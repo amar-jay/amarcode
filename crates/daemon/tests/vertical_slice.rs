@@ -118,7 +118,8 @@ async fn create_chat_prompt_store_and_events() {
             "params": {
                 "chat_id": chat_id,
                 "agent_id": AGENT_ID,
-                "text": "hello mock"
+                "text": "hello mock",
+                "session_mode": "build"
             }
         }),
     )
@@ -270,6 +271,16 @@ async fn create_chat_prompt_store_and_events() {
             || e.method.starts_with("message.")),
         "expected prompt or message methods in acp_events: {:?}",
         acp_events.iter().map(|e| &e.method).collect::<Vec<_>>()
+    );
+    assert!(
+        acp_events
+            .iter()
+            .any(|event| event.method == "session/set_config_option"),
+        "a non-Codex agent's advertised mode should be configured: {:?}",
+        acp_events
+            .iter()
+            .map(|event| &event.method)
+            .collect::<Vec<_>>()
     );
 
     let run = store
