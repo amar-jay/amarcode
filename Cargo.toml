@@ -3,8 +3,10 @@ resolver = "2"
 members = [
   "crates/application/src-tauri",
   "crates/daemon",
+  "crates/protocol",
 ]
 default-members = [
   "crates/application/src-tauri",
   "crates/daemon",
+  "crates/protocol",
 ]

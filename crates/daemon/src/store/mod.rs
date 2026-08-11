@@ -17,9 +17,11 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    protocol::{MessagePartKind, MessageRole, MessageStatus, RpcDirection, RpcEnvelope, RunStatus},
+    protocol::{MessageRole, MessageStatus, RpcDirection, RpcEnvelope, RunStatus},
     Error, Result,
 };
+
+pub use crate::protocol::{AgentDefinition, Chat, Message, MessagePart};
 
 pub mod agents;
 pub mod chats;
@@ -31,28 +33,6 @@ pub mod runs;
 const MIGRATIONS: &[&str] = &[include_str!("../../migrations/0001_initial.sql")];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentDefinition {
-    pub id: String,
-    pub name: String,
-    pub command: String,
-    pub arguments: Vec<String>,
-    pub environment: Vec<(String, String)>,
-    pub is_preset: bool,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Chat {
-    pub id: String,
-    pub workspace_path: String,
-    pub title: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub archived_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRun {
     pub id: String,
     pub chat_id: String,
@@ -62,26 +42,6 @@ pub struct AgentRun {
     pub started_at: String,
     pub finished_at: Option<String>,
     pub error_message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub id: String,
-    pub chat_id: String,
-    pub agent_run_id: Option<String>,
-    pub role: MessageRole,
-    pub content: String,
-    pub status: MessageStatus,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MessagePart {
-    pub message_id: String,
-    pub ordinal: i64,
-    pub kind: MessagePartKind,
-    pub content_json: String,
 }
 
 /// Persisted ACP traffic row (DB form of [`RpcEnvelope`] plus run metadata).

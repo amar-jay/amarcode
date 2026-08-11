@@ -62,8 +62,9 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
 
 fn health(app: &App) -> Result<Value> {
     let body = HealthResult {
-        status: "ok",
-        version: env!("CARGO_PKG_VERSION"),
+        status: "ok".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+        protocol_version: amarcode_protocol::PROTOCOL_VERSION,
         addr: app.config.daemon_addr.clone(),
     };
     to_value(body)
@@ -71,7 +72,8 @@ fn health(app: &App) -> Result<Value> {
 
 fn version() -> Result<Value> {
     to_value(VersionResult {
-        version: env!("CARGO_PKG_VERSION"),
+        version: env!("CARGO_PKG_VERSION").into(),
+        protocol_version: amarcode_protocol::PROTOCOL_VERSION,
     })
 }
 

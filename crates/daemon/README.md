@@ -4,9 +4,9 @@ Background service for Amarcode. Owns durable workspace state, talks to ACP
 coding agents as subprocesses, and exposes a local TCP JSON-line API for the
 editor / CLI.
 
-> **Scope note for contributors:** implement against *this* crate and this
-> protocol. Do not mirror or “port” behavior from the desktop app shell; that
-> surface is separate and currently diverges from this design.
+> **Scope note for contributors:** the client wire contract lives in the
+> workspace's `amarcode-protocol` crate and is shared with the desktop shell.
+> Do not re-declare those wire types in either consumer.
 
 ---
 
@@ -44,7 +44,8 @@ Strict layering. Dependencies point **down** only.
 | **Entrypoint** | `main.rs` | Load config, init logging, build `App`, run until signal |
 | **App** | `app.rs` | Owns `Config`, `Store`, event bus; binds TCP and serves |
 | **Client RPC** | `rpc/` | TCP accept, one JSON object per line, method dispatch, event subscriptions |
-| **Protocol** | `protocol/` | Stable wire types for clients *and* shared domain enums |
+| **Protocol** | `../protocol/` | Versioned client wire types and shared domain enums; generates the React TypeScript contract |
+| **ACP protocol** | `protocol/acp_types.rs` | Daemon-private vocabulary for the agent subprocess protocol |
 | **Service** | `service/` | Product use-cases (chat CRUD, start run, prompt, fan-out). *Mostly scaffolded* |
 | **Store** | `store/` | SQLite persistence (WAL, FKs, migrations) |
 | **ACP** | `acp/` | Spawn agent, stdio JSON-RPC, correlate requests, inbound notifications |
@@ -68,7 +69,8 @@ TCP line
 - `store` does not know about TCP or ACP method names as control flow.
 - `acp` does not know about chats or UI events.
 - `service` is the only place that may join store + ACP + event bus.
-- `protocol` is the shared vocabulary; keep it boring and versioned.
+- `amarcode-protocol` is the shared client vocabulary; keep it boring and
+  increment `PROTOCOL_VERSION` for incompatible wire changes.
 
 ### Store-first write path (critical)
 
@@ -189,8 +191,8 @@ One JSON object per line. No HTTP, no length prefixes.
 
 | Method | Manager | Behavior |
 |--------|---------|----------|
-| `health` | — | status, version, bind addr |
-| `version` | — | package version |
+| `health` | — | status, daemon version, protocol version, bind addr |
+| `version` | — | daemon version and protocol version |
 | `subscribe_events` | — | ack, then stream `EditorEvent` lines (`chat_id` / `run_id` / `session_id` filters) |
 | `list_agents` | agents | preset + custom agent definitions |
 | `create_chat` | chats | `{ workspace_path, title? }` → chat row + `ChatUpdated` |
@@ -254,7 +256,7 @@ service::session
               Notification | Request | InvalidMessage | Disconnected
 ```
 
-Shared method names live in `protocol::types`:
+Daemon-private ACP method names live in `protocol::acp_types`:
 
 - `AgentRpcMethod` — daemon → agent (`initialize`, `session/new`, `session/prompt`, …)
 - `AgentEventMethod` — agent → daemon (`session/update`, `session/request_permission`, …)
@@ -289,9 +291,8 @@ src/
   logging.rs           tracing setup
   error.rs             shared Error / Result
   protocol/
-    rpc.rs             client RPC request/response types
-    events.rs          EditorEvent wire shapes
-    types.rs           RunStatus, MessageRole, ACP methods, …
+    mod.rs             re-exports the shared client protocol
+    acp_types.rs       daemon-private ACP methods and envelopes
   rpc/
     server.rs          TCP accept + shutdown
     connection.rs      per-socket read/write + subscribe loop
@@ -302,7 +303,20 @@ src/
   bin/test-client-cli.rs   manual protocol tester (scaffold)
 migrations/
   0001_initial.sql
+
+../protocol/
+  src/rpc.rs           client RPC request/response types
+  src/events.rs        EditorEvent wire shapes
+  src/types.rs         RunStatus, MessageRole, persisted wire models, …
+  src/bin/generate-types.rs
+
+../application/src/generated/protocol.ts
+                       checked-in generated React contract
 ```
+
+The protocol crate's drift test compares the generator output byte-for-byte
+with the checked-in TypeScript file. Run `bun run protocol:generate` after a
+contract change and `bun run protocol:check` in verification/CI.
 
 ---
 

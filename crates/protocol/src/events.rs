@@ -1,25 +1,17 @@
-//! Live event payloads sent to subscribed TCP clients.
-//!
-//! After `subscribe_events` succeeds, the connection receives lines like:
-//! `{ "event": { "type": "runUpdated", "payload": { ... } } }`.
-//!
-//! These are the stable editor-facing events. ACP agent notifications are
-//! translated into this shape by `service::session_manager`.
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
-use super::types::{MessagePartKind, MessageStatus, RunStatus, TurnStatus};
+use crate::{MessagePartKind, MessageStatus, RunStatus, TurnStatus};
 
-/// Wire envelope written after a successful `subscribe_events`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventLine {
     pub event: EditorEvent,
 }
 
-/// Stable events emitted by the daemon to the editor frontend.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
+#[ts(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum EditorEvent {
     ChatUpdated {
         chat_id: String,
@@ -29,7 +21,6 @@ pub enum EditorEvent {
         status: RunStatus,
         error_message: Option<String>,
     },
-    /// One user prompt → agent stopReason lifecycle.
     TurnUpdated {
         chat_id: String,
         run_id: String,
@@ -51,6 +42,7 @@ pub enum EditorEvent {
     },
     MessagePartAdded {
         message_id: String,
+        #[ts(type = "number")]
         ordinal: i64,
         kind: MessagePartKind,
     },

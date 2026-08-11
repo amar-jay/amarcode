@@ -27,11 +27,15 @@ impl AppState {
     }
 
     pub async fn health(&self) -> Result<HealthResult, String> {
-        self.call(methods::HEALTH, Value::Null).await
+        let health: HealthResult = self.call(methods::HEALTH, Value::Null).await?;
+        ensure_compatible_protocol(health.protocol_version)?;
+        Ok(health)
     }
 
     pub async fn version(&self) -> Result<VersionResult, String> {
-        self.call(methods::VERSION, Value::Null).await
+        let version: VersionResult = self.call(methods::VERSION, Value::Null).await?;
+        ensure_compatible_protocol(version.protocol_version)?;
+        Ok(version)
     }
 
     pub async fn list_agents(&self) -> Result<Vec<AgentDefinition>, String> {
@@ -130,6 +134,9 @@ impl AppState {
         &self,
         filter: crate::protocol::rpc::SubscribeEventsParams,
     ) -> Result<EventSubscription, String> {
+        // Re-check on every subscription, not only application bootstrap. A
+        // restarted daemon may have a different protocol version.
+        self.health().await?;
         DaemonBridge::subscribe(serde_json::to_value(filter).map_err(|error| error.to_string())?)
             .await
     }
@@ -156,5 +163,29 @@ impl AppState {
         // Each RPC gets its own request/response connection so reads, cancel,
         // and agent responses remain available while that request is pending.
         DaemonBridge::new().call(method, params).await
+    }
+}
+
+fn ensure_compatible_protocol(actual: u32) -> Result<(), String> {
+    let expected = amarcode_protocol::PROTOCOL_VERSION;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "incompatible daemon protocol: application requires {expected}, daemon provides {actual}"
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_compatible_protocol;
+
+    #[test]
+    fn rejects_a_different_daemon_protocol_version() {
+        assert!(ensure_compatible_protocol(amarcode_protocol::PROTOCOL_VERSION).is_ok());
+        let error = ensure_compatible_protocol(amarcode_protocol::PROTOCOL_VERSION + 1)
+            .expect_err("different version must be rejected");
+        assert!(error.contains("incompatible daemon protocol"));
     }
 }

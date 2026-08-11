@@ -1,47 +1,31 @@
-//! Client-facing RPC shapes for the TCP JSON-line protocol.
-//!
-//! Framing (one JSON object per line):
-//! - request:  `{ "method": "...", "params": { ... } }`
-//! - response: `{ "result": ... }` or `{ "error": "..." }`
-//!
-//! Handlers live in `rpc::handler`; this module is types only.
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
-/// Well-known RPC method names.
+use crate::{AgentDefinition, Chat};
+
 pub mod methods {
     pub const HEALTH: &str = "health";
     pub const VERSION: &str = "version";
     pub const SUBSCRIBE_EVENTS: &str = "subscribe_events";
-
     pub const LIST_AGENTS: &str = "list_agents";
-
     pub const CREATE_CHAT: &str = "create_chat";
     pub const LIST_CHATS: &str = "list_chats";
     pub const GET_CHAT: &str = "get_chat";
-
     pub const PROMPT: &str = "prompt";
     pub const SET_SESSION_MODE: &str = "set_session_mode";
     pub const CANCEL: &str = "cancel";
-
     pub const RESPOND_PERMISSION: &str = "respond_permission";
     pub const RESPOND_INPUT: &str = "respond_input";
 }
 
-/// One client request line.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RpcRequest {
     pub method: String,
-    /// Optional JSON object (or any value). Missing params default to `null`.
     #[serde(default)]
     pub params: Value,
 }
 
-/// One server response line.
-///
-/// Exactly one of `result` or `error` is set when serializing successful
-/// handler outcomes vs failures.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -66,21 +50,21 @@ impl RpcResponse {
     }
 }
 
-// --- health / version / subscribe ------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct HealthResult {
     pub status: String,
     pub version: String,
+    pub protocol_version: u32,
     pub addr: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct VersionResult {
     pub version: String,
+    pub protocol_version: u32,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 pub struct SubscribeEventsParams {
     #[serde(default)]
     pub chat_id: Option<String>,
@@ -95,23 +79,19 @@ pub struct SubscribeEventsResult {
     pub subscribed: bool,
 }
 
-// --- agents ----------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListAgentsResult {
-    pub agents: Vec<super::AgentDefinition>,
+    pub agents: Vec<AgentDefinition>,
 }
 
-// --- chats -----------------------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct CreateChatParams {
     pub workspace_path: String,
     #[serde(default)]
     pub title: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 pub struct ListChatsParams {
     #[serde(default)]
     pub workspace_path: Option<String>,
@@ -119,13 +99,12 @@ pub struct ListChatsParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListChatsResult {
-    pub chats: Vec<super::Chat>,
+    pub chats: Vec<Chat>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct GetChatParams {
     pub chat_id: String,
-    /// When true (default), include messages and parts for UI restore.
     #[serde(default = "default_true")]
     pub include_messages: bool,
 }
@@ -134,9 +113,7 @@ fn default_true() -> bool {
     true
 }
 
-// --- session / agent runs --------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PromptParams {
     pub chat_id: String,
     pub agent_id: String,
@@ -147,7 +124,13 @@ pub struct PromptParams {
     pub session_mode: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SetSessionModeParams {
+    pub chat_id: String,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PromptResultDto {
     pub run_id: String,
     pub chat_id: String,
@@ -156,38 +139,36 @@ pub struct PromptResultDto {
     pub acp_session_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CancelParams {
     pub chat_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct CancelResult {
     pub cancelled: bool,
     pub chat_id: String,
 }
 
-/// Answer an agent-initiated permission or input request.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct RespondAgentParams {
     pub request_id: String,
-    /// Success payload forwarded as JSON-RPC `result` to the agent.
     #[serde(default)]
     pub result: Option<Value>,
-    /// If set, the daemon answers with a JSON-RPC error instead of `result`.
     #[serde(default)]
     pub error: Option<RespondAgentError>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct RespondAgentError {
+    #[ts(type = "number")]
     pub code: i64,
     pub message: String,
     #[serde(default)]
     pub data: Option<Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct RespondAgentResult {
     pub ok: bool,
     pub request_id: String,

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { toast } from "sonner";
+import { daemonApi } from "@/api";
 import { loadAgentsAtom, selectedAgentAtom, selectedAgentIdAtom } from "./agents";
 import { refreshChatsAtom } from "./chats";
 import { ensureDaemonEventStream, subscribeDaemonEvents } from "./daemon-events";
@@ -45,14 +46,31 @@ export function useAppBootstrap() {
 
   // Catalogs + event stream bound to the Provider store (not getDefaultStore).
   useEffect(() => {
-    ensureDaemonEventStream(store);
-    void loadAgents().catch((error: unknown) => {
-      console.error("Failed to load agents:", error);
-    });
-    void refreshChats().catch((error: unknown) => {
-      console.error("Failed to load chats:", error);
-      toast.error("Failed to load chats. Please try again.");
-    });
+    let cancelled = false;
+    void (async () => {
+      try {
+        // `daemon_health` validates the shared wire protocol version in the
+        // Tauri layer. Do not start subscriptions or catalogs against an
+        // incompatible daemon.
+        await daemonApi.health();
+        if (cancelled) return;
+        ensureDaemonEventStream(store);
+        await Promise.all([loadAgents(), refreshChats()]);
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Daemon bootstrap failed:", error);
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : typeof error === "string"
+              ? error
+              : "Unable to connect to a compatible daemon.",
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [store, loadAgents, refreshChats]);
 
   // Keep sidebar list fresh when any chat metadata changes (every event).
