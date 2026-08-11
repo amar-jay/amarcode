@@ -15,17 +15,17 @@ impl Store {
     pub fn seed_presets(&self) -> Result<()> {
         let now = now();
         for (id, name, command, arguments) in [
-            ("claude-acp", "Claude Agent ACP", "claude-agent-acp", vec![]),
+            ("codex-acp", "Codex", "codex-acp", vec![]),
+            ("claude-acp", "Claude Code", "claude-agent-acp", vec![]),
             (
                 "copilot-acp",
-                "GitHub Copilot ACP",
+                "GitHub Copilot",
                 "copilot",
                 vec!["--acp"],
             ),
-            ("codex-acp", "Codex ACP", "codex-acp", vec![]),
             (
                 "grok-acp",
-                "Grok ACP",
+                "Grok",
                 "grok",
                 vec!["agent", "stdio"],
             )

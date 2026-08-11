@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::Duration,
 };
 
@@ -56,6 +56,10 @@ pub(super) struct LiveRun {
 pub(super) struct SessionInner {
     pub(super) store: Arc<Store>,
     pub(super) events: broadcast::Sender<EditorEvent>,
+    /// Serializes complete prompt turns per chat. Weak entries allow locks for
+    /// inactive chats to be reclaimed while preserving one lock for all
+    /// current callers and waiters.
+    pub(super) prompt_locks: Mutex<HashMap<String, Weak<Mutex<()>>>>,
     pub(super) by_chat: Mutex<HashMap<String, LiveRun>>,
     pub(super) pending: Mutex<HashMap<String, PendingAgentRequest>>,
 }

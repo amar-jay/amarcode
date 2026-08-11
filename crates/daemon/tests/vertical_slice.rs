@@ -290,8 +290,118 @@ async fn create_chat_prompt_store_and_events() {
     let _ = std::fs::remove_dir_all(&app_dir);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_prompts_share_one_chat_run() {
+    let mock_agent = env_bin("mock-acp-agent");
+    let daemon_bin = env_bin("amarcode-daemon");
+
+    let app_dir = std::env::temp_dir().join(format!("amarcode-concurrent-{}", uuid_simple()));
+    std::fs::create_dir_all(&app_dir).expect("app dir");
+    let workspace = app_dir.join("workspace");
+    std::fs::create_dir_all(&workspace).expect("workspace");
+
+    let addr = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind free port");
+        let port = listener.local_addr().expect("free port address").port();
+        drop(listener);
+        format!("127.0.0.1:{port}")
+    };
+
+    let mut daemon = Command::new(&daemon_bin)
+        .env("AMARCODE_APPDIR", &app_dir)
+        .env("AMARCODE_DAEMON_ADDR", &addr)
+        .env("AMARCODE_LOG", "amarcode_daemon=info")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn daemon");
+
+    wait_for_tcp(&addr, Duration::from_secs(5))
+        .await
+        .expect("daemon did not start");
+    rpc(&addr, json!({"method": "health"}))
+        .await
+        .expect("health");
+    insert_mock_agent_with_environment(
+        &app_dir,
+        &mock_agent,
+        &chrono_now(),
+        vec![("AMARCODE_MOCK_INITIALIZE_DELAY_MS".into(), "250".into())],
+    );
+
+    let create = rpc(
+        &addr,
+        json!({
+            "method": "create_chat",
+            "params": {
+                "workspace_path": workspace.to_string_lossy(),
+                "title": "concurrent prompts"
+            }
+        }),
+    )
+    .await
+    .expect("create_chat");
+    let chat_id = create["result"]["id"].as_str().expect("chat id").to_owned();
+
+    let first = rpc(
+        &addr,
+        json!({
+            "method": "prompt",
+            "params": { "chat_id": chat_id, "agent_id": AGENT_ID, "text": "first" }
+        }),
+    );
+    let second = rpc(
+        &addr,
+        json!({
+            "method": "prompt",
+            "params": { "chat_id": chat_id, "agent_id": AGENT_ID, "text": "second" }
+        }),
+    );
+    let (first, second) = tokio::join!(first, second);
+    let first = first.expect("first prompt");
+    let second = second.expect("second prompt");
+    assert!(
+        first.get("result").is_some(),
+        "first prompt failed: {first}"
+    );
+    assert!(
+        second.get("result").is_some(),
+        "second prompt failed: {second}"
+    );
+    assert_eq!(
+        first.pointer("/result/run_id"),
+        second.pointer("/result/run_id"),
+        "serialized prompts should reuse the same live run"
+    );
+
+    let store = amarcode_daemon::store::Store::open(&app_dir.join("workspace.sqlite3"))
+        .expect("reopen store");
+    let runs = store.list_runs_for_chat(&chat_id).expect("list chat runs");
+    assert_eq!(runs.len(), 1, "concurrent prompts created orphan runs");
+    let user_messages = store
+        .messages(&chat_id)
+        .expect("chat messages")
+        .into_iter()
+        .filter(|message| message.role == amarcode_daemon::protocol::MessageRole::User)
+        .count();
+    assert_eq!(user_messages, 2, "both prompts must be stored exactly once");
+
+    let _ = daemon.kill();
+    let _ = daemon.wait();
+    let _ = std::fs::remove_dir_all(&app_dir);
+}
+
 /// Insert mock agent into the live daemon DB (no create_agent RPC yet).
 fn insert_mock_agent(app_dir: &std::path::Path, mock_agent: &std::path::Path, now: &str) {
+    insert_mock_agent_with_environment(app_dir, mock_agent, now, vec![]);
+}
+
+fn insert_mock_agent_with_environment(
+    app_dir: &std::path::Path,
+    mock_agent: &std::path::Path,
+    now: &str,
+    environment: Vec<(String, String)>,
+) {
     // Daemon may still be writing; open with short retry.
     let db_path = app_dir.join("workspace.sqlite3");
     for _ in 0..20 {
@@ -307,7 +417,7 @@ fn insert_mock_agent(app_dir: &std::path::Path, mock_agent: &std::path::Path, no
             name: "Mock ACP".into(),
             command: mock_agent.to_string_lossy().into_owned(),
             arguments: vec![],
-            environment: vec![],
+            environment,
             is_preset: false,
             created_at: now.into(),
             updated_at: now.into(),

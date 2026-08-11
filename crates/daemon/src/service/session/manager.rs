@@ -40,6 +40,7 @@ impl SessionManager {
             inner: Arc::new(SessionInner {
                 store,
                 events,
+                prompt_locks: std::sync::Mutex::new(HashMap::new()),
                 by_chat: std::sync::Mutex::new(HashMap::new()),
                 pending: std::sync::Mutex::new(HashMap::new()),
             }),
@@ -48,6 +49,20 @@ impl SessionManager {
 
     /// Start a new agent run for a chat (spawns ACP, initialize + resume/new session).
     pub fn start_run(
+        &self,
+        chat_id: &str,
+        agent_id: &str,
+        session_mode: Option<&str>,
+    ) -> Result<AgentRun> {
+        let prompt_lock = self.prompt_lock(chat_id)?;
+        let _prompt_guard = prompt_lock
+            .lock()
+            .map_err(|_| Error::msg("prompt lock poisoned"))?;
+        self.start_run_locked(chat_id, agent_id, session_mode)
+    }
+
+    /// Start a run while the caller holds this chat's prompt lock.
+    fn start_run_locked(
         &self,
         chat_id: &str,
         agent_id: &str,
@@ -271,6 +286,15 @@ impl SessionManager {
             return Err(Error::msg("prompt text must not be empty"));
         }
 
+        // Keep session selection/startup and the complete ACP turn atomic for
+        // this chat. Without this, concurrent RPC connections can both spawn a
+        // run or can overwrite the live turn's streaming/message ownership.
+        // Other chats use different locks and continue in parallel.
+        let prompt_lock = self.prompt_lock(chat_id)?;
+        let _prompt_guard = prompt_lock
+            .lock()
+            .map_err(|_| Error::msg("prompt lock poisoned"))?;
+
         let needs_start = {
             let guard = self
                 .inner
@@ -283,7 +307,7 @@ impl SessionManager {
             }
         };
         if needs_start {
-            self.start_run(chat_id, agent_id, session_mode)?;
+            self.start_run_locked(chat_id, agent_id, session_mode)?;
         }
 
         let (run_id, client, session_id, needs_history_hydration) = {
@@ -453,6 +477,25 @@ impl SessionManager {
             user_message_id: user_message.id,
             acp_session_id: session_id,
         })
+    }
+
+    fn prompt_lock(&self, chat_id: &str) -> Result<Arc<std::sync::Mutex<()>>> {
+        let mut locks = self
+            .inner
+            .prompt_locks
+            .lock()
+            .map_err(|_| Error::msg("prompt lock registry poisoned"))?;
+
+        // A waiting caller owns a strong Arc, so pruning dead weak references
+        // cannot split callers for the same chat across different locks.
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = locks.get(chat_id).and_then(std::sync::Weak::upgrade) {
+            return Ok(lock);
+        }
+
+        let lock = Arc::new(std::sync::Mutex::new(()));
+        locks.insert(chat_id.to_owned(), Arc::downgrade(&lock));
+        Ok(lock)
     }
 
     /// Change the active Codex session's collaboration/permission preset.

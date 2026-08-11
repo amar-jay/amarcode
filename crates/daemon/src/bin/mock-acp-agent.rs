@@ -41,6 +41,12 @@ fn main() {
 
         match method {
             Some("initialize") => {
+                if let Some(delay_ms) = std::env::var("AMARCODE_MOCK_INITIALIZE_DELAY_MS")
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                }
                 reply(
                     &mut stdout,
                     id,
