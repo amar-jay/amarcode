@@ -63,11 +63,12 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
                 write_response(&mut writer, &RpcResponse::ok(value)).await?;
             }
             Ok(DispatchOutcome::Subscribe(filter)) => {
-                let ack = SubscribeEventsResult { subscribed: true };
-                let value = serde_json::to_value(ack)?;
-                write_response(&mut writer, &RpcResponse::ok(value)).await?;
+                // Register before awaiting socket I/O. Any event emitted while
+                // the acknowledgement is being written is then queued for this
+                // subscriber instead of falling into a registration gap.
+                let receiver = acknowledge_subscription(&mut writer, &app.events).await?;
                 debug!(%peer, ?filter, "entering event subscription mode");
-                return stream_events(&app, &mut writer, &mut lines, filter).await;
+                return stream_events(&mut writer, &mut lines, filter, receiver).await;
             }
             Err(err) => {
                 write_response(&mut writer, &RpcResponse::err(err.to_string())).await?;
@@ -77,6 +78,20 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
 
     info!(%peer, "client disconnected");
     Ok(())
+}
+
+async fn acknowledge_subscription<W>(
+    writer: &mut W,
+    events: &broadcast::Sender<EditorEvent>,
+) -> Result<broadcast::Receiver<EditorEvent>>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    let receiver = events.subscribe();
+    let ack = SubscribeEventsResult { subscribed: true };
+    let value = serde_json::to_value(ack)?;
+    write_response(writer, &RpcResponse::ok(value)).await?;
+    Ok(receiver)
 }
 
 async fn write_response<W: AsyncWriteExt + Unpin>(
@@ -102,21 +117,19 @@ async fn write_event<W: AsyncWriteExt + Unpin>(writer: &mut W, event: &EditorEve
 
 /// After subscribe ack: forward matching events until the client goes away.
 ///
-/// Event production is owned by `service::session` (broadcast). Until
-/// that lands, this waits on the shared bus (or client disconnect) so the
-/// protocol shape is already correct.
+/// Event production is owned by `service::session` (broadcast). The receiver
+/// is already registered before this function starts, so events emitted while
+/// the subscription acknowledgement was in flight remain queued.
 async fn stream_events<R, W>(
-    app: &App,
     writer: &mut W,
     lines: &mut tokio::io::Lines<R>,
     filter: SubscribeEventsParams,
+    mut rx: broadcast::Receiver<EditorEvent>,
 ) -> Result<()>
 where
     R: tokio::io::AsyncBufRead + Unpin,
     W: AsyncWriteExt + Unpin,
 {
-    let mut rx = app.events.subscribe();
-
     loop {
         tokio::select! {
             // Client closed the socket (or sent trailing noise we ignore).
@@ -152,6 +165,55 @@ where
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tokio::io::{duplex, AsyncBufReadExt, BufReader};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn event_during_subscription_ack_is_retained() {
+        let (events, _) = broadcast::channel(4);
+        let (client, mut server) = duplex(1);
+        let task_events = events.clone();
+
+        // The one-byte duplex capacity forces the acknowledgement write to
+        // remain pending until the client starts reading it.
+        let subscription =
+            tokio::spawn(async move { acknowledge_subscription(&mut server, &task_events).await });
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while events.receiver_count() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("subscription receiver registration");
+        let event = EditorEvent::ChatUpdated {
+            chat_id: "chat-during-ack".into(),
+        };
+        events.send(event).expect("send test event");
+
+        let mut ack = String::new();
+        BufReader::new(client)
+            .read_line(&mut ack)
+            .await
+            .expect("read subscription ack");
+        let mut receiver = subscription
+            .await
+            .expect("subscription task")
+            .expect("subscription ack");
+
+        assert!(ack.contains("\"subscribed\":true"), "unexpected ack: {ack}");
+        match receiver.try_recv().expect("queued event") {
+            EditorEvent::ChatUpdated { chat_id } => assert_eq!(chat_id, "chat-during-ack"),
+            other => panic!("unexpected queued event: {other:?}"),
         }
     }
 }
