@@ -13,6 +13,9 @@ import type {
   RespondAgentResult,
 } from "./types";
 
+export type DaemonEventStreamStatus =
+  { status: "connected" } | { status: "disconnected"; error: string };
+
 /**
  * Typed bindings for the daemon-backed Tauri commands.
  *
@@ -65,9 +68,18 @@ export const daemonApi = {
   subscribeEvents: async (
     filter: EventFilter,
     onEvent: (event: EditorEvent) => void,
+    onStatus: (status: DaemonEventStreamStatus) => void,
   ): Promise<void> => {
-    const channel = new Channel<EditorEvent>();
-    channel.onmessage = onEvent;
-    await invoke("subscribe_events", { filter, onEvent: channel });
+    const eventChannel = new Channel<EditorEvent>();
+    eventChannel.onmessage = onEvent;
+    const statusChannel = new Channel<DaemonEventStreamStatus>();
+    statusChannel.onmessage = onStatus;
+    // This promise intentionally remains pending while the stream is healthy.
+    // Tauri rejects it when the daemon connection ends.
+    await invoke("subscribe_events", {
+      filter,
+      onEvent: eventChannel,
+      onStatus: statusChannel,
+    });
   },
 } as const;

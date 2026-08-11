@@ -23,7 +23,26 @@ export type TurnSnapshot = {
 /** Latest turnUpdated payload per chat — survives remount / last-event overwrite. */
 export const latestTurnByChatAtom = atom<Record<string, TurnSnapshot>>({});
 
+export type DaemonEventStreamState = {
+  status: "idle" | "connecting" | "connected" | "reconnecting";
+  error: string | null;
+  reconnectAttempt: number;
+  retryInMs: number | null;
+};
+
+/** Connection lifecycle exposed to React for banners/debugging/telemetry. */
+export const daemonEventStreamStateAtom = atom<DaemonEventStreamState>({
+  status: "idle",
+  error: null,
+  reconnectAttempt: 0,
+  retryInMs: null,
+});
+
 let streamStarted = false;
+let reconnectAttempt = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+const INITIAL_RECONNECT_DELAY_MS = 250;
+const MAX_RECONNECT_DELAY_MS = 5_000;
 /** Store that owns the React tree (Provider). Must not be getDefaultStore() when a Provider is used. */
 let boundStore: JotaiStore | null = null;
 const listeners = new Set<EventListener>();
@@ -56,26 +75,76 @@ function activeStore(fallback?: JotaiStore): JotaiStore {
  */
 export function ensureDaemonEventStream(store: JotaiStore) {
   boundStore = store;
-  if (streamStarted) return;
+  if (streamStarted || reconnectTimer) return;
   streamStarted = true;
+  store.set(daemonEventStreamStateAtom, {
+    status: reconnectAttempt > 0 ? "reconnecting" : "connecting",
+    error: store.get(daemonEventStreamStateAtom).error,
+    reconnectAttempt,
+    retryInMs: null,
+  });
 
   void daemonApi
-    .subscribeEvents({}, (event) => {
-      const s = activeStore(store);
-      rememberTurn(s, event);
-      s.set(lastDaemonEventAtom, event);
-      for (const listener of listeners) {
-        try {
-          listener(event);
-        } catch (error) {
-          console.error("daemon event listener failed", error);
+    .subscribeEvents(
+      {},
+      (event) => {
+        const s = activeStore(store);
+        rememberTurn(s, event);
+        s.set(lastDaemonEventAtom, event);
+        for (const listener of listeners) {
+          try {
+            listener(event);
+          } catch (error) {
+            console.error("daemon event listener failed", error);
+          }
         }
-      }
-    })
+      },
+      (status) => {
+        const s = activeStore(store);
+        if (status.status === "connected") {
+          reconnectAttempt = 0;
+          s.set(daemonEventStreamStateAtom, {
+            status: "connected",
+            error: null,
+            reconnectAttempt: 0,
+            retryInMs: null,
+          });
+        } else {
+          s.set(daemonEventStreamStateAtom, {
+            status: "reconnecting",
+            error: status.error,
+            reconnectAttempt: reconnectAttempt + 1,
+            retryInMs: null,
+          });
+        }
+      },
+    )
     .catch((error: unknown) => {
-      // Allow a future reconnect to call ensure again.
       streamStarted = false;
-      console.error("daemon event stream disconnected", error);
+      const message = error instanceof Error ? error.message : String(error);
+      reconnectAttempt += 1;
+      const delay = Math.min(
+        INITIAL_RECONNECT_DELAY_MS * 2 ** (reconnectAttempt - 1),
+        MAX_RECONNECT_DELAY_MS,
+      );
+      const s = activeStore(store);
+      s.set(daemonEventStreamStateAtom, {
+        status: "reconnecting",
+        error: message,
+        reconnectAttempt,
+        retryInMs: delay,
+      });
+      console.warn(
+        `daemon event stream disconnected; retrying in ${delay}ms`,
+        error,
+      );
+
+      if (!reconnectTimer) {
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          ensureDaemonEventStream(activeStore(store));
+        }, delay);
+      }
     });
 }
 

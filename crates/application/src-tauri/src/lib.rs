@@ -5,6 +5,7 @@ mod state;
 
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
 use tauri::{ipc::Channel, State};
 
 use crate::{
@@ -101,23 +102,40 @@ async fn respond_input(
     state.respond_input(params).await
 }
 
-/// Start one daemon event stream. The stream uses a dedicated TCP connection
-/// because `subscribe_events` permanently switches that connection to events.
+#[derive(Clone, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+enum DaemonEventStreamStatus {
+    Connected,
+    Disconnected { error: String },
+}
+
+/// Run one daemon event stream for the lifetime of its dedicated TCP
+/// connection. Keeping this command pending is intentional: if the daemon
+/// disconnects, the returned error rejects the frontend `invoke` promise so
+/// React can reconnect instead of silently retaining a dead subscription.
 #[tauri::command]
 async fn subscribe_events(
     state: State<'_, AppState>,
     filter: crate::protocol::rpc::SubscribeEventsParams,
     on_event: Channel<EditorEvent>,
+    on_status: Channel<DaemonEventStreamStatus>,
 ) -> Result<(), String> {
     let mut subscription = state.subscribe_events(filter).await?;
-    tauri::async_runtime::spawn(async move {
-        while let Ok(event) = subscription.next::<EditorEvent>().await {
-            if on_event.send(event).is_err() {
-                break;
+    on_status
+        .send(DaemonEventStreamStatus::Connected)
+        .map_err(|error| error.to_string())?;
+
+    loop {
+        match subscription.next::<EditorEvent>().await {
+            Ok(event) => on_event.send(event).map_err(|error| error.to_string())?,
+            Err(error) => {
+                let _ = on_status.send(DaemonEventStreamStatus::Disconnected {
+                    error: error.clone(),
+                });
+                return Err(error);
             }
         }
-    });
-    Ok(())
+    }
 }
 
 #[tauri::command]
