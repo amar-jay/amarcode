@@ -4,7 +4,7 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     acp::AcpClient,
@@ -419,29 +419,27 @@ impl SessionManager {
                 .expect("params object")
                 .insert("sessionId".into(), json!(sid));
         } else {
-            self.finish_turn(
-                chat_id,
-                &run_id,
-                &user_message.id,
-                TurnStatus::Failed,
-                None,
-                Some("live session missing acp_session_id"),
-            );
-            return Err(Error::msg("live session missing acp_session_id"));
+            let error = Error::msg("live session missing acp_session_id");
+            if let Err(cleanup_error) =
+                self.terminate_failed_prompt(chat_id, &run_id, &user_message.id, &error.to_string())
+            {
+                warn!(%run_id, error = %cleanup_error, "failed cleaning up broken prompt run");
+            }
+            return Err(error);
         }
 
         let prompt_result = match self.acp_request(&run_id, &client, AgentRpcMethod::Prompt, params)
         {
             Ok(value) => value,
             Err(err) => {
-                self.finish_turn(
+                if let Err(cleanup_error) = self.terminate_failed_prompt(
                     chat_id,
                     &run_id,
                     &user_message.id,
-                    TurnStatus::Failed,
-                    None,
-                    Some(&err.to_string()),
-                );
+                    &err.to_string(),
+                ) {
+                    warn!(%run_id, error = %cleanup_error, "failed cleaning up rejected prompt run");
+                }
                 return Err(err);
             }
         };
@@ -450,14 +448,11 @@ impl SessionManager {
         // persists notifications on a separate worker. Wait for that worker
         // before finalizing the messages from this turn.
         if let Err(err) = client.sync_inbound(ACP_REQUEST_TIMEOUT) {
-            self.finish_turn(
-                chat_id,
-                &run_id,
-                &user_message.id,
-                TurnStatus::Failed,
-                None,
-                Some(&err.to_string()),
-            );
+            if let Err(cleanup_error) =
+                self.terminate_failed_prompt(chat_id, &run_id, &user_message.id, &err.to_string())
+            {
+                warn!(%run_id, error = %cleanup_error, "failed cleaning up stalled inbound run");
+            }
             return Err(Error::msg(err.to_string()));
         }
 
@@ -914,6 +909,80 @@ impl SessionManager {
         });
     }
 
+    /// A prompt transport failure leaves the ACP process's state ambiguous.
+    /// Detach it before killing the process so late notifications cannot touch
+    /// this chat, then make every durable row terminal before publishing the
+    /// corresponding editor events.
+    fn terminate_failed_prompt(
+        &self,
+        chat_id: &str,
+        run_id: &str,
+        user_message_id: &str,
+        error: &str,
+    ) -> Result<()> {
+        let mut live = {
+            let mut live_runs = self
+                .inner
+                .by_chat
+                .lock()
+                .map_err(|_| Error::msg("session lock poisoned"))?;
+            if live_runs
+                .get(chat_id)
+                .is_none_or(|live| live.run_id != run_id)
+            {
+                return Ok(());
+            }
+            live_runs.remove(chat_id).expect("live run checked above")
+        };
+
+        remove_pending_requests_for_run(&self.inner, run_id);
+        let _ = live.client.notify(
+            AgentRpcMethod::Cancel,
+            json!({ "sessionId": live.acp_session_id }),
+        );
+        let _ = live.client.kill();
+
+        let mut first_message_error = None;
+        for message_id in take_streaming_messages_from_live(&mut live) {
+            match finalize_message(&self.inner, &message_id, MessageStatus::Failed) {
+                Ok(()) => self.emit(EditorEvent::MessageUpdated {
+                    message_id,
+                    status: MessageStatus::Failed,
+                }),
+                Err(message_error) => {
+                    first_message_error.get_or_insert(message_error);
+                }
+            }
+        }
+
+        self.inner
+            .store
+            .update_run(run_id, RunStatus::Failed, None, Some(error))?;
+        self.emit(EditorEvent::RunUpdated {
+            run_id: run_id.to_owned(),
+            status: RunStatus::Failed,
+            error_message: Some(error.to_owned()),
+        });
+        self.emit(EditorEvent::TurnUpdated {
+            chat_id: chat_id.to_owned(),
+            run_id: run_id.to_owned(),
+            user_message_id: user_message_id.to_owned(),
+            status: TurnStatus::Failed,
+            stop_reason: None,
+            error_message: Some(error.to_owned()),
+        });
+        self.emit(EditorEvent::AgentConnectionChanged {
+            agent_id: live.agent_id,
+            connected: false,
+            error_message: Some(error.to_owned()),
+        });
+
+        if let Some(message_error) = first_message_error {
+            return Err(message_error);
+        }
+        Ok(())
+    }
+
     fn detach_chat(&self, chat_id: &str) {
         let removed = self
             .inner
@@ -1036,6 +1105,117 @@ mod tests {
                 .expect("current run")
                 .0,
             "new-run"
+        );
+    }
+
+    #[test]
+    fn failed_prompt_terminates_run_and_partial_messages() {
+        let store = Arc::new(Store::open(Path::new(":memory:")).expect("store"));
+        store.seed_presets().expect("seed agents");
+        store
+            .create_chat(&crate::store::Chat {
+                id: "chat-1".to_owned(),
+                workspace_path: "/tmp/workspace".to_owned(),
+                title: "timeout".to_owned(),
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+                updated_at: "2026-01-01T00:00:00Z".to_owned(),
+                archived_at: None,
+            })
+            .expect("create chat");
+        store
+            .create_run(&AgentRun {
+                id: "run-1".to_owned(),
+                chat_id: "chat-1".to_owned(),
+                agent_id: "codex-acp".to_owned(),
+                acp_session_id: Some("session-1".to_owned()),
+                status: RunStatus::Running,
+                started_at: "2026-01-01T00:00:00Z".to_owned(),
+                finished_at: None,
+                error_message: None,
+            })
+            .expect("create run");
+        store
+            .create_message(&Message {
+                id: "partial-message".to_owned(),
+                chat_id: "chat-1".to_owned(),
+                agent_run_id: Some("run-1".to_owned()),
+                role: MessageRole::Assistant,
+                content: "partial".to_owned(),
+                status: MessageStatus::Streaming,
+                created_at: "2026-01-01T00:00:01Z".to_owned(),
+                updated_at: "2026-01-01T00:00:01Z".to_owned(),
+            })
+            .expect("create partial message");
+        store
+            .replace_message_parts(
+                "partial-message",
+                &[MessagePart {
+                    message_id: "partial-message".to_owned(),
+                    ordinal: 0,
+                    kind: MessagePartKind::Text,
+                    content_json: json!({ "text": "partial" }).to_string(),
+                }],
+            )
+            .expect("create message part");
+
+        let (events, _) = broadcast::channel(8);
+        let manager = SessionManager::new(
+            Arc::clone(&store),
+            AgentManager::new(Arc::clone(&store), PathBuf::from("/tmp/tools")),
+            events,
+        );
+        manager.inner.by_chat.lock().expect("live runs").insert(
+            "chat-1".to_owned(),
+            LiveRun {
+                run_id: "run-1".to_owned(),
+                agent_id: "codex-acp".to_owned(),
+                client: sleeping_client(),
+                acp_session_id: Some("session-1".to_owned()),
+                needs_history_hydration: false,
+                streaming_message_ids: HashMap::from([(
+                    "upstream".to_owned(),
+                    "partial-message".to_owned(),
+                )]),
+                last_streaming_message_id: Some("partial-message".to_owned()),
+                active_user_message_id: Some("user-message".to_owned()),
+            },
+        );
+        manager.inner.pending.lock().expect("pending").insert(
+            "pending".to_owned(),
+            PendingAgentRequest {
+                request_id: "pending".to_owned(),
+                run_id: "run-1".to_owned(),
+                chat_id: "chat-1".to_owned(),
+                acp_id: 1,
+                method: "session/request_permission".to_owned(),
+                params: Value::Null,
+            },
+        );
+
+        manager
+            .terminate_failed_prompt("chat-1", "run-1", "user-message", "ACP request timed out")
+            .expect("terminate failed prompt");
+
+        assert!(manager
+            .live_run_for_chat("chat-1")
+            .expect("live run")
+            .is_none());
+        assert!(manager.pending_requests().expect("pending").is_empty());
+        assert_eq!(
+            store
+                .get_run("run-1")
+                .expect("run")
+                .expect("run row")
+                .status,
+            RunStatus::Failed
+        );
+        assert_eq!(
+            store
+                .get_message("partial-message")
+                .expect("message")
+                .expect("message row")
+                .status,
+            MessageStatus::Failed
         );
     }
 }

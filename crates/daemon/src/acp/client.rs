@@ -354,6 +354,11 @@ fn route_incoming(
         Ok(mut waiting) => {
             if let Some(sender) = waiting.remove(&id) {
                 let _ = sender.send(result);
+            } else {
+                let _ = inbound_sender.send(AcpInbound::InvalidMessage {
+                    error: format!("late or unknown ACP response id: {id}"),
+                    raw: raw.into(),
+                });
             }
         }
         Err(_) => {
@@ -367,4 +372,30 @@ fn route_incoming(
 
 fn lock_error<T>(_: std::sync::PoisonError<T>) -> AcpError {
     AcpError::Protocol("ACP internal lock poisoned".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, sync::Mutex};
+
+    use super::*;
+
+    #[test]
+    fn late_response_is_reported_instead_of_silently_dropped() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (inbound_sender, inbound_receiver) = mpsc::channel();
+
+        route_incoming(
+            r#"{"jsonrpc":"2.0","id":7,"result":{}}"#,
+            &pending,
+            &inbound_sender,
+        );
+
+        match inbound_receiver.recv().expect("late response diagnostic") {
+            AcpInbound::InvalidMessage { error, .. } => {
+                assert!(error.contains("response id: 7"));
+            }
+            other => panic!("unexpected inbound message: {other:?}"),
+        }
+    }
 }
