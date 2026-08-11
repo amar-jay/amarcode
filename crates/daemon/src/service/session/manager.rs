@@ -19,7 +19,9 @@ use crate::{
 
 use super::{
     inbound::spawn_inbound_worker,
-    messages::{finalize_message, take_streaming_messages_from_live},
+    messages::{
+        finalize_message, remove_pending_requests_for_run, take_streaming_messages_from_live,
+    },
     types::{LiveRun, PendingAgentRequest, PromptResult, SessionInner, ACP_REQUEST_TIMEOUT},
     util::{extract_session_id, extract_stop_reason, normalize_permission_result, timestamp},
 };
@@ -118,6 +120,26 @@ impl SessionManager {
         };
 
         let client = Arc::new(client);
+        // Ownership begins as soon as the ACP process exists, not only after
+        // initialization. This lets legitimate startup requests through while
+        // still giving inbound workers an exact run-id ownership check.
+        self.inner
+            .by_chat
+            .lock()
+            .map_err(|_| Error::msg("session lock poisoned"))?
+            .insert(
+                chat_id.to_owned(),
+                LiveRun {
+                    run_id: run.id.clone(),
+                    agent_id: agent_id.to_owned(),
+                    client: Arc::clone(&client),
+                    acp_session_id: None,
+                    needs_history_hydration: false,
+                    streaming_message_ids: HashMap::new(),
+                    last_streaming_message_id: None,
+                    active_user_message_id: None,
+                },
+            );
         spawn_inbound_worker(
             Arc::clone(&self.inner),
             run.id.clone(),
@@ -148,6 +170,7 @@ impl SessionManager {
                 }
             }),
         ) {
+            self.remove_live_run(chat_id, &run.id);
             let _ = client.kill();
             let _ = self.fail_run(&run.id, &err.to_string());
             return Err(err);
@@ -210,6 +233,7 @@ impl SessionManager {
         let (acp_session_id, needs_history_hydration) = match session_setup {
             Ok(value) => value,
             Err(err) => {
+                self.remove_live_run(chat_id, &run.id);
                 let _ = client.kill();
                 let _ = self.fail_run(&run.id, &err.to_string());
                 return Err(err);
@@ -228,6 +252,7 @@ impl SessionManager {
             if let Err(err) =
                 self.configure_codex_session(&run.id, &client, acp_session_id.as_deref(), mode)
             {
+                self.remove_live_run(chat_id, &run.id);
                 let _ = client.kill();
                 let _ = self.fail_run(&run.id, &err.to_string());
                 return Err(err);
@@ -251,21 +276,18 @@ impl SessionManager {
             error_message: None,
         });
 
-        let live = LiveRun {
-            run_id: run.id.clone(),
-            agent_id: agent_id.to_owned(),
-            client,
-            acp_session_id: acp_session_id.clone(),
-            needs_history_hydration,
-            streaming_message_ids: HashMap::new(),
-            last_streaming_message_id: None,
-            active_user_message_id: None,
-        };
-        self.inner
+        let mut live_runs = self
+            .inner
             .by_chat
             .lock()
-            .map_err(|_| Error::msg("session lock poisoned"))?
-            .insert(chat_id.to_owned(), live);
+            .map_err(|_| Error::msg("session lock poisoned"))?;
+        let live = live_runs
+            .get_mut(chat_id)
+            .filter(|live| live.run_id == run.id)
+            .ok_or_else(|| Error::msg("agent disconnected during session startup"))?;
+        live.acp_session_id = acp_session_id.clone();
+        live.needs_history_hydration = needs_history_hydration;
+        drop(live_runs);
 
         let mut run = run;
         run.status = RunStatus::Running;
@@ -629,6 +651,7 @@ impl SessionManager {
 
         let active_user_message_id = live.active_user_message_id.clone();
         let run_id = live.run_id.clone();
+        remove_pending_requests_for_run(&self.inner, &run_id);
 
         let _ = self.acp_notify(
             &run_id,
@@ -686,8 +709,9 @@ impl SessionManager {
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             guard
                 .get(&pending.chat_id)
+                .filter(|live| live.run_id == pending.run_id)
                 .map(|live| Arc::clone(&live.client))
-                .ok_or_else(|| Error::msg("live session gone for pending request"))?
+                .ok_or_else(|| Error::msg("pending request belongs to a replaced run"))?
         };
 
         // ACP permission replies must use `outcome.optionId`. Translate
@@ -740,8 +764,9 @@ impl SessionManager {
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             guard
                 .get(&pending.chat_id)
+                .filter(|live| live.run_id == pending.run_id)
                 .map(|live| Arc::clone(&live.client))
-                .ok_or_else(|| Error::msg("live session gone for pending request"))?
+                .ok_or_else(|| Error::msg("pending request belongs to a replaced run"))?
         };
 
         client
@@ -897,6 +922,7 @@ impl SessionManager {
             .ok()
             .and_then(|mut guard| guard.remove(chat_id));
         if let Some(live) = removed {
+            remove_pending_requests_for_run(&self.inner, &live.run_id);
             let _ = live.client.kill();
             if let Some(user_message_id) = live.active_user_message_id {
                 let _ = self.inner.events.send(EditorEvent::TurnUpdated {
@@ -922,7 +948,94 @@ impl SessionManager {
         }
     }
 
+    fn remove_live_run(&self, chat_id: &str, run_id: &str) {
+        if let Ok(mut live_runs) = self.inner.by_chat.lock() {
+            if live_runs
+                .get(chat_id)
+                .is_some_and(|live| live.run_id == run_id)
+            {
+                live_runs.remove(chat_id);
+            }
+        }
+        remove_pending_requests_for_run(&self.inner, run_id);
+    }
+
     fn emit(&self, event: EditorEvent) {
         let _ = self.inner.events.send(event);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::{
+        collections::HashMap,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
+
+    use tokio::sync::broadcast;
+
+    use crate::{acp::AcpClient, service::AgentManager, store::Store};
+
+    use super::*;
+
+    fn sleeping_client() -> Arc<AcpClient> {
+        let arguments = vec!["-c".to_owned(), "sleep 30".to_owned()];
+        let (client, _inbound) =
+            AcpClient::spawn("/bin/sh", &arguments, &[], None).expect("spawn test agent");
+        Arc::new(client)
+    }
+
+    #[test]
+    fn stale_pending_request_cannot_target_replacement_client() {
+        let store = Arc::new(Store::open(Path::new(":memory:")).expect("store"));
+        let (events, _) = broadcast::channel(4);
+        let manager = SessionManager::new(
+            Arc::clone(&store),
+            AgentManager::new(store, PathBuf::from("/tmp/tools")),
+            events,
+        );
+
+        manager.inner.by_chat.lock().expect("live runs").insert(
+            "chat-1".to_owned(),
+            LiveRun {
+                run_id: "new-run".to_owned(),
+                agent_id: "agent".to_owned(),
+                client: sleeping_client(),
+                acp_session_id: Some("new-session".to_owned()),
+                needs_history_hydration: false,
+                streaming_message_ids: HashMap::new(),
+                last_streaming_message_id: None,
+                active_user_message_id: None,
+            },
+        );
+        manager.inner.pending.lock().expect("pending").insert(
+            "daemon-request".to_owned(),
+            PendingAgentRequest {
+                request_id: "daemon-request".to_owned(),
+                run_id: "old-run".to_owned(),
+                chat_id: "chat-1".to_owned(),
+                acp_id: 1,
+                method: "session/request_permission".to_owned(),
+                params: Value::Null,
+            },
+        );
+
+        let error = manager
+            .respond_to_agent("daemon-request", json!({ "allow": true }))
+            .expect_err("stale request must be rejected");
+        assert!(error.to_string().contains("replaced run"));
+        assert!(manager
+            .pending_requests()
+            .expect("pending requests")
+            .is_empty());
+        assert_eq!(
+            manager
+                .live_run_for_chat("chat-1")
+                .expect("live run")
+                .expect("current run")
+                .0,
+            "new-run"
+        );
     }
 }

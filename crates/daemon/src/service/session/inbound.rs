@@ -18,7 +18,8 @@ use crate::{
 use super::{
     messages::{
         append_text_delta, append_tool_part, complete_run, ensure_context_message,
-        ensure_streaming_message, finalize_message, next_part_ordinal, take_streaming_messages,
+        ensure_streaming_message, finalize_message, next_part_ordinal,
+        remove_pending_requests_for_run, take_streaming_messages,
     },
     types::{PendingAgentRequest, SessionInner},
     util::{emit, extract_text_delta},
@@ -52,6 +53,10 @@ fn handle_inbound(
         AcpInbound::Notification { event, envelope } => {
             // 1. STORE raw envelope
             inner.store.save_acp_envelope(run_id, &envelope)?;
+            if !run_owns_chat(inner, run_id, chat_id)? {
+                debug!(%run_id, %chat_id, "ignoring notification from replaced ACP run");
+                return Ok(());
+            }
             // 2. apply product state + 3. EVENTS
             apply_notification(inner, run_id, chat_id, event, &envelope)?;
         }
@@ -63,19 +68,31 @@ fn handle_inbound(
             };
             inner.store.save_acp_envelope(run_id, &envelope)?;
 
-            let request_id = id.to_string();
+            let request_id = new_pending_request_id();
             let pending = PendingAgentRequest {
+                request_id: request_id.clone(),
                 run_id: run_id.to_owned(),
                 chat_id: chat_id.to_owned(),
                 acp_id: id,
                 method: method.clone(),
                 params: params.clone(),
             };
+            // Hold the live-run lock through insertion. A replacement must
+            // wait, then removes this run's pending requests after detaching.
+            let live = inner
+                .by_chat
+                .lock()
+                .map_err(|_| Error::msg("session lock poisoned"))?;
+            if live.get(chat_id).is_none_or(|live| live.run_id != run_id) {
+                debug!(%run_id, %chat_id, acp_id = id, "ignoring request from replaced ACP run");
+                return Ok(());
+            }
             inner
                 .pending
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?
                 .insert(request_id.clone(), pending);
+            drop(live);
 
             let agent_method = AgentEventMethod::from(method.as_str());
             match agent_method {
@@ -114,28 +131,22 @@ fn handle_inbound(
         }
         AcpInbound::Disconnected => {
             debug!(%run_id, "ACP disconnected");
-            // If this run is still the live one for the chat, mark failed/stopped.
-            let still_live = {
-                let guard = inner
+            // Check and remove atomically so an old reader cannot remove a
+            // replacement that became live between two lock acquisitions.
+            let disconnected = {
+                let mut guard = inner
                     .by_chat
                     .lock()
                     .map_err(|_| Error::msg("session lock poisoned"))?;
-                guard
-                    .get(chat_id)
-                    .map(|live| live.run_id == run_id)
-                    .unwrap_or(false)
+                if guard.get(chat_id).is_some_and(|live| live.run_id == run_id) {
+                    guard.remove(chat_id)
+                } else {
+                    None
+                }
             };
-            if still_live {
-                let (agent_id, active_user_message_id) = {
-                    let mut guard = inner
-                        .by_chat
-                        .lock()
-                        .map_err(|_| Error::msg("session lock poisoned"))?;
-                    guard
-                        .remove(chat_id)
-                        .map(|live| (live.agent_id, live.active_user_message_id))
-                        .unwrap_or_default()
-                };
+            if let Some(live) = disconnected {
+                let agent_id = live.agent_id;
+                let active_user_message_id = live.active_user_message_id;
                 if let Some(user_message_id) = active_user_message_id {
                     emit(
                         inner,
@@ -173,6 +184,7 @@ fn handle_inbound(
                         },
                     );
                 }
+                remove_pending_requests_for_run(inner, run_id);
             }
         }
         AcpInbound::Barrier(acknowledge) => {
@@ -180,6 +192,10 @@ fn handle_inbound(
         }
     }
     Ok(())
+}
+
+fn new_pending_request_id() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
 fn apply_notification(
@@ -218,7 +234,7 @@ fn apply_notification(
             );
         }
         AgentEventMethod::MessageCompleted => {
-            for message_id in take_streaming_messages(inner, chat_id) {
+            for message_id in take_streaming_messages(inner, run_id, chat_id) {
                 finalize_message(inner, &message_id, MessageStatus::Complete)?;
                 emit(
                     inner,
@@ -230,7 +246,7 @@ fn apply_notification(
             }
         }
         AgentEventMethod::MessageFailed => {
-            for message_id in take_streaming_messages(inner, chat_id) {
+            for message_id in take_streaming_messages(inner, run_id, chat_id) {
                 finalize_message(inner, &message_id, MessageStatus::Failed)?;
                 emit(
                     inner,
@@ -323,6 +339,14 @@ fn apply_notification(
     Ok(())
 }
 
+fn run_owns_chat(inner: &SessionInner, run_id: &str, chat_id: &str) -> Result<bool> {
+    let guard = inner
+        .by_chat
+        .lock()
+        .map_err(|_| Error::msg("session lock poisoned"))?;
+    Ok(guard.get(chat_id).is_some_and(|live| live.run_id == run_id))
+}
+
 /// Handle ACP `session/update` notification params.
 fn apply_session_update(
     inner: &SessionInner,
@@ -402,4 +426,20 @@ fn apply_session_update(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::new_pending_request_id;
+
+    #[test]
+    fn daemon_request_ids_do_not_share_the_acp_id_namespace() {
+        let ids = (0..64)
+            .map(|_| new_pending_request_id())
+            .collect::<HashSet<_>>();
+        assert_eq!(ids.len(), 64);
+        assert!(ids.iter().all(|id| uuid::Uuid::parse_str(id).is_ok()));
+    }
 }

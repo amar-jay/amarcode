@@ -26,6 +26,9 @@ pub struct PromptResult {
 /// Pending agent-initiated JSON-RPC request (permission / input).
 #[derive(Debug, Clone)]
 pub struct PendingAgentRequest {
+    /// Daemon-wide identifier exposed to editor clients. This is deliberately
+    /// distinct from `acp_id`, whose scope is only one agent process.
+    pub request_id: String,
     pub run_id: String,
     pub chat_id: String,
     pub acp_id: u64,

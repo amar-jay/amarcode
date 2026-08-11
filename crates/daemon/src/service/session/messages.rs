@@ -47,7 +47,18 @@ pub(super) fn complete_run(
     status: RunStatus,
     error: Option<&str>,
 ) -> Result<()> {
-    for message_id in take_streaming_messages(inner, chat_id) {
+    let live = {
+        let mut guard = inner
+            .by_chat
+            .lock()
+            .map_err(|_| Error::msg("session lock poisoned"))?;
+        if guard.get(chat_id).is_none_or(|live| live.run_id != run_id) {
+            return Ok(());
+        }
+        guard.remove(chat_id).expect("live run checked above")
+    };
+
+    for message_id in live.streaming_message_ids.into_values() {
         finalize_message(inner, &message_id, MessageStatus::Complete)?;
         emit(
             inner,
@@ -57,22 +68,7 @@ pub(super) fn complete_run(
             },
         );
     }
-    let active_user_message_id = if let Ok(mut guard) = inner.by_chat.lock() {
-        if guard
-            .get(chat_id)
-            .map(|l| l.run_id == run_id)
-            .unwrap_or(false)
-        {
-            guard
-                .get_mut(chat_id)
-                .and_then(|live| live.active_user_message_id.take())
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    if let Some(user_message_id) = active_user_message_id {
+    if let Some(user_message_id) = live.active_user_message_id {
         let turn_status = if status == RunStatus::Failed {
             TurnStatus::Failed
         } else if status == RunStatus::Stopped {
@@ -101,24 +97,15 @@ pub(super) fn complete_run(
             error_message: error.map(str::to_owned),
         },
     );
-    if let Ok(mut guard) = inner.by_chat.lock() {
-        if guard
-            .get(chat_id)
-            .map(|l| l.run_id == run_id)
-            .unwrap_or(false)
-        {
-            if let Some(live) = guard.remove(chat_id) {
-                emit(
-                    inner,
-                    EditorEvent::AgentConnectionChanged {
-                        agent_id: live.agent_id,
-                        connected: false,
-                        error_message: error.map(str::to_owned),
-                    },
-                );
-            }
-        }
-    }
+    remove_pending_requests_for_run(inner, run_id);
+    emit(
+        inner,
+        EditorEvent::AgentConnectionChanged {
+            agent_id: live.agent_id,
+            connected: false,
+            error_message: error.map(str::to_owned),
+        },
+    );
     Ok(())
 }
 
@@ -189,14 +176,24 @@ pub(super) fn ensure_context_message(
     )
 }
 
-pub(super) fn take_streaming_messages(inner: &SessionInner, chat_id: &str) -> Vec<String> {
+pub(super) fn take_streaming_messages(
+    inner: &SessionInner,
+    run_id: &str,
+    chat_id: &str,
+) -> Vec<String> {
     let Ok(mut guard) = inner.by_chat.lock() else {
         return Vec::new();
     };
-    let Some(live) = guard.get_mut(chat_id) else {
+    let Some(live) = guard.get_mut(chat_id).filter(|live| live.run_id == run_id) else {
         return Vec::new();
     };
     take_streaming_messages_from_live(live)
+}
+
+pub(super) fn remove_pending_requests_for_run(inner: &SessionInner, run_id: &str) {
+    if let Ok(mut pending) = inner.pending.lock() {
+        pending.retain(|_, request| request.run_id != run_id);
+    }
 }
 
 pub(super) fn take_streaming_messages_from_live(live: &mut LiveRun) -> Vec<String> {
@@ -282,4 +279,56 @@ pub(super) fn finalize_message(
 pub(super) fn next_part_ordinal(inner: &SessionInner, message_id: &str) -> Result<i64> {
     let parts = inner.store.message_parts(message_id)?;
     Ok(parts.iter().map(|p| p.ordinal).max().unwrap_or(-1) + 1)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use tokio::sync::broadcast;
+
+    use crate::{acp::AcpClient, store::Store};
+
+    use super::*;
+
+    fn sleeping_client() -> Arc<AcpClient> {
+        let arguments = vec!["-c".to_owned(), "sleep 30".to_owned()];
+        let (client, _inbound) =
+            AcpClient::spawn("/bin/sh", &arguments, &[], None).expect("spawn sleeping test agent");
+        Arc::new(client)
+    }
+
+    #[test]
+    fn stale_run_cannot_drain_current_streaming_messages() {
+        let store = Arc::new(Store::open(std::path::Path::new(":memory:")).expect("store"));
+        let (events, _) = broadcast::channel(4);
+        let inner = SessionInner {
+            store,
+            events,
+            prompt_locks: std::sync::Mutex::new(HashMap::new()),
+            by_chat: std::sync::Mutex::new(HashMap::from([(
+                "chat-1".to_owned(),
+                LiveRun {
+                    run_id: "new-run".to_owned(),
+                    agent_id: "agent".to_owned(),
+                    client: sleeping_client(),
+                    acp_session_id: Some("session".to_owned()),
+                    needs_history_hydration: false,
+                    streaming_message_ids: HashMap::from([(
+                        "upstream".to_owned(),
+                        "new-message".to_owned(),
+                    )]),
+                    last_streaming_message_id: Some("new-message".to_owned()),
+                    active_user_message_id: None,
+                },
+            )])),
+            pending: std::sync::Mutex::new(HashMap::new()),
+        };
+
+        assert!(take_streaming_messages(&inner, "old-run", "chat-1").is_empty());
+        assert_eq!(
+            take_streaming_messages(&inner, "new-run", "chat-1"),
+            vec!["new-message"]
+        );
+    }
 }
