@@ -19,7 +19,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde_json::{json, Value};
@@ -34,6 +34,14 @@ pub enum AcpError {
     Json(serde_json::Error),
     Timeout {
         id: u64,
+    },
+    IdleTimeout {
+        id: u64,
+        idle: Duration,
+    },
+    TotalTimeout {
+        id: u64,
+        total: Duration,
     },
     ConnectionClosed,
     Protocol(String),
@@ -50,6 +58,16 @@ impl fmt::Display for AcpError {
             Self::Io(error) => write!(formatter, "ACP I/O error: {error}"),
             Self::Json(error) => write!(formatter, "ACP JSON error: {error}"),
             Self::Timeout { id } => write!(formatter, "ACP request {id} timed out"),
+            Self::IdleTimeout { id, idle } => write!(
+                formatter,
+                "ACP request {id} timed out after {}s without agent activity",
+                idle.as_secs()
+            ),
+            Self::TotalTimeout { id, total } => write!(
+                formatter,
+                "ACP request {id} exceeded its {}s total deadline",
+                total.as_secs()
+            ),
             Self::ConnectionClosed => write!(formatter, "ACP connection closed"),
             Self::Protocol(message) => write!(formatter, "ACP protocol error: {message}"),
             Self::Remote { code, message, .. } => {
@@ -96,7 +114,18 @@ pub enum AcpInbound {
     Barrier(Sender<()>),
 }
 
-type PendingResponse = Sender<AcpResult<Value>>;
+enum PendingEvent {
+    Activity(Instant),
+    Response(AcpResult<Value>),
+}
+
+type PendingResponse = Sender<PendingEvent>;
+
+#[derive(Debug, Clone, Copy)]
+enum RequestDeadline {
+    Fixed(Duration),
+    ActivityAware { idle: Duration, total: Duration },
+}
 
 pub struct AcpClient {
     stdin: Mutex<ChildStdin>,
@@ -164,6 +193,35 @@ impl AcpClient {
         params: Value,
         timeout: Duration,
     ) -> AcpResult<Value> {
+        self.request_with_deadline(method, params, RequestDeadline::Fixed(timeout))
+    }
+
+    /// Waits for a long-running request while resetting its idle deadline for
+    /// every valid ACP message received from the agent. The total deadline is
+    /// still a final safety bound for agents that remain noisy forever.
+    pub fn request_with_activity_timeout(
+        &self,
+        method: AgentRpcMethod,
+        params: Value,
+        idle_timeout: Duration,
+        total_timeout: Duration,
+    ) -> AcpResult<Value> {
+        self.request_with_deadline(
+            method,
+            params,
+            RequestDeadline::ActivityAware {
+                idle: idle_timeout,
+                total: total_timeout,
+            },
+        )
+    }
+
+    fn request_with_deadline(
+        &self,
+        method: AgentRpcMethod,
+        params: Value,
+        deadline: RequestDeadline,
+    ) -> AcpResult<Value> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
         self.pending.lock().map_err(lock_error)?.insert(id, sender);
@@ -178,14 +236,9 @@ impl AcpClient {
             return Err(error);
         }
 
-        match receiver.recv_timeout(timeout) {
-            Ok(result) => result,
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                self.pending.lock().map_err(lock_error)?.remove(&id);
-                Err(AcpError::Timeout { id })
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(AcpError::ConnectionClosed),
-        }
+        let result = wait_for_response(id, receiver, deadline);
+        self.pending.lock().map_err(lock_error)?.remove(&id);
+        result
     }
 
     /// Sends a JSON-RPC notification, which has no response ID.
@@ -280,7 +333,7 @@ fn spawn_reader(
 
         if let Ok(mut waiting) = pending.lock() {
             for (_, sender) in waiting.drain() {
-                let _ = sender.send(Err(AcpError::ConnectionClosed));
+                let _ = sender.send(PendingEvent::Response(Err(AcpError::ConnectionClosed)));
             }
         }
         let _ = inbound_sender.send(AcpInbound::Disconnected);
@@ -302,6 +355,14 @@ fn route_incoming(
             return;
         }
     };
+
+    // A valid message proves the agent is alive and making protocol progress.
+    // Wake long-running requests so their idle deadline starts from now.
+    if let Ok(waiting) = pending.lock() {
+        for sender in waiting.values() {
+            let _ = sender.send(PendingEvent::Activity(Instant::now()));
+        }
+    }
 
     if let Some(method) = message.get("method").and_then(Value::as_str) {
         let params = message.get("params").cloned().unwrap_or(Value::Null);
@@ -353,7 +414,7 @@ fn route_incoming(
     match pending.lock() {
         Ok(mut waiting) => {
             if let Some(sender) = waiting.remove(&id) {
-                let _ = sender.send(result);
+                let _ = sender.send(PendingEvent::Response(result));
             } else {
                 let _ = inbound_sender.send(AcpInbound::InvalidMessage {
                     error: format!("late or unknown ACP response id: {id}"),
@@ -366,6 +427,66 @@ fn route_incoming(
                 error: "pending response lock poisoned".into(),
                 raw: raw.into(),
             });
+        }
+    }
+}
+
+fn wait_for_response(
+    id: u64,
+    receiver: Receiver<PendingEvent>,
+    deadline: RequestDeadline,
+) -> AcpResult<Value> {
+    let started = Instant::now();
+    let mut last_activity = started;
+
+    loop {
+        let now = Instant::now();
+        let wait = match deadline {
+            RequestDeadline::Fixed(timeout) => timeout.saturating_sub(now.duration_since(started)),
+            RequestDeadline::ActivityAware { idle, total } => {
+                let total_remaining = total.saturating_sub(now.duration_since(started));
+                let idle_remaining = idle.saturating_sub(now.duration_since(last_activity));
+                total_remaining.min(idle_remaining)
+            }
+        };
+
+        if wait.is_zero() {
+            return Err(deadline_error(id, deadline, started, last_activity));
+        }
+
+        match receiver.recv_timeout(wait) {
+            Ok(PendingEvent::Activity(observed_at)) => {
+                if matches!(deadline, RequestDeadline::ActivityAware { .. }) {
+                    last_activity = observed_at;
+                }
+            }
+            Ok(PendingEvent::Response(result)) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                return Err(deadline_error(id, deadline, started, last_activity));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(AcpError::ConnectionClosed);
+            }
+        }
+    }
+}
+
+fn deadline_error(
+    id: u64,
+    deadline: RequestDeadline,
+    started: Instant,
+    last_activity: Instant,
+) -> AcpError {
+    match deadline {
+        RequestDeadline::Fixed(_) => AcpError::Timeout { id },
+        RequestDeadline::ActivityAware { total, .. }
+            if Instant::now().saturating_duration_since(started) >= total =>
+        {
+            AcpError::TotalTimeout { id, total }
+        }
+        RequestDeadline::ActivityAware { idle, .. } => {
+            debug_assert!(Instant::now().saturating_duration_since(last_activity) >= idle);
+            AcpError::IdleTimeout { id, idle }
         }
     }
 }
@@ -397,5 +518,95 @@ mod tests {
             }
             other => panic!("unexpected inbound message: {other:?}"),
         }
+    }
+
+    #[test]
+    fn agent_activity_extends_a_long_running_request() {
+        let (sender, receiver) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            for _ in 0..5 {
+                thread::sleep(Duration::from_millis(30));
+                sender
+                    .send(PendingEvent::Activity(Instant::now()))
+                    .expect("activity");
+            }
+            sender
+                .send(PendingEvent::Response(Ok(
+                    json!({ "stopReason": "end_turn" }),
+                )))
+                .expect("response");
+        });
+
+        let result = wait_for_response(
+            7,
+            receiver,
+            RequestDeadline::ActivityAware {
+                idle: Duration::from_millis(100),
+                total: Duration::from_millis(500),
+            },
+        )
+        .expect("continued activity must keep the request alive");
+
+        worker.join().expect("activity worker");
+        assert_eq!(result["stopReason"], "end_turn");
+    }
+
+    #[test]
+    fn inactive_long_running_request_still_times_out() {
+        let (_sender, receiver) = mpsc::channel();
+        let error = wait_for_response(
+            9,
+            receiver,
+            RequestDeadline::ActivityAware {
+                idle: Duration::from_millis(10),
+                total: Duration::from_secs(1),
+            },
+        )
+        .expect_err("silence must reach the idle deadline");
+
+        assert!(matches!(error, AcpError::IdleTimeout { id: 9, .. }));
+    }
+
+    #[test]
+    fn total_deadline_caps_continuous_agent_activity() {
+        let (sender, receiver) = mpsc::channel();
+        let worker = thread::spawn(move || loop {
+            thread::sleep(Duration::from_millis(5));
+            if sender.send(PendingEvent::Activity(Instant::now())).is_err() {
+                break;
+            }
+        });
+
+        let error = wait_for_response(
+            11,
+            receiver,
+            RequestDeadline::ActivityAware {
+                idle: Duration::from_millis(20),
+                total: Duration::from_millis(50),
+            },
+        )
+        .expect_err("activity must not bypass the total safety deadline");
+
+        assert!(matches!(error, AcpError::TotalTimeout { id: 11, .. }));
+        worker.join().expect("activity worker");
+    }
+
+    #[test]
+    fn parsed_agent_messages_notify_waiting_requests_of_activity() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (pending_sender, pending_receiver) = mpsc::channel();
+        pending.lock().expect("pending").insert(3, pending_sender);
+        let (inbound_sender, _inbound_receiver) = mpsc::channel();
+
+        route_incoming(
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{}}"#,
+            &pending,
+            &inbound_sender,
+        );
+
+        assert!(matches!(
+            pending_receiver.recv().expect("activity notification"),
+            PendingEvent::Activity(_)
+        ));
     }
 }

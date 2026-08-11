@@ -150,9 +150,9 @@ function reasoningLabel(text: string, verbose: boolean): ReactNode {
   );
 }
 
-function assistantMessageTone(content: string, status: string): "warning" | "error" | null {
+function assistantMessageTone(content: string): "warning" | "error" | null {
   const text = content.trim();
-  if (status === "failed" || /^(error|failed|failure|unable to|cannot |can't )/i.test(text)) return "error";
+  if (/^(error|failed|failure|unable to|cannot |can't )/i.test(text)) return "error";
   if (/^(warning|caution|notice)/i.test(text)) return "warning";
   return null;
 }
@@ -292,6 +292,8 @@ function groupChatBlocks(
     );
     block.status = block.items.some((item) => item.message.status === "failed")
       ? "failed"
+      : block.items.some((item) => item.message.status === "interrupted")
+        ? "interrupted"
       : block.streaming
         ? "streaming"
         : "complete";
@@ -438,8 +440,14 @@ export function LiveChatScreen() {
 
             const leadingWarning = splitLeadingWarning(block.content);
             const responseContent = leadingWarning?.response ?? block.content;
-            const tone = assistantMessageTone(responseContent, block.status);
+            const tone = assistantMessageTone(responseContent);
             const hasVisibleContent = Boolean(responseContent.trim());
+            const interruption =
+              block.status === "failed"
+                ? "Response failed before completion."
+                : block.status === "interrupted"
+                  ? "Response was interrupted before completion."
+                  : null;
 
             return (
               <Message from="assistant" key={block.key} className="space-between">
@@ -503,6 +511,12 @@ export function LiveChatScreen() {
                     <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
                       <LoaderCircle className="size-3.5 shrink-0 animate-spin" />
                       <Shimmer className="text-sm" duration={1.4}>{`${waitingLabel}…`}</Shimmer>
+                    </div>
+                  )}
+                  {interruption && (
+                    <div className="flex items-center gap-2 text-xs text-destructive">
+                      <CircleX className="size-3.5 shrink-0" />
+                      <span>{interruption}</span>
                     </div>
                   )}
                 </MessageContent>

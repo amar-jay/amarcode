@@ -14,6 +14,10 @@ use crate::{acp::AcpClient, protocol::EditorEvent, store::Store};
 use super::session_config::SessionConfiguration;
 
 pub(super) const ACP_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+// Prompt turns routinely outlive control RPCs. Only prolonged silence should
+// stop one; the total bound protects against an endlessly noisy agent.
+pub(super) const ACP_PROMPT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+pub(super) const ACP_PROMPT_TOTAL_TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
 
 /// Result of starting a run / sending a prompt.
 #[derive(Debug, Clone)]

@@ -23,7 +23,10 @@ use super::{
         finalize_message, remove_pending_requests_for_run, take_streaming_messages_from_live,
     },
     session_config::{configure_session, SessionConfiguration},
-    types::{LiveRun, PendingAgentRequest, PromptResult, SessionInner, ACP_REQUEST_TIMEOUT},
+    types::{
+        LiveRun, PendingAgentRequest, PromptResult, SessionInner, ACP_PROMPT_IDLE_TIMEOUT,
+        ACP_PROMPT_TOTAL_TIMEOUT, ACP_REQUEST_TIMEOUT,
+    },
     util::{extract_session_id, extract_stop_reason, normalize_permission_result, timestamp},
 };
 
@@ -457,10 +460,15 @@ impl SessionManager {
             return Err(error);
         }
 
-        let prompt_result = match self.acp_request(&run_id, &client, AgentRpcMethod::Prompt, params)
-        {
+        let prompt_result = match self.acp_prompt_request(&run_id, &client, params) {
             Ok(value) => value,
             Err(err) => {
+                warn!(
+                    %run_id,
+                    %chat_id,
+                    error = %err,
+                    "ACP prompt failed before the agent returned a result"
+                );
                 if let Err(cleanup_error) = self.terminate_failed_prompt(
                     chat_id,
                     &run_id,
@@ -838,6 +846,35 @@ impl SessionManager {
         Ok(result)
     }
 
+    fn acp_prompt_request(&self, run_id: &str, client: &AcpClient, params: Value) -> Result<Value> {
+        let method = AgentRpcMethod::Prompt;
+        let envelope = RpcEnvelope {
+            direction: RpcDirection::Sent,
+            method: method.as_str().to_owned(),
+            payload: params.clone(),
+        };
+        self.inner.store.save_acp_envelope(run_id, &envelope)?;
+
+        let result = client
+            .request_with_activity_timeout(
+                method,
+                params,
+                ACP_PROMPT_IDLE_TIMEOUT,
+                ACP_PROMPT_TOTAL_TIMEOUT,
+            )
+            .map_err(Error::from)?;
+
+        self.inner.store.save_acp_envelope(
+            run_id,
+            &RpcEnvelope {
+                direction: RpcDirection::Received,
+                method: "rpc.result".into(),
+                payload: result.clone(),
+            },
+        )?;
+        Ok(result)
+    }
+
     fn acp_notify(
         &self,
         run_id: &str,
@@ -953,10 +990,10 @@ impl SessionManager {
 
         let mut first_message_error = None;
         for message_id in take_streaming_messages_from_live(&mut live) {
-            match finalize_message(&self.inner, &message_id, MessageStatus::Failed) {
+            match finalize_message(&self.inner, &message_id, MessageStatus::Interrupted) {
                 Ok(()) => self.emit(EditorEvent::MessageUpdated {
                     message_id,
-                    status: MessageStatus::Failed,
+                    status: MessageStatus::Interrupted,
                 }),
                 Err(message_error) => {
                     first_message_error.get_or_insert(message_error);
@@ -1119,7 +1156,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_prompt_terminates_run_and_partial_messages() {
+    fn failed_prompt_interrupts_partial_messages() {
         let store = Arc::new(Store::open(Path::new(":memory:")).expect("store"));
         store.seed_presets().expect("seed agents");
         store
@@ -1226,7 +1263,7 @@ mod tests {
                 .expect("message")
                 .expect("message row")
                 .status,
-            MessageStatus::Failed
+            MessageStatus::Interrupted
         );
     }
 }
