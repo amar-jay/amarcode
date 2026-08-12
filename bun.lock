@@ -69,8 +69,8 @@
         "vitest": "^3.0.0",
       },
     },
-    "workers/daemon-distribution": {
-      "name": "@amarcode/daemon-distribution",
+    "crates/daemon-distro": {
+      "name": "@amarcode/daemon-distro",
       "version": "0.1.0",
       "devDependencies": {
         "@cloudflare/workers-types": "^5.20260811.1",
@@ -89,7 +89,7 @@
 
     "@amarcode/application": ["@amarcode/application@workspace:crates/application"],
 
-    "@amarcode/daemon-distribution": ["@amarcode/daemon-distribution@workspace:workers/daemon-distribution"],
+    "@amarcode/daemon-distro": ["@amarcode/daemon-distro@workspace:crates/daemon-distro"],
 
     "@antfu/install-pkg": ["@antfu/install-pkg@1.1.0", "", { "dependencies": { "package-manager-detector": "^1.3.0", "tinyexec": "^1.0.1" } }, "sha512-MGQsmw10ZyI+EJo45CdSER4zEb+p31LpDAFp2Z3gkSd1yqVZGi0Ebx++YTEMonJy4oChEMLsxZ64j8FH6sSqtQ=="],
 

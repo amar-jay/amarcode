@@ -42,7 +42,7 @@ type BuiltArtifact = {
 };
 
 const projectRoot = resolve(import.meta.dir, "..");
-const workerDirectory = join(projectRoot, "workers", "daemon-distribution");
+const workerDirectory = join(projectRoot, "crates", "daemon-distro");
 const wranglerConfig = join(workerDirectory, "wrangler.jsonc");
 const releasePublicKey = "5ef56cd7772e8c601ca9c5a15378b7088fc558e7edcde73770cbb116d9e255d2";
 

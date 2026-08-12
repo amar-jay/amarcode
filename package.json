@@ -3,8 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
-    "crates/*",
-    "workers/*"
+    "crates/*"
   ],
   "scripts": {
     "dev": "bun run --cwd crates/application dev",
@@ -18,8 +17,8 @@
     "daemon:test-cli": "cargo run -p amarcode-daemon --bin daemon-test-cli --",
     "daemon:mock-agent": "cargo run -p amarcode-daemon --bin mock-acp-agent --",
     "daemon:publish": "bun scripts/publish-daemon.ts --target x86_64-unknown-linux-gnu --target x86_64-pc-windows-gnu",
-    "worker:check": "bun run --cwd workers/daemon-distribution check",
-    "worker:test": "bun run --cwd workers/daemon-distribution test",
+    "worker:check": "bun run --cwd crates/daemon-distro check",
+    "worker:test": "bun run --cwd crates/daemon-distro test",
     "tsc": "bun run --cwd crates/application tsc",
     "protocol:generate": "cargo run -p amarcode-protocol --bin generate-protocol-types",
     "protocol:check": "cargo test -p amarcode-protocol checked_in_typescript_bindings_are_current"
