@@ -5,6 +5,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(unix)]
+use std::{ffi::OsString, io::Read, time::Instant};
+
 use serde::Serialize;
 use tauri::{ipc::Channel, AppHandle, Manager};
 use tokio::sync::Mutex as AsyncMutex;
@@ -181,6 +184,24 @@ impl DaemonManager {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
+        // Desktop launchers inherit the graphical session's PATH, which often
+        // omits tools installed by shell-managed runtimes such as nvm, Bun,
+        // Cargo, mise, or asdf.  The daemon launches ACP adapters by command
+        // name, so give it the same PATH the user gets in a login shell.
+        #[cfg(unix)]
+        if let Some(path) = agent_path() {
+            command.env("PATH", path);
+        }
+
+        // GUI processes on Windows can likewise have a stale or incomplete
+        // user PATH. npm in particular installs ACP command shims under
+        // `%APPDATA%\npm`, which may be missing when Amarcode is opened from
+        // the Start menu instead of a terminal.
+        #[cfg(windows)]
+        if let Some(path) = agent_path() {
+            command.env("PATH", path);
+        }
+
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -205,6 +226,104 @@ impl DaemonManager {
             let _ = child.wait();
         }
     }
+}
+
+#[cfg(unix)]
+const PATH_MARKER: &str = "__AMARCODE_LOGIN_PATH__";
+
+/// Resolve the user's interactive login-shell PATH and merge it ahead of the
+/// graphical session PATH. Shell startup output is ignored by extracting only
+/// the marker-prefixed line emitted by our command.
+#[cfg(unix)]
+fn agent_path() -> Option<OsString> {
+    let shell = std::env::var_os("SHELL").filter(|value| !value.is_empty())?;
+    let mut child = Command::new(shell)
+        .args(["-ilc", "printf '\n__AMARCODE_LOGIN_PATH__%s\n' \"$PATH\""])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()
+        .ok()?;
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().ok()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    if !status.success() {
+        return None;
+    }
+
+    let mut output = Vec::new();
+    child.stdout.take()?.read_to_end(&mut output).ok()?;
+    let login_path = marked_path(&output)?;
+    let inherited = std::env::var_os("PATH");
+    let mut paths = Vec::new();
+    for path in std::env::split_paths(&login_path).chain(
+        inherited
+            .as_deref()
+            .into_iter()
+            .flat_map(std::env::split_paths),
+    ) {
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    std::env::join_paths(paths).ok().or(Some(login_path))
+}
+
+#[cfg(unix)]
+fn marked_path(output: &[u8]) -> Option<OsString> {
+    use std::os::unix::ffi::OsStringExt;
+
+    output
+        .split(|byte| *byte == b'\n')
+        .rev()
+        .find_map(|line| line.strip_prefix(PATH_MARKER.as_bytes()))
+        .filter(|path| !path.is_empty())
+        .map(|path| OsString::from_vec(path.strip_suffix(b"\r").unwrap_or(path).to_vec()))
+}
+
+#[cfg(windows)]
+fn agent_path() -> Option<std::ffi::OsString> {
+    use std::path::PathBuf;
+
+    let inherited = std::env::var_os("PATH");
+    let user_profile = std::env::var_os("USERPROFILE").map(PathBuf::from);
+    let app_data = std::env::var_os("APPDATA").map(PathBuf::from);
+    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+
+    let mut paths = Vec::new();
+    for path in [
+        std::env::var_os("PNPM_HOME").map(PathBuf::from),
+        std::env::var_os("NVM_SYMLINK").map(PathBuf::from),
+        app_data.as_ref().map(|root| root.join("npm")),
+        local_app_data.as_ref().map(|root| root.join("pnpm")),
+        user_profile.as_ref().map(|root| root.join(".bun/bin")),
+        user_profile.as_ref().map(|root| root.join(".cargo/bin")),
+        user_profile.as_ref().map(|root| root.join("scoop/shims")),
+    ]
+    .into_iter()
+    .flatten()
+    .chain(
+        inherited
+            .as_deref()
+            .into_iter()
+            .flat_map(std::env::split_paths),
+    ) {
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+
+    std::env::join_paths(paths).ok()
 }
 
 fn send(channel: &Channel<DaemonBootstrapStatus>, status: DaemonBootstrapStatus) {
@@ -259,4 +378,24 @@ async fn wait_for_health() -> Result<HealthResult, String> {
     Err(format!(
         "daemon failed its startup health check: {last_error}"
     ))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::marked_path;
+
+    #[test]
+    fn extracts_path_without_shell_startup_output() {
+        let output = b"shell banner\nwarning\n__AMARCODE_LOGIN_PATH__/nvm/bin:/usr/bin\r\n";
+        assert_eq!(
+            marked_path(output).unwrap(),
+            std::ffi::OsString::from("/nvm/bin:/usr/bin")
+        );
+    }
+
+    #[test]
+    fn rejects_output_without_a_nonempty_marked_path() {
+        assert!(marked_path(b"shell banner\n").is_none());
+        assert!(marked_path(b"__AMARCODE_LOGIN_PATH__\n").is_none());
+    }
 }
