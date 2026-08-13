@@ -22,9 +22,9 @@
     "daemon:check": "cargo check -p amarcode-daemon",
     "daemon:test-cli": "cargo run -p amarcode-daemon --bin daemon-test-cli --",
     "daemon:mock-agent": "cargo run -p amarcode-daemon --bin mock-acp-agent --",
-    "daemon:publish": "bun crates/daemon-distro/scripts/publish-daemon.ts --target x86_64-unknown-linux-gnu --target x86_64-pc-windows-gnu",
-    "worker:check": "bun run --cwd crates/daemon-distro check",
-    "worker:test": "bun run --cwd crates/daemon-distro test",
+    "daemon:publish": "bun crates/daemon-registry/scripts/publish-daemon.ts --target x86_64-unknown-linux-gnu --target x86_64-pc-windows-gnu",
+    "worker:check": "bun run --cwd crates/daemon-registry check",
+    "worker:test": "bun run --cwd crates/daemon-registry test",
     "tsc": "bun run --cwd crates/application tsc",
     "protocol:generate": "cargo run -p amarcode-protocol --bin generate-protocol-types",
     "protocol:check": "cargo test -p amarcode-protocol checked_in_typescript_bindings_are_current"
