@@ -47,11 +47,14 @@ type InputRequestPresentation = {
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return null;
   return value as Record<string, unknown>;
 }
 
-function inputRequestPresentation(details: JsonValue): InputRequestPresentation {
+function inputRequestPresentation(
+  details: JsonValue,
+): InputRequestPresentation {
   const record = asRecord(details);
   if (!record) {
     return { message: "The agent needs one detail before it can continue." };
@@ -79,8 +82,7 @@ function inputRequestPresentation(details: JsonValue): InputRequestPresentation 
     : [];
 
   const alternatives = [field.oneOf, field.anyOf].find(Array.isArray) as
-    | unknown[]
-    | undefined;
+    unknown[] | undefined;
   const choices =
     enumChoices.length > 0
       ? enumChoices
@@ -92,7 +94,9 @@ function inputRequestPresentation(details: JsonValue): InputRequestPresentation 
             ? [
                 {
                   label:
-                    typeof choice.title === "string" ? choice.title : String(value),
+                    typeof choice.title === "string"
+                      ? choice.title
+                      : String(value),
                   value: value as JsonValue,
                 },
               ]
@@ -123,10 +127,14 @@ function actionSummary(details: JsonValue): ActionSummary | null {
   const tool = asRecord(record.toolCall) ?? record;
   const title =
     [tool.title, tool.name, record.message, record.title].find(
-      (value): value is string => typeof value === "string" && Boolean(value.trim()),
+      (value): value is string =>
+        typeof value === "string" && Boolean(value.trim()),
     ) ?? "Agent action";
 
-  const rawInput = asRecord(tool.rawInput) ?? asRecord(tool.input) ?? asRecord(record.rawInput);
+  const rawInput =
+    asRecord(tool.rawInput) ??
+    asRecord(tool.input) ??
+    asRecord(record.rawInput);
   const command =
     (rawInput && typeof rawInput.command === "string" && rawInput.command) ||
     (typeof tool.command === "string" && tool.command) ||
@@ -164,7 +172,10 @@ function permissionOptions(details: JsonValue): PermissionOption[] {
     return [
       {
         optionId,
-        name: typeof item.name === "string" && item.name.trim() ? item.name : optionId,
+        name:
+          typeof item.name === "string" && item.name.trim()
+            ? item.name
+            : optionId,
         kind: typeof item.kind === "string" ? item.kind : "",
       },
     ];
@@ -191,11 +202,12 @@ function isAllowKind(kind: string, optionId: string): boolean {
 function defaultOptionId(options: PermissionOption[]): string {
   const allowOnce = options.find(
     (option) =>
-      option.kind === "allow_once" ||
-      /allow[-_]?once/i.test(option.optionId),
+      option.kind === "allow_once" || /allow[-_]?once/i.test(option.optionId),
   );
   if (allowOnce) return allowOnce.optionId;
-  const firstAllow = options.find((option) => isAllowKind(option.kind, option.optionId));
+  const firstAllow = options.find((option) =>
+    isAllowKind(option.kind, option.optionId),
+  );
   return firstAllow?.optionId ?? options[0]?.optionId ?? "";
 }
 
@@ -245,7 +257,9 @@ export function PendingAgentRequestCard({
   const [submitting, setSubmitting] = useState(false);
 
   // Keep selection valid when the request changes mid-stream.
-  const activeOptionId = orderedOptions.some((option) => option.optionId === selectedOptionId)
+  const activeOptionId = orderedOptions.some(
+    (option) => option.optionId === selectedOptionId,
+  )
     ? selectedOptionId
     : defaultOptionId(orderedOptions);
 
@@ -327,7 +341,9 @@ export function PendingAgentRequestCard({
           <DialogFooter>
             <Button
               disabled={!activeOptionId || submitting}
-              onClick={() => void submit(selectedPermissionResult(activeOptionId))}
+              onClick={() =>
+                void submit(selectedPermissionResult(activeOptionId))
+              }
             >
               {submitting ? (
                 <>
@@ -383,7 +399,9 @@ export function PendingAgentRequestCard({
               value={
                 choice === null
                   ? undefined
-                  : String(field.choices.findIndex((item) => item.value === choice))
+                  : String(
+                      field.choices.findIndex((item) => item.value === choice),
+                    )
               }
               onValueChange={(value) =>
                 setChoice(field.choices[Number(value)]?.value ?? null)
@@ -405,7 +423,10 @@ export function PendingAgentRequestCard({
                     )}
                   >
                     <RadioGroupItem id={id} value={String(index)} />
-                    <Label htmlFor={id} className="flex-1 cursor-pointer text-sm font-normal">
+                    <Label
+                      htmlFor={id}
+                      className="flex-1 cursor-pointer text-sm font-normal"
+                    >
                       {item.label}
                     </Label>
                   </div>

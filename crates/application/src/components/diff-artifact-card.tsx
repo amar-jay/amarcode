@@ -8,7 +8,8 @@ type DiffChange = {
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return null;
   return value as Record<string, unknown>;
 }
 
@@ -30,14 +31,20 @@ function pathsFromPatch(patch: string): string[] {
  * Minimal line LCS → unified-diff body. Good enough for chat previews;
  * clients like Zed own full editor diffs.
  */
-function unifiedFromTexts(path: string, oldText: string | null | undefined, newText: string): string {
+function unifiedFromTexts(
+  path: string,
+  oldText: string | null | undefined,
+  newText: string,
+): string {
   const fileName = path.split(/[/\\]/).pop() || path;
   const oldLines = oldText == null ? [] : oldText.split("\n");
   const newLines = newText.split("\n");
 
   // Drop a single trailing empty segment so split("a\n") behaves like editors.
-  if (oldLines.length > 0 && oldLines[oldLines.length - 1] === "") oldLines.pop();
-  if (newLines.length > 0 && newLines[newLines.length - 1] === "") newLines.pop();
+  if (oldLines.length > 0 && oldLines[oldLines.length - 1] === "")
+    oldLines.pop();
+  if (newLines.length > 0 && newLines[newLines.length - 1] === "")
+    newLines.pop();
 
   const header = [
     `diff --git a/${fileName} b/${fileName}`,
@@ -66,7 +73,9 @@ function unifiedFromTexts(path: string, oldText: string | null | undefined, newT
   // LCS table
   const m = oldLines.length;
   const n = newLines.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    Array(n + 1).fill(0),
+  );
   for (let i = m - 1; i >= 0; i--) {
     for (let j = n - 1; j >= 0; j--) {
       dp[i][j] =
@@ -109,7 +118,10 @@ function unifiedFromTexts(path: string, oldText: string | null | undefined, newT
   ].join("\n");
 }
 
-function operationFor(oldText: unknown, newText: unknown): DiffChange["operation"] {
+function operationFor(
+  oldText: unknown,
+  newText: unknown,
+): DiffChange["operation"] {
   if (oldText == null || oldText === "") return "create";
   if (typeof newText === "string" && newText === "") return "delete";
   return "modify";
@@ -131,7 +143,11 @@ function extractPatch(diff: Record<string, unknown>): string | null {
   // Agent extension: prebuilt git patch as string or { text }.
   if (typeof diff.patch === "string" && diff.patch.trim()) return diff.patch;
   const patchRecord = asRecord(diff.patch);
-  if (patchRecord && typeof patchRecord.text === "string" && patchRecord.text.trim()) {
+  if (
+    patchRecord &&
+    typeof patchRecord.text === "string" &&
+    patchRecord.text.trim()
+  ) {
     return patchRecord.text;
   }
   return null;
@@ -143,7 +159,9 @@ function extractChanges(diff: Record<string, unknown>): DiffChange[] {
       const value = asRecord(change);
       if (!value || typeof value.path !== "string") return [];
       const operation =
-        value.operation === "create" || value.operation === "delete" || value.operation === "modify"
+        value.operation === "create" ||
+        value.operation === "delete" ||
+        value.operation === "modify"
           ? value.operation
           : operationFor(value.oldText, value.newText);
       return [{ path: value.path, operation }];
@@ -152,7 +170,9 @@ function extractChanges(diff: Record<string, unknown>): DiffChange[] {
   }
 
   if (typeof diff.path === "string") {
-    return [{ path: diff.path, operation: operationFor(diff.oldText, diff.newText) }];
+    return [
+      { path: diff.path, operation: operationFor(diff.oldText, diff.newText) },
+    ];
   }
   return [];
 }
@@ -230,10 +250,14 @@ export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
   const [expanded, setExpanded] = useState(false);
   const changedFiles = artifact.changes.length;
   const additionCount =
-    artifact.patch?.split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    artifact.patch
+      ?.split("\n")
+      .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
       .length ?? 0;
   const deletionCount =
-    artifact.patch?.split("\n").filter((line) => line.startsWith("-") && !line.startsWith("---"))
+    artifact.patch
+      ?.split("\n")
+      .filter((line) => line.startsWith("-") && !line.startsWith("---"))
       .length ?? 0;
   const summary =
     changedFiles > 0
@@ -259,16 +283,26 @@ export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
         <span className="text-muted-foreground">{summary}</span>
         {artifact.patch && (
           <span className="font-mono text-muted-foreground">
-            <span className="text-emerald-600 dark:text-emerald-400">+{additionCount}</span>{" "}
-            <span className="text-red-600 dark:text-red-400">−{deletionCount}</span>
+            <span className="text-emerald-600 dark:text-emerald-400">
+              +{additionCount}
+            </span>{" "}
+            <span className="text-red-600 dark:text-red-400">
+              −{deletionCount}
+            </span>
           </span>
         )}
       </button>
       {expanded && artifact.changes.length > 0 && (
         <div className="border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">
           {artifact.changes.map((change) => (
-            <div key={`${change.operation}-${change.path}`} className="font-mono">
-              <span className="text-muted-foreground/80">{change.operation}</span> {change.path}
+            <div
+              key={`${change.operation}-${change.path}`}
+              className="font-mono"
+            >
+              <span className="text-muted-foreground/80">
+                {change.operation}
+              </span>{" "}
+              {change.path}
             </div>
           ))}
         </div>

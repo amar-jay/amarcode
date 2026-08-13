@@ -108,6 +108,7 @@ function connectionIllustration(
     case "checking":
       return "/illustrations/daemon-checking.png";
     case "installRequired":
+      return "/illustrations/daemon-service-required.png";
     case "verifying":
       return "/illustrations/daemon-verifying.png";
     case "downloading":
@@ -117,6 +118,6 @@ function connectionIllustration(
     case "starting":
       return "/illustrations/daemon-starting.png";
     case "failed":
-      return "/illustrations/daemon-error.png";
+      return "/illustrations/daemon-connection-failed.png";
   }
 }

@@ -8,10 +8,10 @@
   "scripts": {
     "dev": "bun run --cwd crates/application dev",
     "build": "bun run --cwd crates/application build",
-    "test": "bun run --cwd crates/application test",
     "tauri": "bun run --cwd crates/application tauri",
-    "tauri:dev": "bun run --cwd crates/application tauri:dev",
-    "tauri:build": "bun run --cwd crates/application tauri:build",
+    "app:test": "bun run --cwd crates/application test",
+    "app:dev": "bun run --cwd crates/application tauri:dev",
+    "app:build": "bun run --cwd crates/application tauri:build",
     "daemon": "cargo run -p amarcode-daemon --bin amarcode-daemon -- run",
     "daemon:install-dev": "cargo run -p amarcode-daemon --bin amarcode-daemon -- install",
     "daemon:start": "cargo run -p amarcode-daemon --bin amarcode-daemon -- start",
@@ -25,8 +25,13 @@
     "daemon:publish": "bun crates/daemon-registry/scripts/publish-daemon.ts --target x86_64-unknown-linux-gnu --target x86_64-pc-windows-gnu",
     "worker:check": "bun run --cwd crates/daemon-registry check",
     "worker:test": "bun run --cwd crates/daemon-registry test",
-    "tsc": "bun run --cwd crates/application tsc",
     "protocol:generate": "cargo run -p amarcode-protocol --bin generate-protocol-types",
-    "protocol:check": "cargo test -p amarcode-protocol checked_in_typescript_bindings_are_current"
+    "protocol:check": "cargo test -p amarcode-protocol checked_in_typescript_bindings_are_current",
+    "tsc": "bun run --cwd crates/application tsc",
+    "test": "bun run app:test && bun run worker:test",
+    "prettify": "bun run prettier -w . --ignore-path .gitignore && cargo fmt --all"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.6"
   }
 }

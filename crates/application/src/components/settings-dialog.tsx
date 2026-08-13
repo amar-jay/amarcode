@@ -49,8 +49,19 @@ import {
   FieldLegend,
   FieldSet,
 } from "@/components/ui/field";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import type { AgentInfo } from "@/types";
 import type { SessionMode } from "@/state";
 
@@ -79,7 +90,11 @@ const themeChoices: {
   },
 ];
 
-const paletteChoices: { value: AppPalette; label: string; description: string }[] = [
+const paletteChoices: {
+  value: AppPalette;
+  label: string;
+  description: string;
+}[] = [
   {
     value: "monochrome",
     label: "Monochrome",
@@ -244,75 +259,121 @@ function AgentDefaultsPanel({
   const selectedAgent = agents.find((agent) => agent.id === defaultAgentId);
   const availableAgents = agents.filter((agent) => agent.available);
   const unavailableAgents = agents.filter((agent) => !agent.available);
-  const renderAgent = (agent: AgentInfo) => <CommandItem 
-		className="cursor-pointer rounded-none w-full! space-x-auto data-disabled:cursor-not-allowed data-disabled:opacity-50"
-		disabled={!agent.available}
-		title={agent.unavailable_reason ?? undefined}
-		key={agent.id} value={`${agent.name} ${agent.id}`} onSelect={() => {
-      onDefaultAgentChange(agent.id);
-      setAgentPickerOpen(false);
-    }}>
-		<span className="mr-auto">
-        {agent.name.replace(/\s*\bACP\s*$/i, "")}
-		</span>
+  const renderAgent = (agent: AgentInfo) => (
+    <CommandItem
+      className="cursor-pointer rounded-none w-full! space-x-auto data-disabled:cursor-not-allowed data-disabled:opacity-50"
+      disabled={!agent.available}
+      title={agent.unavailable_reason ?? undefined}
+      key={agent.id}
+      value={`${agent.name} ${agent.id}`}
+      onSelect={() => {
+        onDefaultAgentChange(agent.id);
+        setAgentPickerOpen(false);
+      }}
+    >
+      <span className="mr-auto">{agent.name.replace(/\s*\bACP\s*$/i, "")}</span>
       {!agent.available ? (
-        <span className="ml-auto text-xs text-muted-foreground">Not installed</span>
+        <span className="ml-auto text-xs text-muted-foreground">
+          Not installed
+        </span>
       ) : (
-        <Check className={`ml-auto size-4 ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`} />
+        <Check
+          className={`ml-auto size-4 ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`}
+        />
       )}
-    </CommandItem>;
-  return <div className="mx-auto w-full max-w-132">
-    <h2 className="text-base font-medium">Agent defaults</h2>
-    <p className="mt-1 text-xs leading-5 text-muted-foreground">These choices are used when you start a new chat. Existing conversations keep their current session settings.</p>
-    <Separator className="my-6" />
-    <FieldSet className="gap-7">
-      <Field>
-        <FieldContent>
-          <FieldLabel htmlFor="default-acp-agent">Default ACP agent</FieldLabel>
-          <FieldDescription>Choose the agent preselected in the new-chat composer.</FieldDescription>
-        </FieldContent>
-        <Popover open={agentPickerOpen} onOpenChange={setAgentPickerOpen}>
-          <PopoverTrigger asChild>
-            <Button id="default-acp-agent" variant="outline" role="combobox" aria-expanded={agentPickerOpen} className="w-full justify-between font-normal">
-              {selectedAgent?.name.replace(/\s*\bACP\s*$/i, "") ?? "Choose an agent"}
-              <ChevronsUpDown className="size-4 text-muted-foreground" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-(--radix-popover-trigger-width) p-0">
-            <Command>
-              <CommandInput placeholder="Search ACP agents…" />
-              <CommandList>
-                <CommandEmpty>No matching ACP agents.</CommandEmpty>
-                {availableAgents.length > 0 && (
-                  <CommandGroup heading="Available">
-                    {availableAgents.map(renderAgent)}
-                  </CommandGroup>
-                )}
-                {unavailableAgents.length > 0 && (
-                  <CommandGroup heading="Not installed">
-                    {unavailableAgents.map(renderAgent)}
-                  </CommandGroup>
-                )}
-              </CommandList>
-            </Command>
-          </PopoverContent>
-        </Popover>
-      </Field>
-      <FieldSet>
-        <FieldLegend>Default session mode</FieldLegend>
-        <FieldDescription>Controls how Codex starts new sessions.</FieldDescription>
-        <RadioGroup value={defaultSessionMode} onValueChange={(value) => onDefaultSessionModeChange(value as SessionMode)}>
-          {(["plan", "build", "ask"] as const).map((mode) => <Field key={mode} orientation="horizontal">
-            <RadioGroupItem value={mode} id={`default-mode-${mode}`} />
-            <FieldContent>
-              <FieldLabel htmlFor={`default-mode-${mode}`} className="capitalize">{mode}</FieldLabel>
-              <FieldDescription>{mode === "plan" ? "Plan before implementation" : mode === "build" ? "Work with agent access" : "Review without edits"}</FieldDescription>
-            </FieldContent>
-          </Field>)}
-        </RadioGroup>
+    </CommandItem>
+  );
+  return (
+    <div className="mx-auto w-full max-w-132">
+      <h2 className="text-base font-medium">Agent defaults</h2>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        These choices are used when you start a new chat. Existing conversations
+        keep their current session settings.
+      </p>
+      <Separator className="my-6" />
+      <FieldSet className="gap-7">
+        <Field>
+          <FieldContent>
+            <FieldLabel htmlFor="default-acp-agent">
+              Default ACP agent
+            </FieldLabel>
+            <FieldDescription>
+              Choose the agent preselected in the new-chat composer.
+            </FieldDescription>
+          </FieldContent>
+          <Popover open={agentPickerOpen} onOpenChange={setAgentPickerOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                id="default-acp-agent"
+                variant="outline"
+                role="combobox"
+                aria-expanded={agentPickerOpen}
+                className="w-full justify-between font-normal"
+              >
+                {selectedAgent?.name.replace(/\s*\bACP\s*$/i, "") ??
+                  "Choose an agent"}
+                <ChevronsUpDown className="size-4 text-muted-foreground" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              className="w-(--radix-popover-trigger-width) p-0"
+            >
+              <Command>
+                <CommandInput placeholder="Search ACP agents…" />
+                <CommandList>
+                  <CommandEmpty>No matching ACP agents.</CommandEmpty>
+                  {availableAgents.length > 0 && (
+                    <CommandGroup heading="Available">
+                      {availableAgents.map(renderAgent)}
+                    </CommandGroup>
+                  )}
+                  {unavailableAgents.length > 0 && (
+                    <CommandGroup heading="Not installed">
+                      {unavailableAgents.map(renderAgent)}
+                    </CommandGroup>
+                  )}
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        </Field>
+        <FieldSet>
+          <FieldLegend>Default session mode</FieldLegend>
+          <FieldDescription>
+            Controls how Codex starts new sessions.
+          </FieldDescription>
+          <RadioGroup
+            value={defaultSessionMode}
+            onValueChange={(value) =>
+              onDefaultSessionModeChange(value as SessionMode)
+            }
+          >
+            {(["plan", "build", "ask"] as const).map((mode) => (
+              <Field key={mode} orientation="horizontal">
+                <RadioGroupItem value={mode} id={`default-mode-${mode}`} />
+                <FieldContent>
+                  <FieldLabel
+                    htmlFor={`default-mode-${mode}`}
+                    className="capitalize"
+                  >
+                    {mode}
+                  </FieldLabel>
+                  <FieldDescription>
+                    {mode === "plan"
+                      ? "Plan before implementation"
+                      : mode === "build"
+                        ? "Work with agent access"
+                        : "Review without edits"}
+                  </FieldDescription>
+                </FieldContent>
+              </Field>
+            ))}
+          </RadioGroup>
+        </FieldSet>
       </FieldSet>
-    </FieldSet>
-  </div>;
+    </div>
+  );
 }
 
 function AppearancePanel({
@@ -391,7 +452,11 @@ function AppearancePanel({
           >
             <PalettePreview palette={value} />
             <div className="mt-3 flex items-start gap-2">
-              <RadioGroupItem id={`palette-${value}`} value={value} className="mt-0.5" />
+              <RadioGroupItem
+                id={`palette-${value}`}
+                value={value}
+                className="mt-0.5"
+              />
               <span>
                 <span className="block text-xs font-medium">{label}</span>
                 <span className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">
@@ -473,8 +538,15 @@ function GeneralPanel({
   );
 }
 
-function ThemePreview({ theme, palette }: { theme: Theme; palette: AppPalette }) {
-  const lightCanvas = palette === "monochrome" ? "bg-[#fafafa]" : "bg-[#f8f3ea]";
+function ThemePreview({
+  theme,
+  palette,
+}: {
+  theme: Theme;
+  palette: AppPalette;
+}) {
+  const lightCanvas =
+    palette === "monochrome" ? "bg-[#fafafa]" : "bg-[#f8f3ea]";
   const darkCanvas = palette === "monochrome" ? "bg-[#383838]" : "bg-[#3d342e]";
   const canvas =
     theme === "light"
@@ -496,7 +568,9 @@ function ThemePreview({ theme, palette }: { theme: Theme; palette: AppPalette })
           <div
             className={
               theme === "light"
-                ? palette === "monochrome" ? "rounded-sm bg-[#e8e8e8]" : "rounded-sm bg-[#e9dcc8]"
+                ? palette === "monochrome"
+                  ? "rounded-sm bg-[#e8e8e8]"
+                  : "rounded-sm bg-[#e9dcc8]"
                 : "rounded-sm bg-[#58493f]"
             }
           />
@@ -504,7 +578,9 @@ function ThemePreview({ theme, palette }: { theme: Theme; palette: AppPalette })
             <div
               className={
                 theme === "light"
-                  ? palette === "monochrome" ? "h-3 rounded-sm bg-[#d6d6d6]" : "h-3 rounded-sm bg-[#e0c9aa]"
+                  ? palette === "monochrome"
+                    ? "h-3 rounded-sm bg-[#d6d6d6]"
+                    : "h-3 rounded-sm bg-[#e0c9aa]"
                   : "h-3 rounded-sm bg-[#5a4a40]"
               }
             />

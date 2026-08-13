@@ -6,7 +6,9 @@ import { defaultAgentIdAtom } from "./preferences";
 /** Full agent catalog from the daemon (shared, loaded once). */
 export const agentsAtom = atom<AgentInfo[]>([]);
 
-const agentsLoadStateAtom = atom<"idle" | "loading" | "ready" | "error">("idle");
+const agentsLoadStateAtom = atom<"idle" | "loading" | "ready" | "error">(
+  "idle",
+);
 
 /** Load agents if not already loaded / in-flight. Retries after a prior error. */
 export const loadAgentsAtom = atom(null, async (get, set) => {

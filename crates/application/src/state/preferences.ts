@@ -7,7 +7,9 @@ export type Palette = "monochrome" | "ember";
 
 function readTheme(): Theme {
   const stored = localStorage.getItem("amarcode-theme");
-  return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+  return stored === "light" || stored === "dark" || stored === "system"
+    ? stored
+    : "system";
 }
 
 export function readPalette(): Palette {
@@ -16,14 +18,24 @@ export function readPalette(): Palette {
 }
 
 /** User-facing chrome preference. Synced to `document.documentElement` by `useAppBootstrap`. */
-export const themeAtom = atomWithStorage<Theme>("amarcode-theme", readTheme(), undefined, {
-  getOnInit: true,
-});
+export const themeAtom = atomWithStorage<Theme>(
+  "amarcode-theme",
+  readTheme(),
+  undefined,
+  {
+    getOnInit: true,
+  },
+);
 
 /** Color style token (`data-style` on `<html>`). */
-export const paletteAtom = atomWithStorage<Palette>("amarcode-palette", readPalette(), undefined, {
-  getOnInit: true,
-});
+export const paletteAtom = atomWithStorage<Palette>(
+  "amarcode-palette",
+  readPalette(),
+  undefined,
+  {
+    getOnInit: true,
+  },
+);
 
 /** Default agent for new chats / home composer. */
 export const defaultAgentIdAtom = atomWithStorage<string>(

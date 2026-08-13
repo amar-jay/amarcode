@@ -18,8 +18,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-	BotIcon,
-	Check,
+  BotIcon,
+  Check,
   FolderOpen,
   MessageCircle,
   Ruler,
@@ -33,7 +33,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@/components/ui/command"
+} from "@/components/ui/command";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { toast } from "sonner";
@@ -55,7 +55,6 @@ const modeIcons: Record<SessionMode, typeof Ruler> = {
   build: Wrench,
   ask: MessageCircle,
 };
-
 
 export function AgentSelection({
   setSelectedAgent,
@@ -85,7 +84,9 @@ export function AgentSelection({
       <span>{stripAcpSuffix(agent.name)}</span>
 
       {!agent.available && (
-        <span className="ml-auto text-xs text-muted-foreground">Not installed</span>
+        <span className="ml-auto text-xs text-muted-foreground">
+          Not installed
+        </span>
       )}
 
       {agent.available && selectedAgent === agent.id && (
@@ -113,9 +114,7 @@ export function AgentSelection({
           <CommandList>
             <CommandEmpty>No agents found.</CommandEmpty>
             {availableAgents.length > 0 && (
-              <CommandGroup>
-                {agents.map(renderAgent)}
-              </CommandGroup>
+              <CommandGroup>{agents.map(renderAgent)}</CommandGroup>
             )}
           </CommandList>
         </Command>
@@ -128,7 +127,12 @@ function stripAcpSuffix(value: string): string {
 }
 
 interface AppPromptInputProps {
-  onChatStarted?: (chat: Chat, agent: AgentInfo, workspacePath: string, sessionMode: SessionMode) => void;
+  onChatStarted?: (
+    chat: Chat,
+    agent: AgentInfo,
+    workspacePath: string,
+    sessionMode: SessionMode,
+  ) => void;
   onSendPrompt?: (text: string, sessionMode: SessionMode) => Promise<void>;
   workspacePath: string;
   onWorkspacePathChange?: (workspacePath: string) => void;
@@ -138,70 +142,93 @@ interface AppPromptInputProps {
   onStop?: () => void;
   sessionMode?: SessionMode;
   onSessionModeChange?: (mode: SessionMode) => Promise<void> | void;
-};
+}
 
-function AppPromptInput({ onChatStarted, onSendPrompt, workspacePath, onWorkspacePathChange, selectedAgentId, onAgentSelected, isWorking = false, onStop, sessionMode, onSessionModeChange }: AppPromptInputProps) {
-  const [uncontrolledMode, setUncontrolledMode] = useState<SessionMode>("build");
+function AppPromptInput({
+  onChatStarted,
+  onSendPrompt,
+  workspacePath,
+  onWorkspacePathChange,
+  selectedAgentId,
+  onAgentSelected,
+  isWorking = false,
+  onStop,
+  sessionMode,
+  onSessionModeChange,
+}: AppPromptInputProps) {
+  const [uncontrolledMode, setUncontrolledMode] =
+    useState<SessionMode>("build");
   const mode = sessionMode ?? uncontrolledMode;
   const ModeIcon = modeIcons[mode];
-	const isChatComposer = Boolean(onSendPrompt);
+  const isChatComposer = Boolean(onSendPrompt);
 
-	const openDirectory = async () => {
-		try {
-			const path = await open({
-				directory: true,
-				multiple: false,
-				title: "Choose a project folder",
-			});
+  const openDirectory = async () => {
+    try {
+      const path = await open({
+        directory: true,
+        multiple: false,
+        title: "Choose a project folder",
+      });
 
-			if (typeof path === "string") {
-				onWorkspacePathChange?.(path);
-			}
-		} catch (error) {
-			console.error("Error choosing workspace directory:", error);
-			toast.error("Unable to open the directory picker.");
-		}
-	};
+      if (typeof path === "string") {
+        onWorkspacePathChange?.(path);
+      }
+    } catch (error) {
+      console.error("Error choosing workspace directory:", error);
+      toast.error("Unable to open the directory picker.");
+    }
+  };
 
-	const handleSubmit = async (message: PromptInputMessage) => {
-		const text = message.text.trim();
-		if (!text) return;
-		if (onSendPrompt) {
-			await onSendPrompt(text, mode);
-			return;
-		}
-		if (!workspacePath || !selectedAgentId) {
-			toast.error("Choose a workspace and agent, then enter a prompt.");
-			return;
-		}
-		try{
-		const agent = agents.find((candidate) => candidate.id === selectedAgentId);
-		if (!agent) throw new Error("Selected agent is no longer available.");
-		if (!agent.available) throw new Error(agent.unavailable_reason ?? "Selected agent is not installed.");
-		const chat = await daemonApi.createChat(workspacePath, text.slice(0, 72))
+  const handleSubmit = async (message: PromptInputMessage) => {
+    const text = message.text.trim();
+    if (!text) return;
+    if (onSendPrompt) {
+      await onSendPrompt(text, mode);
+      return;
+    }
+    if (!workspacePath || !selectedAgentId) {
+      toast.error("Choose a workspace and agent, then enter a prompt.");
+      return;
+    }
+    try {
+      const agent = agents.find(
+        (candidate) => candidate.id === selectedAgentId,
+      );
+      if (!agent) throw new Error("Selected agent is no longer available.");
+      if (!agent.available)
+        throw new Error(
+          agent.unavailable_reason ?? "Selected agent is not installed.",
+        );
+      const chat = await daemonApi.createChat(workspacePath, text.slice(0, 72));
 
-		// Transition immediately. The daemon's prompt RPC remains open until the
-		// agent turn finishes, while the chat screen renders via the event stream.
-		onChatStarted?.(chat, agent, workspacePath, mode);
-		void daemonApi.prompt(chat.id, selectedAgentId, text, mode).catch((error: unknown) => {
-			console.error("Error submitting prompt:", error);
-			toast.error("The agent could not start this prompt.");
-		});
-		} catch (error) {
-			console.error("Error submitting prompt:", error);
-			toast.error(error instanceof Error ? error.message : "An error occurred while submitting the prompt.");
-		}
-	}
-	const agents = useAgentCatalog();
-	const selectAgent = (agentId: string) => {
-		const agent = agents.find((candidate) => candidate.id === agentId);
-		if (agent) onAgentSelected?.(agent);
-	};
-	const selectMode = async (nextMode: SessionMode) => {
-		if (onSessionModeChange) await onSessionModeChange(nextMode);
-		else setUncontrolledMode(nextMode);
-	};
-	const showModeControl = !isChatComposer || selectedAgentId === "codex-acp";
+      // Transition immediately. The daemon's prompt RPC remains open until the
+      // agent turn finishes, while the chat screen renders via the event stream.
+      onChatStarted?.(chat, agent, workspacePath, mode);
+      void daemonApi
+        .prompt(chat.id, selectedAgentId, text, mode)
+        .catch((error: unknown) => {
+          console.error("Error submitting prompt:", error);
+          toast.error("The agent could not start this prompt.");
+        });
+    } catch (error) {
+      console.error("Error submitting prompt:", error);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "An error occurred while submitting the prompt.",
+      );
+    }
+  };
+  const agents = useAgentCatalog();
+  const selectAgent = (agentId: string) => {
+    const agent = agents.find((candidate) => candidate.id === agentId);
+    if (agent) onAgentSelected?.(agent);
+  };
+  const selectMode = async (nextMode: SessionMode) => {
+    if (onSessionModeChange) await onSessionModeChange(nextMode);
+    else setUncontrolledMode(nextMode);
+  };
+  const showModeControl = !isChatComposer || selectedAgentId === "codex-acp";
   return (
     <PromptInput onSubmit={handleSubmit}>
       <PromptInputBody>
@@ -209,57 +236,58 @@ function AppPromptInput({ onChatStarted, onSendPrompt, workspacePath, onWorkspac
       </PromptInputBody>
       <PromptInputFooter>
         <PromptInputTools>
-          {showModeControl && <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <PromptInputButton
-                size="sm"
-								className="w-12 mx-auto ring-0 focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-              >
-                <ModeIcon size={3} />
-                <span>{modeLabels[mode]}</span>
-              </PromptInputButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-8">
-              {SET_MODES.map((value) => {
-                const Icon = modeIcons[value];
+          {showModeControl && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <PromptInputButton
+                  size="sm"
+                  className="w-12 mx-auto ring-0 focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+                >
+                  <ModeIcon size={3} />
+                  <span>{modeLabels[mode]}</span>
+                </PromptInputButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-8">
+                {SET_MODES.map((value) => {
+                  const Icon = modeIcons[value];
 
-                return (
-                  <DropdownMenuItem key={value} onSelect={() => void selectMode(value)}>
-                    <Icon size={3} />
-                    <span>{modeLabels[value]}</span>
-                    {mode === value && (
-											<Check className="ml-auto size-3.5 text-current" />
-                    )}
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>}
-					{
-						onAgentSelected && (
-								<AgentSelection
-										setSelectedAgent={selectAgent}
-										selectedAgent={selectedAgentId}
-										agents={agents}
-								/>
-						)
-					}
-					{
-						!isChatComposer && (
-			          <PromptInputButton
-										tooltip={{
-											content: workspacePath || "Choose a project folder",
-										}}
-									onClick={openDirectory}
-										className="max-w-40"
-			          >
-			            <FolderOpen size={16} />
-										{workspacePath && (
-											<span className="truncate">…{workspacePath.slice(-15)}</span>
-										)}
-			          </PromptInputButton>
-						)
-					}
+                  return (
+                    <DropdownMenuItem
+                      key={value}
+                      onSelect={() => void selectMode(value)}
+                    >
+                      <Icon size={3} />
+                      <span>{modeLabels[value]}</span>
+                      {mode === value && (
+                        <Check className="ml-auto size-3.5 text-current" />
+                      )}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {onAgentSelected && (
+            <AgentSelection
+              setSelectedAgent={selectAgent}
+              selectedAgent={selectedAgentId}
+              agents={agents}
+            />
+          )}
+          {!isChatComposer && (
+            <PromptInputButton
+              tooltip={{
+                content: workspacePath || "Choose a project folder",
+              }}
+              onClick={openDirectory}
+              className="max-w-40"
+            >
+              <FolderOpen size={16} />
+              {workspacePath && (
+                <span className="truncate">…{workspacePath.slice(-15)}</span>
+              )}
+            </PromptInputButton>
+          )}
         </PromptInputTools>
         <PromptInputSubmit
           disabled={!selectedAgentId || !workspacePath}
@@ -269,6 +297,6 @@ function AppPromptInput({ onChatStarted, onSendPrompt, workspacePath, onWorkspac
       </PromptInputFooter>
     </PromptInput>
   );
-};
+}
 
 export default AppPromptInput;

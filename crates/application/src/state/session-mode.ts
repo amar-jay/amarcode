@@ -6,6 +6,9 @@ export function isSessionMode(value: unknown): value is SessionMode {
   return value === "plan" || value === "build" || value === "ask";
 }
 
-export function parseSessionMode(value: string | null | undefined, fallback: SessionMode = "build"): SessionMode {
+export function parseSessionMode(
+  value: string | null | undefined,
+  fallback: SessionMode = "build",
+): SessionMode {
   return isSessionMode(value) ? value : fallback;
 }

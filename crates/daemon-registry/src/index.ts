@@ -12,7 +12,11 @@ const JSON_CACHE_CONTROL = "public, max-age=60, must-revalidate";
 const BINARY_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
 
-function json(value: unknown, status = 200, extraHeaders?: HeadersInit): Response {
+function json(
+  value: unknown,
+  status = 200,
+  extraHeaders?: HeadersInit,
+): Response {
   const headers = new Headers(extraHeaders);
   headers.set("content-type", "application/json; charset=utf-8");
   headers.set("x-content-type-options", "nosniff");
@@ -62,7 +66,9 @@ export function resolveArtifactRoute(pathname: string): ArtifactRoute | null {
   const target = safeSegment(artifactMatch[2]);
   if (!version || !target) return null;
 
-  const filename = target.includes("windows") ? "amarcode-daemon.exe" : "amarcode-daemon";
+  const filename = target.includes("windows")
+    ? "amarcode-daemon.exe"
+    : "amarcode-daemon";
   return {
     key: `daemon/${version}/${target}/${filename}`,
     cacheControl: BINARY_CACHE_CONTROL,
@@ -70,10 +76,18 @@ export function resolveArtifactRoute(pathname: string): ArtifactRoute | null {
   };
 }
 
-function rangeHeaders(object: R2Object, request: Request, headers: Headers): number {
+function rangeHeaders(
+  object: R2Object,
+  request: Request,
+  headers: Headers,
+): number {
   if (!request.headers.has("range") || !object.range) return 200;
 
-  const range = object.range as { offset?: number; length?: number; suffix?: number };
+  const range = object.range as {
+    offset?: number;
+    length?: number;
+    suffix?: number;
+  };
   let start: number;
   let length: number;
   if (typeof range.suffix === "number") {
@@ -84,12 +98,19 @@ function rangeHeaders(object: R2Object, request: Request, headers: Headers): num
     length = range.length ?? object.size - start;
   }
 
-  headers.set("content-range", `bytes ${start}-${start + length - 1}/${object.size}`);
+  headers.set(
+    "content-range",
+    `bytes ${start}-${start + length - 1}/${object.size}`,
+  );
   headers.set("content-length", String(length));
   return 206;
 }
 
-async function serveArtifact(request: Request, env: Env, route: ArtifactRoute): Promise<Response> {
+async function serveArtifact(
+  request: Request,
+  env: Env,
+  route: ArtifactRoute,
+): Promise<Response> {
   if (request.method === "HEAD") {
     const object = await env.DAEMON_ARTIFACTS.head(route.key);
     if (!object) return json({ error: "artifact not found" }, 404);
@@ -102,7 +123,10 @@ async function serveArtifact(request: Request, env: Env, route: ArtifactRoute): 
     headers.set("accept-ranges", "bytes");
     headers.set("x-content-type-options", "nosniff");
     if (route.downloadName) {
-      headers.set("content-disposition", `attachment; filename=\"${route.downloadName}\"`);
+      headers.set(
+        "content-disposition",
+        `attachment; filename=\"${route.downloadName}\"`,
+      );
     }
     return new Response(null, { status: 200, headers });
   }
@@ -120,12 +144,16 @@ async function serveArtifact(request: Request, env: Env, route: ArtifactRoute): 
   headers.set("accept-ranges", "bytes");
   headers.set("x-content-type-options", "nosniff");
   if (route.downloadName) {
-    headers.set("content-disposition", `attachment; filename=\"${route.downloadName}\"`);
+    headers.set(
+      "content-disposition",
+      `attachment; filename=\"${route.downloadName}\"`,
+    );
   }
 
   if (!("body" in object)) {
     const notModified =
-      request.headers.has("if-none-match") || request.headers.has("if-modified-since");
+      request.headers.has("if-none-match") ||
+      request.headers.has("if-modified-since");
     return new Response(null, { status: notModified ? 304 : 412, headers });
   }
 
@@ -133,7 +161,10 @@ async function serveArtifact(request: Request, env: Env, route: ArtifactRoute): 
   return new Response(object.body, { status, headers });
 }
 
-export async function handleRequest(request: Request, env: Env): Promise<Response> {
+export async function handleRequest(
+  request: Request,
+  env: Env,
+): Promise<Response> {
   const url = new URL(request.url);
 
   if (url.pathname === "/health") {

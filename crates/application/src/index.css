@@ -325,7 +325,8 @@
  * inside the border — not floating above the block.
  */
 [data-streamdown="code-block"] > .pointer-events-none.sticky,
-[data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]) {
+[data-streamdown="code-block"]
+  > div:has(> [data-streamdown="code-block-actions"]) {
   position: absolute !important;
   top: 0 !important;
   right: 0 !important;
@@ -432,7 +433,11 @@
 [data-streamdown="code-block-body"] code > span.block::before {
   width: 1.5rem !important;
   margin-right: 0.75rem !important;
-  color: color-mix(in oklab, var(--muted-foreground) 50%, transparent) !important;
+  color: color-mix(
+    in oklab,
+    var(--muted-foreground) 50%,
+    transparent
+  ) !important;
   font-size: 0.6875rem !important;
   line-height: inherit;
   opacity: 0.8;
@@ -468,7 +473,11 @@
 }
 
 .dark [data-streamdown="code-block-body"] {
-  background: color-mix(in oklab, var(--background) 85%, var(--card)) !important;
+  background: color-mix(
+    in oklab,
+    var(--background) 85%,
+    var(--card)
+  ) !important;
   color: var(--foreground);
 }
 
@@ -511,6 +520,8 @@
 .dark [data-home-stage]:has([data-prompt-shell]:hover) [data-watermark-mark] {
   opacity: 0.22;
 }
-.dark [data-home-stage]:has([data-prompt-shell]:focus-within) [data-watermark-mark] {
+.dark
+  [data-home-stage]:has([data-prompt-shell]:focus-within)
+  [data-watermark-mark] {
   opacity: 0.14;
 }

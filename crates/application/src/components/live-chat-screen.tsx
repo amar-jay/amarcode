@@ -1,6 +1,12 @@
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { AlertTriangle, CircleX, LoaderCircle, Wrench, type LucideIcon } from "lucide-react";
+import {
+  AlertTriangle,
+  CircleX,
+  LoaderCircle,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Conversation,
@@ -14,12 +20,20 @@ import {
   ChainOfThoughtHeader,
   ChainOfThoughtStep,
 } from "@/components/ai-elements/chain-of-thought";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import type { MessageDetail, MessagePart } from "@/types";
 import AppPromptInput from "./main-prompt-input";
 import { PendingAgentRequestCard } from "./pending-agent-request";
-import { DiffArtifactCard, diffArtifacts, type DiffArtifact } from "./diff-artifact-card";
+import {
+  DiffArtifactCard,
+  diffArtifacts,
+  type DiffArtifact,
+} from "./diff-artifact-card";
 import {
   activeSessionAtom,
   applyLiveChatEventAtom,
@@ -63,7 +77,11 @@ type ChatBlock =
 function partText(part: MessagePart): string | null {
   try {
     const value: unknown = JSON.parse(part.content_json);
-    return typeof value === "object" && value !== null && "text" in value && typeof value.text === "string" && Boolean(value.text.trim())
+    return typeof value === "object" &&
+      value !== null &&
+      "text" in value &&
+      typeof value.text === "string" &&
+      Boolean(value.text.trim())
       ? value.text
       : null;
   } catch {
@@ -80,8 +98,10 @@ function toolSummary(
     const value: unknown = JSON.parse(part.content_json);
     if (typeof value !== "object" || value === null) return null;
     const record = value as Record<string, unknown>;
-    const raw = [record.title, record.name, record.toolName]
-      .find((candidate): candidate is string => typeof candidate === "string" && Boolean(candidate.trim()));
+    const raw = [record.title, record.name, record.toolName].find(
+      (candidate): candidate is string =>
+        typeof candidate === "string" && Boolean(candidate.trim()),
+    );
     if (!raw) return null;
     const id = typeof record.toolCallId === "string" ? record.toolCallId : raw;
     const kind = typeof record.kind === "string" ? record.kind : "";
@@ -90,14 +110,22 @@ function toolSummary(
     // In verbose mode, surface rawInput command when title is generic.
     if (verbose) {
       const rawInput =
-        typeof record.rawInput === "object" && record.rawInput !== null && !Array.isArray(record.rawInput)
+        typeof record.rawInput === "object" &&
+        record.rawInput !== null &&
+        !Array.isArray(record.rawInput)
           ? (record.rawInput as Record<string, unknown>)
           : null;
       const command =
-        (rawInput && typeof rawInput.command === "string" && rawInput.command) ||
+        (rawInput &&
+          typeof rawInput.command === "string" &&
+          rawInput.command) ||
         (typeof record.command === "string" && record.command) ||
         null;
-      if (command && command.trim() && (label.length < 8 || /^(run|execute|bash|shell|command)/i.test(label))) {
+      if (
+        command &&
+        command.trim() &&
+        (label.length < 8 || /^(run|execute|bash|shell|command)/i.test(label))
+      ) {
         label = command.trim();
       }
       return { id, label };
@@ -119,7 +147,8 @@ function toolSummary(
 }
 
 function reasoningLabel(text: string, verbose: boolean): ReactNode {
-  const display = verbose || text.length <= 320 ? text : `${text.slice(0, 320)}…`;
+  const display =
+    verbose || text.length <= 320 ? text : `${text.slice(0, 320)}…`;
   const fragments = display.split(/(```[\s\S]*?```|`[^`]+`)/g);
   return (
     <div className="whitespace-pre-wrap">
@@ -139,7 +168,10 @@ function reasoningLabel(text: string, verbose: boolean): ReactNode {
         }
         if (fragment.startsWith("`") && fragment.endsWith("`")) {
           return (
-            <code key={index} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">
+            <code
+              key={index}
+              className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]"
+            >
               {fragment.slice(1, -1)}
             </code>
           );
@@ -152,7 +184,8 @@ function reasoningLabel(text: string, verbose: boolean): ReactNode {
 
 function assistantMessageTone(content: string): "warning" | "error" | null {
   const text = content.trim();
-  if (/^(error|failed|failure|unable to|cannot |can't )/i.test(text)) return "error";
+  if (/^(error|failed|failure|unable to|cannot |can't )/i.test(text))
+    return "error";
   if (/^(warning|caution|notice)/i.test(text)) return "warning";
   return null;
 }
@@ -166,11 +199,17 @@ function removeLeadingPromptEcho(content: string, prompt: string): string {
 }
 
 /** Keep an initial notice distinct from the assistant's actual response. */
-function splitLeadingWarning(content: string): { warning: string; response: string } | null {
+function splitLeadingWarning(
+  content: string,
+): { warning: string; response: string } | null {
   const paragraphs = content.trim().split(/\n\s*\n/);
   const [warning, ...response] = paragraphs;
 
-  if (!warning || !response.length || !/^(warning|caution|notice)/i.test(warning)) {
+  if (
+    !warning ||
+    !response.length ||
+    !/^(warning|caution|notice)/i.test(warning)
+  ) {
     return null;
   }
 
@@ -210,7 +249,8 @@ function buildTimeline(
         key: `${message.id}-tool-${part.ordinal}`,
         label: tool.label,
         icon: Wrench,
-        status: streaming && message.status === "streaming" ? "active" : "complete",
+        status:
+          streaming && message.status === "streaming" ? "active" : "complete",
       });
     }
   }
@@ -278,7 +318,8 @@ function groupChatBlocks(
     const previous = blocks[index - 1];
     if (
       previous?.kind === "user" &&
-      previous.item.message.agent_run_id === block.items[0]?.message.agent_run_id
+      previous.item.message.agent_run_id ===
+        block.items[0]?.message.agent_run_id
     ) {
       block.content = removeLeadingPromptEcho(
         block.content,
@@ -288,15 +329,16 @@ function groupChatBlocks(
     block.streaming = block.items.some(
       (item) =>
         item.message.status === "streaming" ||
-        (turnWorking && item.message.id === messages[messages.length - 1]?.message.id),
+        (turnWorking &&
+          item.message.id === messages[messages.length - 1]?.message.id),
     );
     block.status = block.items.some((item) => item.message.status === "failed")
       ? "failed"
       : block.items.some((item) => item.message.status === "interrupted")
         ? "interrupted"
-      : block.streaming
-        ? "streaming"
-        : "complete";
+        : block.streaming
+          ? "streaming"
+          : "complete";
     block.timeline = buildTimeline(block.items, block.streaming, verbose);
     block.diffs = block.items.flatMap((item) => diffArtifacts(item.parts));
   }
@@ -386,7 +428,9 @@ export function LiveChatScreen() {
   }
 
   const lastMessage = messages[messages.length - 1]?.message;
-  const lastAssistantBlock = [...blocks].reverse().find((block) => block.kind === "assistant");
+  const lastAssistantBlock = [...blocks]
+    .reverse()
+    .find((block) => block.kind === "assistant");
   // Only show a bottom placeholder when nothing assistant-visible exists yet.
   const showTurnPlaceholder =
     isWorking &&
@@ -411,14 +455,18 @@ export function LiveChatScreen() {
         {live.loading && (
           <LoaderCircle className="ml-2 size-4 animate-spin text-muted-foreground" />
         )}
-        {isWorking && <span className="ml-3 text-xs text-muted-foreground">Working…</span>}
+        {isWorking && (
+          <span className="ml-3 text-xs text-muted-foreground">Working…</span>
+        )}
         {live.contextRestoration && (
           <span className="ml-3 text-xs text-muted-foreground">
             {live.contextRestoration}…
           </span>
         )}
         {!isWorking && live.runStatus && live.runStatus !== "running" && (
-          <span className="ml-3 text-xs text-muted-foreground">{live.runStatus}</span>
+          <span className="ml-3 text-xs text-muted-foreground">
+            {live.runStatus}
+          </span>
         )}
       </header>
       <Conversation>
@@ -430,7 +478,9 @@ export function LiveChatScreen() {
                 <Message from="user" key={block.key} className="space-between">
                   <MessageContent className="w-full">
                     <p className="whitespace-pre-wrap">
-                      <span className="mr-2 select-none text-muted-foreground">&gt;</span>
+                      <span className="mr-2 select-none text-muted-foreground">
+                        &gt;
+                      </span>
                       {message.content}
                     </p>
                   </MessageContent>
@@ -450,7 +500,11 @@ export function LiveChatScreen() {
                   : null;
 
             return (
-              <Message from="assistant" key={block.key} className="space-between">
+              <Message
+                from="assistant"
+                key={block.key}
+                className="space-between"
+              >
                 <MessageContent className="w-full space-y-2">
                   {block.timeline.length > 0 && (
                     <ChainOfThought
@@ -487,7 +541,9 @@ export function LiveChatScreen() {
                   {leadingWarning && (
                     <div className="flex gap-2 rounded-md py-2 text-xs text-amber-700 dark:text-amber-300">
                       <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                      <MessageResponse>{leadingWarning.warning}</MessageResponse>
+                      <MessageResponse>
+                        {leadingWarning.warning}
+                      </MessageResponse>
                     </div>
                   )}
                   {hasVisibleContent &&
@@ -510,7 +566,10 @@ export function LiveChatScreen() {
                   {!hasVisibleContent && block.streaming && (
                     <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
                       <LoaderCircle className="size-3.5 shrink-0 animate-spin" />
-                      <Shimmer className="text-sm" duration={1.4}>{`${waitingLabel}…`}</Shimmer>
+                      <Shimmer
+                        className="text-sm"
+                        duration={1.4}
+                      >{`${waitingLabel}…`}</Shimmer>
                     </div>
                   )}
                   {interruption && (
@@ -543,7 +602,9 @@ export function LiveChatScreen() {
           />
         )}
         {live.error && (
-          <p className="mx-auto mb-2 max-w-3xl text-sm text-destructive">{live.error}</p>
+          <p className="mx-auto mb-2 max-w-3xl text-sm text-destructive">
+            {live.error}
+          </p>
         )}
         <AppPromptInput
           workspacePath={workspacePath}

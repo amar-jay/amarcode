@@ -65,7 +65,9 @@ async fn create_chat_prompt_store_and_events() {
     .await
     .expect("health");
     assert_eq!(
-        health.pointer("/result/protocol_version").and_then(Value::as_u64),
+        health
+            .pointer("/result/protocol_version")
+            .and_then(Value::as_u64),
         Some(u64::from(amarcode_protocol::PROTOCOL_VERSION)),
         "health must advertise the shared protocol version"
     );

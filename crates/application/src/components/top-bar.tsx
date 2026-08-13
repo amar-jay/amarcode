@@ -1,8 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
 
-interface TopBarProps {
-}
+interface TopBarProps {}
 
 export function TopBar({}: TopBarProps) {
   return (

@@ -7,7 +7,7 @@
   "r2_buckets": [
     {
       "binding": "DAEMON_ARTIFACTS",
-      "bucket_name": "amarcode-daemons"
-    }
-  ]
+      "bucket_name": "amarcode-daemons",
+    },
+  ],
 }

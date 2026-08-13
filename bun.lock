@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "amarcode",
+      "devDependencies": {
+        "prettier": "^3.9.6",
+      },
     },
     "crates/application": {
       "name": "@amarcode/application",

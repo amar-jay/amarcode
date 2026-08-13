@@ -1,6 +1,11 @@
 #!/usr/bin/env bun
 
-import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  sign,
+} from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -46,9 +51,13 @@ const requiredLifecycleCommands = ["install", "start", "restart", "status"];
 const projectRoot = resolve(import.meta.dir, "..", "..", "..");
 const workerDirectory = join(projectRoot, "crates", "daemon-registry");
 const wranglerConfig = join(workerDirectory, "wrangler.jsonc");
-const releasePublicKey = "5ef56cd7772e8c601ca9c5a15378b7088fc558e7edcde73770cbb116d9e255d2";
+const releasePublicKey =
+  "5ef56cd7772e8c601ca9c5a15378b7088fc558e7edcde73770cbb116d9e255d2";
 
-function run(command: string[], options: { cwd?: string; quiet?: boolean; allowFailure?: boolean } = {}) {
+function run(
+  command: string[],
+  options: { cwd?: string; quiet?: boolean; allowFailure?: boolean } = {},
+) {
   if (!options.quiet) console.log(`$ ${command.join(" ")}`);
   const result = Bun.spawnSync(command, {
     cwd: options.cwd ?? projectRoot,
@@ -57,7 +66,9 @@ function run(command: string[], options: { cwd?: string; quiet?: boolean; allowF
   });
   if (!result.success && !options.allowFailure) {
     const detail = options.quiet ? `\n${result.stderr.toString().trim()}` : "";
-    throw new Error(`command failed (${result.exitCode}): ${command.join(" ")}${detail}`);
+    throw new Error(
+      `command failed (${result.exitCode}): ${command.join(" ")}${detail}`,
+    );
   }
   return result;
 }
@@ -75,8 +86,13 @@ function cargoValue(manifestPath: string, key: string): string {
 }
 
 function protocolVersion(): number {
-  const contents = readFileSync(join(projectRoot, "crates", "protocol", "src", "lib.rs"), "utf8");
-  const match = contents.match(/pub const PROTOCOL_VERSION:\s*u32\s*=\s*(\d+)\s*;/);
+  const contents = readFileSync(
+    join(projectRoot, "crates", "protocol", "src", "lib.rs"),
+    "utf8",
+  );
+  const match = contents.match(
+    /pub const PROTOCOL_VERSION:\s*u32\s*=\s*(\d+)\s*;/,
+  );
   if (!match) throw new Error("could not read PROTOCOL_VERSION");
   return Number(match[1]);
 }
@@ -114,7 +130,8 @@ function parseArgs(args: string[]): Options {
     }
     if (["--version", "--target", "--bucket"].includes(argument)) {
       const value = args[index + 1];
-      if (!value || value.startsWith("--")) throw new Error(`${argument} requires a value`);
+      if (!value || value.startsWith("--"))
+        throw new Error(`${argument} requires a value`);
       if (argument === "--target") targets.push(value);
       else values.set(argument, value);
       index += 1;
@@ -140,9 +157,15 @@ Options:
   return {
     version:
       values.get("--version") ??
-      cargoValue(join(projectRoot, "crates", "daemon", "Cargo.toml"), "version"),
+      cargoValue(
+        join(projectRoot, "crates", "daemon", "Cargo.toml"),
+        "version",
+      ),
     targets: [...new Set(targets.length > 0 ? targets : [hostTarget()])],
-    bucket: values.get("--bucket") ?? process.env.AMARCODE_DAEMON_BUCKET ?? "amarcode-daemons",
+    bucket:
+      values.get("--bucket") ??
+      process.env.AMARCODE_DAEMON_BUCKET ??
+      "amarcode-daemons",
     skipBuild: flags.has("--skip-build"),
     skipDeploy: flags.has("--skip-deploy"),
     dryRun: flags.has("--dry-run"),
@@ -155,7 +178,11 @@ function validateSegment(label: string, value: string) {
   }
 }
 
-function loadRemoteManifest(bucket: string, key: string, path: string): Manifest | null {
+function loadRemoteManifest(
+  bucket: string,
+  key: string,
+  path: string,
+): Manifest | null {
   const result = run(
     [
       "bunx",
@@ -175,15 +202,25 @@ function loadRemoteManifest(bucket: string, key: string, path: string): Manifest
   if (!result.success) {
     const stderr = result.stderr.toString();
     if (stderr.includes("The specified key does not exist")) return null;
-    throw new Error(`could not read existing manifest from R2:\n${stderr.trim()}`);
+    throw new Error(
+      `could not read existing manifest from R2:\n${stderr.trim()}`,
+    );
   }
   if (!existsSync(path)) {
-    throw new Error("Wrangler reported a successful manifest download but created no file");
+    throw new Error(
+      "Wrangler reported a successful manifest download but created no file",
+    );
   }
   return JSON.parse(readFileSync(path, "utf8")) as Manifest;
 }
 
-function upload(bucket: string, key: string, path: string, contentType: string, cacheControl: string) {
+function upload(
+  bucket: string,
+  key: string,
+  path: string,
+  contentType: string,
+  cacheControl: string,
+) {
   run([
     "bunx",
     "wrangler",
@@ -217,8 +254,13 @@ function signManifest(contents: string): string {
   if (privateKey.asymmetricKeyType !== "ed25519") {
     throw new Error("daemon signing key must be an Ed25519 private key");
   }
-  const publicDer = createPublicKey(privateKey).export({ format: "der", type: "spki" });
-  const actualPublicKey = publicDer.subarray(publicDer.byteLength - 32).toString("hex");
+  const publicDer = createPublicKey(privateKey).export({
+    format: "der",
+    type: "spki",
+  });
+  const actualPublicKey = publicDer
+    .subarray(publicDer.byteLength - 32)
+    .toString("hex");
   if (actualPublicKey !== releasePublicKey) {
     throw new Error(
       `daemon signing key does not match the application public key (${actualPublicKey})`,
@@ -250,9 +292,12 @@ async function main() {
       ]);
     }
 
-    const filename = target.includes("windows") ? "amarcode-daemon.exe" : "amarcode-daemon";
+    const filename = target.includes("windows")
+      ? "amarcode-daemon.exe"
+      : "amarcode-daemon";
     const binaryPath = join(projectRoot, "target", target, "release", filename);
-    if (!existsSync(binaryPath)) throw new Error(`daemon binary not found at ${binaryPath}`);
+    if (!existsSync(binaryPath))
+      throw new Error(`daemon binary not found at ${binaryPath}`);
     if (target === currentHostTarget) verifyLifecycleCli(binaryPath);
 
     const binary = readFileSync(binaryPath);
@@ -269,26 +314,38 @@ async function main() {
     };
   });
 
-  const temporaryDirectory = mkdtempSync(join(tmpdir(), "amarcode-daemon-publish-"));
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "amarcode-daemon-publish-"),
+  );
   try {
     const versionManifestPath = join(temporaryDirectory, "manifest.json");
     const versionManifestKey = `daemon/${options.version}/manifest.json`;
     const existing = options.dryRun
       ? null
-      : loadRemoteManifest(options.bucket, versionManifestKey, versionManifestPath);
-    const commitResult = run(["git", "rev-parse", "HEAD"], { quiet: true, allowFailure: true });
+      : loadRemoteManifest(
+          options.bucket,
+          versionManifestKey,
+          versionManifestPath,
+        );
+    const commitResult = run(["git", "rev-parse", "HEAD"], {
+      quiet: true,
+      allowFailure: true,
+    });
     const worktreeResult = run(["git", "status", "--porcelain"], {
       quiet: true,
       allowFailure: true,
     });
     const worktreeClean =
-      worktreeResult.success && worktreeResult.stdout.toString().trim().length === 0;
+      worktreeResult.success &&
+      worktreeResult.stdout.toString().trim().length === 0;
     const sourceCommit =
       commitResult.success && worktreeClean
         ? commitResult.stdout.toString().trim()
         : undefined;
     if (!worktreeClean) {
-      console.warn("Publishing from a dirty worktree; sourceCommit will be omitted.");
+      console.warn(
+        "Publishing from a dirty worktree; sourceCommit will be omitted.",
+      );
     }
     const manifest: Manifest = {
       version: options.version,
@@ -340,7 +397,13 @@ async function main() {
       "text/plain; charset=utf-8",
       "public, max-age=60, must-revalidate",
     );
-    upload(options.bucket, versionManifestKey, versionManifestPath, "application/json", "public, max-age=60, must-revalidate");
+    upload(
+      options.bucket,
+      versionManifestKey,
+      versionManifestPath,
+      "application/json",
+      "public, max-age=60, must-revalidate",
+    );
     upload(
       options.bucket,
       "daemon/latest.json.sig",
@@ -348,10 +411,18 @@ async function main() {
       "text/plain; charset=utf-8",
       "public, max-age=60, must-revalidate",
     );
-    upload(options.bucket, "daemon/latest.json", latestPath, "application/json", "public, max-age=60, must-revalidate");
+    upload(
+      options.bucket,
+      "daemon/latest.json",
+      latestPath,
+      "application/json",
+      "public, max-age=60, must-revalidate",
+    );
 
     if (!options.skipDeploy) {
-      run(["bunx", "wrangler", "deploy", "--config", wranglerConfig], { cwd: workerDirectory });
+      run(["bunx", "wrangler", "deploy", "--config", wranglerConfig], {
+        cwd: workerDirectory,
+      });
     }
     console.log("\nDaemon publication completed successfully.");
   } finally {
