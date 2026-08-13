@@ -2,6 +2,7 @@ mod config;
 mod daemon;
 mod protocol;
 mod state;
+mod window;
 
 use std::path::{Path, PathBuf};
 
@@ -223,6 +224,10 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            window::fit_main_window(app)?;
+            Ok(())
+        })
         .manage(daemon::DaemonManager::new())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
