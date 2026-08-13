@@ -73,11 +73,7 @@ pub(super) fn normalize_permission_result(pending_params: &Value, result: Value)
     let allow = result
         .get("allow")
         .and_then(|value| value.as_bool())
-        .or_else(|| {
-            result
-                .get("approved")
-                .and_then(|value| value.as_bool())
-        });
+        .or_else(|| result.get("approved").and_then(|value| value.as_bool()));
 
     if let Some(allow) = allow {
         let preferred_kinds: &[&str] = if allow {

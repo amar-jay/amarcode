@@ -8,6 +8,7 @@ pub mod app;
 pub mod app_dir;
 pub mod config;
 pub mod error;
+mod instance_lock;
 pub mod logging;
 pub mod protocol;
 pub mod rpc;

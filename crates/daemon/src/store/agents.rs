@@ -17,18 +17,8 @@ impl Store {
         for (id, name, command, arguments) in [
             ("codex-acp", "Codex", "codex-acp", vec![]),
             ("claude-acp", "Claude Code", "claude-agent-acp", vec![]),
-            (
-                "copilot-acp",
-                "GitHub Copilot",
-                "copilot",
-                vec!["--acp"],
-            ),
-            (
-                "grok-acp",
-                "Grok",
-                "grok",
-                vec!["agent", "stdio"],
-            )
+            ("copilot-acp", "GitHub Copilot", "copilot", vec!["--acp"]),
+            ("grok-acp", "Grok", "grok", vec!["agent", "stdio"]),
         ] {
             self.save_agent(&AgentDefinition {
                 id: id.into(),

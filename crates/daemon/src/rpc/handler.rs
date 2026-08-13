@@ -50,7 +50,9 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
 
         // sessions (ACP — may block; run off the async worker)
         methods::PROMPT => Ok(DispatchOutcome::Result(prompt(app, params).await?)),
-        methods::SET_SESSION_MODE => Ok(DispatchOutcome::Result(set_session_mode(app, params).await?)),
+        methods::SET_SESSION_MODE => Ok(DispatchOutcome::Result(
+            set_session_mode(app, params).await?,
+        )),
         methods::CANCEL => Ok(DispatchOutcome::Result(cancel(app, params).await?)),
         methods::RESPOND_PERMISSION | methods::RESPOND_INPUT => {
             Ok(DispatchOutcome::Result(respond_agent(app, params).await?))
@@ -155,11 +157,14 @@ async fn prompt(app: &App, params: Value) -> Result<Value> {
     let chat_id = p.chat_id;
     let agent_id = p.agent_id;
     let text = p.text;
-    let session_mode = p.session_mode.or_else(|| p.plan_mode.then(|| "plan".to_owned()));
+    let session_mode = p
+        .session_mode
+        .or_else(|| p.plan_mode.then(|| "plan".to_owned()));
 
     // ACP spawn/request is blocking; keep the async runtime free.
     let result = tokio::task::block_in_place(|| {
-        app.sessions.prompt(&chat_id, &agent_id, text, session_mode.as_deref())
+        app.sessions
+            .prompt(&chat_id, &agent_id, text, session_mode.as_deref())
     })?;
     to_value(prompt_dto(result))
 }
