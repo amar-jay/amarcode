@@ -1,9 +1,10 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
-  AgentDefinition,
+  AgentInfo,
   AgentResponse,
   CancelResult,
   Chat,
+  DeleteChatResult,
   DaemonVersion,
   EditorEvent,
   EventFilter,
@@ -42,7 +43,7 @@ export const daemonApi = {
   health: (): Promise<Health> => invoke("daemon_health"),
   version: (): Promise<DaemonVersion> => invoke("daemon_version"),
 
-  listAgents: (): Promise<AgentDefinition[]> => invoke("list_agents"),
+  listAgents: (): Promise<AgentInfo[]> => invoke("list_agents"),
 
   createChat: (workspacePath: string, title?: string): Promise<Chat> =>
     invoke("create_chat", { workspacePath, title }),
@@ -50,6 +51,8 @@ export const daemonApi = {
     invoke("list_chats", { workspacePath }),
   getChat: (chatId: string, includeMessages = true): Promise<GetChatResult> =>
     invoke("get_chat", { chatId, includeMessages }),
+  deleteChat: (chatId: string): Promise<DeleteChatResult> =>
+    invoke("delete_chat", { chatId }),
 
   prompt: (
     chatId: string,

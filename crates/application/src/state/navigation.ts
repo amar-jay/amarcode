@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import type { AgentDefinition, Chat } from "@/types";
+import type { AgentInfo, Chat } from "@/types";
 import { chatsAtom } from "./chats";
 import { defaultSessionModeAtom } from "./preferences";
 import { selectedAgentAtom, selectAgentAtom } from "./agents";
@@ -12,7 +12,7 @@ import type { SessionMode } from "./session-mode";
  */
 export type ActiveSession = {
   chat: Chat;
-  agent?: AgentDefinition;
+  agent?: AgentInfo;
   /** Run to attach on first paint (usually null; events fill it in). */
   initialRunId: string | null;
   /** Home composer just kicked off a prompt for this chat. */
@@ -52,7 +52,7 @@ export const openStartedChatAtom = atom(
     set,
     payload: {
       chat: Chat;
-      agent: AgentDefinition;
+      agent: AgentInfo;
       sessionMode: SessionMode;
     },
   ) => {
@@ -74,7 +74,7 @@ export const setWorkspacePathAtom = atom(null, (_get, set, path: string) => {
 });
 
 /** Keep the open session's agent in sync when the composer agent changes. */
-export const bindSessionAgentAtom = atom(null, (get, set, agent: AgentDefinition) => {
+export const bindSessionAgentAtom = atom(null, (get, set, agent: AgentInfo) => {
   set(selectAgentAtom, agent);
   const session = get(activeSessionAtom);
   if (session) set(activeSessionAtom, { ...session, agent });

@@ -11,10 +11,11 @@ use crate::{
     daemon::{DaemonBridge, EventSubscription},
     protocol::{
         rpc::{
-            methods, CancelResult, HealthResult, ListAgentsResult, ListChatsResult,
-            PromptResultDto, RespondAgentParams, RespondAgentResult, VersionResult,
+            methods, CancelResult, DeleteChatResult, HealthResult, ListAgentsResult,
+            ListChatsResult, PromptResultDto, RespondAgentParams, RespondAgentResult,
+            VersionResult,
         },
-        AgentDefinition, Chat, GetChatResult,
+        AgentInfo, Chat, GetChatResult,
     },
 };
 
@@ -38,7 +39,7 @@ impl AppState {
         Ok(version)
     }
 
-    pub async fn list_agents(&self) -> Result<Vec<AgentDefinition>, String> {
+    pub async fn list_agents(&self) -> Result<Vec<AgentInfo>, String> {
         Ok(self
             .call::<ListAgentsResult>(methods::LIST_AGENTS, Value::Null)
             .await?
@@ -77,6 +78,11 @@ impl AppState {
             json!({ "chat_id": chat_id, "include_messages": include_messages }),
         )
         .await
+    }
+
+    pub async fn delete_chat(&self, chat_id: String) -> Result<DeleteChatResult, String> {
+        self.call(methods::DELETE_CHAT, json!({ "chat_id": chat_id }))
+            .await
     }
 
     pub async fn prompt(

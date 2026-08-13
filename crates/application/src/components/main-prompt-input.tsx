@@ -29,6 +29,7 @@ import {
   Command,
   CommandDialog,
   CommandEmpty,
+  CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
@@ -37,7 +38,7 @@ import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { toast } from "sonner";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AgentDefinition, Chat } from "@/types";
+import type { AgentInfo, Chat } from "@/types";
 import { SESSION_MODES, type SessionMode } from "@/state";
 
 export type { SessionMode };
@@ -63,12 +64,37 @@ export function AgentSelection({
 }: {
   setSelectedAgent: (agentId: string) => void;
   selectedAgent: string;
-  agents: AgentDefinition[];
+  agents: AgentInfo[];
 }) {
   const [open, setOpen] = useState(false);
 
   const selectedName =
     agents.find((agent) => agent.id === selectedAgent)?.name ?? "Agent";
+  const renderAgent = (agent: AgentInfo) => (
+    <CommandItem
+      key={agent.id}
+      value={stripAcpSuffix(agent.name)}
+      disabled={!agent.available}
+      title={agent.unavailable_reason ?? undefined}
+      onSelect={() => {
+        setSelectedAgent(agent.id);
+        setOpen(false);
+      }}
+      className="w-full cursor-pointer data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
+    >
+      <span>{stripAcpSuffix(agent.name)}</span>
+
+      {!agent.available && (
+        <span className="ml-auto text-xs text-muted-foreground">Not installed</span>
+      )}
+
+      {agent.available && selectedAgent === agent.id && (
+        <Check className="ml-auto size-4" />
+      )}
+    </CommandItem>
+  );
+  const availableAgents = agents.filter((agent) => agent.available);
+  const unavailableAgents = agents.filter((agent) => !agent.available);
 
   return (
     <div className="flex flex-col gap-4">
@@ -84,27 +110,13 @@ export function AgentSelection({
       <CommandDialog open={open} onOpenChange={setOpen}>
         <Command>
           <CommandInput placeholder="Search agents..." />
-
           <CommandList>
             <CommandEmpty>No agents found.</CommandEmpty>
-
-            {agents.map((agent) => (
-              <CommandItem
-                key={agent.id}
-                value={stripAcpSuffix(agent.name)}
-                onSelect={() => {
-                  setSelectedAgent(agent.id);
-                  setOpen(false);
-                }}
-                className="cursor-pointer w-full"
-              >
-                <span>{stripAcpSuffix(agent.name)}</span>
-
-                {selectedAgent === agent.id && (
-                  <Check className="ml-auto size-4" />
-                )}
-              </CommandItem>
-            ))}
+            {availableAgents.length > 0 && (
+              <CommandGroup>
+                {agents.map(renderAgent)}
+              </CommandGroup>
+            )}
           </CommandList>
         </Command>
       </CommandDialog>
@@ -116,12 +128,12 @@ function stripAcpSuffix(value: string): string {
 }
 
 interface AppPromptInputProps {
-  onChatStarted?: (chat: Chat, agent: AgentDefinition, workspacePath: string, sessionMode: SessionMode) => void;
+  onChatStarted?: (chat: Chat, agent: AgentInfo, workspacePath: string, sessionMode: SessionMode) => void;
   onSendPrompt?: (text: string, sessionMode: SessionMode) => Promise<void>;
   workspacePath: string;
   onWorkspacePathChange?: (workspacePath: string) => void;
   selectedAgentId: string;
-  onAgentSelected?: (agent: AgentDefinition) => void;
+  onAgentSelected?: (agent: AgentInfo) => void;
   isWorking?: boolean;
   onStop?: () => void;
   sessionMode?: SessionMode;
@@ -163,9 +175,10 @@ function AppPromptInput({ onChatStarted, onSendPrompt, workspacePath, onWorkspac
 			return;
 		}
 		try{
-		const chat = await daemonApi.createChat(workspacePath, text.slice(0, 72))
 		const agent = agents.find((candidate) => candidate.id === selectedAgentId);
 		if (!agent) throw new Error("Selected agent is no longer available.");
+		if (!agent.available) throw new Error(agent.unavailable_reason ?? "Selected agent is not installed.");
+		const chat = await daemonApi.createChat(workspacePath, text.slice(0, 72))
 
 		// Transition immediately. The daemon's prompt RPC remains open until the
 		// agent turn finishes, while the chat screen renders via the event stream.
@@ -176,7 +189,7 @@ function AppPromptInput({ onChatStarted, onSendPrompt, workspacePath, onWorkspac
 		});
 		} catch (error) {
 			console.error("Error submitting prompt:", error);
-			toast.error("An error occurred while submitting the prompt.");
+			toast.error(error instanceof Error ? error.message : "An error occurred while submitting the prompt.");
 		}
 	}
 	const agents = useAgentCatalog();

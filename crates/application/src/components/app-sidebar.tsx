@@ -1,4 +1,16 @@
-import { Bot, Plus, Settings } from "lucide-react";
+import { useState } from "react";
+import { Bot, Plus, Settings, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Sidebar,
   SidebarContent,
@@ -8,6 +20,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -21,6 +34,7 @@ type ChatSidebarProps = {
   chats: Chat[];
   onNewChat: () => void;
   onSelectChat: (chatId: string) => void;
+  onDeleteChat: (chatId: string) => Promise<void>;
   onOpenSettings: () => void;
 };
 
@@ -30,9 +44,28 @@ export function AppSidebar({
   chats,
   onNewChat,
   onSelectChat,
+  onDeleteChat,
   onOpenSettings,
 }: ChatSidebarProps) {
+  const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const deleteChat = async () => {
+    if (!chatToDelete) return;
+    setDeleting(true);
+    try {
+      await onDeleteChat(chatToDelete.id);
+      setChatToDelete(null);
+    } catch (error) {
+      console.error("Failed to delete chat:", error);
+      toast.error(error instanceof Error ? error.message : "Unable to delete this chat.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
+    <>
     <Sidebar
       variant="floating"
       collapsible="icon"
@@ -66,10 +99,22 @@ export function AppSidebar({
                     isActive={chat.id === activeChatId}
                     onClick={() => onSelectChat(chat.id)}
                     tooltip={chat.title}
-                    className="hover:bg-sidebar-accent/50"
+                    className="pr-8 hover:bg-sidebar-accent/50"
                   >
                     <span>{chat.title}</span>
                   </SidebarMenuButton>
+                  <SidebarMenuAction
+                    showOnHover
+                    aria-label={`Delete ${chat.title}`}
+                    title="Delete chat"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setChatToDelete(chat);
+                    }}
+                    className="hover:text-destructive"
+                  >
+                    <Trash2 />
+                  </SidebarMenuAction>
                 </SidebarMenuItem>
                 ))}
               {!chats.length && (
@@ -99,5 +144,34 @@ export function AppSidebar({
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+    <AlertDialog
+      open={chatToDelete !== null}
+      onOpenChange={(open) => {
+        if (!open && !deleting) setChatToDelete(null);
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete chat?</AlertDialogTitle>
+          <AlertDialogDescription>
+            “{chatToDelete?.title}” and its complete message history will be permanently deleted.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            disabled={deleting}
+            onClick={(event) => {
+              event.preventDefault();
+              void deleteChat();
+            }}
+          >
+            {deleting ? "Deleting…" : "Delete"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

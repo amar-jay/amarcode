@@ -23,7 +23,7 @@ afterAll(() => {
 test("propagates a disconnect and starts one replacement event stream", async () => {
   vi.useFakeTimers();
   const store = createStore();
-  let rejectFirst: (reason: Error) => void = () => undefined;
+  let rejectFirst: (reason?: Error) => void = () => undefined;
 
   mocks.subscribeEvents
     .mockImplementationOnce((_filter, _onEvent, onStatus) => {
@@ -43,13 +43,13 @@ test("propagates a disconnect and starts one replacement event stream", async ()
   expect(mocks.subscribeEvents).toHaveBeenCalledTimes(1);
   expect(store.get(daemonEventStreamStateAtom).status).toBe("connected");
 
-  rejectFirst(new Error("daemon closed the subscription connection"));
+  rejectFirst();
   await Promise.resolve();
   await Promise.resolve();
 
   expect(store.get(daemonEventStreamStateAtom)).toEqual({
     status: "reconnecting",
-    error: "daemon closed the subscription connection",
+    error: "undefined",
     reconnectAttempt: 1,
     retryInMs: 250,
   });

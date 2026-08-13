@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::{AgentDefinition, Chat};
+use crate::{AgentInfo, Chat};
 
 pub mod methods {
     pub const HEALTH: &str = "health";
@@ -12,6 +12,7 @@ pub mod methods {
     pub const CREATE_CHAT: &str = "create_chat";
     pub const LIST_CHATS: &str = "list_chats";
     pub const GET_CHAT: &str = "get_chat";
+    pub const DELETE_CHAT: &str = "delete_chat";
     pub const PROMPT: &str = "prompt";
     pub const SET_SESSION_MODE: &str = "set_session_mode";
     pub const CANCEL: &str = "cancel";
@@ -81,7 +82,7 @@ pub struct SubscribeEventsResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListAgentsResult {
-    pub agents: Vec<AgentDefinition>,
+    pub agents: Vec<AgentInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -107,6 +108,16 @@ pub struct GetChatParams {
     pub chat_id: String,
     #[serde(default = "default_true")]
     pub include_messages: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct DeleteChatParams {
+    pub chat_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct DeleteChatResult {
+    pub deleted: bool,
 }
 
 fn default_true() -> bool {

@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/field";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import type { AgentDefinition } from "@/types";
+import type { AgentInfo } from "@/types";
 import type { SessionMode } from "@/state";
 
 type SettingsPage = "appearance" | "general" | "agent";
@@ -121,7 +121,7 @@ export function SettingsDialog({
   onThemeChange: (theme: Theme) => void;
   palette: AppPalette;
   onPaletteChange: (palette: AppPalette) => void;
-  agents: AgentDefinition[];
+  agents: AgentInfo[];
   defaultAgentId: string;
   onDefaultAgentChange: (agentId: string) => void;
   defaultSessionMode: SessionMode;
@@ -234,7 +234,7 @@ function AgentDefaultsPanel({
   defaultSessionMode,
   onDefaultSessionModeChange,
 }: {
-  agents: AgentDefinition[];
+  agents: AgentInfo[];
   defaultAgentId: string;
   onDefaultAgentChange: (agentId: string) => void;
   defaultSessionMode: SessionMode;
@@ -242,6 +242,25 @@ function AgentDefaultsPanel({
 }) {
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const selectedAgent = agents.find((agent) => agent.id === defaultAgentId);
+  const availableAgents = agents.filter((agent) => agent.available);
+  const unavailableAgents = agents.filter((agent) => !agent.available);
+  const renderAgent = (agent: AgentInfo) => <CommandItem 
+		className="cursor-pointer rounded-none !w-full space-x-auto data-disabled:cursor-not-allowed data-disabled:opacity-50"
+		disabled={!agent.available}
+		title={agent.unavailable_reason ?? undefined}
+		key={agent.id} value={`${agent.name} ${agent.id}`} onSelect={() => {
+      onDefaultAgentChange(agent.id);
+      setAgentPickerOpen(false);
+    }}>
+		<span className="mr-auto">
+        {agent.name.replace(/\s*\bACP\s*$/i, "")}
+		</span>
+      {!agent.available ? (
+        <span className="ml-auto text-xs text-muted-foreground">Not installed</span>
+      ) : (
+        <Check className={`ml-auto size-4 ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`} />
+      )}
+    </CommandItem>;
   return <div className="mx-auto w-full max-w-[33rem]">
     <h2 className="text-base font-medium">Agent defaults</h2>
     <p className="mt-1 text-xs leading-5 text-muted-foreground">These choices are used when you start a new chat. Existing conversations keep their current session settings.</p>
@@ -264,19 +283,16 @@ function AgentDefaultsPanel({
               <CommandInput placeholder="Search ACP agents…" />
               <CommandList>
                 <CommandEmpty>No matching ACP agents.</CommandEmpty>
-                <CommandGroup>
-                  {agents.map((agent) => <CommandItem 
-									 className="cursor-pointer rounded-none !w-full space-x-auto"
-									key={agent.id} value={`${agent.name} ${agent.id}`} onSelect={() => {
-                    onDefaultAgentChange(agent.id);
-                    setAgentPickerOpen(false);
-                  }}>
-										<span className="mr-auto">
-                    {agent.name.replace(/\s*\bACP\s*$/i, "")}
-										</span>
-                    <Check className={`ml-auto size-4 ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`} />
-                  </CommandItem>)}
-                </CommandGroup>
+                {availableAgents.length > 0 && (
+                  <CommandGroup heading="Available">
+                    {availableAgents.map(renderAgent)}
+                  </CommandGroup>
+                )}
+                {unavailableAgents.length > 0 && (
+                  <CommandGroup heading="Not installed">
+                    {unavailableAgents.map(renderAgent)}
+                  </CommandGroup>
+                )}
               </CommandList>
             </Command>
           </PopoverContent>

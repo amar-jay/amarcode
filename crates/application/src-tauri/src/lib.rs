@@ -12,10 +12,10 @@ use crate::{
     protocol::{
         events::EditorEvent,
         rpc::{
-            CancelResult, HealthResult, PromptResultDto, RespondAgentParams, RespondAgentResult,
-            VersionResult,
+            CancelResult, DeleteChatResult, HealthResult, PromptResultDto, RespondAgentParams,
+            RespondAgentResult, VersionResult,
         },
-        AgentDefinition, Chat, GetChatResult,
+        AgentInfo, Chat, GetChatResult,
     },
     state::AppState,
 };
@@ -48,7 +48,7 @@ async fn daemon_version(state: State<'_, AppState>) -> Result<VersionResult, Str
 }
 
 #[tauri::command]
-async fn list_agents(state: State<'_, AppState>) -> Result<Vec<AgentDefinition>, String> {
+async fn list_agents(state: State<'_, AppState>) -> Result<Vec<AgentInfo>, String> {
     state.list_agents().await
 }
 
@@ -76,6 +76,14 @@ async fn get_chat(
     include_messages: bool,
 ) -> Result<GetChatResult, String> {
     state.get_chat(chat_id, include_messages).await
+}
+
+#[tauri::command]
+async fn delete_chat(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> Result<DeleteChatResult, String> {
+    state.delete_chat(chat_id).await
 }
 
 #[tauri::command]
@@ -208,6 +216,7 @@ pub fn run() {
             create_chat,
             list_chats,
             get_chat,
+            delete_chat,
             prompt,
             set_session_mode,
             cancel,

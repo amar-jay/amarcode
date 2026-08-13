@@ -1,10 +1,10 @@
 import { atom } from "jotai";
 import { daemonApi } from "@/api";
-import type { AgentDefinition } from "@/types";
+import type { AgentInfo } from "@/types";
 import { defaultAgentIdAtom } from "./preferences";
 
 /** Full agent catalog from the daemon (shared, loaded once). */
-export const agentsAtom = atom<AgentDefinition[]>([]);
+export const agentsAtom = atom<AgentInfo[]>([]);
 
 const agentsLoadStateAtom = atom<"idle" | "loading" | "ready" | "error">("idle");
 
@@ -37,16 +37,21 @@ export const selectedAgentAtom = atom((get) => {
   const agents = get(agentsAtom);
   if (!agents.length) return undefined;
   const preferred = get(selectedAgentIdAtom) ?? get(defaultAgentIdAtom);
-  return agents.find((agent) => agent.id === preferred) ?? agents[0];
+  return (
+    agents.find((agent) => agent.id === preferred && agent.available) ??
+    agents.find((agent) => agent.available)
+  );
 });
 
 /** Set selection by agent id (no-op if unknown). */
 export const selectAgentByIdAtom = atom(null, (get, set, agentId: string) => {
-  const agent = get(agentsAtom).find((candidate) => candidate.id === agentId);
+  const agent = get(agentsAtom).find(
+    (candidate) => candidate.id === agentId && candidate.available,
+  );
   if (agent) set(selectedAgentIdAtom, agent.id);
 });
 
 /** Set selection from a full agent object. */
-export const selectAgentAtom = atom(null, (_get, set, agent: AgentDefinition) => {
-  set(selectedAgentIdAtom, agent.id);
+export const selectAgentAtom = atom(null, (_get, set, agent: AgentInfo) => {
+  if (agent.available) set(selectedAgentIdAtom, agent.id);
 });

@@ -701,6 +701,50 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Permanently delete a chat after its current turn has settled and its
+    /// live ACP process, if any, has been stopped.
+    pub fn delete_chat(&self, chat_id: &str) -> Result<()> {
+        self.inner
+            .store
+            .get_chat(chat_id)?
+            .ok_or_else(|| Error::msg(format!("chat not found: {chat_id}")))?;
+
+        // Interrupt an active turn first, then wait for its prompt guard so all
+        // cleanup writes finish before the cascading database deletion.
+        if self.has_live_run(chat_id)? {
+            self.cancel(chat_id)?;
+        }
+        let prompt_lock = self.prompt_lock(chat_id)?;
+        let _prompt_guard = prompt_lock
+            .lock()
+            .map_err(|_| Error::msg("prompt lock poisoned"))?;
+
+        // A prompt could have won the lock race immediately before deletion.
+        if self.has_live_run(chat_id)? {
+            self.cancel(chat_id)?;
+        }
+
+        if !self.inner.store.delete_chat(chat_id)? {
+            return Err(Error::msg(format!("chat not found: {chat_id}")));
+        }
+        if let Ok(mut locks) = self.inner.prompt_locks.lock() {
+            locks.remove(chat_id);
+        }
+        self.emit(EditorEvent::ChatUpdated {
+            chat_id: chat_id.to_owned(),
+        });
+        Ok(())
+    }
+
+    fn has_live_run(&self, chat_id: &str) -> Result<bool> {
+        Ok(self
+            .inner
+            .by_chat
+            .lock()
+            .map_err(|_| Error::msg("session lock poisoned"))?
+            .contains_key(chat_id))
+    }
+
     /// Answer an agent-initiated request (`ApprovalRequired` / `QuestionRequired`).
     pub fn respond_to_agent(&self, request_id: &str, result: Value) -> Result<()> {
         let pending = {

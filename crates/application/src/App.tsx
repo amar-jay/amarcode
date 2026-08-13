@@ -8,6 +8,7 @@ import { TopBar } from "@/components/top-bar";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { DaemonConnectionDialog } from "@/components/daemon-connection-dialog";
 import { Toaster } from "@/components/ui/sonner";
+import { daemonApi } from "@/api";
 import {
   activeSessionAtom,
   agentsAtom,
@@ -74,7 +75,12 @@ export default function App() {
           workspacePath={workspacePath}
           chats={chats}
           onNewChat={() => startNewChat()}
-          onSelectChat={(chatId) => selectChat(chatId)}
+                onSelectChat={(chatId) => selectChat(chatId)}
+                onDeleteChat={async (chatId) => {
+                  await daemonApi.deleteChat(chatId);
+                  if (activeSession?.chat.id === chatId) startNewChat();
+                  await refreshChats();
+                }}
           onOpenSettings={() => setSettingsOpen(true)}
         />
         {activeSession ? (

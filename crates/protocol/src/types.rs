@@ -91,6 +91,25 @@ pub struct AgentDefinition {
     pub updated_at: String,
 }
 
+/// An agent definition annotated with availability on the daemon host.
+///
+/// Availability is intentionally not persisted: it depends on the daemon's
+/// current tools directory and process environment.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AgentInfo {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    pub arguments: Vec<String>,
+    pub environment: Vec<(String, String)>,
+    pub is_preset: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub available: bool,
+    pub resolved_command: Option<String>,
+    pub unavailable_reason: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Chat {
     pub id: String,

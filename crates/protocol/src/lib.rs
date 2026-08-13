@@ -6,12 +6,12 @@ pub mod types;
 
 pub use events::{EditorEvent, EventLine};
 pub use types::{
-    AgentDefinition, Chat, ChatDetail, GetChatResult, Message, MessageDetail, MessagePart,
-    MessagePartKind, MessageRole, MessageStatus, RunStatus, TurnStatus,
+    AgentDefinition, AgentInfo, Chat, ChatDetail, GetChatResult, Message, MessageDetail,
+    MessagePart, MessagePartKind, MessageRole, MessageStatus, RunStatus, TurnStatus,
 };
 
 /// Increment when a wire change is not backward compatible.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Deterministic checked-in TypeScript contract consumed by the React app.
 pub fn typescript_bindings() -> String {
@@ -25,6 +25,7 @@ pub fn typescript_bindings() -> String {
         MessageStatus::decl(&config),
         MessagePartKind::decl(&config),
         AgentDefinition::decl(&config),
+        AgentInfo::decl(&config),
         Chat::decl(&config),
         Message::decl(&config),
         MessagePart::decl(&config),
@@ -37,6 +38,8 @@ pub fn typescript_bindings() -> String {
         rpc::CreateChatParams::decl(&config),
         rpc::ListChatsParams::decl(&config),
         rpc::GetChatParams::decl(&config),
+        rpc::DeleteChatParams::decl(&config),
+        rpc::DeleteChatResult::decl(&config),
         rpc::PromptParams::decl(&config),
         rpc::SetSessionModeParams::decl(&config),
         rpc::PromptResultDto::decl(&config),

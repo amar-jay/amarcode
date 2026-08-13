@@ -10,9 +10,10 @@ use serde_json::{json, Value};
 
 use crate::{
     protocol::rpc::{
-        methods, CancelParams, CancelResult, CreateChatParams, GetChatParams, HealthResult,
-        ListAgentsResult, ListChatsParams, ListChatsResult, PromptParams, PromptResultDto,
-        RespondAgentParams, RespondAgentResult, SetSessionModeParams, SubscribeEventsParams, VersionResult,
+        methods, CancelParams, CancelResult, CreateChatParams, DeleteChatParams, DeleteChatResult,
+        GetChatParams, HealthResult, ListAgentsResult, ListChatsParams, ListChatsResult,
+        PromptParams, PromptResultDto, RespondAgentParams, RespondAgentResult,
+        SetSessionModeParams, SubscribeEventsParams, VersionResult,
     },
     service::{ChatDetail, MessageDetail, PromptResult},
     App, Error, Result,
@@ -45,6 +46,7 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::CREATE_CHAT => Ok(DispatchOutcome::Result(create_chat(app, params)?)),
         methods::LIST_CHATS => Ok(DispatchOutcome::Result(list_chats(app, params)?)),
         methods::GET_CHAT => Ok(DispatchOutcome::Result(get_chat(app, params)?)),
+        methods::DELETE_CHAT => Ok(DispatchOutcome::Result(delete_chat(app, params).await?)),
 
         // sessions (ACP — may block; run off the async worker)
         methods::PROMPT => Ok(DispatchOutcome::Result(prompt(app, params).await?)),
@@ -110,6 +112,13 @@ fn get_chat(app: &App, params: Value) -> Result<Value> {
         let chat = app.chats.get_required(&p.chat_id)?;
         to_value(chat)
     }
+}
+
+async fn delete_chat(app: &App, params: Value) -> Result<Value> {
+    let p: DeleteChatParams = parse_params(params)?;
+    let chat_id = p.chat_id;
+    tokio::task::block_in_place(|| app.sessions.delete_chat(&chat_id))?;
+    to_value(DeleteChatResult { deleted: true })
 }
 
 fn chat_detail_json(detail: &ChatDetail) -> Result<Value> {

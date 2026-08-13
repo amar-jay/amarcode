@@ -76,4 +76,45 @@ impl Store {
             .map_err(to_error)?;
         Ok(())
     }
+
+    /// Permanently delete a chat and all dependent rows via foreign-key
+    /// cascades. Returns whether a chat row existed.
+    pub fn delete_chat(&self, id: &str) -> Result<bool> {
+        let deleted = self
+            .connection()?
+            .execute("DELETE FROM chats WHERE id=?1", params![id])
+            .map_err(to_error)?;
+        Ok(deleted > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delete_chat_removes_the_row_and_reports_missing_chats() {
+        let directory =
+            std::env::temp_dir().join(format!("amarcode-delete-chat-{}", uuid::Uuid::new_v4()));
+        let store = Store::open(&directory.join("store.sqlite3")).expect("open store");
+        let chat = Chat {
+            id: "chat-to-delete".into(),
+            workspace_path: "/tmp/workspace".into(),
+            title: "Delete me".into(),
+            created_at: super::super::now(),
+            updated_at: super::super::now(),
+            archived_at: None,
+        };
+        store.create_chat(&chat).expect("create chat");
+
+        assert!(store.delete_chat(&chat.id).expect("delete chat"));
+        assert!(store
+            .get_chat(&chat.id)
+            .expect("get deleted chat")
+            .is_none());
+        assert!(!store.delete_chat(&chat.id).expect("delete missing chat"));
+
+        drop(store);
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
 }
