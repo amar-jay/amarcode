@@ -84,12 +84,12 @@ export default function App() {
           workspacePath={workspacePath}
           chats={chats}
           onNewChat={() => startNewChat()}
-                onSelectChat={(chatId) => selectChat(chatId)}
-                onDeleteChat={async (chatId) => {
-                  await daemonApi.deleteChat(chatId);
-                  if (activeSession?.chat.id === chatId) startNewChat();
-                  await refreshChats();
-                }}
+          onSelectChat={(chatId) => selectChat(chatId)}
+          onDeleteChat={async (chatId) => {
+            await daemonApi.deleteChat(chatId);
+            if (activeSession?.chat.id === chatId) startNewChat();
+            await refreshChats();
+          }}
           onOpenSettings={() => setSettingsOpen(true)}
         />
         {activeSession ? (

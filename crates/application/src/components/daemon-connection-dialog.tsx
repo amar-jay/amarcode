@@ -24,10 +24,10 @@ export function DaemonConnectionDialog({
 }: DaemonConnectionDialogProps) {
   const isError = status.status === "failed";
   const requiresInstall = status.status === "installRequired";
-  const title =
-    requiresInstall
-      ? "Background service required"
-      : status.status === "downloading"
+  const illustration = connectionIllustration(status);
+  const title = requiresInstall
+    ? "Background service required"
+    : status.status === "downloading"
       ? "Downloading daemon..."
       : status.status === "verifying"
         ? "Verifying daemon..."
@@ -38,10 +38,9 @@ export function DaemonConnectionDialog({
             : isError
               ? "Connection failed"
               : "Checking daemon...";
-  const description =
-    requiresInstall
-      ? `${status.reason} It runs for your user account, starts at login, and remains available when this window closes.`
-      : status.status === "downloading"
+  const description = requiresInstall
+    ? `${status.reason} It runs for your user account, starts at login, and remains available when this window closes.`
+    : status.status === "downloading"
       ? status.total > 0
         ? Math.round((status.received / status.total) * 100) + "% downloaded"
         : "Downloading the daemon for this platform."
@@ -66,12 +65,13 @@ export function DaemonConnectionDialog({
         </button>
         <div className="mx-auto flex size-36 items-center justify-center">
           <img
-            src="/connection.svg"
+            key={illustration}
+            src={illustration}
             alt=""
             className={
               !isError && !requiresInstall
-                ? "size-full animate-[pulse_1.8s_ease-in-out_infinite] dark:invert"
-                : "size-full dark:invert"
+                ? "size-full object-contain animate-[pulse_1.8s_ease-in-out_infinite] dark:invert"
+                : "size-full object-contain dark:invert"
             }
           />
         </div>
@@ -99,4 +99,24 @@ export function DaemonConnectionDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function connectionIllustration(
+  status: Exclude<DaemonBootstrapStatus, { status: "ready" }>,
+): string {
+  switch (status.status) {
+    case "checking":
+      return "/illustrations/daemon-checking.png";
+    case "installRequired":
+    case "verifying":
+      return "/illustrations/daemon-verifying.png";
+    case "downloading":
+      return "/illustrations/daemon-downloading.png";
+    case "installing":
+      return "/illustrations/daemon-installing.png";
+    case "starting":
+      return "/illustrations/daemon-starting.png";
+    case "failed":
+      return "/illustrations/daemon-error.png";
+  }
 }

@@ -35,7 +35,9 @@ export function useAppBootstrap() {
       status: "checking",
     });
   const [daemonAttempt, setDaemonAttempt] = useState(0);
-  const [daemonUpdateVersion, setDaemonUpdateVersion] = useState<string | null>(null);
+  const [daemonUpdateVersion, setDaemonUpdateVersion] = useState<string | null>(
+    null,
+  );
   const [daemonUpdateStatus, setDaemonUpdateStatus] =
     useState<DaemonUpdateStatus | null>(null);
   const store = useStore();
@@ -160,8 +162,7 @@ export function useAppBootstrap() {
       setDaemonUpdateVersion(null);
       setDaemonUpdateStatus(null);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
       console.error("Daemon update failed:", error);
       setDaemonUpdateStatus({ status: "failed", error: message });
       // The backend attempts rollback; reconnect/reconcile with whatever
@@ -169,7 +170,10 @@ export function useAppBootstrap() {
       try {
         await reconcileDaemonClient();
       } catch (reconnectError) {
-        console.error("Daemon reconnection after update failure failed:", reconnectError);
+        console.error(
+          "Daemon reconnection after update failure failed:",
+          reconnectError,
+        );
       }
     }
   }, [reconcileDaemonClient]);
@@ -205,7 +209,10 @@ export function useAppBootstrap() {
     daemonUpdateStatus,
     updateDaemon,
     closeDaemonUpdate: () => {
-      if (daemonUpdateStatus === null || daemonUpdateStatus.status === "failed") {
+      if (
+        daemonUpdateStatus === null ||
+        daemonUpdateStatus.status === "failed"
+      ) {
         setDaemonUpdateVersion(null);
         setDaemonUpdateStatus(null);
       }

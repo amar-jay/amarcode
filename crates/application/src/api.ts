@@ -62,8 +62,7 @@ export const daemonApi = {
     statusChannel.onmessage = onStatus;
     return invoke("daemon_install", { onStatus: statusChannel });
   },
-  checkUpdate: (): Promise<DaemonUpdateCheck> =>
-    invoke("daemon_check_update"),
+  checkUpdate: (): Promise<DaemonUpdateCheck> => invoke("daemon_check_update"),
   update: async (
     onStatus: (status: DaemonUpdateStatus) => void,
   ): Promise<Health> => {

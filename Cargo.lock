@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "amarcode-daemon"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "amarcode-protocol",
  "chrono",
