@@ -254,6 +254,44 @@ pub(super) fn append_text_delta(inner: &SessionInner, message_id: &str, delta: &
     Ok(())
 }
 
+pub(super) fn append_thinking_delta(
+    inner: &SessionInner,
+    message_id: &str,
+    delta: &str,
+) -> Result<()> {
+    let mut parts = inner.store.message_parts(message_id)?;
+    if let Some(thinking_part) = parts
+        .last_mut()
+        .filter(|part| part.kind == MessagePartKind::Thinking)
+    {
+        let content: Value = serde_json::from_str(&thinking_part.content_json).unwrap_or(json!({}));
+        let existing = content
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        thinking_part.content_json = json!({ "text": format!("{existing}{delta}") }).to_string();
+        inner.store.replace_message_parts(message_id, &parts)?;
+    } else {
+        let ordinal = parts.iter().map(|part| part.ordinal).max().unwrap_or(-1) + 1;
+        parts.push(MessagePart {
+            message_id: message_id.to_owned(),
+            ordinal,
+            kind: MessagePartKind::Thinking,
+            content_json: json!({ "text": delta }).to_string(),
+        });
+        inner.store.replace_message_parts(message_id, &parts)?;
+        emit(
+            inner,
+            EditorEvent::MessagePartAdded {
+                message_id: message_id.to_owned(),
+                ordinal,
+                kind: MessagePartKind::Thinking,
+            },
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn finalize_message(
     inner: &SessionInner,
     message_id: &str,

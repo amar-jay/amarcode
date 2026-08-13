@@ -8,18 +8,17 @@ use tracing::{debug, warn};
 use crate::{
     acp::AcpInbound,
     protocol::{
-        AgentEventMethod, EditorEvent, MessagePartKind, MessageStatus, RpcDirection, RpcEnvelope,
-        RunStatus, TurnStatus,
+        AgentEventMethod, EditorEvent, MessageStatus, RpcDirection, RpcEnvelope, RunStatus,
+        TurnStatus,
     },
-    store::MessagePart,
     Error, Result,
 };
 
 use super::{
     messages::{
-        append_text_delta, append_tool_part, complete_run, ensure_context_message,
-        ensure_streaming_message, finalize_message, next_part_ordinal,
-        remove_pending_requests_for_run, take_streaming_messages,
+        append_text_delta, append_thinking_delta, append_tool_part, complete_run,
+        ensure_streaming_message, finalize_message, remove_pending_requests_for_run,
+        take_streaming_messages,
     },
     types::{PendingAgentRequest, SessionInner},
     util::{emit, extract_text_delta},
@@ -220,10 +219,23 @@ fn apply_notification(
                 },
             );
         }
-        AgentEventMethod::MessageDelta | AgentEventMethod::ThinkingDelta => {
+        AgentEventMethod::MessageDelta => {
             let message_id = ensure_streaming_message(inner, run_id, chat_id, None)?;
             if let Some(delta) = extract_text_delta(&envelope.payload) {
                 append_text_delta(inner, &message_id, &delta)?;
+            }
+            emit(
+                inner,
+                EditorEvent::MessageUpdated {
+                    message_id,
+                    status: MessageStatus::Streaming,
+                },
+            );
+        }
+        AgentEventMethod::ThinkingDelta => {
+            let message_id = ensure_streaming_message(inner, run_id, chat_id, None)?;
+            if let Some(delta) = extract_text_delta(&envelope.payload) {
+                append_thinking_delta(inner, &message_id, &delta)?;
             }
             emit(
                 inner,
@@ -369,7 +381,11 @@ fn apply_session_update(
                 update.get("messageId").and_then(|value| value.as_str()),
             )?;
             if let Some(delta) = extract_text_delta(update) {
-                append_text_delta(inner, &message_id, &delta)?;
+                if is_reasoning_message_chunk(update) {
+                    append_thinking_delta(inner, &message_id, &delta)?;
+                } else {
+                    append_text_delta(inner, &message_id, &delta)?;
+                }
             }
             emit(
                 inner,
@@ -386,26 +402,14 @@ fn apply_session_update(
             // assistant message. The raw notification remains in acp_events.
         }
         "agent_thought_chunk" => {
-            let message_id = ensure_context_message(inner, run_id, chat_id)?;
+            let message_id = ensure_streaming_message(
+                inner,
+                run_id,
+                chat_id,
+                update.get("messageId").and_then(Value::as_str),
+            )?;
             if let Some(delta) = extract_text_delta(update) {
-                // Store thought as a thinking part + optional text append.
-                let ordinal = next_part_ordinal(inner, &message_id)?;
-                let mut parts = inner.store.message_parts(&message_id)?;
-                parts.push(MessagePart {
-                    message_id: message_id.clone(),
-                    ordinal,
-                    kind: MessagePartKind::Thinking,
-                    content_json: json!({ "text": delta }).to_string(),
-                });
-                inner.store.replace_message_parts(&message_id, &parts)?;
-                emit(
-                    inner,
-                    EditorEvent::MessagePartAdded {
-                        message_id: message_id.clone(),
-                        ordinal,
-                        kind: MessagePartKind::Thinking,
-                    },
-                );
+                append_thinking_delta(inner, &message_id, &delta)?;
             }
             emit(
                 inner,
@@ -428,11 +432,24 @@ fn apply_session_update(
     Ok(())
 }
 
+fn is_reasoning_message_chunk(update: &Value) -> bool {
+    matches!(
+        update
+            .get("_meta")
+            .and_then(|meta| meta.get("codex"))
+            .and_then(|codex| codex.get("phase"))
+            .and_then(Value::as_str),
+        Some("commentary" | "analysis" | "reasoning")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
-    use super::new_pending_request_id;
+    use serde_json::json;
+
+    use super::{is_reasoning_message_chunk, new_pending_request_id};
 
     #[test]
     fn daemon_request_ids_do_not_share_the_acp_id_namespace() {
@@ -441,5 +458,23 @@ mod tests {
             .collect::<HashSet<_>>();
         assert_eq!(ids.len(), 64);
         assert!(ids.iter().all(|id| uuid::Uuid::parse_str(id).is_ok()));
+    }
+
+    #[test]
+    fn codex_commentary_is_classified_as_reasoning() {
+        assert!(is_reasoning_message_chunk(&json!({
+            "_meta": { "codex": { "phase": "commentary" } }
+        })));
+        assert!(is_reasoning_message_chunk(&json!({
+            "_meta": { "codex": { "phase": "analysis" } }
+        })));
+    }
+
+    #[test]
+    fn final_and_unphased_messages_remain_visible_answers() {
+        assert!(!is_reasoning_message_chunk(&json!({
+            "_meta": { "codex": { "phase": "final_answer" } }
+        })));
+        assert!(!is_reasoning_message_chunk(&json!({})));
     }
 }
