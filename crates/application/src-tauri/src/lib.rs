@@ -6,7 +6,7 @@ mod state;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::{ipc::Channel, AppHandle, Manager, State};
+use tauri::{ipc::Channel, AppHandle, State};
 
 use crate::{
     protocol::{
@@ -25,8 +25,25 @@ async fn daemon_bootstrap(
     app: AppHandle,
     manager: State<'_, daemon::DaemonManager>,
     on_status: Channel<daemon::DaemonBootstrapStatus>,
-) -> Result<HealthResult, String> {
+) -> Result<Option<HealthResult>, String> {
     match manager.bootstrap(&app, &on_status).await {
+        Ok(health) => Ok(health),
+        Err(error) => {
+            let _ = on_status.send(daemon::DaemonBootstrapStatus::Failed {
+                error: error.clone(),
+            });
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
+async fn daemon_install(
+    app: AppHandle,
+    manager: State<'_, daemon::DaemonManager>,
+    on_status: Channel<daemon::DaemonBootstrapStatus>,
+) -> Result<HealthResult, String> {
+    match manager.install(&app, &on_status).await {
         Ok(health) => Ok(health),
         Err(error) => {
             let _ = on_status.send(daemon::DaemonBootstrapStatus::Failed {
@@ -210,6 +227,7 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             daemon_bootstrap,
+            daemon_install,
             daemon_health,
             daemon_version,
             list_agents,
@@ -228,13 +246,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building amarcode");
 
-    app.run(|app_handle, event| {
-        if matches!(event, tauri::RunEvent::Exit) {
-            // Packaged daemons are OS-managed and intentionally survive GUI
-            // exit. Only a local development override is app-owned.
-            app_handle
-                .state::<daemon::DaemonManager>()
-                .stop_development_daemon();
-        }
-    });
+    // The native service manager exclusively owns the daemon lifecycle. The
+    // desktop application has no daemon child process to stop on exit.
+    app.run(|_, _| {});
 }

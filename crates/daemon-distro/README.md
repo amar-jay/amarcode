@@ -80,13 +80,17 @@ key is embedded in the desktop application; never commit the private key.
 
 ## Desktop application integration
 
-At startup, the Tauri backend checks whether a compatible daemon is already
-listening. For local development it then prefers `AMARCODE_DAEMON_COMMAND` or a
-daemon in the workspace's `target/debug` directory; development daemons remain
-children of the desktop process. Packaged applications fetch `latest.json` and
-its signature, verify the embedded Ed25519 public key, select the current
-platform artifact, and verify both its byte size and SHA-256 before registering
-and starting it as a per-user, login-persistent background service.
+At startup, the Tauri backend first verifies that the native per-user service is
+registered. Only then does it accept a compatible daemon health response or ask
+the service manager to start it. The desktop never launches a long-lived daemon
+child process, including in development, and closing the desktop never stops
+the service.
+
+Ordinary bootstrap does not download or install a service. When installation
+is missing, the desktop presents an explicit consent action. Only that action
+fetches `latest.json`, verifies its Ed25519 signature, selects the platform
+artifact, verifies its byte size and SHA-256, and invokes the daemon's
+short-lived `install` and `restart` lifecycle commands.
 
 Installed releases are kept below Tauri's application-local data directory in
 `daemon/<version>/<rust-target>/`. The last successfully launched signed
@@ -103,13 +107,34 @@ of the desktop application:
 Re-registering a release updates the executable path and restarts the managed
 daemon. Closing Amarcode does not stop it.
 
+Native registration and lifecycle control live in the daemon binary:
+`run`, `install`, `uninstall`, `start`, `stop`, `restart`, and `status`.
+`install` registers login persistence without starting the service; the
+desktop's explicit installation action invokes `restart` separately.
+
 Runtime overrides useful for development and staging:
 
-- `AMARCODE_DAEMON_COMMAND` launches a specific local executable.
+- `AMARCODE_DAEMON_SERVICE_EXECUTABLE` selects a daemon binary for short-lived
+  `status` and `start` lifecycle commands. It must already be registered as the
+  native user service; the desktop never invokes it in `run` mode.
 - `AMARCODE_DAEMON_RELEASE_URL` changes the `latest.json` endpoint; its
   signature must be available at the same URL with `.sig` appended and must
   still match the public key compiled into the application.
 - `AMARCODE_DAEMON_ADDR` changes the daemon health/RPC address.
+
+For local development, register the debug binary once and let the operating
+system own it:
+
+```sh
+bun run daemon:install-dev
+bun run daemon:restart
+bun run tauri:dev
+```
+
+Debug desktop builds automatically find `target/debug/amarcode-daemon` for
+lifecycle commands. Set `AMARCODE_DAEMON_SERVICE_EXECUTABLE` when using a
+binary elsewhere. Use `bun run daemon:status`, `daemon:stop`, or
+`daemon:uninstall` to manage the development service explicitly.
 
 For CI publishing, store the private PEM as an encrypted secret, write it to a
 temporary file with restricted permissions, set `AMARCODE_DAEMON_SIGNING_KEY`

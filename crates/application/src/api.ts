@@ -19,6 +19,7 @@ export type DaemonEventStreamStatus =
 
 export type DaemonBootstrapStatus =
   | { status: "checking" }
+  | { status: "installRequired"; reason: string }
   | { status: "downloading"; received: number; total: number }
   | { status: "verifying" }
   | { status: "installing" }
@@ -35,10 +36,17 @@ export type DaemonBootstrapStatus =
 export const daemonApi = {
   bootstrap: async (
     onStatus: (status: DaemonBootstrapStatus) => void,
-  ): Promise<Health> => {
+  ): Promise<Health | null> => {
     const statusChannel = new Channel<DaemonBootstrapStatus>();
     statusChannel.onmessage = onStatus;
     return invoke("daemon_bootstrap", { onStatus: statusChannel });
+  },
+  install: async (
+    onStatus: (status: DaemonBootstrapStatus) => void,
+  ): Promise<Health> => {
+    const statusChannel = new Channel<DaemonBootstrapStatus>();
+    statusChannel.onmessage = onStatus;
+    return invoke("daemon_install", { onStatus: statusChannel });
   },
   health: (): Promise<Health> => invoke("daemon_health"),
   version: (): Promise<DaemonVersion> => invoke("daemon_version"),

@@ -1,20 +1,21 @@
 use std::{
-    path::Path,
-    process::{Child, Command, Stdio},
-    sync::Mutex,
-    time::Duration,
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    time::{Duration, Instant},
 };
 
 #[cfg(unix)]
-use std::{ffi::OsString, io::Read, time::Instant};
+use std::ffi::OsString;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, AppHandle, Manager};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::{
     config::Config,
-    daemon::{release, service, DaemonBridge},
+    daemon::{release, DaemonBridge},
     protocol::rpc::{methods, HealthResult},
 };
 
@@ -22,6 +23,7 @@ use crate::{
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum DaemonBootstrapStatus {
     Checking,
+    InstallRequired { reason: String },
     Downloading { received: u64, total: u64 },
     Verifying,
     Installing,
@@ -32,14 +34,12 @@ pub enum DaemonBootstrapStatus {
 
 pub struct DaemonManager {
     bootstrap_lock: AsyncMutex<()>,
-    development_child: Mutex<Option<Child>>,
 }
 
 impl DaemonManager {
     pub fn new() -> Self {
         Self {
             bootstrap_lock: AsyncMutex::new(()),
-            development_child: Mutex::new(None),
         }
     }
 
@@ -47,38 +47,90 @@ impl DaemonManager {
         &self,
         app: &AppHandle,
         on_status: &Channel<DaemonBootstrapStatus>,
-    ) -> Result<HealthResult, String> {
+    ) -> Result<Option<HealthResult>, String> {
         let _guard = self.bootstrap_lock.lock().await;
         send(on_status, DaemonBootstrapStatus::Checking);
 
-        if let Ok(health) = compatible_health().await {
-            ready(on_status, &health);
-            return Ok(health);
+        let target = release::platform_target()?;
+        let install_root = install_root(app)?;
+        let (executable, expected_version) = if let Some(executable) =
+            Config::get().daemon_service_executable.clone()
+        {
+            if !executable.is_file() {
+                install_required(
+                    on_status,
+                    "The configured daemon service executable does not exist.",
+                );
+                return Ok(None);
+            }
+            (executable, None)
+        } else {
+            if !service_installation_marker(&install_root).is_file() {
+                install_required(
+                    on_status,
+                    "The per-user background service has not been installed yet.",
+                );
+                return Ok(None);
+            }
+
+            let Some((executable, expected_version)) = cached_executable(&install_root, target)?
+            else {
+                install_required(
+                    on_status,
+                    "The installed service needs to be repaired with a verified daemon executable.",
+                );
+                return Ok(None);
+            };
+            (executable, Some(expected_version))
+        };
+
+        let status = match service_status(&executable) {
+            Ok(status) => status,
+            Err(error) => {
+                install_required(
+                    on_status,
+                    &format!("The daemon service status could not be verified: {error}"),
+                );
+                return Ok(None);
+            }
+        };
+        if !status.installed {
+            install_required(
+                on_status,
+                "The per-user background service is no longer registered.",
+            );
+            return Ok(None);
         }
 
-        let configured_command = &Config::get().daemon_command;
-        let explicit_override = std::env::var_os("AMARCODE_DAEMON_COMMAND").is_some();
-        if explicit_override || Path::new(configured_command).is_file() {
-            send(on_status, DaemonBootstrapStatus::Starting);
-            self.spawn_development_daemon(configured_command)?;
-            match wait_for_health().await {
-                Ok(health) => {
-                    ready(on_status, &health);
-                    return Ok(health);
-                }
-                Err(error) => {
-                    self.stop_development_daemon();
-                    return Err(error);
-                }
+        // Health is trusted only after native service registration has been
+        // verified. A random foreground daemon must not satisfy bootstrap.
+        if status.state == ServiceState::Running {
+            if let Ok(health) = compatible_health().await {
+                ensure_expected_version(expected_version.as_deref(), &health)?;
+                ready(on_status, &health);
+                return Ok(Some(health));
             }
         }
 
+        send(on_status, DaemonBootstrapStatus::Starting);
+        run_lifecycle_command(&executable, &["start"], None)?;
+        let health = wait_for_health().await?;
+        ensure_service_running(&executable)?;
+        ensure_expected_version(expected_version.as_deref(), &health)?;
+        ready(on_status, &health);
+        Ok(Some(health))
+    }
+
+    /// Download, verify, register, and start the service after explicit user
+    /// consent. Ordinary bootstrap never calls this method.
+    pub async fn install(
+        &self,
+        app: &AppHandle,
+        on_status: &Channel<DaemonBootstrapStatus>,
+    ) -> Result<HealthResult, String> {
+        let _guard = self.bootstrap_lock.lock().await;
         let target = release::platform_target()?;
-        let install_root = app
-            .path()
-            .app_local_data_dir()
-            .map_err(|error| error.to_string())?
-            .join("daemon");
+        let install_root = install_root(app)?;
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(90))
             .build()
@@ -139,16 +191,30 @@ impl DaemonManager {
                 );
             }
             send(on_status, DaemonBootstrapStatus::Verifying);
+            if let Err(error) = verify_lifecycle_cli(&executable) {
+                failures.push(error);
+                continue;
+            }
             send(on_status, DaemonBootstrapStatus::Installing);
             send(on_status, DaemonBootstrapStatus::Starting);
 
             let service_path = agent_path();
-            if let Err(error) = service::install_and_start(&executable, service_path.as_deref()) {
+            if let Err(error) =
+                run_lifecycle_command(&executable, &["install"], service_path.as_deref())
+            {
+                failures.push(error);
+                continue;
+            }
+            if let Err(error) = run_lifecycle_command(&executable, &["restart"], None) {
                 failures.push(error);
                 continue;
             }
             match wait_for_health().await {
                 Ok(health) => {
+                    if let Err(error) = ensure_service_running(&executable) {
+                        failures.push(error);
+                        continue;
+                    }
                     if health.version != manifest.manifest.version {
                         failures.push(format!(
                             "daemon version mismatch: installed {}, launched {}",
@@ -156,9 +222,10 @@ impl DaemonManager {
                         ));
                         continue;
                     }
-                    if let Err(error) = manifest.save_as_current(&install_root) {
-                        failures.push(error);
-                    }
+                    manifest.save_as_current(&install_root)?;
+                    fs::write(service_installation_marker(&install_root), b"1\n").map_err(
+                        |error| format!("failed to save service installation state: {error}"),
+                    )?;
                     ready(on_status, &health);
                     return Ok(health);
                 }
@@ -174,62 +241,180 @@ impl DaemonManager {
             failures.join("; ")
         })
     }
+}
 
-    /// Development commands remain child processes. Production releases use
-    /// the platform service manager and are never stored in this handle.
-    fn spawn_development_daemon(&self, executable: &str) -> Result<(), String> {
-        self.stop_development_daemon();
-        let mut command = Command::new(executable);
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+const SERVICE_INSTALLATION_MARKER: &str = "service-installed-v1";
 
-        // Desktop launchers inherit the graphical session's PATH, which often
-        // omits tools installed by shell-managed runtimes such as nvm, Bun,
-        // Cargo, mise, or asdf.  The daemon launches ACP adapters by command
-        // name, so give it the same PATH the user gets in a login shell.
-        #[cfg(unix)]
-        if let Some(path) = agent_path() {
-            command.env("PATH", path);
-        }
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+enum ServiceState {
+    NotInstalled,
+    Stopped,
+    Running,
+    Unknown,
+}
 
-        // GUI processes on Windows can likewise have a stale or incomplete
-        // user PATH. npm in particular installs ACP command shims under
-        // `%APPDATA%\npm`, which may be missing when Amarcode is opened from
-        // the Start menu instead of a terminal.
-        #[cfg(windows)]
-        if let Some(path) = agent_path() {
-            command.env("PATH", path);
-        }
+#[derive(Debug, Deserialize)]
+struct ServiceStatus {
+    installed: bool,
+    state: ServiceState,
+}
 
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
-        }
+fn install_root(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("daemon"))
+}
 
-        let child = command
-            .spawn()
-            .map_err(|error| format!("failed to launch daemon {executable}: {error}"))?;
-        *self
-            .development_child
-            .lock()
-            .expect("daemon child lock poisoned") = Some(child);
+fn service_installation_marker(install_root: &Path) -> PathBuf {
+    install_root.join(SERVICE_INSTALLATION_MARKER)
+}
+
+fn cached_executable(
+    install_root: &Path,
+    target: &str,
+) -> Result<Option<(PathBuf, String)>, String> {
+    let manifest = match release::load_cached(install_root) {
+        Ok(manifest) => manifest,
+        Err(_) => return Ok(None),
+    };
+    if ensure_manifest_compatible(&manifest).is_err() {
+        return Ok(None);
+    }
+    let executable = manifest.installed_executable(install_root, target)?;
+    Ok(executable.map(|path| (path, manifest.manifest.version)))
+}
+
+fn service_status(executable: &Path) -> Result<ServiceStatus, String> {
+    let output = run_lifecycle_command(executable, &["status", "--json"], None)?;
+    serde_json::from_str(&output)
+        .map_err(|error| format!("daemon returned invalid service status: {error}"))
+}
+
+fn ensure_service_running(executable: &Path) -> Result<(), String> {
+    let status = service_status(executable)?;
+    if status.installed && status.state == ServiceState::Running {
         Ok(())
+    } else {
+        Err("daemon answered health checks, but the native service is not running".into())
+    }
+}
+
+fn verify_lifecycle_cli(executable: &Path) -> Result<(), String> {
+    let help =
+        run_lifecycle_command_with_timeout(executable, &["--help"], None, Duration::from_secs(3))
+            .map_err(|error| {
+            format!("downloaded daemon does not support service lifecycle commands: {error}")
+        })?;
+    validate_lifecycle_help(&help)
+}
+
+fn validate_lifecycle_help(help: &str) -> Result<(), String> {
+    for command in ["install", "start", "restart", "status"] {
+        if !help
+            .lines()
+            .any(|line| line.trim_start().starts_with(command))
+        {
+            return Err(format!(
+                "downloaded daemon is missing the required `{command}` lifecycle command"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn run_lifecycle_command(
+    executable: &Path,
+    arguments: &[&str],
+    path: Option<&std::ffi::OsStr>,
+) -> Result<String, String> {
+    run_lifecycle_command_with_timeout(executable, arguments, path, Duration::from_secs(15))
+}
+
+fn run_lifecycle_command_with_timeout(
+    executable: &Path,
+    arguments: &[&str],
+    path: Option<&std::ffi::OsStr>,
+    timeout: Duration,
+) -> Result<String, String> {
+    let mut command = Command::new(executable);
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
     }
 
-    pub fn stop_development_daemon(&self) {
-        if let Some(mut child) = self
-            .development_child
-            .lock()
-            .expect("daemon child lock poisoned")
-            .take()
-        {
+    let mut child = command.spawn().map_err(|error| {
+        format!(
+            "failed to run {} {}: {error}",
+            executable.display(),
+            arguments.join(" ")
+        )
+    })?;
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            break status;
+        }
+        if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
+            return Err(format!(
+                "daemon lifecycle command timed out: {}",
+                arguments.join(" ")
+            ));
         }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let Some(mut reader) = child.stdout.take() {
+        reader
+            .read_to_string(&mut stdout)
+            .map_err(|error| error.to_string())?;
     }
+    if let Some(mut reader) = child.stderr.take() {
+        reader
+            .read_to_string(&mut stderr)
+            .map_err(|error| error.to_string())?;
+    }
+    if status.success() {
+        Ok(stdout.trim().to_owned())
+    } else {
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
+        Err(if detail.is_empty() {
+            format!(
+                "daemon lifecycle command failed ({}): {status}",
+                arguments.join(" ")
+            )
+        } else {
+            detail.to_owned()
+        })
+    }
+}
+
+fn install_required(channel: &Channel<DaemonBootstrapStatus>, reason: &str) {
+    send(
+        channel,
+        DaemonBootstrapStatus::InstallRequired {
+            reason: reason.to_owned(),
+        },
+    );
 }
 
 #[cfg(unix)]
@@ -343,6 +528,17 @@ fn ready(channel: &Channel<DaemonBootstrapStatus>, health: &HealthResult) {
     );
 }
 
+fn ensure_expected_version(expected: Option<&str>, health: &HealthResult) -> Result<(), String> {
+    if expected.is_none_or(|expected| expected == health.version) {
+        return Ok(());
+    }
+    Err(format!(
+        "daemon version mismatch: installed {}, launched {}",
+        expected.unwrap_or_default(),
+        health.version
+    ))
+}
+
 fn ensure_manifest_compatible(manifest: &release::VerifiedManifest) -> Result<(), String> {
     let expected = amarcode_protocol::PROTOCOL_VERSION;
     let actual = manifest.manifest.protocol_version;
@@ -384,12 +580,50 @@ async fn wait_for_health() -> Result<HealthResult, String> {
     ))
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
-    use super::marked_path;
+    use super::{ensure_expected_version, validate_lifecycle_help, ServiceState, ServiceStatus};
+    use crate::protocol::rpc::HealthResult;
+
+    fn health(version: &str) -> HealthResult {
+        HealthResult {
+            status: "ok".into(),
+            version: version.into(),
+            protocol_version: amarcode_protocol::PROTOCOL_VERSION,
+            addr: "127.0.0.1:43821".into(),
+        }
+    }
 
     #[test]
+    fn parses_native_service_status() {
+        let status: ServiceStatus = serde_json::from_str(
+            r#"{"installed":true,"state":"running","definition_path":"ignored"}"#,
+        )
+        .expect("service status");
+        assert!(status.installed);
+        assert_eq!(status.state, ServiceState::Running);
+    }
+
+    #[test]
+    fn verified_release_requires_its_expected_daemon_version() {
+        assert!(ensure_expected_version(Some("0.3.0"), &health("0.3.0")).is_ok());
+        assert!(ensure_expected_version(Some("0.3.0"), &health("0.2.0")).is_err());
+        assert!(ensure_expected_version(None, &health("dev")).is_ok());
+    }
+
+    #[test]
+    fn release_binary_must_advertise_every_service_lifecycle_command() {
+        let complete =
+            "  install  register\n  start  start\n  restart  restart\n  status  status\n";
+        assert!(validate_lifecycle_help(complete).is_ok());
+        assert!(validate_lifecycle_help("  run  foreground\n").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn extracts_path_without_shell_startup_output() {
+        use super::marked_path;
+
         let output = b"shell banner\nwarning\n__AMARCODE_LOGIN_PATH__/nvm/bin:/usr/bin\r\n";
         assert_eq!(
             marked_path(output).unwrap(),
@@ -397,8 +631,11 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn rejects_output_without_a_nonempty_marked_path() {
+        use super::marked_path;
+
         assert!(marked_path(b"shell banner\n").is_none());
         assert!(marked_path(b"__AMARCODE_LOGIN_PATH__\n").is_none());
     }

@@ -12,6 +12,7 @@ pub mod logging;
 pub mod protocol;
 pub mod rpc;
 pub mod service;
+pub mod service_control;
 pub mod store;
 
 pub use app::App;

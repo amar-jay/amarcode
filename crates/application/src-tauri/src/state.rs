@@ -19,8 +19,7 @@ use crate::{
     },
 };
 
-pub struct AppState {
-}
+pub struct AppState {}
 
 impl AppState {
     pub fn new() -> Self {

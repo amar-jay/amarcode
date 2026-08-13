@@ -41,7 +41,8 @@ Strict layering. Dependencies point **down** only.
 
 | Layer | Path | Responsibility |
 |-------|------|----------------|
-| **Entrypoint** | `main.rs` | Load config, init logging, build `App`, run until signal |
+| **Entrypoint** | `main.rs` | Parse lifecycle commands; `run` loads config, logging, and `App` |
+| **Service control** | `service_control.rs` | Install/start/stop/status through the native per-user service manager |
 | **App** | `app.rs` | Owns `Config`, `Store`, event bus; binds TCP and serves |
 | **Client RPC** | `rpc/` | TCP accept, one JSON object per line, method dispatch, event subscriptions |
 | **Protocol** | `../protocol/` | Versioned client wire types and shared domain enums; generates the React TypeScript contract |
@@ -279,41 +280,6 @@ Wired on `App` as `agents`, `chats`, `sessions`. Client RPC methods dispatch int
 
 ---
 
-## Module map
-
-```
-src/
-  main.rs              process entry
-  lib.rs               crate root
-  app.rs               App state + run
-  config.rs            env config
-  app_dir.rs           data directory
-  logging.rs           tracing setup
-  error.rs             shared Error / Result
-  protocol/
-    mod.rs             re-exports the shared client protocol
-    acp_types.rs       daemon-private ACP methods and envelopes
-  rpc/
-    server.rs          TCP accept + shutdown
-    connection.rs      per-socket read/write + subscribe loop
-    handler.rs         method switchboard
-  service/             use-cases (scaffold)
-  store/               SQLite + row types (protocol enums)
-  acp/client.rs        AcpClient
-  bin/test-client-cli.rs   manual protocol tester (scaffold)
-migrations/
-  0001_initial.sql
-
-../protocol/
-  src/rpc.rs           client RPC request/response types
-  src/events.rs        EditorEvent wire shapes
-  src/types.rs         RunStatus, MessageRole, persisted wire models, …
-  src/bin/generate-types.rs
-
-../application/src/generated/protocol.ts
-                       checked-in generated React contract
-```
-
 The protocol crate's drift test compares the generator output byte-for-byte
 with the checked-in TypeScript file. Run `bun run protocol:generate` after a
 contract change and `bun run protocol:check` in verification/CI.
@@ -357,15 +323,48 @@ re-declare parallel enums or re-implement SQL that already lives in `store`.
 
 ## Local run
 
+The desktop application only connects to a native per-user service; it never
+owns a daemon child process. For desktop development, register the debug daemon
+once and let the operating system manage it:
+
 ```bash
 # from workspace root
-cargo run -p amarcode-daemon
+bun run daemon:install-dev
+bun run daemon:restart
+bun run daemon:status
+bun run tauri:dev
+```
+
+Closing the desktop leaves the daemon running. Use `bun run daemon:stop` or
+`bun run daemon:uninstall` when you explicitly want to stop or unregister it.
+
+Foreground mode remains available for daemon-only debugging and integration
+work, but the desktop will not treat an unregistered foreground process as its
+managed service:
+
+```bash
+# from workspace root
+cargo run -p amarcode-daemon -- run
 
 # optional
 export AMARCODE_DAEMON_ADDR=127.0.0.1:43821
 export AMARCODE_APPDIR=~/.amarcode
 export AMARCODE_LOG=amarcode_daemon=debug
 ```
+
+The daemon also owns its per-user service lifecycle:
+
+```bash
+amarcode-daemon install   # register; does not start immediately
+amarcode-daemon start
+amarcode-daemon status --json
+amarcode-daemon restart
+amarcode-daemon stop
+amarcode-daemon uninstall # preserves SQLite and other user data
+```
+
+Running without a subcommand currently aliases `run` for compatibility with
+older development scripts and service definitions.
 
 Smoke:
 
@@ -398,7 +397,7 @@ Clap-based subcommands (`--help` on any command).
 
 ```bash
 # terminal A
-cargo run -p amarcode-daemon
+cargo run -p amarcode-daemon -- run
 
 # terminal B — full slice with mock agent
 cargo build -p amarcode-daemon --bin mock-acp-agent --bin daemon-test-cli

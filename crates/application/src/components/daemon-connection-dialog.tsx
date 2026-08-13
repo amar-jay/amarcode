@@ -12,17 +12,22 @@ import type { DaemonBootstrapStatus } from "@/api";
 type DaemonConnectionDialogProps = {
   status: Exclude<DaemonBootstrapStatus, { status: "ready" }>;
   onRetry: () => void;
+  onInstall: () => void;
   onCloseApplication: () => void;
 };
 
 export function DaemonConnectionDialog({
   status,
   onRetry,
+  onInstall,
   onCloseApplication,
 }: DaemonConnectionDialogProps) {
   const isError = status.status === "failed";
+  const requiresInstall = status.status === "installRequired";
   const title =
-    status.status === "downloading"
+    requiresInstall
+      ? "Background service required"
+      : status.status === "downloading"
       ? "Downloading daemon..."
       : status.status === "verifying"
         ? "Verifying daemon..."
@@ -34,7 +39,9 @@ export function DaemonConnectionDialog({
               ? "Connection failed"
               : "Checking daemon...";
   const description =
-    status.status === "downloading"
+    requiresInstall
+      ? `${status.reason} It runs for your user account, starts at login, and remains available when this window closes.`
+      : status.status === "downloading"
       ? status.total > 0
         ? Math.round((status.received / status.total) * 100) + "% downloaded"
         : "Downloading the daemon for this platform."
@@ -62,7 +69,7 @@ export function DaemonConnectionDialog({
             src="/connection.svg"
             alt=""
             className={
-              !isError
+              !isError && !requiresInstall
                 ? "size-full animate-[pulse_1.8s_ease-in-out_infinite] dark:invert"
                 : "size-full dark:invert"
             }
@@ -75,15 +82,19 @@ export function DaemonConnectionDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-2">
-          <Button
-            className={buttonVariants({
-              variant: isError ? "default" : "outline",
-            })}
-            onClick={onRetry}
-            disabled={!isError}
-          >
-            {!isError ? "Please wait..." : "Try again"}
-          </Button>
+          {requiresInstall ? (
+            <Button onClick={onInstall}>Install and start service</Button>
+          ) : (
+            <Button
+              className={buttonVariants({
+                variant: isError ? "default" : "outline",
+              })}
+              onClick={onRetry}
+              disabled={!isError}
+            >
+              {!isError ? "Please wait..." : "Try again"}
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

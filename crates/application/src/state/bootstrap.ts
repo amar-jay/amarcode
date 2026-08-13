@@ -46,6 +46,26 @@ export function useAppBootstrap() {
     () => setDaemonAttempt((attempt) => attempt + 1),
     [],
   );
+  const initializeDaemonClient = useCallback(async () => {
+    ensureDaemonEventStream(store);
+    await Promise.all([loadAgents(), refreshChats()]);
+  }, [store, loadAgents, refreshChats]);
+  const installDaemon = useCallback(async () => {
+    try {
+      await daemonApi.install(setDaemonConnection);
+      await initializeDaemonClient();
+    } catch (error) {
+      console.error("Daemon installation failed:", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === "string"
+            ? error
+            : "Unable to install the Amarcode background service.";
+      setDaemonConnection({ status: "failed", error: message });
+      toast.error(message);
+    }
+  }, [initializeDaemonClient]);
 
   // Theme → <html class="dark">
   useEffect(() => {
@@ -70,15 +90,14 @@ export function useAppBootstrap() {
     let cancelled = false;
     void (async () => {
       try {
-        // Tauri installs, launches, and validates the daemon before catalogs
-        // or event subscriptions are allowed to start.
+        // Bootstrap may connect or start an already-installed service. It is
+        // deliberately read-only when service installation has not occurred.
         setDaemonConnection({ status: "checking" });
-        await daemonApi.bootstrap((status) => {
+        const health = await daemonApi.bootstrap((status) => {
           if (!cancelled) setDaemonConnection(status);
         });
-        if (cancelled) return;
-        ensureDaemonEventStream(store);
-        await Promise.all([loadAgents(), refreshChats()]);
+        if (cancelled || health === null) return;
+        await initializeDaemonClient();
       } catch (error) {
         if (cancelled) return;
         console.error("Daemon bootstrap failed:", error);
@@ -95,7 +114,7 @@ export function useAppBootstrap() {
     return () => {
       cancelled = true;
     };
-  }, [store, loadAgents, refreshChats, daemonAttempt]);
+  }, [initializeDaemonClient, daemonAttempt]);
 
   // Keep sidebar list fresh when any chat metadata changes (every event).
   useEffect(() => {
@@ -120,5 +139,5 @@ export function useAppBootstrap() {
     setComposerMode(defaultSessionMode);
   }, [defaultSessionMode, setComposerMode]);
 
-  return { daemonConnection, retryDaemon };
+  return { daemonConnection, retryDaemon, installDaemon };
 }

@@ -41,6 +41,8 @@ type BuiltArtifact = {
   key: string;
 };
 
+const requiredLifecycleCommands = ["install", "start", "restart", "status"];
+
 const projectRoot = resolve(import.meta.dir, "..", "..", "..");
 const workerDirectory = join(projectRoot, "crates", "daemon-distro");
 const wranglerConfig = join(workerDirectory, "wrangler.jsonc");
@@ -83,6 +85,21 @@ function hostTarget(): string {
   const match = output(["rustc", "-vV"]).match(/^host:\s*(.+)$/m);
   if (!match) throw new Error("rustc did not report a host target");
   return match[1].trim();
+}
+
+function verifyLifecycleCli(binaryPath: string) {
+  const result = run([binaryPath, "--help"], { quiet: true });
+  const help = result.stdout.toString();
+  for (const command of requiredLifecycleCommands) {
+    const advertised = help
+      .split(/\r?\n/)
+      .some((line) => line.trimStart().startsWith(command));
+    if (!advertised) {
+      throw new Error(
+        `daemon release binary is missing the required ${command} lifecycle command`,
+      );
+    }
+  }
 }
 
 function parseArgs(args: string[]): Options {
@@ -213,6 +230,7 @@ function signManifest(contents: string): string {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  const currentHostTarget = hostTarget();
   validateSegment("version", options.version);
   for (const target of options.targets) validateSegment("target", target);
 
@@ -235,6 +253,7 @@ async function main() {
     const filename = target.includes("windows") ? "amarcode-daemon.exe" : "amarcode-daemon";
     const binaryPath = join(projectRoot, "target", target, "release", filename);
     if (!existsSync(binaryPath)) throw new Error(`daemon binary not found at ${binaryPath}`);
+    if (target === currentHostTarget) verifyLifecycleCli(binaryPath);
 
     const binary = readFileSync(binaryPath);
     const artifact: Artifact = {
@@ -258,7 +277,19 @@ async function main() {
       ? null
       : loadRemoteManifest(options.bucket, versionManifestKey, versionManifestPath);
     const commitResult = run(["git", "rev-parse", "HEAD"], { quiet: true, allowFailure: true });
-    const sourceCommit = commitResult.success ? commitResult.stdout.toString().trim() : undefined;
+    const worktreeResult = run(["git", "status", "--porcelain"], {
+      quiet: true,
+      allowFailure: true,
+    });
+    const worktreeClean =
+      worktreeResult.success && worktreeResult.stdout.toString().trim().length === 0;
+    const sourceCommit =
+      commitResult.success && worktreeClean
+        ? commitResult.stdout.toString().trim()
+        : undefined;
+    if (!worktreeClean) {
+      console.warn("Publishing from a dirty worktree; sourceCommit will be omitted.");
+    }
     const manifest: Manifest = {
       version: options.version,
       protocolVersion: protocolVersion(),

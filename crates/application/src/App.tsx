@@ -35,7 +35,7 @@ import {
  * Domain state lives in `src/state/*` (jotai).
  */
 export default function App() {
-  const { daemonConnection, retryDaemon } = useAppBootstrap();
+  const { daemonConnection, retryDaemon, installDaemon } = useAppBootstrap();
 
   const [theme, setTheme] = useAtom(themeAtom);
   const [palette, setPalette] = useAtom(paletteAtom);
@@ -134,6 +134,7 @@ export default function App() {
         <DaemonConnectionDialog
           status={daemonConnection}
           onRetry={retryDaemon}
+          onInstall={() => void installDaemon()}
           onCloseApplication={() => void getCurrentWindow().close()}
         />
       )}

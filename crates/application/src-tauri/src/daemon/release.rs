@@ -218,6 +218,29 @@ impl VerifiedManifest {
         Ok(destination)
     }
 
+    /// Return the verified on-disk executable without downloading or writing.
+    /// This is used by ordinary bootstrap, which must remain read-only.
+    pub fn installed_executable(
+        &self,
+        install_root: &Path,
+        target: &str,
+    ) -> Result<Option<PathBuf>, String> {
+        let artifact = self.artifact(target)?;
+        let filename = if target.contains("windows") {
+            "amarcode-daemon.exe"
+        } else {
+            "amarcode-daemon"
+        };
+        let path = install_root
+            .join(&self.manifest.version)
+            .join(target)
+            .join(filename);
+        if !path.is_file() {
+            return Ok(None);
+        }
+        verify_file(&path, artifact).map(|verified| verified.then_some(path))
+    }
+
     pub fn save_as_current(&self, install_root: &Path) -> Result<(), String> {
         fs::create_dir_all(install_root)
             .map_err(|error| format!("failed to create daemon install directory: {error}"))?;
