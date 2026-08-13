@@ -7,6 +7,7 @@ import { LiveChatScreen } from "@/components/live-chat-screen";
 import { TopBar } from "@/components/top-bar";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { DaemonConnectionDialog } from "@/components/daemon-connection-dialog";
+import { DaemonUpdateDialog } from "@/components/daemon-update-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { daemonApi } from "@/api";
 import {
@@ -35,7 +36,15 @@ import {
  * Domain state lives in `src/state/*` (jotai).
  */
 export default function App() {
-  const { daemonConnection, retryDaemon, installDaemon } = useAppBootstrap();
+  const {
+    daemonConnection,
+    retryDaemon,
+    installDaemon,
+    daemonUpdateVersion,
+    daemonUpdateStatus,
+    updateDaemon,
+    closeDaemonUpdate,
+  } = useAppBootstrap();
 
   const [theme, setTheme] = useAtom(themeAtom);
   const [palette, setPalette] = useAtom(paletteAtom);
@@ -138,6 +147,12 @@ export default function App() {
           onCloseApplication={() => void getCurrentWindow().close()}
         />
       )}
+      <DaemonUpdateDialog
+        version={daemonUpdateVersion}
+        status={daemonUpdateStatus}
+        onConfirm={() => void updateDaemon()}
+        onClose={closeDaemonUpdate}
+      />
     </div>
   );
 }

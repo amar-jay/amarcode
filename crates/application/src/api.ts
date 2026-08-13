@@ -27,6 +27,20 @@ export type DaemonBootstrapStatus =
   | { status: "ready"; version: string }
   | { status: "failed"; error: string };
 
+export type DaemonUpdateCheck =
+  | { status: "upToDate"; currentVersion: string }
+  | { status: "available"; currentVersion: string; version: string }
+  | { status: "unavailable"; reason: string };
+
+export type DaemonUpdateStatus =
+  | { status: "downloading"; received: number; total: number }
+  | { status: "verifying" }
+  | { status: "installing" }
+  | { status: "restarting" }
+  | { status: "rollingBack" }
+  | { status: "ready"; version: string }
+  | { status: "failed"; error: string };
+
 /**
  * Typed bindings for the daemon-backed Tauri commands.
  *
@@ -47,6 +61,15 @@ export const daemonApi = {
     const statusChannel = new Channel<DaemonBootstrapStatus>();
     statusChannel.onmessage = onStatus;
     return invoke("daemon_install", { onStatus: statusChannel });
+  },
+  checkUpdate: (): Promise<DaemonUpdateCheck> =>
+    invoke("daemon_check_update"),
+  update: async (
+    onStatus: (status: DaemonUpdateStatus) => void,
+  ): Promise<Health> => {
+    const statusChannel = new Channel<DaemonUpdateStatus>();
+    statusChannel.onmessage = onStatus;
+    return invoke("daemon_update", { onStatus: statusChannel });
   },
   health: (): Promise<Health> => invoke("daemon_health"),
   version: (): Promise<DaemonVersion> => invoke("daemon_version"),

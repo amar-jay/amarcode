@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { toast } from "sonner";
-import { daemonApi, type DaemonBootstrapStatus } from "@/api";
+import {
+  daemonApi,
+  type DaemonBootstrapStatus,
+  type DaemonUpdateStatus,
+} from "@/api";
 import {
   loadAgentsAtom,
   selectedAgentAtom,
@@ -19,6 +23,7 @@ import {
   themeAtom,
 } from "./preferences";
 import { composerSessionModeAtom } from "./navigation";
+import { liveChatAtom, loadLiveChatAtom } from "./live-chat";
 
 /**
  * One-time app shell effects: theme DOM sync, catalogs, event stream, defaults.
@@ -30,6 +35,9 @@ export function useAppBootstrap() {
       status: "checking",
     });
   const [daemonAttempt, setDaemonAttempt] = useState(0);
+  const [daemonUpdateVersion, setDaemonUpdateVersion] = useState<string | null>(null);
+  const [daemonUpdateStatus, setDaemonUpdateStatus] =
+    useState<DaemonUpdateStatus | null>(null);
   const store = useStore();
   const theme = useAtomValue(themeAtom);
   const palette = useAtomValue(paletteAtom);
@@ -40,6 +48,7 @@ export function useAppBootstrap() {
 
   const loadAgents = useSetAtom(loadAgentsAtom);
   const refreshChats = useSetAtom(refreshChatsAtom);
+  const loadLiveChat = useSetAtom(loadLiveChatAtom);
   const setSelectedAgentId = useSetAtom(selectedAgentIdAtom);
   const setComposerMode = useSetAtom(composerSessionModeAtom);
   const retryDaemon = useCallback(
@@ -50,6 +59,32 @@ export function useAppBootstrap() {
     ensureDaemonEventStream(store);
     await Promise.all([loadAgents(), refreshChats()]);
   }, [store, loadAgents, refreshChats]);
+  const reconcileDaemonClient = useCallback(async () => {
+    await initializeDaemonClient();
+    const live = store.get(liveChatAtom);
+    if (live) await loadLiveChat({ chatId: live.chatId, silent: true });
+  }, [initializeDaemonClient, loadLiveChat, store]);
+  const checkDaemonUpdate = useCallback(async () => {
+    try {
+      const update = await daemonApi.checkUpdate();
+      if (update.status !== "available") return;
+      toast(`Daemon ${update.version} is available`, {
+        id: `daemon-update-${update.version}`,
+        description: `Installed version: ${update.currentVersion}`,
+        duration: 15_000,
+        action: {
+          label: "Update",
+          onClick: () => {
+            setDaemonUpdateStatus(null);
+            setDaemonUpdateVersion(update.version);
+          },
+        },
+      });
+    } catch (error) {
+      // Updates are best-effort; startup and offline use remain unaffected.
+      console.info("Daemon update check failed:", error);
+    }
+  }, []);
   const installDaemon = useCallback(async () => {
     try {
       await daemonApi.install(setDaemonConnection);
@@ -98,6 +133,7 @@ export function useAppBootstrap() {
         });
         if (cancelled || health === null) return;
         await initializeDaemonClient();
+        if (!cancelled) void checkDaemonUpdate();
       } catch (error) {
         if (cancelled) return;
         console.error("Daemon bootstrap failed:", error);
@@ -114,7 +150,29 @@ export function useAppBootstrap() {
     return () => {
       cancelled = true;
     };
-  }, [initializeDaemonClient, daemonAttempt]);
+  }, [initializeDaemonClient, checkDaemonUpdate, daemonAttempt]);
+
+  const updateDaemon = useCallback(async () => {
+    try {
+      const health = await daemonApi.update(setDaemonUpdateStatus);
+      await reconcileDaemonClient();
+      toast.success(`Daemon ${health.version} updated successfully.`);
+      setDaemonUpdateVersion(null);
+      setDaemonUpdateStatus(null);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      console.error("Daemon update failed:", error);
+      setDaemonUpdateStatus({ status: "failed", error: message });
+      // The backend attempts rollback; reconnect/reconcile with whatever
+      // healthy version is available after that attempt.
+      try {
+        await reconcileDaemonClient();
+      } catch (reconnectError) {
+        console.error("Daemon reconnection after update failure failed:", reconnectError);
+      }
+    }
+  }, [reconcileDaemonClient]);
 
   // Keep sidebar list fresh when any chat metadata changes (every event).
   useEffect(() => {
@@ -139,5 +197,18 @@ export function useAppBootstrap() {
     setComposerMode(defaultSessionMode);
   }, [defaultSessionMode, setComposerMode]);
 
-  return { daemonConnection, retryDaemon, installDaemon };
+  return {
+    daemonConnection,
+    retryDaemon,
+    installDaemon,
+    daemonUpdateVersion,
+    daemonUpdateStatus,
+    updateDaemon,
+    closeDaemonUpdate: () => {
+      if (daemonUpdateStatus === null || daemonUpdateStatus.status === "failed") {
+        setDaemonUpdateVersion(null);
+        setDaemonUpdateStatus(null);
+      }
+    },
+  };
 }

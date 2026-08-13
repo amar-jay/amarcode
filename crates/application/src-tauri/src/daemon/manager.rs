@@ -9,6 +9,7 @@ use std::{
 #[cfg(unix)]
 use std::ffi::OsString;
 
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, AppHandle, Manager};
 use tokio::sync::Mutex as AsyncMutex;
@@ -28,6 +29,41 @@ pub enum DaemonBootstrapStatus {
     Verifying,
     Installing,
     Starting,
+    Ready { version: String },
+    Failed { error: String },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum DaemonUpdateCheck {
+    UpToDate {
+        current_version: String,
+    },
+    Available {
+        current_version: String,
+        version: String,
+    },
+    Unavailable {
+        reason: String,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum DaemonUpdateStatus {
+    Downloading { received: u64, total: u64 },
+    Verifying,
+    Installing,
+    Restarting,
+    RollingBack,
     Ready { version: String },
     Failed { error: String },
 }
@@ -53,6 +89,9 @@ impl DaemonManager {
 
         let target = release::platform_target()?;
         let install_root = install_root(app)?;
+        if Config::get().daemon_service_executable.is_none() {
+            recover_interrupted_update(&install_root, target).await?;
+        }
         let (executable, expected_version) = if let Some(executable) =
             Config::get().daemon_service_executable.clone()
         {
@@ -241,9 +280,211 @@ impl DaemonManager {
             failures.join("; ")
         })
     }
+
+    /// Check the signed release channel without downloading or changing the
+    /// native service. Failures are returned so callers can treat update
+    /// checks as best-effort without hiding diagnostics.
+    pub async fn check_update(&self, app: &AppHandle) -> Result<DaemonUpdateCheck, String> {
+        let _guard = self.bootstrap_lock.lock().await;
+        if Config::get().daemon_service_executable.is_some() {
+            return Ok(DaemonUpdateCheck::Unavailable {
+                reason: "updates are disabled for a configured development daemon".into(),
+            });
+        }
+
+        let target = release::platform_target()?;
+        let install_root = install_root(app)?;
+        if !service_installation_marker(&install_root).is_file() {
+            return Ok(DaemonUpdateCheck::Unavailable {
+                reason: "the daemon service is not installed".into(),
+            });
+        }
+        let current = release::load_cached(&install_root)?;
+        ensure_manifest_compatible(&current)?;
+        current.artifact(target)?;
+
+        let client = release_client()?;
+        let latest = release::fetch_latest(&client).await?;
+        ensure_manifest_compatible(&latest)?;
+        latest.artifact(target)?;
+
+        update_check(&current.manifest.version, &latest.manifest.version)
+    }
+
+    /// Stage, verify and activate a newer daemon release. The previous
+    /// executable and signed manifest remain available until the replacement
+    /// passes its health check, and are restored on any activation failure.
+    pub async fn update(
+        &self,
+        app: &AppHandle,
+        on_status: &Channel<DaemonUpdateStatus>,
+    ) -> Result<HealthResult, String> {
+        let _guard = self.bootstrap_lock.lock().await;
+        if Config::get().daemon_service_executable.is_some() {
+            return Err("updates are disabled for a configured development daemon".into());
+        }
+
+        let target = release::platform_target()?;
+        let install_root = install_root(app)?;
+        let previous = release::load_cached(&install_root).map_err(|error| {
+            format!("cannot update without a verified current release: {error}")
+        })?;
+        ensure_manifest_compatible(&previous)?;
+        let previous_executable = previous
+            .installed_executable(&install_root, target)?
+            .ok_or_else(|| "the current verified daemon executable is missing".to_string())?;
+
+        let client = release_client()?;
+        let latest = release::fetch_latest(&client).await?;
+        ensure_manifest_compatible(&latest)?;
+        let artifact = latest.artifact(target)?.clone();
+        match update_check(&previous.manifest.version, &latest.manifest.version)? {
+            DaemonUpdateCheck::Available { .. } => {}
+            DaemonUpdateCheck::UpToDate { .. } => return compatible_health().await,
+            DaemonUpdateCheck::Unavailable { reason } => return Err(reason),
+        }
+
+        send_update(
+            on_status,
+            DaemonUpdateStatus::Downloading {
+                received: 0,
+                total: artifact.size,
+            },
+        );
+        let executable = latest
+            .ensure_installed(&client, &install_root, target)
+            .await?;
+        send_update(
+            on_status,
+            DaemonUpdateStatus::Downloading {
+                received: artifact.size,
+                total: artifact.size,
+            },
+        );
+        send_update(on_status, DaemonUpdateStatus::Verifying);
+        verify_lifecycle_cli(&executable)?;
+
+        write_update_marker(&install_root)?;
+        send_update(on_status, DaemonUpdateStatus::Installing);
+        let service_path = agent_path();
+        if let Err(error) =
+            run_lifecycle_command(&executable, &["install"], service_path.as_deref())
+        {
+            return Err(rollback_release(
+                &previous,
+                &previous_executable,
+                &install_root,
+                on_status,
+                format!("failed to install daemon update: {error}"),
+            )
+            .await);
+        }
+
+        send_update(on_status, DaemonUpdateStatus::Restarting);
+        let activation = activate_release(&executable, &latest.manifest.version).await;
+        let health = match activation {
+            Ok(health) => health,
+            Err(error) => {
+                return Err(rollback_release(
+                    &previous,
+                    &previous_executable,
+                    &install_root,
+                    on_status,
+                    error,
+                )
+                .await);
+            }
+        };
+
+        if let Err(error) = latest.save_as_current(&install_root) {
+            return Err(rollback_release(
+                &previous,
+                &previous_executable,
+                &install_root,
+                on_status,
+                format!("failed to commit daemon update: {error}"),
+            )
+            .await);
+        }
+        clear_update_marker(&install_root)?;
+
+        send_update(
+            on_status,
+            DaemonUpdateStatus::Ready {
+                version: health.version.clone(),
+            },
+        );
+        Ok(health)
+    }
+}
+
+fn release_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+fn update_check(current: &str, latest: &str) -> Result<DaemonUpdateCheck, String> {
+    let current_version = Version::parse(current)
+        .map_err(|error| format!("invalid installed daemon version {current}: {error}"))?;
+    let latest_version = Version::parse(latest)
+        .map_err(|error| format!("invalid available daemon version {latest}: {error}"))?;
+    if latest_version > current_version {
+        Ok(DaemonUpdateCheck::Available {
+            current_version: current.to_owned(),
+            version: latest.to_owned(),
+        })
+    } else {
+        Ok(DaemonUpdateCheck::UpToDate {
+            current_version: current.to_owned(),
+        })
+    }
+}
+
+async fn activate_release(
+    executable: &Path,
+    expected_version: &str,
+) -> Result<HealthResult, String> {
+    run_lifecycle_command(executable, &["restart"], None)?;
+    let health = wait_for_health().await?;
+    ensure_service_running(executable)?;
+    ensure_expected_version(Some(expected_version), &health)?;
+    Ok(health)
+}
+
+async fn rollback_release(
+    previous: &release::VerifiedManifest,
+    previous_executable: &Path,
+    install_root: &Path,
+    on_status: &Channel<DaemonUpdateStatus>,
+    update_error: String,
+) -> String {
+    send_update(on_status, DaemonUpdateStatus::RollingBack);
+    let service_path = agent_path();
+    let rollback = async {
+        run_lifecycle_command(previous_executable, &["install"], service_path.as_deref())?;
+        activate_release(previous_executable, &previous.manifest.version).await?;
+        previous.save_as_current(install_root)?;
+        Ok::<(), String>(())
+    }
+    .await;
+
+    match rollback {
+        Ok(()) => match clear_update_marker(install_root) {
+            Ok(()) => format!("{update_error}; the previous daemon version was restored"),
+            Err(error) => format!(
+                "{update_error}; the previous daemon version was restored, but recovery state could not be cleared: {error}"
+            ),
+        },
+        Err(rollback_error) => format!(
+            "{update_error}; rollback also failed: {rollback_error}. Repair the daemon service from the connection dialog"
+        ),
+    }
 }
 
 const SERVICE_INSTALLATION_MARKER: &str = "service-installed-v1";
+const UPDATE_ACTIVATION_MARKER: &str = "update-activation-pending-v1";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -270,6 +511,55 @@ fn install_root(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn service_installation_marker(install_root: &Path) -> PathBuf {
     install_root.join(SERVICE_INSTALLATION_MARKER)
+}
+
+fn update_activation_marker(install_root: &Path) -> PathBuf {
+    install_root.join(UPDATE_ACTIVATION_MARKER)
+}
+
+fn write_update_marker(install_root: &Path) -> Result<(), String> {
+    fs::create_dir_all(install_root)
+        .map_err(|error| format!("failed to create daemon install directory: {error}"))?;
+    let path = update_activation_marker(install_root);
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&path)
+        .map_err(|error| format!("failed to write daemon update marker: {error}"))?;
+    use std::io::Write as _;
+    file.write_all(b"1\n")
+        .and_then(|_| file.sync_all())
+        .map_err(|error| format!("failed to persist daemon update marker: {error}"))
+}
+
+fn clear_update_marker(install_root: &Path) -> Result<(), String> {
+    match fs::remove_file(update_activation_marker(install_root)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("failed to clear daemon update marker: {error}")),
+    }
+}
+
+async fn recover_interrupted_update(install_root: &Path, target: &str) -> Result<(), String> {
+    if !update_activation_marker(install_root).is_file() {
+        return Ok(());
+    }
+    // The signed cached manifest is the commit record. If activation was
+    // interrupted before commit this restores the old executable; if commit
+    // completed it finishes activating the new executable.
+    let current = release::load_cached(install_root)
+        .map_err(|error| format!("cannot recover an interrupted daemon update: {error}"))?;
+    ensure_manifest_compatible(&current)?;
+    let executable = current
+        .installed_executable(install_root, target)?
+        .ok_or_else(|| {
+            "cannot recover because the current daemon executable is missing".to_string()
+        })?;
+    let service_path = agent_path();
+    run_lifecycle_command(&executable, &["install"], service_path.as_deref())?;
+    activate_release(&executable, &current.manifest.version).await?;
+    clear_update_marker(install_root)
 }
 
 fn cached_executable(
@@ -519,6 +809,10 @@ fn send(channel: &Channel<DaemonBootstrapStatus>, status: DaemonBootstrapStatus)
     let _ = channel.send(status);
 }
 
+fn send_update(channel: &Channel<DaemonUpdateStatus>, status: DaemonUpdateStatus) {
+    let _ = channel.send(status);
+}
+
 fn ready(channel: &Channel<DaemonBootstrapStatus>, health: &HealthResult) {
     send(
         channel,
@@ -582,7 +876,11 @@ async fn wait_for_health() -> Result<HealthResult, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_expected_version, validate_lifecycle_help, ServiceState, ServiceStatus};
+    use super::{
+        clear_update_marker, ensure_expected_version, update_activation_marker, update_check,
+        validate_lifecycle_help, write_update_marker, DaemonUpdateCheck, ServiceState,
+        ServiceStatus,
+    };
     use crate::protocol::rpc::HealthResult;
 
     fn health(version: &str) -> HealthResult {
@@ -609,6 +907,47 @@ mod tests {
         assert!(ensure_expected_version(Some("0.3.0"), &health("0.3.0")).is_ok());
         assert!(ensure_expected_version(Some("0.3.0"), &health("0.2.0")).is_err());
         assert!(ensure_expected_version(None, &health("dev")).is_ok());
+    }
+
+    #[test]
+    fn update_check_uses_semantic_version_ordering() {
+        assert!(matches!(
+            update_check("0.3.9", "0.3.10").expect("compare versions"),
+            DaemonUpdateCheck::Available { version, .. } if version == "0.3.10"
+        ));
+        assert!(matches!(
+            update_check("1.0.0", "1.0.0-rc.1").expect("compare versions"),
+            DaemonUpdateCheck::UpToDate { .. }
+        ));
+        assert!(update_check("development", "1.0.0").is_err());
+    }
+
+    #[test]
+    fn update_activation_marker_is_persisted_and_cleared() {
+        let directory =
+            std::env::temp_dir().join(format!("amarcode-update-marker-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+
+        write_update_marker(&directory).expect("write marker");
+        assert!(update_activation_marker(&directory).is_file());
+        clear_update_marker(&directory).expect("clear marker");
+        clear_update_marker(&directory).expect("clearing a missing marker is idempotent");
+        assert!(!update_activation_marker(&directory).exists());
+
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    fn update_ipc_contract_uses_camel_case_fields() {
+        let value = serde_json::to_value(DaemonUpdateCheck::Available {
+            current_version: "0.3.1".into(),
+            version: "0.3.2".into(),
+        })
+        .expect("serialize update check");
+        assert_eq!(value["status"], "available");
+        assert_eq!(value["currentVersion"], "0.3.1");
+        assert_eq!(value["version"], "0.3.2");
+        assert!(value.get("current_version").is_none());
     }
 
     #[test]

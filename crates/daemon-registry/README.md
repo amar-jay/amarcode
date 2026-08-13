@@ -92,6 +92,20 @@ fetches `latest.json`, verifies its Ed25519 signature, selects the platform
 artifact, verifies its byte size and SHA-256, and invokes the daemon's
 short-lived `install` and `restart` lifecycle commands.
 
+After a successful bootstrap, the desktop performs a best-effort signed update
+check in the background. A newer semantically-versioned release with the same
+protocol version produces a non-blocking UI notification. Updating always
+requires user confirmation because restarting the service interrupts active
+agent turns.
+
+The update is staged before the running service is touched: the signature,
+artifact size, SHA-256, and lifecycle CLI are all verified first. Activation
+then re-registers the versioned executable, restarts the service, and requires
+an exact version/protocol health response before caching the new manifest as
+current. On failure the previous signed release is re-registered and restarted.
+An fsynced activation marker lets the next desktop launch recover the release
+selected by the cached manifest if the desktop exits during this transaction.
+
 Installed releases are kept below Tauri's application-local data directory in
 `daemon/<version>/<rust-target>/`. The last successfully launched signed
 manifest is cached there as well, allowing the application to use an already

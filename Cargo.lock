@@ -41,6 +41,7 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

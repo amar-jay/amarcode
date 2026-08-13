@@ -56,6 +56,31 @@ async fn daemon_install(
 }
 
 #[tauri::command]
+async fn daemon_check_update(
+    app: AppHandle,
+    manager: State<'_, daemon::DaemonManager>,
+) -> Result<daemon::DaemonUpdateCheck, String> {
+    manager.check_update(&app).await
+}
+
+#[tauri::command]
+async fn daemon_update(
+    app: AppHandle,
+    manager: State<'_, daemon::DaemonManager>,
+    on_status: Channel<daemon::DaemonUpdateStatus>,
+) -> Result<HealthResult, String> {
+    match manager.update(&app, &on_status).await {
+        Ok(health) => Ok(health),
+        Err(error) => {
+            let _ = on_status.send(daemon::DaemonUpdateStatus::Failed {
+                error: error.clone(),
+            });
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
 async fn daemon_health(state: State<'_, AppState>) -> Result<HealthResult, String> {
     state.health().await
 }
@@ -233,6 +258,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             daemon_bootstrap,
             daemon_install,
+            daemon_check_update,
+            daemon_update,
             daemon_health,
             daemon_version,
             list_agents,

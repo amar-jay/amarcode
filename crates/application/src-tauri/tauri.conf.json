@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "amarcode",
   "version": "0.1.0",
-  "identifier": "com.acpworkbench.desktop",
+  "identifier": "com.amarcode.desktop",
   "build": {
     "beforeDevCommand": "bun run --cwd .. dev",
     "devUrl": "http://localhost:1420",
