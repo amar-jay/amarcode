@@ -112,7 +112,7 @@ export default function App() {
         position="bottom-right"
         closeButton
         theme={toasterTheme}
-        className="pointer-events-auto !z-[100]"
+        className="pointer-events-auto z-100!"
       />
       <SettingsDialog
         open={settingsOpen}

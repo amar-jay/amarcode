@@ -14,7 +14,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::{
     config::Config,
-    daemon::{release, DaemonBridge},
+    daemon::{release, service, DaemonBridge},
     protocol::rpc::{methods, HealthResult},
 };
 
@@ -32,14 +32,14 @@ pub enum DaemonBootstrapStatus {
 
 pub struct DaemonManager {
     bootstrap_lock: AsyncMutex<()>,
-    child: Mutex<Option<Child>>,
+    development_child: Mutex<Option<Child>>,
 }
 
 impl DaemonManager {
     pub fn new() -> Self {
         Self {
             bootstrap_lock: AsyncMutex::new(()),
-            child: Mutex::new(None),
+            development_child: Mutex::new(None),
         }
     }
 
@@ -60,14 +60,14 @@ impl DaemonManager {
         let explicit_override = std::env::var_os("AMARCODE_DAEMON_COMMAND").is_some();
         if explicit_override || Path::new(configured_command).is_file() {
             send(on_status, DaemonBootstrapStatus::Starting);
-            self.spawn(configured_command)?;
+            self.spawn_development_daemon(configured_command)?;
             match wait_for_health().await {
                 Ok(health) => {
                     ready(on_status, &health);
                     return Ok(health);
                 }
                 Err(error) => {
-                    self.stop();
+                    self.stop_development_daemon();
                     return Err(error);
                 }
             }
@@ -142,7 +142,8 @@ impl DaemonManager {
             send(on_status, DaemonBootstrapStatus::Installing);
             send(on_status, DaemonBootstrapStatus::Starting);
 
-            if let Err(error) = self.spawn(&executable.to_string_lossy()) {
+            let service_path = agent_path();
+            if let Err(error) = service::install_and_start(&executable, service_path.as_deref()) {
                 failures.push(error);
                 continue;
             }
@@ -153,7 +154,6 @@ impl DaemonManager {
                             "daemon version mismatch: installed {}, launched {}",
                             manifest.manifest.version, health.version
                         ));
-                        self.stop();
                         continue;
                     }
                     if let Err(error) = manifest.save_as_current(&install_root) {
@@ -164,7 +164,6 @@ impl DaemonManager {
                 }
                 Err(error) => {
                     failures.push(error);
-                    self.stop();
                 }
             }
         }
@@ -176,8 +175,10 @@ impl DaemonManager {
         })
     }
 
-    fn spawn(&self, executable: &str) -> Result<(), String> {
-        self.stop();
+    /// Development commands remain child processes. Production releases use
+    /// the platform service manager and are never stored in this handle.
+    fn spawn_development_daemon(&self, executable: &str) -> Result<(), String> {
+        self.stop_development_daemon();
         let mut command = Command::new(executable);
         command
             .stdin(Stdio::null())
@@ -211,13 +212,16 @@ impl DaemonManager {
         let child = command
             .spawn()
             .map_err(|error| format!("failed to launch daemon {executable}: {error}"))?;
-        *self.child.lock().expect("daemon child lock poisoned") = Some(child);
+        *self
+            .development_child
+            .lock()
+            .expect("daemon child lock poisoned") = Some(child);
         Ok(())
     }
 
-    pub fn stop(&self) {
+    pub fn stop_development_daemon(&self) {
         if let Some(mut child) = self
-            .child
+            .development_child
             .lock()
             .expect("daemon child lock poisoned")
             .take()

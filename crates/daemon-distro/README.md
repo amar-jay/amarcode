@@ -82,16 +82,26 @@ key is embedded in the desktop application; never commit the private key.
 
 At startup, the Tauri backend checks whether a compatible daemon is already
 listening. For local development it then prefers `AMARCODE_DAEMON_COMMAND` or a
-daemon in the workspace's `target/debug` directory. Packaged applications fetch
-`latest.json` and its signature, verify the embedded Ed25519 public key, select
-the current platform artifact, and verify both its byte size and SHA-256 before
-launching it.
+daemon in the workspace's `target/debug` directory; development daemons remain
+children of the desktop process. Packaged applications fetch `latest.json` and
+its signature, verify the embedded Ed25519 public key, select the current
+platform artifact, and verify both its byte size and SHA-256 before registering
+and starting it as a per-user, login-persistent background service.
 
 Installed releases are kept below Tauri's application-local data directory in
 `daemon/<version>/<rust-target>/`. The last successfully launched signed
 manifest is cached there as well, allowing the application to use an already
-verified release when Cloudflare is temporarily unreachable. The application
-owns the child process it starts and terminates it on application exit.
+verified release when Cloudflare is temporarily unreachable.
+
+Packaged daemon lifecycle is owned by the operating system and is independent
+of the desktop application:
+
+- Linux uses `amarcode-daemon.service` under the systemd user manager.
+- macOS uses `~/Library/LaunchAgents/com.amarcode.daemon.plist`.
+- Windows uses the current user's `Amarcode Daemon` logon task.
+
+Re-registering a release updates the executable path and restarts the managed
+daemon. Closing Amarcode does not stop it.
 
 Runtime overrides useful for development and staging:
 

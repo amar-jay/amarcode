@@ -230,7 +230,11 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
-            app_handle.state::<daemon::DaemonManager>().stop();
+            // Packaged daemons are OS-managed and intentionally survive GUI
+            // exit. Only a local development override is app-owned.
+            app_handle
+                .state::<daemon::DaemonManager>()
+                .stop_development_daemon();
         }
     });
 }

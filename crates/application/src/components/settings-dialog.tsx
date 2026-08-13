@@ -140,7 +140,7 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!h-[500px] !w-[800px] !max-w-[800px] overflow-hidden p-0">
+      <DialogContent className="h-125! w-200! max-w-200! overflow-hidden p-0">
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <DialogDescription className="sr-only">
           Customize your amarcode preferences.
@@ -245,7 +245,7 @@ function AgentDefaultsPanel({
   const availableAgents = agents.filter((agent) => agent.available);
   const unavailableAgents = agents.filter((agent) => !agent.available);
   const renderAgent = (agent: AgentInfo) => <CommandItem 
-		className="cursor-pointer rounded-none !w-full space-x-auto data-disabled:cursor-not-allowed data-disabled:opacity-50"
+		className="cursor-pointer rounded-none w-full! space-x-auto data-disabled:cursor-not-allowed data-disabled:opacity-50"
 		disabled={!agent.available}
 		title={agent.unavailable_reason ?? undefined}
 		key={agent.id} value={`${agent.name} ${agent.id}`} onSelect={() => {
@@ -261,7 +261,7 @@ function AgentDefaultsPanel({
         <Check className={`ml-auto size-4 ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`} />
       )}
     </CommandItem>;
-  return <div className="mx-auto w-full max-w-[33rem]">
+  return <div className="mx-auto w-full max-w-132">
     <h2 className="text-base font-medium">Agent defaults</h2>
     <p className="mt-1 text-xs leading-5 text-muted-foreground">These choices are used when you start a new chat. Existing conversations keep their current session settings.</p>
     <Separator className="my-6" />
@@ -278,7 +278,7 @@ function AgentDefaultsPanel({
               <ChevronsUpDown className="size-4 text-muted-foreground" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+          <PopoverContent align="start" className="w-(--radix-popover-trigger-width) p-0">
             <Command>
               <CommandInput placeholder="Search ACP agents…" />
               <CommandList>
@@ -327,7 +327,7 @@ function AppearancePanel({
   onPaletteChange: (palette: AppPalette) => void;
 }) {
   return (
-    <div className="mx-auto w-full max-w-[33rem]">
+    <div className="mx-auto w-full max-w-132">
       <div>
         <p className="text-sm font-medium">Theme</p>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -426,7 +426,7 @@ function GeneralPanel({
   setVerboseReasoning: (value: boolean) => void;
 }) {
   return (
-    <div className="mx-auto w-full max-w-[33rem]">
+    <div className="mx-auto w-full max-w-132">
       <h2 className="text-base font-medium">General</h2>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         Set the defaults for starting and reviewing agent sessions.

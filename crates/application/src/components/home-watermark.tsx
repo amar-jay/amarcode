@@ -45,7 +45,7 @@ export function HomeWatermark() {
       </div>
 
       {/* Soft vertical wash so the input sits on a calm field */}
-      <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-transparent to-background/90" />
+      <div className="absolute inset-0 bg-linear-to-b from-background/80 via-transparent to-background/90" />
     </div>
   );
 }
