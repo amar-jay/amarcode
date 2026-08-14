@@ -3,11 +3,9 @@
 
 export const PROTOCOL_VERSION = 3 as const;
 
-export type JsonValue =
-  null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
-export type RunStatus =
-  "starting" | "running" | "completed" | "stopped" | "failed";
+export type RunStatus = "starting" | "running" | "completed" | "stopped" | "failed";
 
 export type TurnStatus = "started" | "completed" | "cancelled" | "failed";
 
@@ -15,176 +13,52 @@ export type MessageRole = "system" | "user" | "assistant" | "tool";
 
 export type MessageStatus = "streaming" | "complete" | "interrupted" | "failed";
 
-export type MessagePartKind =
-  "text" | "tool_call" | "tool_result" | "thinking" | "file" | "image";
+export type MessagePartKind = "text" | "tool_call" | "tool_result" | "thinking" | "file" | "image";
 
-export type AgentDefinition = {
-  id: string;
-  name: string;
-  command: string;
-  arguments: Array<string>;
-  environment: Array<[string, string]>;
-  is_preset: boolean;
-  created_at: string;
-  updated_at: string;
-};
+export type AgentDefinition = { id: string, name: string, command: string, arguments: Array<string>, environment: Array<[string, string]>, is_preset: boolean, created_at: string, updated_at: string, };
 
-export type AgentInfo = {
-  id: string;
-  name: string;
-  command: string;
-  arguments: Array<string>;
-  environment: Array<[string, string]>;
-  is_preset: boolean;
-  created_at: string;
-  updated_at: string;
-  available: boolean;
-  resolved_command: string | null;
-  unavailable_reason: string | null;
-};
+export type AgentInfo = { id: string, name: string, command: string, arguments: Array<string>, environment: Array<[string, string]>, is_preset: boolean, created_at: string, updated_at: string, available: boolean, resolved_command: string | null, unavailable_reason: string | null, };
 
-export type Chat = {
-  id: string;
-  workspace_path: string;
-  title: string;
-  created_at: string;
-  updated_at: string;
-  archived_at: string | null;
-};
+export type Chat = { id: string, workspace_path: string, title: string, created_at: string, updated_at: string, archived_at: string | null, };
 
-export type Message = {
-  id: string;
-  chat_id: string;
-  agent_run_id: string | null;
-  role: MessageRole;
-  content: string;
-  status: MessageStatus;
-  created_at: string;
-  updated_at: string;
-};
+export type Message = { id: string, chat_id: string, agent_run_id: string | null, role: MessageRole, content: string, status: MessageStatus, created_at: string, updated_at: string, };
 
-export type MessagePart = {
-  message_id: string;
-  ordinal: number;
-  kind: MessagePartKind;
-  content_json: string;
-};
+export type MessagePart = { message_id: string, ordinal: number, kind: MessagePartKind, content_json: string, };
 
-export type MessageDetail = { message: Message; parts: Array<MessagePart> };
+export type MessageDetail = { message: Message, parts: Array<MessagePart>, };
 
-export type ChatDetail = { chat: Chat; messages: Array<MessageDetail> };
+export type ChatDetail = { chat: Chat, messages: Array<MessageDetail>, };
 
 export type GetChatResult = ChatDetail | Chat;
 
-export type HealthResult = {
-  status: string;
-  version: string;
-  protocol_version: number;
-  addr: string;
-};
+export type HealthResult = { status: string, version: string, protocol_version: number, addr: string, };
 
-export type VersionResult = { version: string; protocol_version: number };
+export type VersionResult = { version: string, protocol_version: number, };
 
-export type SubscribeEventsParams = {
-  chat_id: string | null;
-  run_id: string | null;
-  session_id: string | null;
-};
+export type SubscribeEventsParams = { chat_id: string | null, run_id: string | null, session_id: string | null, };
 
-export type CreateChatParams = { workspace_path: string; title: string | null };
+export type CreateChatParams = { workspace_path: string, title: string | null, };
 
-export type ListChatsParams = { workspace_path: string | null };
+export type ListChatsParams = { workspace_path: string | null, };
 
-export type GetChatParams = { chat_id: string; include_messages: boolean };
+export type GetChatParams = { chat_id: string, include_messages: boolean, };
 
-export type DeleteChatParams = { chat_id: string };
+export type DeleteChatParams = { chat_id: string, };
 
-export type DeleteChatResult = { deleted: boolean };
+export type DeleteChatResult = { deleted: boolean, };
 
-export type PromptParams = {
-  chat_id: string;
-  agent_id: string;
-  text: string;
-  plan_mode: boolean;
-  session_mode: string | null;
-};
+export type PromptParams = { chat_id: string, agent_id: string, text: string, plan_mode: boolean, session_mode: string | null, };
 
-export type SetSessionModeParams = { chat_id: string; mode: string };
+export type SetSessionModeParams = { chat_id: string, mode: string, };
 
-export type PromptResultDto = {
-  run_id: string;
-  chat_id: string;
-  agent_id: string;
-  user_message_id: string;
-  acp_session_id: string | null;
-};
+export type PromptResultDto = { run_id: string, chat_id: string, agent_id: string, user_message_id: string, acp_session_id: string | null, };
 
-export type CancelResult = { cancelled: boolean; chat_id: string };
+export type CancelResult = { cancelled: boolean, chat_id: string, };
 
-export type RespondAgentError = {
-  code: number;
-  message: string;
-  data: JsonValue | null;
-};
+export type RespondAgentError = { code: number, message: string, data: JsonValue | null, };
 
-export type RespondAgentParams = {
-  request_id: string;
-  result: JsonValue | null;
-  error: RespondAgentError | null;
-};
+export type RespondAgentParams = { request_id: string, result: JsonValue | null, error: RespondAgentError | null, };
 
-export type RespondAgentResult = { ok: boolean; request_id: string };
+export type RespondAgentResult = { ok: boolean, request_id: string, };
 
-export type EditorEvent =
-  | { type: "chatUpdated"; payload: { chat_id: string } }
-  | {
-      type: "runUpdated";
-      payload: {
-        run_id: string;
-        status: RunStatus;
-        error_message: string | null;
-      };
-    }
-  | {
-      type: "turnUpdated";
-      payload: {
-        chat_id: string;
-        run_id: string;
-        user_message_id: string;
-        status: TurnStatus;
-        stop_reason: string | null;
-        error_message: string | null;
-      };
-    }
-  | {
-      type: "contextRestoration";
-      payload: { chat_id: string; run_id: string; source: string };
-    }
-  | {
-      type: "messageUpdated";
-      payload: { message_id: string; status: MessageStatus };
-    }
-  | {
-      type: "messagePartAdded";
-      payload: { message_id: string; ordinal: number; kind: MessagePartKind };
-    }
-  | {
-      type: "approvalRequired";
-      payload: { run_id: string; request_id: string; details: JsonValue };
-    }
-  | {
-      type: "questionRequired";
-      payload: { run_id: string; request_id: string; details: JsonValue };
-    }
-  | {
-      type: "workspaceFilesChanged";
-      payload: { workspace_path: string; paths: Array<string> };
-    }
-  | {
-      type: "agentConnectionChanged";
-      payload: {
-        agent_id: string;
-        connected: boolean;
-        error_message: string | null;
-      };
-    };
+export type EditorEvent = { "type": "chatUpdated", "payload": { chat_id: string, } } | { "type": "runUpdated", "payload": { run_id: string, status: RunStatus, error_message: string | null, } } | { "type": "turnUpdated", "payload": { chat_id: string, run_id: string, user_message_id: string, status: TurnStatus, stop_reason: string | null, error_message: string | null, } } | { "type": "contextRestoration", "payload": { chat_id: string, run_id: string, source: string, } } | { "type": "messageUpdated", "payload": { message_id: string, status: MessageStatus, } } | { "type": "messagePartAdded", "payload": { message_id: string, ordinal: number, kind: MessagePartKind, } } | { "type": "approvalRequired", "payload": { run_id: string, request_id: string, details: JsonValue, } } | { "type": "questionRequired", "payload": { run_id: string, request_id: string, details: JsonValue, } } | { "type": "workspaceFilesChanged", "payload": { workspace_path: string, paths: Array<string>, } } | { "type": "agentConnectionChanged", "payload": { agent_id: string, connected: boolean, error_message: string | null, } };

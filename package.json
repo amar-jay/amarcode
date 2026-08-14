@@ -29,8 +29,8 @@
     "protocol:check": "cargo test -p amarcode-protocol checked_in_typescript_bindings_are_current",
     "tsc": "bun run --cwd crates/application tsc",
     "test": "bun run app:test && bun run worker:test",
-		"clippy": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
-    "prettify": "bun run prettier -w . --ignore-path .gitignore && cargo fmt --all"
+    "clippy": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+    "prettify": "bun run prettier -w . --ignore-path .gitignore --ignore-path .prettierignore && cargo fmt --all"
   },
   "devDependencies": {
     "prettier": "^3.9.6"
