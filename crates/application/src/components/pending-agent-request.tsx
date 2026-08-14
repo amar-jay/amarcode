@@ -335,7 +335,7 @@ export function PendingAgentRequestCard({
                   <Label
                     htmlFor={id}
                     className={cn(
-                      "flex-1 cursor-pointer text-sm font-normal",
+                      "min-w-0 flex-1 cursor-pointer break-all text-sm font-normal",
                       reject && "text-destructive",
                     )}
                   >
