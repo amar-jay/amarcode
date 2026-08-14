@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/command";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AgentInfo, Chat } from "@/types";
 import { SESSION_MODES, type SessionMode } from "@/state";
@@ -175,7 +175,7 @@ function AppPromptInput({
       }
     } catch (error) {
       console.error("Error choosing workspace directory:", error);
-      toast.error("Unable to open the directory picker.");
+      notify("Unable to open the directory picker.", "error");
     }
   };
 
@@ -187,7 +187,7 @@ function AppPromptInput({
       return;
     }
     if (!workspacePath || !selectedAgentId) {
-      toast.error("Choose a workspace and agent, then enter a prompt.");
+      notify("Choose a workspace and agent, then enter a prompt.", "error");
       return;
     }
     try {
@@ -208,14 +208,15 @@ function AppPromptInput({
         .prompt(chat.id, selectedAgentId, text, mode)
         .catch((error: unknown) => {
           console.error("Error submitting prompt:", error);
-          toast.error("The agent could not start this prompt.");
+          notify("The agent could not start this prompt.", "error");
         });
     } catch (error) {
       console.error("Error submitting prompt:", error);
-      toast.error(
+      notify(
         error instanceof Error
           ? error.message
           : "An error occurred while submitting the prompt.",
+        "error",
       );
     }
   };

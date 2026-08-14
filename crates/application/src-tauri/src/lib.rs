@@ -271,6 +271,7 @@ fn list_workspace_files(workspace_path: String) -> Result<Vec<String>, String> {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             window::fit_main_window(app)?;

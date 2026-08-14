@@ -26,6 +26,7 @@
     "@streamdown/mermaid": "^1.0.2",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-notification": "^2.0.0",
     "@tauri-apps/plugin-opener": "^2.0.0",
     "@xyflow/react": "^12.11.2",
     "ai": "^7.0.56",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
-import { toast } from "sonner";
+import { notify, notifyToast } from "@/lib/notify";
 import {
   daemonApi,
   type DaemonBootstrapStatus,
@@ -70,7 +70,7 @@ export function useAppBootstrap() {
     try {
       const update = await daemonApi.checkUpdate();
       if (update.status !== "available") return;
-      toast(`Daemon ${update.version} is available`, {
+      notifyToast(`Daemon ${update.version} is available`, {
         id: `daemon-update-${update.version}`,
         description: `Installed version: ${update.currentVersion}`,
         duration: 15_000,
@@ -100,7 +100,7 @@ export function useAppBootstrap() {
             ? error
             : "Unable to install the Amarcode background service.";
       setDaemonConnection({ status: "failed", error: message });
-      toast.error(message);
+      notify(message, "error");
     }
   }, [initializeDaemonClient]);
 
@@ -146,7 +146,7 @@ export function useAppBootstrap() {
               ? error
               : "Unable to install or start a compatible daemon.";
         setDaemonConnection({ status: "failed", error: message });
-        toast.error(message);
+        notify(message, "error");
       }
     })();
     return () => {
@@ -158,7 +158,7 @@ export function useAppBootstrap() {
     try {
       const health = await daemonApi.update(setDaemonUpdateStatus);
       await reconcileDaemonClient();
-      toast.success(`Daemon ${health.version} updated successfully.`);
+      notify(`Daemon ${health.version} updated successfully.`, "success");
       setDaemonUpdateVersion(null);
       setDaemonUpdateStatus(null);
     } catch (error) {

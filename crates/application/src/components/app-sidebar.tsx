@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Bot, Plus, Settings, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -58,8 +58,9 @@ export function AppSidebar({
       setChatToDelete(null);
     } catch (error) {
       console.error("Failed to delete chat:", error);
-      toast.error(
+      notify(
         error instanceof Error ? error.message : "Unable to delete this chat.",
+        "error",
       );
     } finally {
       setDeleting(false);

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
+import { notifyAttention } from "@/lib/notify";
 import type { JsonValue } from "@/types";
 
 export type PendingAgentRequest = {
@@ -219,6 +220,13 @@ export function PendingAgentRequestCard({
   onRespond: (result: JsonValue) => Promise<void>;
 }) {
   const isApproval = request.kind === "approval";
+  useEffect(() => {
+    const title = isApproval ? "Permission required" : "Input needed";
+    const body = isApproval
+      ? "Amarcode is waiting for your approval."
+      : "Amarcode is waiting for your response.";
+    notifyAttention(`agent-request:${request.requestId}`, title, body);
+  }, [isApproval, request.requestId]);
   const presentation = useMemo(
     () => (isApproval ? null : inputRequestPresentation(request.details)),
     [isApproval, request.details],
