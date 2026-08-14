@@ -20,3 +20,8 @@ target
 
 target
 .wrangler
+
+acl-manifests.json
+capabilities.json
+desktop-schema.json
+linux-schema.json

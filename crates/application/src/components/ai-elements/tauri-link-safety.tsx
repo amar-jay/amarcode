@@ -45,18 +45,15 @@ export function handleExternalLinkClick(event: MouseEvent<HTMLAnchorElement>) {
   }
 
   event.preventDefault();
-  const target = event.currentTarget.getAttribute("href") ?? event.currentTarget.href;
+  const target =
+    event.currentTarget.getAttribute("href") ?? event.currentTarget.href;
   void openExternalTarget(target).catch((error: unknown) => {
     console.error("Unable to open external link:", error);
     notify("Unable to open this link with a desktop application.", "error");
   });
 }
 
-function TauriLinkSafetyModal({
-  isOpen,
-  onClose,
-  url,
-}: LinkSafetyModalProps) {
+function TauriLinkSafetyModal({ isOpen, onClose, url }: LinkSafetyModalProps) {
   const openLink = async () => {
     try {
       await openExternalTarget(url);

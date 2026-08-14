@@ -58,6 +58,21 @@ export interface WorkspaceInfo {
   isGitRepository: boolean;
 }
 
+export interface WorkspaceChange {
+  path: string;
+  status: string;
+  staged: boolean;
+  unstaged: boolean;
+}
+
+export interface WorkspaceDiff {
+  path: string;
+  status: string;
+  before: string;
+  after: string;
+  comparison: string;
+}
+
 /**
  * Typed bindings for the daemon-backed Tauri commands.
  *
@@ -105,6 +120,13 @@ export const daemonApi = {
     invoke("list_workspace_files", { workspacePath }),
   getWorkspaceInfo: (workspacePath: string): Promise<WorkspaceInfo> =>
     invoke("get_workspace_info", { workspacePath }),
+  listWorkspaceChanges: (workspacePath: string): Promise<WorkspaceChange[]> =>
+    invoke("list_workspace_changes", { workspacePath }),
+  getWorkspaceFileDiff: (
+    workspacePath: string,
+    relativePath: string,
+  ): Promise<WorkspaceDiff> =>
+    invoke("get_workspace_file_diff", { workspacePath, relativePath }),
 
   listAgents: (): Promise<AgentInfo[]> => invoke("list_agents"),
 

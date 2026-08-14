@@ -67,11 +67,7 @@ function displayCommand(value: string): string {
 
   // Some agents serialize the entire command as a JSON-like quoted string.
   // Hide only a matching outer pair; shell quotes inside the command remain.
-  if (
-    trimmed.length >= 2 &&
-    trimmed.startsWith('"') &&
-    trimmed.endsWith('"')
-  ) {
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
     return trimmed.slice(1, -1);
   }
   return trimmed;

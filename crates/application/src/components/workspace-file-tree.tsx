@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  FileIcon,
   FileQuestion,
   FolderOpen,
   LoaderCircle,
   RefreshCw,
 } from "lucide-react";
-import { daemonApi } from "@/api";
+import { daemonApi, type WorkspaceChange } from "@/api";
 import {
   FileTree,
   FileTreeFile,
   FileTreeFolder,
+  FileTreeIcon,
+  FileTreeName,
 } from "@/components/ai-elements/file-tree";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -70,14 +73,31 @@ function makeTree(paths: string[]): TreeNode[] {
   return sortTree(root.children);
 }
 
-function TreeNodes({ nodes }: { nodes: TreeNode[] }) {
+function TreeNodes({
+  changes,
+  nodes,
+}: {
+  changes: Map<string, WorkspaceChange>;
+  nodes: TreeNode[];
+}) {
   return nodes.map((node) =>
     node.kind === "folder" ? (
       <FileTreeFolder key={node.path} name={node.name} path={node.path}>
-        <TreeNodes nodes={node.children} />
+        <TreeNodes changes={changes} nodes={node.children} />
       </FileTreeFolder>
     ) : (
-      <FileTreeFile key={node.path} name={node.name} path={node.path} />
+      <FileTreeFile key={node.path} name={node.name} path={node.path}>
+        <span className="size-4 shrink-0" />
+        <FileTreeIcon>
+          <FileIcon className="size-4 text-muted-foreground" />
+        </FileTreeIcon>
+        <FileTreeName>{node.name}</FileTreeName>
+        {changes.get(node.path) && (
+          <span className="ml-auto rounded bg-muted px-1 font-mono text-[0.6rem] font-semibold text-muted-foreground">
+            {changes.get(node.path)?.status}
+          </span>
+        )}
+      </FileTreeFile>
     ),
   );
 }
@@ -87,7 +107,7 @@ export function useWorkspaceFileTree(active: boolean, workspacePath: string) {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string>();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-	const validWorkspace = !!workspacePath;
+  const validWorkspace = !!workspacePath;
 
   const refresh = useCallback(async () => {
     if (!workspacePath) {
@@ -120,27 +140,40 @@ export function useWorkspaceFileTree(active: boolean, workspacePath: string) {
     setExpanded(new Set());
   }, [workspacePath]);
 
-
   const tree = useMemo(() => makeTree(files), [files]);
-	return {
-		files,
-		isLoading,
-		selectedPath,
-		setSelectedPath,
-		expanded,
-		setExpanded,
-		refresh,
-		tree,
-		validWorkspace
-	}
+  return {
+    files,
+    isLoading,
+    selectedPath,
+    setSelectedPath,
+    expanded,
+    setExpanded,
+    refresh,
+    tree,
+    validWorkspace,
+  };
 }
 
 export function WorkspaceFileTree({
-		 files, isLoading, selectedPath, setSelectedPath, expanded, setExpanded, refresh, tree, validWorkspace }: ReturnType<typeof useWorkspaceFileTree>) {
+  changes = new Map(),
+  ...treeState
+}: ReturnType<typeof useWorkspaceFileTree> & {
+  changes?: Map<string, WorkspaceChange>;
+}) {
+  const {
+    files,
+    isLoading,
+    selectedPath,
+    setSelectedPath,
+    expanded,
+    setExpanded,
+    tree,
+    validWorkspace,
+  } = treeState;
 
   return (
     <section
-      className="flex min-h-0 flex-1 flex-col border-t"
+      className="flex min-h-0 flex-1 flex-col"
       aria-label="Workspace files"
     >
       <div className="min-h-0 flex-1 overflow-y-auto pb-5">
@@ -164,18 +197,18 @@ export function WorkspaceFileTree({
             onSelect={setSelectedPath}
             selectedPath={selectedPath}
           >
-            <TreeNodes nodes={tree} />
+            <TreeNodes changes={changes} nodes={tree} />
           </FileTree>
         )}
       </div>
-      {selectedPath && (
+      {/* {selectedPath && (
         <div className="flex items-center gap-2 border-t px-2 py-2 text-xs text-muted-foreground">
           <FolderOpen className="size-3.5 shrink-0" />
           <span className="truncate font-mono" title={selectedPath}>
             {selectedPath}
           </span>
         </div>
-      )}
+      )} */}
     </section>
   );
 }

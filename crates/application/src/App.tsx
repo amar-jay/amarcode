@@ -93,9 +93,7 @@ export default function App() {
           }}
           onOpenSettings={() => setSettingsOpen(true)}
         />
-				<AppSidePanel 
-						workspacePath={workspacePath}
-				/>
+        <AppSidePanel workspacePath={workspacePath} />
         {activeSession ? (
           <LiveChatScreen />
         ) : (

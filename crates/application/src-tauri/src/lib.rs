@@ -4,7 +4,11 @@ mod protocol;
 mod state;
 mod window;
 
-use std::{path::PathBuf, process::Command};
+use std::{
+    fs,
+    path::{Component, Path, PathBuf},
+    process::Command,
+};
 
 use ignore::WalkBuilder;
 use serde::Serialize;
@@ -277,6 +281,170 @@ struct WorkspaceInfo {
     is_git_repository: bool,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceChange {
+    path: String,
+    status: String,
+    staged: bool,
+    unstaged: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceDiff {
+    path: String,
+    status: String,
+    before: String,
+    after: String,
+    comparison: String,
+}
+
+fn git_output(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|error| format!("Could not run Git: {error}"))
+}
+
+fn workspace_changes(root: &Path) -> Result<Vec<WorkspaceChange>, String> {
+    let output = git_output(root, &["status", "--porcelain=v1", "-z"])?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let mut records = output.stdout.split(|byte| *byte == b'\0');
+    let mut changes = Vec::new();
+    while let Some(record) = records.next() {
+        if record.len() < 4 || record[0] == b'!' {
+            continue;
+        }
+        let index = record[0] as char;
+        let worktree = record[1] as char;
+        let path = String::from_utf8_lossy(&record[3..]).into_owned();
+        if path.is_empty() {
+            continue;
+        }
+        // Rename/copy records contain a second, NUL-delimited source path.
+        if matches!(index, 'R' | 'C') {
+            let _ = records.next();
+        }
+        let staged = !matches!(index, ' ' | '?');
+        // An untracked entry is reported as `??`; it compares an empty
+        // baseline to the file currently in the working tree.
+        let unstaged = worktree != ' ';
+        let status = if index == '?' {
+            "A".to_string()
+        } else if staged {
+            index.to_string()
+        } else {
+            worktree.to_string()
+        };
+        changes.push(WorkspaceChange {
+            path,
+            status,
+            staged,
+            unstaged,
+        });
+    }
+    changes.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(changes)
+}
+
+fn workspace_relative_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
+    let relative = Path::new(relative_path);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("The requested file must be inside the workspace.".to_string());
+    }
+    let full_path = root.join(relative);
+    if !full_path.starts_with(root) {
+        return Err("The requested file must be inside the workspace.".to_string());
+    }
+    Ok(full_path)
+}
+
+fn text_content(bytes: Vec<u8>) -> Result<String, String> {
+    const MAX_DIFF_FILE_BYTES: usize = 1_000_000;
+    if bytes.len() > MAX_DIFF_FILE_BYTES {
+        return Err("This file is too large to display as a diff.".to_string());
+    }
+    if bytes.contains(&0) {
+        return Err("Binary files cannot be displayed as a text diff.".to_string());
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn git_blob(root: &Path, revision: &str, path: &str) -> Result<Option<Vec<u8>>, String> {
+    let spec = format!("{revision}:{path}");
+    let output = git_output(root, &["show", "--no-textconv", &spec])?;
+    if output.status.success() {
+        Ok(Some(output.stdout))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn list_workspace_changes(workspace_path: String) -> Result<Vec<WorkspaceChange>, String> {
+    let root = PathBuf::from(workspace_path);
+    if !root.is_dir() {
+        return Err("The selected workspace folder is unavailable.".to_string());
+    }
+    workspace_changes(&root)
+}
+
+#[tauri::command]
+fn get_workspace_file_diff(
+    workspace_path: String,
+    relative_path: String,
+) -> Result<WorkspaceDiff, String> {
+    let root = PathBuf::from(workspace_path);
+    let full_path = workspace_relative_path(&root, &relative_path)?;
+    let change = workspace_changes(&root)?
+        .into_iter()
+        .find(|change| change.path == relative_path);
+
+    if change.is_none() {
+        let contents = text_content(fs::read(&full_path).map_err(|error| error.to_string())?)?;
+        return Ok(WorkspaceDiff {
+            path: relative_path,
+            status: "Current".to_string(),
+            before: contents.clone(),
+            after: contents,
+            comparison: "Current file".to_string(),
+        });
+    }
+    let change = change.expect("checked above");
+
+    let (before, after, comparison) = if change.unstaged {
+        let before = text_content(git_blob(&root, "", &relative_path)?.unwrap_or_default())?;
+        let after = match fs::read(&full_path) {
+            Ok(contents) => text_content(contents)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(error.to_string()),
+        };
+        (before, after, "Unstaged".to_string())
+    } else {
+        let before = text_content(git_blob(&root, "HEAD", &relative_path)?.unwrap_or_default())?;
+        let after = text_content(git_blob(&root, "", &relative_path)?.unwrap_or_default())?;
+        (before, after, "Staged".to_string())
+    };
+
+    Ok(WorkspaceDiff {
+        path: relative_path,
+        status: change.status,
+        before,
+        after,
+        comparison,
+    })
+}
+
 #[tauri::command]
 fn get_workspace_info(workspace_path: String) -> Result<WorkspaceInfo, String> {
     let path = PathBuf::from(&workspace_path);
@@ -338,6 +506,8 @@ pub fn run() {
             subscribe_events,
             list_workspace_files,
             get_workspace_info,
+            list_workspace_changes,
+            get_workspace_file_diff,
         ])
         .build(tauri::generate_context!())
         .expect("error while building amarcode");
