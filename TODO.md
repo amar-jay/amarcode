@@ -1,4 +1,0 @@
-- [ ] app notification if dialog opens and not on screen.
-- [ ] app notification if app toasted when not on screen.
-- [ ] fix the permission required dialog - broken UI and "<code>" to <code>
-- [ ] 

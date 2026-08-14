@@ -53,6 +53,30 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+/** Agents sometimes format a command for display with Markdown or HTML code wrappers. */
+function displayCommand(value: string): string {
+  let trimmed = value.trim();
+  const htmlCode = trimmed.match(/^<code(?:\s[^>]*)?>([\s\S]*)<\/code>$/i);
+  if (htmlCode) trimmed = htmlCode[1].trim();
+
+  const fencedCode = trimmed.match(/^```[^\n]*\n?([\s\S]*?)\n?```$/);
+  if (fencedCode) trimmed = fencedCode[1].trim();
+
+  const inlineCode = trimmed.match(/^`([\s\S]*)`$/);
+  if (inlineCode) trimmed = inlineCode[1];
+
+  // Some agents serialize the entire command as a JSON-like quoted string.
+  // Hide only a matching outer pair; shell quotes inside the command remain.
+  if (
+    trimmed.length >= 2 &&
+    trimmed.startsWith('"') &&
+    trimmed.endsWith('"')
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
 function inputRequestPresentation(
   details: JsonValue,
 ): InputRequestPresentation {
@@ -136,10 +160,11 @@ function actionSummary(details: JsonValue): ActionSummary | null {
     asRecord(tool.rawInput) ??
     asRecord(tool.input) ??
     asRecord(record.rawInput);
-  const command =
+  const rawCommand =
     (rawInput && typeof rawInput.command === "string" && rawInput.command) ||
     (typeof tool.command === "string" && tool.command) ||
     undefined;
+  const command = rawCommand ? displayCommand(rawCommand) : undefined;
   const cwd =
     (rawInput && typeof rawInput.cwd === "string" && rawInput.cwd) ||
     (typeof tool.cwd === "string" && tool.cwd) ||
