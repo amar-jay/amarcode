@@ -1,9 +1,9 @@
 import { createStore } from "jotai";
-import { afterAll, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
   subscribeEvents: vi.fn(),
-}));
+};
 
 vi.mock("@/api", () => ({
   daemonApi: {
@@ -11,17 +11,10 @@ vi.mock("@/api", () => ({
   },
 }));
 
-import {
-  daemonEventStreamStateAtom,
-  ensureDaemonEventStream,
-} from "./daemon-events";
-
-afterAll(() => {
-  vi.useRealTimers();
-});
+const { daemonEventStreamStateAtom, ensureDaemonEventStream } =
+  await import("./daemon-events");
 
 test("propagates a disconnect and starts one replacement event stream", async () => {
-  vi.useFakeTimers();
   const store = createStore();
   let rejectFirst: (reason?: Error) => void = () => undefined;
 
@@ -54,7 +47,7 @@ test("propagates a disconnect and starts one replacement event stream", async ()
     retryInMs: 250,
   });
 
-  await vi.advanceTimersByTimeAsync(250);
+  await new Promise((resolve) => setTimeout(resolve, 275));
 
   expect(mocks.subscribeEvents).toHaveBeenCalledTimes(2);
   expect(store.get(daemonEventStreamStateAtom)).toEqual({
