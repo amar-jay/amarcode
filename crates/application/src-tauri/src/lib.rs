@@ -4,8 +4,9 @@ mod protocol;
 mod state;
 mod window;
 
-use std::path::{Path, PathBuf};
+use std::{path::PathBuf, process::Command};
 
+use ignore::WalkBuilder;
 use serde::Serialize;
 use tauri::{ipc::Channel, AppHandle, State};
 
@@ -231,41 +232,77 @@ async fn subscribe_events(
 
 #[tauri::command]
 fn list_workspace_files(workspace_path: String) -> Result<Vec<String>, String> {
-    fn visit(
-        root: &Path,
-        path: &Path,
-        depth: usize,
-        files: &mut Vec<String>,
-    ) -> Result<(), String> {
-        if depth > 6 || files.len() >= 500 {
-            return Ok(());
-        }
-        for entry in std::fs::read_dir(path).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
-            let child = entry.path();
-            let name = entry.file_name();
-            if [".git", "node_modules", "target", "dist"]
-                .iter()
-                .any(|ignored| name == *ignored)
-            {
-                continue;
-            }
-            if child.is_dir() {
-                visit(root, &child, depth + 1, files)?;
-            } else if child.is_file() {
-                if let Ok(relative) = child.strip_prefix(root) {
-                    files.push(relative.to_string_lossy().to_string());
-                }
-            }
-        }
-        Ok(())
-    }
-
     let root = PathBuf::from(workspace_path);
     let mut files = Vec::new();
-    visit(&root, &root, 0, &mut files)?;
+    let mut walker = WalkBuilder::new(&root);
+    walker
+        // A workspace need not be a Git checkout for its .gitignore to be useful.
+        .require_git(false)
+        .git_ignore(true)
+        // Keep this command's scope to the workspace .gitignore rather than
+        // user-global or tool-specific ignore files.
+        .git_global(false)
+        .git_exclude(false)
+        .ignore(false)
+        .parents(false)
+        .hidden(false)
+        .max_depth(Some(6))
+        .filter_entry(|entry| {
+            !matches!(
+                entry.file_name().to_str(),
+                Some(".git" | "node_modules" | "target" | "dist")
+            )
+        });
+
+    for entry in walker.build() {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file())
+        {
+            continue;
+        }
+        if let Ok(relative) = entry.path().strip_prefix(&root) {
+            files.push(relative.to_string_lossy().to_string());
+        }
+    }
     files.sort();
     Ok(files)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceInfo {
+    display_name: String,
+    is_git_repository: bool,
+}
+
+#[tauri::command]
+fn get_workspace_info(workspace_path: String) -> Result<WorkspaceInfo, String> {
+    let path = PathBuf::from(&workspace_path);
+    if !path.is_dir() {
+        return Err("The selected workspace folder is unavailable.".to_string());
+    }
+
+    let display_name = path
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or(workspace_path);
+
+    let is_git_repository = Command::new("git")
+        .arg("-C")
+        .arg(&path)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map_err(|error| format!("Could not check the workspace Git status: {error}"))?
+        .status
+        .success();
+
+    Ok(WorkspaceInfo {
+        display_name,
+        is_git_repository,
+    })
 }
 
 pub fn run() {
@@ -300,6 +337,7 @@ pub fn run() {
             respond_input,
             subscribe_events,
             list_workspace_files,
+            get_workspace_info,
         ])
         .build(tauri::generate_context!())
         .expect("error while building amarcode");

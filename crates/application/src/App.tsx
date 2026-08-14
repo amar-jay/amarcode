@@ -30,6 +30,7 @@ import {
   useAppBootstrap,
   workspacePathAtom,
 } from "@/state";
+import AppSidePanel from "./components/app-sidepanel";
 
 /**
  * Shell only: route home vs live chat and host chrome.
@@ -92,6 +93,9 @@ export default function App() {
           }}
           onOpenSettings={() => setSettingsOpen(true)}
         />
+				<AppSidePanel 
+						workspacePath={workspacePath}
+				/>
         {activeSession ? (
           <LiveChatScreen />
         ) : (

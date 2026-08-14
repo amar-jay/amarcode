@@ -17,6 +17,7 @@ amarcode-protocol = { path = "../../protocol" }
 base64 = "0.22"
 ed25519-dalek = "2"
 hex = "0.4"
+ignore = "0.4"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

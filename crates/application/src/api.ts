@@ -53,6 +53,11 @@ export interface ApplicationCleanupResult {
   daemonReleaseCacheRemoved: boolean;
 }
 
+export interface WorkspaceInfo {
+  displayName: string;
+  isGitRepository: boolean;
+}
+
 /**
  * Typed bindings for the daemon-backed Tauri commands.
  *
@@ -96,6 +101,10 @@ export const daemonApi = {
   exitApplication: (): Promise<void> => invoke("exit_application"),
   health: (): Promise<Health> => invoke("daemon_health"),
   version: (): Promise<DaemonVersion> => invoke("daemon_version"),
+  listWorkspaceFiles: (workspacePath: string): Promise<string[]> =>
+    invoke("list_workspace_files", { workspacePath }),
+  getWorkspaceInfo: (workspacePath: string): Promise<WorkspaceInfo> =>
+    invoke("get_workspace_info", { workspacePath }),
 
   listAgents: (): Promise<AgentInfo[]> => invoke("list_agents"),
 
