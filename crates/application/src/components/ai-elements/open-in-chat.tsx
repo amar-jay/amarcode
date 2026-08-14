@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { handleExternalLinkClick } from "./tauri-link-safety";
 import {
   ChevronDownIcon,
   ExternalLinkIcon,
@@ -260,6 +261,7 @@ export const OpenInChatGPT = (props: OpenInChatGPTProps) => {
         href={providers.chatgpt.createUrl(query)}
         rel="noopener"
         target="_blank"
+        onClick={handleExternalLinkClick}
       >
         <span className="shrink-0">{providers.chatgpt.icon}</span>
         <span className="flex-1">{providers.chatgpt.title}</span>
@@ -280,6 +282,7 @@ export const OpenInClaude = (props: OpenInClaudeProps) => {
         href={providers.claude.createUrl(query)}
         rel="noopener"
         target="_blank"
+        onClick={handleExternalLinkClick}
       >
         <span className="shrink-0">{providers.claude.icon}</span>
         <span className="flex-1">{providers.claude.title}</span>
@@ -300,6 +303,7 @@ export const OpenInT3 = (props: OpenInT3Props) => {
         href={providers.t3.createUrl(query)}
         rel="noopener"
         target="_blank"
+        onClick={handleExternalLinkClick}
       >
         <span className="shrink-0">{providers.t3.icon}</span>
         <span className="flex-1">{providers.t3.title}</span>
@@ -320,6 +324,7 @@ export const OpenInScira = (props: OpenInSciraProps) => {
         href={providers.scira.createUrl(query)}
         rel="noopener"
         target="_blank"
+        onClick={handleExternalLinkClick}
       >
         <span className="shrink-0">{providers.scira.icon}</span>
         <span className="flex-1">{providers.scira.title}</span>
@@ -340,6 +345,7 @@ export const OpenInv0 = (props: OpenInv0Props) => {
         href={providers.v0.createUrl(query)}
         rel="noopener"
         target="_blank"
+        onClick={handleExternalLinkClick}
       >
         <span className="shrink-0">{providers.v0.icon}</span>
         <span className="flex-1">{providers.v0.title}</span>
@@ -360,6 +366,7 @@ export const OpenInCursor = (props: OpenInCursorProps) => {
         href={providers.cursor.createUrl(query)}
         rel="noopener"
         target="_blank"
+        onClick={handleExternalLinkClick}
       >
         <span className="shrink-0">{providers.cursor.icon}</span>
         <span className="flex-1">{providers.cursor.title}</span>

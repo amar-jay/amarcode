@@ -24,6 +24,7 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+import { tauriLinkSafety } from "./tauri-link-safety";
 
 import { Shimmer } from "./shimmer";
 
@@ -216,7 +217,9 @@ export const ReasoningContent = memo(
       )}
       {...props}
     >
-      <Streamdown plugins={streamdownPlugins}>{children}</Streamdown>
+      <Streamdown plugins={streamdownPlugins} linkSafety={tauriLinkSafety}>
+        {children}
+      </Streamdown>
     </CollapsibleContent>
   ),
 );

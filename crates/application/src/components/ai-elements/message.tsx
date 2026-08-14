@@ -26,6 +26,7 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+import { tauriLinkSafety } from "./tauri-link-safety";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -328,6 +329,7 @@ export const MessageResponse = memo(
         className,
       )}
       plugins={streamdownPlugins}
+      linkSafety={tauriLinkSafety}
       // Dual theme so shiki tokens track light/dark app chrome.
       shikiTheme={["github-light", "github-dark"]}
       lineNumbers

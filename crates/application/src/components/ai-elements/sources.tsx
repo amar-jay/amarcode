@@ -8,6 +8,7 @@ import {
 import { cn } from "@/lib/utils";
 import { BookIcon, ChevronDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
+import { handleExternalLinkClick } from "./tauri-link-safety";
 
 export type SourcesProps = ComponentProps<"div">;
 
@@ -65,6 +66,7 @@ export const Source = ({ href, title, children, ...props }: SourceProps) => (
     href={href}
     rel="noreferrer"
     target="_blank"
+    onClick={handleExternalLinkClick}
     {...props}
   >
     {children ?? (
