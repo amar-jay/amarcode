@@ -31,23 +31,23 @@ pub fn resolve_default() -> Result<PathBuf> {
     #[cfg(target_os = "linux")]
     {
         let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;
-        return Ok(PathBuf::from(home).join(".amarcode"));
+        Ok(PathBuf::from(home).join(".amarcode"))
     }
 
     #[cfg(target_os = "windows")]
     {
         let local =
             env::var_os("LOCALAPPDATA").ok_or_else(|| Error::msg("LOCALAPPDATA is not set"))?;
-        return Ok(PathBuf::from(local).join("amarcode"));
+        Ok(PathBuf::from(local).join("amarcode"))
     }
 
     #[cfg(target_os = "macos")]
     {
         let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;
-        return Ok(PathBuf::from(home)
+        Ok(PathBuf::from(home)
             .join("Library")
             .join("Application Support")
-            .join("amarcode"));
+            .join("amarcode"))
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
