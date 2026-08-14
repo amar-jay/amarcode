@@ -3,4 +3,7 @@ mod manager;
 mod release;
 
 pub use bridge::{DaemonBridge, EventSubscription};
-pub use manager::{DaemonBootstrapStatus, DaemonManager, DaemonUpdateCheck, DaemonUpdateStatus};
+pub use manager::{
+    ApplicationCleanupResult, ApplicationCleanupStatus, DaemonBootstrapStatus, DaemonManager,
+    DaemonUpdateCheck, DaemonUpdateStatus,
+};

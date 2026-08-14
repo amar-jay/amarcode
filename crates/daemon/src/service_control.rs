@@ -172,12 +172,14 @@ mod platform {
         if !path.exists() {
             return Ok(());
         }
-        let _ = Command::new("systemctl")
-            .args(["--user", "stop", UNIT_NAME])
-            .output();
-        let _ = Command::new("systemctl")
-            .args(["--user", "disable", UNIT_NAME])
-            .output();
+        checked(
+            Command::new("systemctl").args(["--user", "stop", UNIT_NAME]),
+            "stop the Amarcode user service before uninstalling it",
+        )?;
+        checked(
+            Command::new("systemctl").args(["--user", "disable", UNIT_NAME]),
+            "disable the Amarcode user service",
+        )?;
         fs::remove_file(&path)
             .map_err(|error| Error::msg(format!("failed to remove {}: {error}", path.display())))?;
         checked(
@@ -480,16 +482,55 @@ mod platform {
 
     pub fn uninstall() -> Result<()> {
         if !status()?.installed {
-            return Ok(());
+            return if daemon_process_running()? {
+                Err(Error::msg(
+                    "amarcode-daemon.exe is still running without a registered scheduled task",
+                ))
+            } else {
+                Ok(())
+            };
         }
         let _ = Command::new("schtasks.exe")
             .args(["/End", "/TN", TASK_NAME])
             .output();
+        for _ in 0..20 {
+            if !daemon_process_running()? {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if daemon_process_running()? {
+            return Err(Error::msg(
+                "failed to stop amarcode-daemon.exe before removing its scheduled task",
+            ));
+        }
         checked(
             Command::new("schtasks.exe").args(["/Delete", "/TN", TASK_NAME, "/F"]),
             "remove the Amarcode logon task",
         )?;
         Ok(())
+    }
+
+    fn daemon_process_running() -> Result<bool> {
+        let output = Command::new("tasklist.exe")
+            .args([
+                "/FI",
+                "IMAGENAME eq amarcode-daemon.exe",
+                "/FO",
+                "CSV",
+                "/NH",
+            ])
+            .output()
+            .map_err(|error| Error::msg(format!("failed to verify daemon exit: {error}")))?;
+        if !output.status.success() {
+            return Err(Error::msg(format!(
+                "failed to verify daemon exit: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line.starts_with("\"amarcode-daemon.exe\",")))
     }
 
     pub fn start() -> Result<()> {

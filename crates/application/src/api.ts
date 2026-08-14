@@ -41,6 +41,18 @@ export type DaemonUpdateStatus =
   | { status: "ready"; version: string }
   | { status: "failed"; error: string };
 
+export type ApplicationCleanupStatus =
+  | { status: "preparing" }
+  | { status: "removingServiceAndData" }
+  | { status: "removingReleaseCache" }
+  | { status: "ready" }
+  | { status: "failed"; error: string };
+
+export interface ApplicationCleanupResult {
+  serviceAndDaemonDataRemoved: boolean;
+  daemonReleaseCacheRemoved: boolean;
+}
+
 /**
  * Typed bindings for the daemon-backed Tauri commands.
  *
@@ -70,6 +82,18 @@ export const daemonApi = {
     statusChannel.onmessage = onStatus;
     return invoke("daemon_update", { onStatus: statusChannel });
   },
+  prepareApplicationUninstall: async (
+    confirmed: boolean,
+    onStatus: (status: ApplicationCleanupStatus) => void,
+  ): Promise<ApplicationCleanupResult> => {
+    const statusChannel = new Channel<ApplicationCleanupStatus>();
+    statusChannel.onmessage = onStatus;
+    return invoke("prepare_application_uninstall", {
+      confirmed,
+      onStatus: statusChannel,
+    });
+  },
+  exitApplication: (): Promise<void> => invoke("exit_application"),
   health: (): Promise<Health> => invoke("daemon_health"),
   version: (): Promise<DaemonVersion> => invoke("daemon_version"),
 

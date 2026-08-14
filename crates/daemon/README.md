@@ -361,7 +361,15 @@ amarcode-daemon status --json
 amarcode-daemon restart
 amarcode-daemon stop
 amarcode-daemon uninstall # preserves SQLite and other user data
+amarcode-daemon purge --confirm-data-loss # unregisters service and deletes daemon data
 ```
+
+`purge` is intentionally narrower than `uninstall`. It validates the
+platform-default daemon data directory, refuses relative, redirected, or
+symlinked targets, unregisters and verifies the service first, and only then
+deletes local chats, logs, tool state, and SQLite data. It refuses to delete an
+`AMARCODE_APPDIR` override; remove custom development data manually after
+checking the path. The operation is idempotent, so it can be retried safely.
 
 Running without a subcommand currently aliases `run` for compatibility with
 older development scripts and service definitions.

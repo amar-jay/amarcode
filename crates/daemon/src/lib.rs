@@ -6,6 +6,7 @@
 pub mod acp;
 pub mod app;
 pub mod app_dir;
+pub mod cleanup;
 pub mod config;
 pub mod error;
 mod instance_lock;

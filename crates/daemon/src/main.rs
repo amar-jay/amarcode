@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use amarcode_daemon::{
-    logging,
+    cleanup, logging,
     service_control::{NativeServiceController, ServiceController},
     App, Config,
 };
@@ -33,6 +33,12 @@ enum LifecycleCommand {
     Install,
     /// Stop and unregister the per-user service without deleting user data.
     Uninstall,
+    /// Stop and unregister the service, then permanently delete daemon data.
+    Purge {
+        /// Required acknowledgement for irreversible data deletion.
+        #[arg(long)]
+        confirm_data_loss: bool,
+    },
     /// Start an already-installed service.
     Start,
     /// Stop the installed service gracefully.
@@ -107,6 +113,11 @@ fn run_lifecycle_command(command: LifecycleCommand) -> amarcode_daemon::Result<(
             controller.uninstall()?;
             println!("uninstalled Amarcode per-user service");
         }
+        LifecycleCommand::Purge { confirm_data_loss } => {
+            require_data_loss_confirmation(confirm_data_loss)?;
+            cleanup::purge_default(&controller)?;
+            println!("removed Amarcode per-user service and daemon data");
+        }
         LifecycleCommand::Start => {
             controller.start()?;
             println!("started Amarcode per-user service");
@@ -140,6 +151,16 @@ fn run_lifecycle_command(command: LifecycleCommand) -> amarcode_daemon::Result<(
     Ok(())
 }
 
+fn require_data_loss_confirmation(confirmed: bool) -> amarcode_daemon::Result<()> {
+    if confirmed {
+        Ok(())
+    } else {
+        Err(amarcode_daemon::Error::msg(
+            "purge permanently deletes local chats, settings, and logs; retry with --confirm-data-loss",
+        ))
+    }
+}
+
 fn display_path(path: PathBuf) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -151,7 +172,7 @@ async fn run(config: Config) -> amarcode_daemon::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, LifecycleCommand};
+    use super::{require_data_loss_confirmation, Cli, LifecycleCommand};
     use clap::Parser;
 
     #[test]
@@ -173,6 +194,14 @@ mod tests {
             );
         }
         assert_eq!(
+            Cli::try_parse_from(["amarcode-daemon", "purge", "--confirm-data-loss"])
+                .unwrap()
+                .command,
+            Some(LifecycleCommand::Purge {
+                confirm_data_loss: true
+            })
+        );
+        assert_eq!(
             Cli::try_parse_from(["amarcode-daemon", "status", "--json"])
                 .unwrap()
                 .command,
@@ -186,5 +215,19 @@ mod tests {
             Cli::try_parse_from(["amarcode-daemon"]).unwrap().command,
             None
         );
+    }
+
+    #[test]
+    fn purge_requires_runtime_confirmation() {
+        assert_eq!(
+            Cli::try_parse_from(["amarcode-daemon", "purge"])
+                .unwrap()
+                .command,
+            Some(LifecycleCommand::Purge {
+                confirm_data_loss: false
+            })
+        );
+        assert!(require_data_loss_confirmation(false).is_err());
+        assert!(require_data_loss_confirmation(true).is_ok());
     }
 }

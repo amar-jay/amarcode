@@ -20,6 +20,14 @@ pub fn resolve() -> Result<PathBuf> {
         }
     }
 
+    resolve_default()
+}
+
+/// Resolve the platform-owned Amarcode data directory without honoring
+/// overrides. Destructive cleanup uses this as its allowlisted target so an
+/// environment variable can never turn `purge` into an arbitrary directory
+/// deletion primitive.
+pub fn resolve_default() -> Result<PathBuf> {
     #[cfg(target_os = "linux")]
     {
         let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;

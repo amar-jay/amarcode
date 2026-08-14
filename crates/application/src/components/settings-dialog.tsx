@@ -11,7 +11,11 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Sun,
+  LoaderCircle,
+  Trash2,
+  TriangleAlert,
 } from "lucide-react";
+import { daemonApi, type ApplicationCleanupStatus } from "@/api";
 import type { Palette as AppPalette, Theme } from "@/state";
 import { verboseReasoningAtom } from "@/state";
 import {
@@ -22,6 +26,17 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -490,6 +505,61 @@ function GeneralPanel({
   verboseReasoning: boolean;
   setVerboseReasoning: (value: boolean) => void;
 }) {
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [cleanupStatus, setCleanupStatus] =
+    useState<ApplicationCleanupStatus | null>(null);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const cleaning =
+    cleanupStatus !== null &&
+    cleanupStatus.status !== "ready" &&
+    cleanupStatus.status !== "failed";
+  const cleanupComplete = cleanupStatus?.status === "ready";
+
+  const beginCleanup = async () => {
+    if (confirmation !== "DELETE AMARCODE DATA" || cleaning) return;
+    setCleanupError(null);
+    setCleanupStatus({ status: "preparing" });
+    try {
+      await daemonApi.prepareApplicationUninstall(true, setCleanupStatus);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCleanupError(message);
+      setCleanupStatus({ status: "failed", error: message });
+      return;
+    }
+
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCleanupError(
+        `The service and native data were removed, but UI preferences could not be cleared: ${message}`,
+      );
+      setCleanupStatus({ status: "ready" });
+      return;
+    }
+
+    setCleanupStatus({ status: "ready" });
+    try {
+      await daemonApi.exitApplication();
+    } catch {
+      setCleanupError(
+        "Cleanup is complete, but Amarcode could not exit automatically. Exit the application manually.",
+      );
+    }
+  };
+
+  const cleanupLabel =
+    cleanupStatus?.status === "removingServiceAndData"
+      ? "Removing service and local data…"
+      : cleanupStatus?.status === "removingReleaseCache"
+        ? "Removing downloaded daemon files…"
+        : cleanupStatus?.status === "ready"
+          ? "Cleanup complete"
+          : "Preparing cleanup…";
+
   return (
     <div className="mx-auto w-full max-w-132">
       <h2 className="text-base font-medium">General</h2>
@@ -534,6 +604,132 @@ function GeneralPanel({
           Restore defaults
         </Button>
       </div>
+      <Separator className="my-8" />
+      <section aria-labelledby="danger-zone-title">
+        <div className="rounded-xl border border-destructive/35 bg-destructive/3 p-4">
+          <div className="flex items-start gap-3">
+            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-destructive/10 text-destructive">
+              <Trash2 className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3
+                id="danger-zone-title"
+                className="text-sm font-medium text-destructive"
+              >
+                Remove Amarcode data
+              </h3>
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                Stop and remove the background service, then permanently delete
+                local chats, logs, settings, and downloaded daemon files.
+              </p>
+              <Button
+                className="mt-4"
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  setConfirmation("");
+                  setCleanupError(null);
+                  setCleanupStatus(null);
+                  setCleanupOpen(true);
+                }}
+              >
+                Remove service and data
+              </Button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <AlertDialog
+        open={cleanupOpen}
+        onOpenChange={(nextOpen) => {
+          if (!cleaning) setCleanupOpen(nextOpen);
+        }}
+      >
+        <AlertDialogContent
+          onEscapeKeyDown={(event) => {
+            if (cleaning) event.preventDefault();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-destructive/10 text-destructive">
+              <TriangleAlert />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Delete all local Amarcode data?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes local chats, daemon logs, settings, the
+              background service, and downloaded daemon versions. Project files
+              in your workspaces are not deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {cleaning || cleanupStatus?.status === "ready" ? (
+            <div
+              className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs"
+              aria-live="polite"
+            >
+              {cleaning ? (
+                <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+              ) : (
+                <Check className="size-4 text-emerald-600" />
+              )}
+              <span>{cleanupLabel}</span>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label
+                htmlFor="cleanup-confirmation"
+                className="text-xs font-medium"
+              >
+                Type <span className="font-mono">DELETE AMARCODE DATA</span> to
+                continue
+              </label>
+              <Input
+                id="cleanup-confirmation"
+                autoComplete="off"
+                spellCheck={false}
+                value={confirmation}
+                onChange={(event) => setConfirmation(event.target.value)}
+                aria-invalid={Boolean(cleanupError)}
+              />
+            </div>
+          )}
+
+          {cleanupError && (
+            <Alert variant="destructive" aria-live="assertive">
+              <TriangleAlert />
+              <AlertDescription>{cleanupError}</AlertDescription>
+            </Alert>
+          )}
+
+          <AlertDialogFooter>
+            <Button
+              variant="outline"
+              disabled={cleaning}
+              onClick={() => {
+                if (cleanupComplete) {
+                  void daemonApi.exitApplication();
+                } else {
+                  setCleanupOpen(false);
+                }
+              }}
+            >
+              {cleanupComplete ? "Exit Amarcode" : "Cancel"}
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={
+                confirmation !== "DELETE AMARCODE DATA" ||
+                cleaning ||
+                cleanupComplete
+              }
+              onClick={() => void beginCleanup()}
+            >
+              {cleaning ? "Removing…" : "Permanently remove data"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

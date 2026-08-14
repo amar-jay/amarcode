@@ -68,6 +68,23 @@ pub enum DaemonUpdateStatus {
     Failed { error: String },
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum ApplicationCleanupStatus {
+    Preparing,
+    RemovingServiceAndData,
+    RemovingReleaseCache,
+    Ready,
+    Failed { error: String },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationCleanupResult {
+    pub service_and_daemon_data_removed: bool,
+    pub daemon_release_cache_removed: bool,
+}
+
 pub struct DaemonManager {
     bootstrap_lock: AsyncMutex<()>,
 }
@@ -416,6 +433,55 @@ impl DaemonManager {
         );
         Ok(health)
     }
+
+    /// Permanently remove the native service, daemon-owned data and cached
+    /// daemon releases after explicit user confirmation. A durable phase
+    /// marker makes the operation safe to retry after process interruption.
+    pub async fn prepare_uninstall(
+        &self,
+        app: &AppHandle,
+        confirmed: bool,
+        on_status: &Channel<ApplicationCleanupStatus>,
+    ) -> Result<ApplicationCleanupResult, String> {
+        if !confirmed {
+            return Err("application cleanup requires explicit data-loss confirmation".into());
+        }
+
+        let _guard = self.bootstrap_lock.lock().await;
+        send_cleanup(on_status, ApplicationCleanupStatus::Preparing);
+
+        let app_data_root = app
+            .path()
+            .app_local_data_dir()
+            .map_err(|error| error.to_string())?;
+        let install_root = app_data_root.join("daemon");
+        let marker = cleanup_marker(&app_data_root);
+        let phase = read_cleanup_phase(&marker)?;
+
+        if phase != Some(CleanupPhase::DaemonPurged) {
+            let executable = cleanup_executable(&install_root)?;
+            verify_cleanup_cli(&executable)?;
+            write_cleanup_phase(&marker, CleanupPhase::Started)?;
+            send_cleanup(on_status, ApplicationCleanupStatus::RemovingServiceAndData);
+            run_lifecycle_command_with_timeout(
+                &executable,
+                &["purge", "--confirm-data-loss"],
+                None,
+                Duration::from_secs(30),
+            )?;
+            write_cleanup_phase(&marker, CleanupPhase::DaemonPurged)?;
+        }
+
+        send_cleanup(on_status, ApplicationCleanupStatus::RemovingReleaseCache);
+        remove_install_root(&install_root, &app_data_root)?;
+        clear_cleanup_marker(&marker)?;
+        send_cleanup(on_status, ApplicationCleanupStatus::Ready);
+
+        Ok(ApplicationCleanupResult {
+            service_and_daemon_data_removed: true,
+            daemon_release_cache_removed: true,
+        })
+    }
 }
 
 fn release_client() -> Result<reqwest::Client, String> {
@@ -485,6 +551,30 @@ async fn rollback_release(
 
 const SERVICE_INSTALLATION_MARKER: &str = "service-installed-v1";
 const UPDATE_ACTIVATION_MARKER: &str = "update-activation-pending-v1";
+const CLEANUP_MARKER: &str = "daemon-cleanup-pending-v1";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CleanupPhase {
+    Started,
+    DaemonPurged,
+}
+
+impl CleanupPhase {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::DaemonPurged => "daemon-purged",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, String> {
+        match value.trim() {
+            "started" => Ok(Self::Started),
+            "daemon-purged" => Ok(Self::DaemonPurged),
+            value => Err(format!("invalid daemon cleanup phase: {value}")),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -515,6 +605,88 @@ fn service_installation_marker(install_root: &Path) -> PathBuf {
 
 fn update_activation_marker(install_root: &Path) -> PathBuf {
     install_root.join(UPDATE_ACTIVATION_MARKER)
+}
+
+fn cleanup_marker(app_data_root: &Path) -> PathBuf {
+    app_data_root.join(CLEANUP_MARKER)
+}
+
+fn read_cleanup_phase(marker: &Path) -> Result<Option<CleanupPhase>, String> {
+    match fs::read_to_string(marker) {
+        Ok(value) => CleanupPhase::parse(&value).map(Some),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!(
+            "failed to read daemon cleanup state {}: {error}",
+            marker.display()
+        )),
+    }
+}
+
+fn write_cleanup_phase(marker: &Path, phase: CleanupPhase) -> Result<(), String> {
+    let parent = marker
+        .parent()
+        .ok_or_else(|| "daemon cleanup marker has no parent".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create application data directory: {error}"))?;
+    let temporary = marker.with_extension(format!("{}.part", std::process::id()));
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| format!("failed to write daemon cleanup state: {error}"))?;
+    use std::io::Write as _;
+    file.write_all(format!("{}\n", phase.as_str()).as_bytes())
+        .and_then(|_| file.sync_all())
+        .map_err(|error| format!("failed to persist daemon cleanup state: {error}"))?;
+    match fs::remove_file(marker) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("failed to replace daemon cleanup state: {error}")),
+    }
+    fs::rename(&temporary, marker)
+        .map_err(|error| format!("failed to commit daemon cleanup state: {error}"))
+}
+
+fn clear_cleanup_marker(marker: &Path) -> Result<(), String> {
+    match fs::remove_file(marker) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("failed to clear daemon cleanup state: {error}")),
+    }
+}
+
+fn cleanup_executable(install_root: &Path) -> Result<PathBuf, String> {
+    if let Some(executable) = Config::get().daemon_service_executable.clone() {
+        if executable.is_file() {
+            return Ok(executable);
+        }
+        return Err("the configured daemon service executable is missing".into());
+    }
+
+    let target = release::platform_target()?;
+    cached_executable(install_root, target)?
+        .map(|(executable, _)| executable)
+        .ok_or_else(|| {
+            "cannot safely remove the daemon service because its verified lifecycle executable is missing"
+                .to_string()
+        })
+}
+
+fn remove_install_root(install_root: &Path, app_data_root: &Path) -> Result<(), String> {
+    if install_root != app_data_root.join("daemon") {
+        return Err("refusing to remove an unexpected daemon release cache path".into());
+    }
+    if let Ok(metadata) = fs::symlink_metadata(install_root) {
+        if metadata.file_type().is_symlink() {
+            return Err("refusing to remove a symlinked daemon release cache".into());
+        }
+    }
+    match fs::remove_dir_all(install_root) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("failed to remove cached daemon releases: {error}")),
+    }
 }
 
 fn write_update_marker(install_root: &Path) -> Result<(), String> {
@@ -601,8 +773,28 @@ fn verify_lifecycle_cli(executable: &Path) -> Result<(), String> {
     validate_lifecycle_help(&help)
 }
 
+fn verify_cleanup_cli(executable: &Path) -> Result<(), String> {
+    let help =
+        run_lifecycle_command_with_timeout(executable, &["--help"], None, Duration::from_secs(3))?;
+    if help
+        .lines()
+        .any(|line| line.trim_start().starts_with("purge"))
+    {
+        Ok(())
+    } else {
+        Err("the installed daemon does not support safe cleanup; update the background service and retry".into())
+    }
+}
+
 fn validate_lifecycle_help(help: &str) -> Result<(), String> {
-    for command in ["install", "start", "restart", "status"] {
+    for command in [
+        "install",
+        "uninstall",
+        "purge",
+        "start",
+        "restart",
+        "status",
+    ] {
         if !help
             .lines()
             .any(|line| line.trim_start().starts_with(command))
@@ -813,6 +1005,10 @@ fn send_update(channel: &Channel<DaemonUpdateStatus>, status: DaemonUpdateStatus
     let _ = channel.send(status);
 }
 
+fn send_cleanup(channel: &Channel<ApplicationCleanupStatus>, status: ApplicationCleanupStatus) {
+    let _ = channel.send(status);
+}
+
 fn ready(channel: &Channel<DaemonBootstrapStatus>, health: &HealthResult) {
     send(
         channel,
@@ -877,9 +1073,10 @@ async fn wait_for_health() -> Result<HealthResult, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_update_marker, ensure_expected_version, update_activation_marker, update_check,
-        validate_lifecycle_help, write_update_marker, DaemonUpdateCheck, ServiceState,
-        ServiceStatus,
+        clear_cleanup_marker, clear_update_marker, ensure_expected_version, read_cleanup_phase,
+        remove_install_root, update_activation_marker, update_check, validate_lifecycle_help,
+        write_cleanup_phase, write_update_marker, ApplicationCleanupResult,
+        ApplicationCleanupStatus, CleanupPhase, DaemonUpdateCheck, ServiceState, ServiceStatus,
     };
     use crate::protocol::rpc::HealthResult;
 
@@ -938,6 +1135,66 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_phase_is_durable_and_idempotently_cleared() {
+        let directory =
+            std::env::temp_dir().join(format!("amarcode-cleanup-marker-{}", std::process::id()));
+        let marker = directory.join("cleanup-marker");
+
+        assert_eq!(read_cleanup_phase(&marker).unwrap(), None);
+        write_cleanup_phase(&marker, CleanupPhase::Started).unwrap();
+        assert_eq!(
+            read_cleanup_phase(&marker).unwrap(),
+            Some(CleanupPhase::Started)
+        );
+        write_cleanup_phase(&marker, CleanupPhase::DaemonPurged).unwrap();
+        assert_eq!(
+            read_cleanup_phase(&marker).unwrap(),
+            Some(CleanupPhase::DaemonPurged)
+        );
+        clear_cleanup_marker(&marker).unwrap();
+        clear_cleanup_marker(&marker).unwrap();
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn release_cache_removal_is_scoped_and_idempotent() {
+        let app_data =
+            std::env::temp_dir().join(format!("amarcode-cleanup-cache-{}", std::process::id()));
+        let install_root = app_data.join("daemon");
+        std::fs::create_dir_all(&install_root).unwrap();
+        std::fs::write(install_root.join("release"), b"cached").unwrap();
+
+        remove_install_root(&install_root, &app_data).unwrap();
+        remove_install_root(&install_root, &app_data).unwrap();
+        assert!(!install_root.exists());
+        assert!(remove_install_root(&app_data.join("other"), &app_data).is_err());
+
+        std::fs::remove_dir_all(app_data).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn release_cache_removal_refuses_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let app_data = std::env::temp_dir().join(format!(
+            "amarcode-cleanup-cache-link-{}",
+            std::process::id()
+        ));
+        let real = app_data.join("real");
+        let install_root = app_data.join("daemon");
+        std::fs::create_dir_all(&real).unwrap();
+        symlink(&real, &install_root).unwrap();
+
+        assert!(remove_install_root(&install_root, &app_data).is_err());
+        assert!(real.is_dir());
+
+        std::fs::remove_file(install_root).unwrap();
+        std::fs::remove_dir_all(app_data).unwrap();
+    }
+
+    #[test]
     fn update_ipc_contract_uses_camel_case_fields() {
         let value = serde_json::to_value(DaemonUpdateCheck::Available {
             current_version: "0.3.1".into(),
@@ -951,9 +1208,23 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_ipc_contract_uses_camel_case_fields() {
+        let status = serde_json::to_value(ApplicationCleanupStatus::RemovingServiceAndData)
+            .expect("serialize cleanup status");
+        assert_eq!(status["status"], "removingServiceAndData");
+
+        let result = serde_json::to_value(ApplicationCleanupResult {
+            service_and_daemon_data_removed: true,
+            daemon_release_cache_removed: true,
+        })
+        .expect("serialize cleanup result");
+        assert_eq!(result["serviceAndDaemonDataRemoved"], true);
+        assert_eq!(result["daemonReleaseCacheRemoved"], true);
+    }
+
+    #[test]
     fn release_binary_must_advertise_every_service_lifecycle_command() {
-        let complete =
-            "  install  register\n  start  start\n  restart  restart\n  status  status\n";
+        let complete = "  install  register\n  uninstall  unregister\n  purge  remove data\n  start  start\n  restart  restart\n  status  status\n";
         assert!(validate_lifecycle_help(complete).is_ok());
         assert!(validate_lifecycle_help("  run  foreground\n").is_err());
     }

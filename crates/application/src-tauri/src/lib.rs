@@ -81,6 +81,29 @@ async fn daemon_update(
 }
 
 #[tauri::command]
+async fn prepare_application_uninstall(
+    app: AppHandle,
+    manager: State<'_, daemon::DaemonManager>,
+    confirmed: bool,
+    on_status: Channel<daemon::ApplicationCleanupStatus>,
+) -> Result<daemon::ApplicationCleanupResult, String> {
+    match manager.prepare_uninstall(&app, confirmed, &on_status).await {
+        Ok(result) => Ok(result),
+        Err(error) => {
+            let _ = on_status.send(daemon::ApplicationCleanupStatus::Failed {
+                error: error.clone(),
+            });
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
+fn exit_application(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
 async fn daemon_health(state: State<'_, AppState>) -> Result<HealthResult, String> {
     state.health().await
 }
@@ -260,6 +283,8 @@ pub fn run() {
             daemon_install,
             daemon_check_update,
             daemon_update,
+            prepare_application_uninstall,
+            exit_application,
             daemon_health,
             daemon_version,
             list_agents,
