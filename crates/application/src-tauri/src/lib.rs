@@ -247,8 +247,25 @@ async fn subscribe_events(
 }
 
 #[tauri::command]
-fn list_workspace_files(workspace_path: String) -> Result<Vec<String>, String> {
+async fn list_workspace_files(
+    workspace_path: String,
+    query: Option<String>,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || list_workspace_files_inner(workspace_path, query))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn list_workspace_files_inner(
+    workspace_path: String,
+    query: Option<String>,
+) -> Result<Vec<String>, String> {
     let root = PathBuf::from(workspace_path);
+    let query = query
+        .as_deref()
+        .map(str::trim)
+        .filter(|query| !query.is_empty())
+        .map(str::to_lowercase);
     let mut files = Vec::new();
     let mut walker = WalkBuilder::new(&root);
     walker
@@ -279,7 +296,13 @@ fn list_workspace_files(workspace_path: String) -> Result<Vec<String>, String> {
             continue;
         }
         if let Ok(relative) = entry.path().strip_prefix(&root) {
-            files.push(relative.to_string_lossy().to_string());
+            let relative = relative.to_string_lossy().replace('\\', "/");
+            if let Some(query) = &query {
+                if !relative.to_lowercase().contains(query) {
+                    continue;
+                }
+            }
+            files.push(relative);
         }
     }
     files.sort();

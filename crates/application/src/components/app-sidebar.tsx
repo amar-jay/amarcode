@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Bot, Plus, Settings, Trash2 } from "lucide-react";
+import { Plus, Settings } from "lucide-react";
 import { notify } from "@/lib/notify";
+import { RecentChats } from "@/components/recent-chats";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,12 +16,8 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -90,42 +87,12 @@ export function AppSidebar({
           </div>
         </SidebarHeader>
         <SidebarContent className="px-2 py-2">
-          <SidebarGroup className="p-0">
-            <SidebarGroupLabel>Recent chats</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {chats.map((chat) => (
-                  <SidebarMenuItem key={chat.id}>
-                    <SidebarMenuButton
-                      isActive={chat.id === activeChatId}
-                      onClick={() => onSelectChat(chat.id)}
-                      tooltip={chat.title}
-                      className="pr-8 hover:bg-sidebar-accent/50"
-                    >
-                      <span>{chat.title}</span>
-                    </SidebarMenuButton>
-                    <SidebarMenuAction
-                      showOnHover
-                      aria-label={`Delete ${chat.title}`}
-                      title="Delete chat"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setChatToDelete(chat);
-                      }}
-                      className="hover:text-destructive"
-                    >
-                      <Trash2 />
-                    </SidebarMenuAction>
-                  </SidebarMenuItem>
-                ))}
-                {!chats.length && (
-                  <p className="px-2 py-3 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-                    No chats yet.
-                  </p>
-                )}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          <RecentChats
+            activeChatId={activeChatId}
+            chats={chats}
+            onSelectChat={onSelectChat}
+            onDeleteChat={setChatToDelete}
+          />
         </SidebarContent>
         <SidebarFooter className="gap-1 border-t border-sidebar-border p-2">
           {/* <div className="flex min-w-0 items-center gap-2 px-2 py-1 text-[11px] leading-5 text-muted-foreground group-data-[collapsible=icon]:hidden">

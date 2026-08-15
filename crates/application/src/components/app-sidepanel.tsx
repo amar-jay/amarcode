@@ -19,6 +19,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "./ui/resizable";
+import { WorkspaceFileSearch } from "./workspace-file-search";
 
 interface AppSidePanelProps {
   workspacePath: string;
@@ -28,6 +29,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [dirName, setDirName] = useState("No workspace selected");
   const [branchName, setBranchName] = useState<string | null>(null);
   const [changes, setChanges] = useState<WorkspaceChange[]>([]);
+  const [fileSearchQuery, setFileSearchQuery] = useState("");
   useEffect(() => {
     if (!workspacePath) {
       setDirName("No workspace selected");
@@ -46,7 +48,14 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         setBranchName(null);
       });
   }, [workspacePath]);
-  const workspaceFileTree = useWorkspaceFileTree(sheetOpen, workspacePath);
+
+  useEffect(() => setFileSearchQuery(""), [workspacePath]);
+
+  const workspaceFileTree = useWorkspaceFileTree(
+    sheetOpen,
+    workspacePath,
+    fileSearchQuery,
+  );
   const refreshChanges = useCallback(async () => {
     if (!workspacePath) {
       setChanges([]);
@@ -84,7 +93,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         )}
         showCloseButton={false}
       >
-        <SheetHeader className="px-3 py-1 flex-row items-center select-none">
+        <SheetHeader className="relative px-3 py-1 flex-row items-center select-none">
           <SheetTitle className="text-xs font-bold flex flex-row items-center gap-1">
             <span>{dirName || ""}</span>
             {branchName && (
@@ -97,33 +106,41 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
               </span>
             )}
             {changes.length > 0 && (
-              <span
-                className="rounded bg-muted px-1.5 py-1 text-[0.6rem]"
+              <p
+                className="rounded bg-muted px-1.5 py-1 text-[0.6rem] max-w-min whitespace-nowrap"
                 title={"" + changes.length + " changes"}
               >
                 ~ {changes.length}
-              </span>
+              </p>
             )}
           </SheetTitle>
-          <SheetDescription className="text-xs text-muted-foreground flex flex-row items-center gap-2 ml-auto">
-            {workspaceFileTree.selectedPath && (
-              <>
-                <FileDiff
-                  className={cn(
-                    "size-4 text-muted-foreground",
-                    diff?.status === "M" && diff?.comparison === "Unstaged"
-                      ? "text-orange-500"
-                      : diff?.status === "M" && diff?.comparison === "Staged"
-                        ? "text-green-500"
-                        : "",
-                  )}
-                />
-                <span className="truncate font-mono text-xs">
-                  {workspaceFileTree.selectedPath || ""}
-                </span>
-              </>
-            )}
-          </SheetDescription>
+          <div className="flex-1" />
+          {workspaceFileTree.selectedPath && (
+            <>
+              <FileDiff
+                className={cn(
+                  "size-4 text-muted-foreground",
+                  diff?.status === "M" && diff?.comparison === "Unstaged"
+                    ? "text-orange-500"
+                    : diff?.status === "M" && diff?.comparison === "Staged"
+                      ? "text-green-500"
+                      : "",
+                )}
+              />
+              <span className="truncate font-mono text-xs">
+                {workspaceFileTree.selectedPath || ""}
+              </span>
+            </>
+          )}
+
+          <div className="flex-1">
+            <WorkspaceFileSearch
+              active={sheetOpen}
+              disabled={!workspaceFileTree.validWorkspace}
+              value={fileSearchQuery}
+              onValueChange={setFileSearchQuery}
+            />
+          </div>
 
           <Button
             disabled={
@@ -133,7 +150,6 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
               void workspaceFileTree.refresh();
               void refreshChanges();
             }}
-            className="ml-auto"
             size="icon-sm"
             variant="ghost"
           >
@@ -165,6 +181,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
               <WorkspaceFileTree
                 {...workspaceFileTree}
                 changes={changesByPath}
+                searchQuery={fileSearchQuery}
               />
             </div>
           </ResizablePanel>

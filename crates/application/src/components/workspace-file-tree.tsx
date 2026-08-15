@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FileIcon,
   FileQuestion,
@@ -73,6 +73,16 @@ function makeTree(paths: string[]): TreeNode[] {
   return sortTree(root.children);
 }
 
+function collectFolderPaths(nodes: TreeNode[], paths = new Set<string>()) {
+  for (const node of nodes) {
+    if (node.kind === "folder") {
+      paths.add(node.path);
+      collectFolderPaths(node.children, paths);
+    }
+  }
+  return paths;
+}
+
 function TreeNodes({
   changes,
   nodes,
@@ -102,23 +112,36 @@ function TreeNodes({
   );
 }
 
-export function useWorkspaceFileTree(active: boolean, workspacePath: string) {
+export function useWorkspaceFileTree(
+  active: boolean,
+  workspacePath: string,
+  searchQuery: string,
+) {
   const [files, setFiles] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string>();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const requestId = useRef(0);
   const validWorkspace = !!workspacePath;
+  const normalizedSearchQuery = searchQuery.trim();
 
   const refresh = useCallback(async () => {
+    const currentRequestId = ++requestId.current;
     if (!workspacePath) {
       setFiles([]);
+      setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     try {
-      setFiles(await daemonApi.listWorkspaceFiles(workspacePath));
+      const files = await daemonApi.listWorkspaceFiles(
+        workspacePath,
+        normalizedSearchQuery || undefined,
+      );
+      if (currentRequestId === requestId.current) setFiles(files);
     } catch (cause) {
+      if (currentRequestId !== requestId.current) return;
       toast(cause instanceof Error ? cause.message : "Could not load files.", {
         dismissible: false,
         action: {
@@ -127,13 +150,21 @@ export function useWorkspaceFileTree(active: boolean, workspacePath: string) {
         },
       });
     } finally {
-      setIsLoading(false);
+      if (currentRequestId === requestId.current) setIsLoading(false);
     }
-  }, [workspacePath]);
+  }, [normalizedSearchQuery, workspacePath]);
 
   useEffect(() => {
-    if (active) void refresh();
-  }, [active, refresh]);
+    if (!active) return;
+    const timeout = window.setTimeout(
+      () => void refresh(),
+      normalizedSearchQuery ? 150 : 0,
+    );
+    return () => {
+      window.clearTimeout(timeout);
+      requestId.current += 1;
+    };
+  }, [active, normalizedSearchQuery, refresh]);
 
   useEffect(() => {
     setSelectedPath(undefined);
@@ -151,6 +182,7 @@ export function useWorkspaceFileTree(active: boolean, workspacePath: string) {
     refresh,
     tree,
     validWorkspace,
+    searchQuery,
   };
 }
 
@@ -169,7 +201,13 @@ export function WorkspaceFileTree({
     setExpanded,
     tree,
     validWorkspace,
+    searchQuery,
   } = treeState;
+  const hasSearchQuery = !!searchQuery.trim();
+  const visibleExpanded = useMemo(
+    () => (hasSearchQuery ? collectFolderPaths(tree) : expanded),
+    [expanded, hasSearchQuery, tree],
+  );
 
   return (
     <section
@@ -185,6 +223,10 @@ export function WorkspaceFileTree({
           <div className="flex items-center justify-center gap-2 px-2 py-6 text-xs text-muted-foreground">
             <LoaderCircle className="size-4 animate-spin" /> Loading files
           </div>
+        ) : tree.length === 0 && hasSearchQuery ? (
+          <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+            No matching files.
+          </div>
         ) : tree.length === 0 ? (
           <div className="px-2 py-6 text-center text-xs text-muted-foreground">
             No visible files in this workspace.
@@ -192,7 +234,7 @@ export function WorkspaceFileTree({
         ) : (
           <FileTree
             className="rounded-md border-0 bg-transparent text-xs pl-0"
-            expanded={expanded}
+            expanded={visibleExpanded}
             onExpandedChange={setExpanded}
             onSelect={setSelectedPath}
             selectedPath={selectedPath}

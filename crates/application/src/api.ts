@@ -119,8 +119,11 @@ export const daemonApi = {
   exitApplication: (): Promise<void> => invoke("exit_application"),
   health: (): Promise<Health> => invoke("daemon_health"),
   version: (): Promise<DaemonVersion> => invoke("daemon_version"),
-  listWorkspaceFiles: (workspacePath: string): Promise<string[]> =>
-    invoke("list_workspace_files", { workspacePath }),
+  listWorkspaceFiles: (
+    workspacePath: string,
+    query?: string,
+  ): Promise<string[]> =>
+    invoke("list_workspace_files", { workspacePath, query }),
   getWorkspaceInfo: (workspacePath: string): Promise<WorkspaceInfo> =>
     invoke("get_workspace_info", { workspacePath }),
   listWorkspaceChanges: (workspacePath: string): Promise<WorkspaceChange[]> =>
