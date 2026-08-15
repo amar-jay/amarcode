@@ -5,6 +5,8 @@
 ; mode. On a real uninstall the service registration must always go away;
 ; daemon data is removed only when the user selects Tauri's "Delete app data"
 ; checkbox.
+${Using:StrFunc} UnStrLoc
+
 !macro NSIS_HOOK_PREUNINSTALL
   ${If} $UpdateMode <> 1
     DetailPrint "Checking Amarcode background service..."
