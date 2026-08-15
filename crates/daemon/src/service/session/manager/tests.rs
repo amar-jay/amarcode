@@ -25,6 +25,7 @@ fn stale_pending_request_cannot_target_replacement_client() {
         Arc::clone(&store),
         AgentManager::new(store, PathBuf::from("/tmp/tools")),
         events,
+        PathBuf::from("/tmp/amarcode-test-attachments"),
     );
 
     manager.inner.by_chat.lock().expect("live runs").insert(
@@ -34,6 +35,7 @@ fn stale_pending_request_cannot_target_replacement_client() {
             agent_id: "agent".to_owned(),
             client: sleeping_client(),
             acp_session_id: Some("new-session".to_owned()),
+            supports_images: false,
             session_configuration: SessionConfiguration::default(),
             needs_history_hydration: false,
             streaming_message_ids: HashMap::new(),
@@ -126,6 +128,7 @@ fn failed_prompt_interrupts_partial_messages() {
         Arc::clone(&store),
         AgentManager::new(Arc::clone(&store), PathBuf::from("/tmp/tools")),
         events,
+        PathBuf::from("/tmp/amarcode-test-attachments"),
     );
     manager.inner.by_chat.lock().expect("live runs").insert(
         "chat-1".to_owned(),
@@ -134,6 +137,7 @@ fn failed_prompt_interrupts_partial_messages() {
             agent_id: "codex-acp".to_owned(),
             client: sleeping_client(),
             acp_session_id: Some("session-1".to_owned()),
+            supports_images: false,
             session_configuration: SessionConfiguration::default(),
             needs_history_hydration: false,
             streaming_message_ids: HashMap::from([(

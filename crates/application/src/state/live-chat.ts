@@ -4,6 +4,7 @@ import type {
   Chat,
   ChatDetail,
   JsonValue,
+  PromptAttachment,
   RunStatus,
   TurnStatus,
 } from "@/types";
@@ -269,10 +270,20 @@ export const submitLivePromptAtom = atom(
   async (
     get,
     set,
-    input: { text: string; mode: SessionMode; agentId: string },
+    input: {
+      text: string;
+      attachments: PromptAttachment[];
+      mode: SessionMode;
+      agentId: string;
+    },
   ) => {
     const live = get(liveChatAtom);
-    if (!live || !input.text.trim() || live.turnStatus === "started") return;
+    if (
+      !live ||
+      (!input.text.trim() && input.attachments.length === 0) ||
+      live.turnStatus === "started"
+    )
+      return;
 
     set(liveChatAtom, {
       ...live,
@@ -286,6 +297,7 @@ export const submitLivePromptAtom = atom(
         live.chatId,
         input.agentId,
         input.text.trim(),
+        input.attachments,
         input.mode,
       );
       const current = get(liveChatAtom);
@@ -308,6 +320,7 @@ export const submitLivePromptAtom = atom(
         error:
           cause instanceof Error ? cause.message : "Unable to send prompt.",
       });
+      throw cause;
     }
   },
 );

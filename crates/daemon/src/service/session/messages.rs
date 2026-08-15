@@ -351,6 +351,7 @@ mod tests {
                     agent_id: "agent".to_owned(),
                     client: sleeping_client(),
                     acp_session_id: Some("session".to_owned()),
+                    supports_images: false,
                     session_configuration: Default::default(),
                     needs_history_hydration: false,
                     streaming_message_ids: HashMap::from([(

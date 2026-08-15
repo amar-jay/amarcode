@@ -12,6 +12,7 @@ pub mod methods {
     pub const CREATE_CHAT: &str = "create_chat";
     pub const LIST_CHATS: &str = "list_chats";
     pub const GET_CHAT: &str = "get_chat";
+    pub const GET_ATTACHMENT: &str = "get_attachment";
     pub const DELETE_CHAT: &str = "delete_chat";
     pub const PROMPT: &str = "prompt";
     pub const SET_SESSION_MODE: &str = "set_session_mode";
@@ -120,8 +121,27 @@ pub struct DeleteChatResult {
     pub deleted: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GetAttachmentParams {
+    pub chat_id: String,
+    pub attachment_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GetAttachmentResult {
+    pub media_type: String,
+    pub data: String,
+}
+
 fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct PromptAttachment {
+    pub filename: Option<String>,
+    pub mime_type: String,
+    pub data: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -129,6 +149,8 @@ pub struct PromptParams {
     pub chat_id: String,
     pub agent_id: String,
     pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<PromptAttachment>,
     #[serde(default)]
     pub plan_mode: bool,
     #[serde(default)]

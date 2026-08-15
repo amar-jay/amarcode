@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   AlertTriangle,
@@ -8,6 +8,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { daemonApi } from "@/api";
 import {
   Conversation,
   ConversationContent,
@@ -26,7 +27,7 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import type { MessageDetail, MessagePart } from "@/types";
+import type { MessageDetail, MessagePart, PromptAttachment } from "@/types";
 import AppPromptInput from "./main-prompt-input";
 import { PendingAgentRequestCard } from "./pending-agent-request";
 import {
@@ -370,6 +371,99 @@ function StreamingCaret() {
   );
 }
 
+type StoredImagePart = {
+  attachmentId: string;
+  filename?: string | null;
+  mediaType: string;
+};
+
+function parseStoredImage(part: MessagePart): StoredImagePart | null {
+  if (part.kind !== "image") return null;
+  try {
+    const value = JSON.parse(part.content_json) as Partial<StoredImagePart>;
+    return typeof value.attachmentId === "string" &&
+      typeof value.mediaType === "string"
+      ? {
+          attachmentId: value.attachmentId,
+          filename: typeof value.filename === "string" ? value.filename : null,
+          mediaType: value.mediaType,
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function StoredImage({
+  chatId,
+  image,
+}: {
+  chatId: string;
+  image: StoredImagePart;
+}) {
+  const [source, setSource] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setSource(null);
+    setFailed(false);
+    void daemonApi
+      .getAttachment(chatId, image.attachmentId)
+      .then((result) => {
+        if (active)
+          setSource(`data:${result.media_type};base64,${result.data}`);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [chatId, image.attachmentId]);
+
+  if (failed) {
+    return (
+      <div className="flex h-28 w-40 items-center justify-center rounded-lg border text-xs text-muted-foreground">
+        Image unavailable
+      </div>
+    );
+  }
+  return (
+    <div className="h-40 max-w-64 overflow-hidden rounded-lg border bg-muted">
+      {source ? (
+        <img
+          alt={image.filename || "Pasted image"}
+          className="size-full object-contain"
+          src={source}
+        />
+      ) : (
+        <div className="flex size-full items-center justify-center">
+          <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserMessageImages({ item }: { item: MessageDetail }) {
+  const images = item.parts
+    .map(parseStoredImage)
+    .filter((image): image is StoredImagePart => image !== null);
+  if (images.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {images.map((image) => (
+        <StoredImage
+          chatId={item.message.chat_id}
+          image={image}
+          key={image.attachmentId}
+        />
+      ))}
+    </div>
+  );
+}
+
 /**
  * Live conversation surface. State lives in `liveChatAtom` (+ navigation /
  * agent atoms); this component is render + wire-up only.
@@ -441,9 +535,13 @@ export function LiveChatScreen() {
       : "Waiting for input"
     : "Thinking";
 
-  const submit = async (text: string, mode: SessionMode) => {
+  const submit = async (
+    text: string,
+    attachments: PromptAttachment[],
+    mode: SessionMode,
+  ) => {
     if (!agent) return;
-    await submitPrompt({ text, mode, agentId: agent.id });
+    await submitPrompt({ text, attachments, mode, agentId: agent.id });
   };
 
   return (
@@ -477,12 +575,15 @@ export function LiveChatScreen() {
               return (
                 <Message from="user" key={block.key} className="space-between">
                   <MessageContent className="w-full">
-                    <p className="whitespace-pre-wrap">
-                      <span className="mr-2 select-none text-muted-foreground">
-                        &gt;
-                      </span>
-                      {message.content}
-                    </p>
+                    {message.content && (
+                      <p className="whitespace-pre-wrap">
+                        <span className="mr-2 select-none text-muted-foreground">
+                          &gt;
+                        </span>
+                        {message.content}
+                      </p>
+                    )}
+                    <UserMessageImages item={block.item} />
                   </MessageContent>
                 </Message>
               );

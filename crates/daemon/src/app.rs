@@ -65,7 +65,12 @@ impl App {
 
         let agents = AgentManager::new(Arc::clone(&store), tools_dir);
         let chats = ChatManager::new(Arc::clone(&store), events.clone());
-        let sessions = SessionManager::new(Arc::clone(&store), agents.clone(), events.clone());
+        let sessions = SessionManager::new(
+            Arc::clone(&store),
+            agents.clone(),
+            events.clone(),
+            config.app_dir.join("attachments"),
+        );
 
         info!("application initialized");
         Ok(Self {

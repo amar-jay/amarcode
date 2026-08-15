@@ -50,6 +50,8 @@ import {
   XIcon,
 } from "lucide-react";
 import { nanoid } from "nanoid";
+import { isTauri } from "@tauri-apps/api/core";
+import { readImage } from "@tauri-apps/plugin-clipboard-manager";
 import type {
   ChangeEvent,
   ChangeEventHandler,
@@ -94,6 +96,57 @@ const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
     });
   } catch {
     return null;
+  }
+};
+
+const readNativeClipboardImage = async (): Promise<File | null> => {
+  if (!isTauri()) return null;
+
+  const image = await readImage();
+  try {
+    const [{ width, height }, rgba] = await Promise.all([
+      image.size(),
+      image.rgba(),
+    ]);
+    if (
+      width <= 0 ||
+      height <= 0 ||
+      width > 8192 ||
+      height > 8192 ||
+      width * height > 40_000_000 ||
+      rgba.length !== width * height * 4
+    ) {
+      return null;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+
+    const pixels = new Uint8ClampedArray(
+      rgba.buffer,
+      rgba.byteOffset,
+      rgba.byteLength,
+    );
+    context.putImageData(new ImageData(pixels, width, height), 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/png");
+    });
+    if (!blob) return null;
+
+    const timestamp = new Date()
+      .toISOString()
+      .replaceAll(/[:.]/g, "-")
+      .replace("T", "_")
+      .replace("Z", "");
+    return new File([blob], `clipboard-${timestamp}.png`, {
+      lastModified: Date.now(),
+      type: "image/png",
+    });
+  } finally {
+    await image.close();
   }
 };
 
@@ -1014,18 +1067,15 @@ export const PromptInputTextarea = ({
   const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = useCallback(
     (event) => {
       const items = event.clipboardData?.items;
-
-      if (!items) {
-        return;
-      }
-
       const files: File[] = [];
 
-      for (const item of items) {
-        if (item.kind === "file") {
-          const file = item.getAsFile();
-          if (file) {
-            files.push(file);
+      if (items) {
+        for (const item of items) {
+          if (item.kind === "file") {
+            const file = item.getAsFile();
+            if (file?.type.startsWith("image/")) {
+              files.push(file);
+            }
           }
         }
       }
@@ -1033,7 +1083,23 @@ export const PromptInputTextarea = ({
       if (files.length > 0) {
         event.preventDefault();
         attachments.add(files);
+        return;
       }
+
+      // WebKitGTK does not consistently expose native clipboard images as
+      // DOM File objects. Preserve normal text paste, but use Tauri's native
+      // clipboard reader when the clipboard has no plain-text payload.
+      const pastedText = event.clipboardData?.getData("text/plain") ?? "";
+      if (pastedText || !isTauri()) return;
+
+      event.preventDefault();
+      void readNativeClipboardImage()
+        .then((file) => {
+          if (file) attachments.add([file]);
+        })
+        .catch((error: unknown) => {
+          console.warn("Unable to read an image from the clipboard:", error);
+        });
     },
     [attachments],
   );

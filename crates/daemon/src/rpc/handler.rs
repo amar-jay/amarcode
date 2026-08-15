@@ -11,9 +11,9 @@ use serde_json::{json, Value};
 use crate::{
     protocol::rpc::{
         methods, CancelParams, CancelResult, CreateChatParams, DeleteChatParams, DeleteChatResult,
-        GetChatParams, HealthResult, ListAgentsResult, ListChatsParams, ListChatsResult,
-        PromptParams, PromptResultDto, RespondAgentParams, RespondAgentResult,
-        SetSessionModeParams, SubscribeEventsParams, VersionResult,
+        GetAttachmentParams, GetAttachmentResult, GetChatParams, HealthResult, ListAgentsResult,
+        ListChatsParams, ListChatsResult, PromptParams, PromptResultDto, RespondAgentParams,
+        RespondAgentResult, SetSessionModeParams, SubscribeEventsParams, VersionResult,
     },
     service::{ChatDetail, MessageDetail, PromptResult},
     App, Error, Result,
@@ -46,6 +46,7 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::CREATE_CHAT => Ok(DispatchOutcome::Result(create_chat(app, params)?)),
         methods::LIST_CHATS => Ok(DispatchOutcome::Result(list_chats(app, params)?)),
         methods::GET_CHAT => Ok(DispatchOutcome::Result(get_chat(app, params)?)),
+        methods::GET_ATTACHMENT => Ok(DispatchOutcome::Result(get_attachment(app, params)?)),
         methods::DELETE_CHAT => Ok(DispatchOutcome::Result(delete_chat(app, params).await?)),
 
         // sessions (ACP — may block; run off the async worker)
@@ -116,6 +117,12 @@ fn get_chat(app: &App, params: Value) -> Result<Value> {
     }
 }
 
+fn get_attachment(app: &App, params: Value) -> Result<Value> {
+    let p: GetAttachmentParams = parse_params(params)?;
+    let (media_type, data) = app.sessions.get_attachment(&p.chat_id, &p.attachment_id)?;
+    to_value(GetAttachmentResult { media_type, data })
+}
+
 async fn delete_chat(app: &App, params: Value) -> Result<Value> {
     let p: DeleteChatParams = parse_params(params)?;
     let chat_id = p.chat_id;
@@ -157,14 +164,20 @@ async fn prompt(app: &App, params: Value) -> Result<Value> {
     let chat_id = p.chat_id;
     let agent_id = p.agent_id;
     let text = p.text;
+    let attachments = p.attachments;
     let session_mode = p
         .session_mode
         .or_else(|| p.plan_mode.then(|| "plan".to_owned()));
 
     // ACP spawn/request is blocking; keep the async runtime free.
     let result = tokio::task::block_in_place(|| {
-        app.sessions
-            .prompt(&chat_id, &agent_id, text, session_mode.as_deref())
+        app.sessions.prompt(
+            &chat_id,
+            &agent_id,
+            text,
+            attachments,
+            session_mode.as_deref(),
+        )
     })?;
     to_value(prompt_dto(result))
 }

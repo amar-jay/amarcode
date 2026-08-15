@@ -11,7 +11,7 @@ pub use types::{
 };
 
 /// Increment when a wire change is not backward compatible.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Deterministic checked-in TypeScript contract consumed by the React app.
 pub fn typescript_bindings() -> String {
@@ -40,6 +40,9 @@ pub fn typescript_bindings() -> String {
         rpc::GetChatParams::decl(&config),
         rpc::DeleteChatParams::decl(&config),
         rpc::DeleteChatResult::decl(&config),
+        rpc::GetAttachmentParams::decl(&config),
+        rpc::GetAttachmentResult::decl(&config),
+        rpc::PromptAttachment::decl(&config),
         rpc::PromptParams::decl(&config),
         rpc::SetSessionModeParams::decl(&config),
         rpc::PromptResultDto::decl(&config),

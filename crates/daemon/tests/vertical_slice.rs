@@ -72,7 +72,12 @@ async fn create_chat_prompt_store_and_events() {
         "health must advertise the shared protocol version"
     );
 
-    insert_mock_agent(&app_dir, &mock_agent, &now);
+    insert_mock_agent_with_environment(
+        &app_dir,
+        &mock_agent,
+        &now,
+        vec![("AMARCODE_MOCK_IMAGE_SUPPORT".into(), "1".into())],
+    );
 
     // Subscriber connection (stays open for events).
     let mut sub = TcpStream::connect(&addr).await.expect("subscribe connect");
@@ -126,6 +131,11 @@ async fn create_chat_prompt_store_and_events() {
                 "chat_id": chat_id,
                 "agent_id": AGENT_ID,
                 "text": "hello mock",
+                "attachments": [{
+                    "filename": "pixel.png",
+                    "mime_type": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                }],
                 "session_mode": "build"
             }
         }),
@@ -224,6 +234,44 @@ async fn create_chat_prompt_store_and_events() {
         messages.iter().any(|m| m.id == user_message_id),
         "user message must be stored before/with prompt result"
     );
+    let user_parts = store
+        .message_parts(&user_message_id)
+        .expect("user message parts");
+    assert!(
+        user_parts
+            .iter()
+            .any(|part| part.kind == amarcode_daemon::protocol::MessagePartKind::Image),
+        "pasted image metadata must be stored with the user message"
+    );
+    let attachment_id = user_parts
+        .iter()
+        .find(|part| part.kind == amarcode_daemon::protocol::MessagePartKind::Image)
+        .and_then(|part| serde_json::from_str::<Value>(&part.content_json).ok())
+        .and_then(|value| value["attachmentId"].as_str().map(str::to_owned))
+        .expect("stored attachment id");
+    let attachment = rpc(
+        &addr,
+        json!({
+            "method": "get_attachment",
+            "params": { "chat_id": chat_id, "attachment_id": attachment_id }
+        }),
+    )
+    .await
+    .expect("get_attachment");
+    assert_eq!(attachment["result"]["media_type"], "image/png");
+    assert!(
+        attachment["result"]["data"]
+            .as_str()
+            .is_some_and(|data| !data.is_empty()),
+        "stored attachment bytes must be available to the UI"
+    );
+    assert_eq!(
+        std::fs::read_dir(app_dir.join("attachments").join(&chat_id))
+            .expect("attachment directory")
+            .count(),
+        1,
+        "the decoded image must be stored outside SQLite"
+    );
     assert!(
         messages
             .iter()
@@ -278,6 +326,17 @@ async fn create_chat_prompt_store_and_events() {
             || e.method.starts_with("message.")),
         "expected prompt or message methods in acp_events: {:?}",
         acp_events.iter().map(|e| &e.method).collect::<Vec<_>>()
+    );
+    assert!(
+        acp_events.iter().any(|event| {
+            event.method == "session/prompt"
+                && serde_json::from_str::<Value>(&event.payload_json)
+                    .ok()
+                    .and_then(|payload| payload.pointer("/prompt").cloned())
+                    .and_then(|prompt| prompt.as_array().cloned())
+                    .is_some_and(|parts| parts.iter().any(|part| part["type"] == "image"))
+        }),
+        "ACP session/prompt must contain an image content block"
     );
     assert!(
         acp_events
@@ -407,11 +466,6 @@ async fn concurrent_prompts_share_one_chat_run() {
     let _ = daemon.kill();
     let _ = daemon.wait();
     let _ = std::fs::remove_dir_all(&app_dir);
-}
-
-/// Insert mock agent into the live daemon DB (no create_agent RPC yet).
-fn insert_mock_agent(app_dir: &std::path::Path, mock_agent: &std::path::Path, now: &str) {
-    insert_mock_agent_with_environment(app_dir, mock_agent, now, vec![]);
 }
 
 fn insert_mock_agent_with_environment(

@@ -9,11 +9,15 @@ impl SessionManager {
         chat_id: &str,
         agent_id: &str,
         text: impl AsRef<str>,
+        attachments: Vec<crate::protocol::rpc::PromptAttachment>,
         session_mode: Option<&str>,
     ) -> Result<PromptResult> {
         let text = text.as_ref().trim();
-        if text.is_empty() {
-            return Err(Error::msg("prompt text must not be empty"));
+        if text.is_empty() && attachments.is_empty() {
+            return Err(Error::msg("prompt must contain text or an image"));
+        }
+        if attachments.len() > crate::service::attachments::MAX_PROMPT_IMAGES {
+            return Err(Error::msg("a prompt can contain at most 4 images"));
         }
 
         // Keep session selection/startup and the complete ACP turn atomic for
@@ -40,7 +44,7 @@ impl SessionManager {
             self.start_run_locked(chat_id, agent_id, session_mode)?;
         }
 
-        let (run_id, client, session_id, needs_history_hydration) = {
+        let (run_id, client, session_id, needs_history_hydration, supports_images) = {
             let mut guard = self
                 .inner
                 .by_chat
@@ -53,9 +57,39 @@ impl SessionManager {
                 live.run_id.clone(),
                 Arc::clone(&live.client),
                 live.acp_session_id.clone(),
-                std::mem::take(&mut live.needs_history_hydration),
+                live.needs_history_hydration,
+                live.supports_images,
             )
         };
+        if !attachments.is_empty() && !supports_images {
+            return Err(Error::msg(
+                "the selected agent does not support image prompts",
+            ));
+        }
+
+        let mut stored_attachments = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            match self.attachments.save_prompt_image(chat_id, attachment) {
+                Ok(stored) => stored_attachments.push(stored),
+                Err(error) => {
+                    for stored in &stored_attachments {
+                        self.attachments.remove(chat_id, &stored.id);
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        if needs_history_hydration {
+            if let Some(live) = self
+                .inner
+                .by_chat
+                .lock()
+                .map_err(|_| Error::msg("session lock poisoned"))?
+                .get_mut(chat_id)
+            {
+                live.needs_history_hydration = false;
+            }
+        }
 
         let now = timestamp();
         let user_message = Message {
@@ -69,15 +103,31 @@ impl SessionManager {
             updated_at: now,
         };
         self.inner.store.create_message(&user_message)?;
-        self.inner.store.replace_message_parts(
-            &user_message.id,
-            &[MessagePart {
+        let mut message_parts = Vec::with_capacity(1 + stored_attachments.len());
+        if !text.is_empty() {
+            message_parts.push(MessagePart {
                 message_id: user_message.id.clone(),
                 ordinal: 0,
                 kind: MessagePartKind::Text,
                 content_json: json!({ "text": text }).to_string(),
-            }],
-        )?;
+            });
+        }
+        for stored in &stored_attachments {
+            message_parts.push(MessagePart {
+                message_id: user_message.id.clone(),
+                ordinal: message_parts.len() as i64,
+                kind: MessagePartKind::Image,
+                content_json: json!({
+                    "attachmentId": stored.id,
+                    "filename": stored.filename,
+                    "mediaType": stored.media_type,
+                })
+                .to_string(),
+            });
+        }
+        self.inner
+            .store
+            .replace_message_parts(&user_message.id, &message_parts)?;
         self.emit(EditorEvent::MessageUpdated {
             message_id: user_message.id.clone(),
             status: MessageStatus::Complete,
@@ -118,9 +168,18 @@ impl SessionManager {
         } else {
             text.to_owned()
         };
-        let mut params = json!({
-            "prompt": [{ "type": "text", "text": prompt_text }],
-        });
+        let mut prompt_blocks = Vec::with_capacity(1 + stored_attachments.len());
+        if !prompt_text.trim().is_empty() {
+            prompt_blocks.push(json!({ "type": "text", "text": prompt_text }));
+        }
+        prompt_blocks.extend(stored_attachments.iter().map(|stored| {
+            json!({
+                "type": "image",
+                "mimeType": stored.media_type,
+                "data": stored.data,
+            })
+        }));
+        let mut params = json!({ "prompt": prompt_blocks });
         if let Some(sid) = &session_id {
             params
                 .as_object_mut()

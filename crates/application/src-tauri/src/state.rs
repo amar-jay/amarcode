@@ -11,9 +11,9 @@ use crate::{
     daemon::{DaemonBridge, EventSubscription},
     protocol::{
         rpc::{
-            methods, CancelResult, DeleteChatResult, HealthResult, ListAgentsResult,
-            ListChatsResult, PromptResultDto, RespondAgentParams, RespondAgentResult,
-            VersionResult,
+            methods, CancelResult, DeleteChatResult, GetAttachmentResult, HealthResult,
+            ListAgentsResult, ListChatsResult, PromptAttachment, PromptResultDto,
+            RespondAgentParams, RespondAgentResult, VersionResult,
         },
         AgentInfo, Chat, GetChatResult,
     },
@@ -84,11 +84,24 @@ impl AppState {
             .await
     }
 
+    pub async fn get_attachment(
+        &self,
+        chat_id: String,
+        attachment_id: String,
+    ) -> Result<GetAttachmentResult, String> {
+        self.call(
+            methods::GET_ATTACHMENT,
+            json!({ "chat_id": chat_id, "attachment_id": attachment_id }),
+        )
+        .await
+    }
+
     pub async fn prompt(
         &self,
         chat_id: String,
         agent_id: String,
         text: String,
+        attachments: Vec<PromptAttachment>,
         session_mode: Option<String>,
     ) -> Result<PromptResultDto, String> {
         self.call(
@@ -97,6 +110,7 @@ impl AppState {
                 "chat_id": chat_id,
                 "agent_id": agent_id,
                 "text": text,
+                "attachments": attachments,
                 "session_mode": session_mode,
             }),
         )

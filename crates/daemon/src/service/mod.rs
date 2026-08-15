@@ -18,6 +18,7 @@
 //! See [`session`] and the crate README ("Store-first write path").
 
 pub mod agent_manager;
+pub mod attachments;
 pub mod chat_manager;
 pub mod session;
 

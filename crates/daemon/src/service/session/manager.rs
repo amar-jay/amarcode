@@ -5,7 +5,11 @@ mod lifecycle;
 mod prompt;
 mod transport;
 
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
@@ -18,6 +22,7 @@ use crate::{
         RpcDirection, RpcEnvelope, RunStatus, TurnStatus,
     },
     service::agent_manager::AgentManager,
+    service::attachments::AttachmentStore,
     store::{AgentRun, Message, MessagePart, Store},
     Error, Result,
 };
@@ -37,6 +42,7 @@ use super::{
 
 pub struct SessionManager {
     agents: AgentManager,
+    attachments: AttachmentStore,
     inner: Arc<SessionInner>,
 }
 
@@ -45,9 +51,11 @@ impl SessionManager {
         store: Arc<Store>,
         agents: AgentManager,
         events: broadcast::Sender<EditorEvent>,
+        attachments_dir: PathBuf,
     ) -> Self {
         Self {
             agents,
+            attachments: AttachmentStore::new(attachments_dir),
             inner: Arc::new(SessionInner {
                 store,
                 events,
@@ -56,6 +64,14 @@ impl SessionManager {
                 pending: std::sync::Mutex::new(HashMap::new()),
             }),
         }
+    }
+
+    pub fn get_attachment(&self, chat_id: &str, attachment_id: &str) -> Result<(String, String)> {
+        self.inner
+            .store
+            .get_chat(chat_id)?
+            .ok_or_else(|| Error::msg(format!("chat not found: {chat_id}")))?;
+        self.attachments.read(chat_id, attachment_id)
     }
 
     /// Start a new agent run for a chat (spawns ACP, initialize + resume/new session).
@@ -143,6 +159,7 @@ impl SessionManager {
                     agent_id: agent_id.to_owned(),
                     client: Arc::clone(&client),
                     acp_session_id: None,
+                    supports_images: false,
                     session_configuration: SessionConfiguration::default(),
                     needs_history_hydration: false,
                     streaming_message_ids: HashMap::new(),
@@ -159,7 +176,7 @@ impl SessionManager {
 
         // Real ACP (Copilot, etc.): method names are `initialize` / `session/*`,
         // not a proprietary `agent.*` namespace.
-        if let Err(err) = self.acp_request(
+        let initialize_response = match self.acp_request(
             &run.id,
             &client,
             AgentRpcMethod::Initialize,
@@ -185,10 +202,26 @@ impl SessionManager {
                 }
             }),
         ) {
-            self.remove_live_run(chat_id, &run.id);
-            let _ = client.kill();
-            let _ = self.fail_run(&run.id, &err.to_string());
-            return Err(err);
+            Ok(value) => value,
+            Err(err) => {
+                self.remove_live_run(chat_id, &run.id);
+                let _ = client.kill();
+                let _ = self.fail_run(&run.id, &err.to_string());
+                return Err(err);
+            }
+        };
+        let supports_images = initialize_response
+            .pointer("/agentCapabilities/promptCapabilities/image")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if let Some(live) = self
+            .inner
+            .by_chat
+            .lock()
+            .map_err(|_| Error::msg("session lock poisoned"))?
+            .get_mut(chat_id)
+        {
+            live.supports_images = supports_images;
         }
 
         let previous_session_id = self

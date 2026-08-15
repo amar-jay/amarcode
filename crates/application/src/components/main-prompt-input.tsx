@@ -10,7 +10,14 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
+  usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
+import {
+  Attachment,
+  AttachmentPreview,
+  AttachmentRemove,
+  Attachments,
+} from "@/components/ai-elements/attachments";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,9 +45,8 @@ import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AgentInfo, Chat } from "@/types";
+import type { AgentInfo, Chat, PromptAttachment } from "@/types";
 import { SESSION_MODES, type SessionMode } from "@/state";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export type { SessionMode };
 const SET_MODES = SESSION_MODES;
@@ -56,6 +62,26 @@ const modeIcons: Record<SessionMode, typeof Ruler> = {
   build: Wrench,
   ask: MessageCircle,
 };
+
+function PromptImagePreviews() {
+  const attachments = usePromptInputAttachments();
+  if (attachments.files.length === 0) return null;
+
+  return (
+    <Attachments className="w-full justify-start px-3 pt-3" variant="grid">
+      {attachments.files.map((file) => (
+        <Attachment
+          data={file}
+          key={file.id}
+          onRemove={() => attachments.remove(file.id)}
+        >
+          <AttachmentPreview />
+          <AttachmentRemove />
+        </Attachment>
+      ))}
+    </Attachments>
+  );
+}
 
 export function AgentSelection({
   setSelectedAgent,
@@ -127,6 +153,22 @@ function stripAcpSuffix(value: string): string {
   return value.replace(/\s*\bACP\s*$/i, "");
 }
 
+function toPromptAttachments(
+  files: PromptInputMessage["files"],
+): PromptAttachment[] {
+  return files.map((file) => {
+    const match = /^data:([^;,]+);base64,(.+)$/s.exec(file.url);
+    if (!match?.[1] || !match[2]) {
+      throw new Error("The pasted image could not be prepared for sending.");
+    }
+    return {
+      filename: file.filename ?? null,
+      mime_type: match[1],
+      data: match[2],
+    };
+  });
+}
+
 interface AppPromptInputProps {
   onChatStarted?: (
     chat: Chat,
@@ -134,7 +176,11 @@ interface AppPromptInputProps {
     workspacePath: string,
     sessionMode: SessionMode,
   ) => void;
-  onSendPrompt?: (text: string, sessionMode: SessionMode) => Promise<void>;
+  onSendPrompt?: (
+    text: string,
+    attachments: PromptAttachment[],
+    sessionMode: SessionMode,
+  ) => Promise<void>;
   workspacePath: string;
   onWorkspacePathChange?: (workspacePath: string) => void;
   selectedAgentId: string;
@@ -182,9 +228,10 @@ function AppPromptInput({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
-    if (!text) return;
+    const attachments = toPromptAttachments(message.files);
+    if (!text && attachments.length === 0) return;
     if (onSendPrompt) {
-      await onSendPrompt(text, mode);
+      await onSendPrompt(text, attachments, mode);
       return;
     }
     if (!workspacePath || !selectedAgentId) {
@@ -200,13 +247,15 @@ function AppPromptInput({
         throw new Error(
           agent.unavailable_reason ?? "Selected agent is not installed.",
         );
-      const chat = await daemonApi.createChat(workspacePath, text.slice(0, 72));
+      const title =
+        text.slice(0, 72) || message.files[0]?.filename || "Image prompt";
+      const chat = await daemonApi.createChat(workspacePath, title);
 
       // Transition immediately. The daemon's prompt RPC remains open until the
       // agent turn finishes, while the chat screen renders via the event stream.
       onChatStarted?.(chat, agent, workspacePath, mode);
       void daemonApi
-        .prompt(chat.id, selectedAgentId, text, mode)
+        .prompt(chat.id, selectedAgentId, text, attachments, mode)
         .catch((error: unknown) => {
           console.error("Error submitting prompt:", error);
           notify("The agent could not start this prompt.", "error");
@@ -232,8 +281,16 @@ function AppPromptInput({
   };
   const showModeControl = !isChatComposer || selectedAgentId === "codex-acp";
   return (
-    <PromptInput onSubmit={handleSubmit}>
+    <PromptInput
+      accept="image/png,image/jpeg,image/webp,image/gif"
+      maxFiles={4}
+      maxFileSize={10 * 1024 * 1024}
+      multiple
+      onError={({ message }) => notify(message, "error")}
+      onSubmit={handleSubmit}
+    >
       <PromptInputBody>
+        <PromptImagePreviews />
         <PromptInputTextarea />
       </PromptInputBody>
       <PromptInputFooter>
@@ -276,32 +333,20 @@ function AppPromptInput({
               agents={agents}
             />
           )}
-          {/* {!isChatComposer && ( */}
-          <Tooltip>
-            <TooltipTrigger>
-              <PromptInputButton
-                tooltip={{
-                  content: workspacePath || "Choose a project folder",
-                }}
-                disabled={isChatComposer}
-                onClick={openDirectory}
-                className="max-w-40"
-                title={workspacePath || ""}
-              >
-                <FolderOpen size={16} />
-                {workspacePath && (
-                  <span className="min-w-0 truncate text-left [direction:rtl]">
-                    {workspacePath}
-                  </span>
-                )}
-              </PromptInputButton>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{workspacePath}</p>
-            </TooltipContent>
-          </Tooltip>
-
-          {/* )} */}
+          <PromptInputButton
+            tooltip={workspacePath || "Choose a project folder"}
+            disabled={isChatComposer}
+            onClick={openDirectory}
+            className="max-w-40"
+            title={workspacePath || ""}
+          >
+            <FolderOpen size={16} />
+            {workspacePath && (
+              <span className="min-w-0 truncate text-left [direction:rtl]">
+                {workspacePath}
+              </span>
+            )}
+          </PromptInputButton>
         </PromptInputTools>
         <PromptInputSubmit
           disabled={!selectedAgentId || !workspacePath}

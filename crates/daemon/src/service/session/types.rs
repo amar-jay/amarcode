@@ -47,6 +47,8 @@ pub(super) struct LiveRun {
     pub(super) agent_id: String,
     pub(super) client: Arc<AcpClient>,
     pub(super) acp_session_id: Option<String>,
+    /// Whether the agent advertised ACP image prompt support at initialize.
+    pub(super) supports_images: bool,
     /// Configuration options advertised by this ACP session. Option ids and
     /// values are agent-defined, so mode changes must be planned from these
     /// capabilities rather than from the executable name.

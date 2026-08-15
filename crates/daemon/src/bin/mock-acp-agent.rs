@@ -42,6 +42,8 @@ fn main() {
 
         match method {
             Some("initialize") => {
+                let supports_images =
+                    std::env::var("AMARCODE_MOCK_IMAGE_SUPPORT").is_ok_and(|value| value == "1");
                 if let Some(delay_ms) = std::env::var("AMARCODE_MOCK_INITIALIZE_DELAY_MS")
                     .ok()
                     .and_then(|value| value.parse::<u64>().ok())
@@ -55,7 +57,7 @@ fn main() {
                         "protocolVersion": 1,
                         "agentCapabilities": {
                             "loadSession": false,
-                            "promptCapabilities": { "image": false, "audio": false, "embeddedContext": false }
+                            "promptCapabilities": { "image": supports_images, "audio": false, "embeddedContext": false }
                         },
                         "agentInfo": {
                             "name": "mock-acp-agent",

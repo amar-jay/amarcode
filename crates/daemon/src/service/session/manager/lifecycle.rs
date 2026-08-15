@@ -84,6 +84,9 @@ impl SessionManager {
         if !self.inner.store.delete_chat(chat_id)? {
             return Err(Error::msg(format!("chat not found: {chat_id}")));
         }
+        if let Err(error) = self.attachments.delete_chat(chat_id) {
+            warn!(%chat_id, %error, "chat deleted but its attachment files could not be removed");
+        }
         if let Ok(mut locks) = self.inner.prompt_locks.lock() {
             locks.remove(chat_id);
         }

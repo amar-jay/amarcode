@@ -18,8 +18,8 @@ use crate::{
     protocol::{
         events::EditorEvent,
         rpc::{
-            CancelResult, DeleteChatResult, HealthResult, PromptResultDto, RespondAgentParams,
-            RespondAgentResult, VersionResult,
+            CancelResult, DeleteChatResult, GetAttachmentResult, HealthResult, PromptAttachment,
+            PromptResultDto, RespondAgentParams, RespondAgentResult, VersionResult,
         },
         AgentInfo, Chat, GetChatResult,
     },
@@ -158,14 +158,26 @@ async fn delete_chat(
 }
 
 #[tauri::command]
+async fn get_attachment(
+    state: State<'_, AppState>,
+    chat_id: String,
+    attachment_id: String,
+) -> Result<GetAttachmentResult, String> {
+    state.get_attachment(chat_id, attachment_id).await
+}
+
+#[tauri::command]
 async fn prompt(
     state: State<'_, AppState>,
     chat_id: String,
     agent_id: String,
     text: String,
+    attachments: Vec<PromptAttachment>,
     session_mode: Option<String>,
 ) -> Result<PromptResultDto, String> {
-    state.prompt(chat_id, agent_id, text, session_mode).await
+    state
+        .prompt(chat_id, agent_id, text, attachments, session_mode)
+        .await
 }
 
 #[tauri::command]
@@ -493,6 +505,7 @@ fn get_workspace_info(workspace_path: String) -> Result<WorkspaceInfo, String> {
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -515,6 +528,7 @@ pub fn run() {
             create_chat,
             list_chats,
             get_chat,
+            get_attachment,
             delete_chat,
             prompt,
             set_session_mode,

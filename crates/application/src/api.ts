@@ -8,9 +8,11 @@ import type {
   DaemonVersion,
   EditorEvent,
   EventFilter,
+  GetAttachmentResult,
   GetChatResult,
   Health,
   PromptResult,
+  PromptAttachment,
   RespondAgentResult,
 } from "./types";
 
@@ -137,6 +139,11 @@ export const daemonApi = {
     invoke("list_chats", { workspacePath }),
   getChat: (chatId: string, includeMessages = true): Promise<GetChatResult> =>
     invoke("get_chat", { chatId, includeMessages }),
+  getAttachment: (
+    chatId: string,
+    attachmentId: string,
+  ): Promise<GetAttachmentResult> =>
+    invoke("get_attachment", { chatId, attachmentId }),
   deleteChat: (chatId: string): Promise<DeleteChatResult> =>
     invoke("delete_chat", { chatId }),
 
@@ -144,9 +151,10 @@ export const daemonApi = {
     chatId: string,
     agentId: string,
     text: string,
+    attachments: PromptAttachment[],
     sessionMode?: "plan" | "build" | "ask",
   ): Promise<PromptResult> =>
-    invoke("prompt", { chatId, agentId, text, sessionMode }),
+    invoke("prompt", { chatId, agentId, text, attachments, sessionMode }),
   setSessionMode: (
     chatId: string,
     mode: "plan" | "build" | "ask",
