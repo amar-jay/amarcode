@@ -72,7 +72,7 @@ jobs:
         run: cargo test --workspace
 
       - name: Build desktop app
-        run: bun run tauri:build
+        run: bun run app:build
 
       # Workspace Cargo.toml puts release output under the repo-root target/
       # (older layouts used crates/application/src-tauri/target).
