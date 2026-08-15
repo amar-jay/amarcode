@@ -40,6 +40,7 @@ import { notify } from "@/lib/notify";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AgentInfo, Chat } from "@/types";
 import { SESSION_MODES, type SessionMode } from "@/state";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export type { SessionMode };
 const SET_MODES = SESSION_MODES;
@@ -275,20 +276,31 @@ function AppPromptInput({
               agents={agents}
             />
           )}
-          {!isChatComposer && (
+          {/* {!isChatComposer && ( */}
+					    <Tooltip>
+      <TooltipTrigger>
+
             <PromptInputButton
               tooltip={{
                 content: workspacePath || "Choose a project folder",
               }}
+							disabled={isChatComposer}
               onClick={openDirectory}
               className="max-w-40"
+							title={workspacePath || ""}
             >
               <FolderOpen size={16} />
               {workspacePath && (
-                <span className="truncate">…{workspacePath.slice(-15)}</span>
+                <span className="min-w-0 truncate text-left [direction:rtl]">{workspacePath}</span>
               )}
             </PromptInputButton>
-          )}
+			</TooltipTrigger>
+      <TooltipContent>
+        <p>{workspacePath}</p>
+      </TooltipContent>
+			</Tooltip>
+
+          {/* )} */}
         </PromptInputTools>
         <PromptInputSubmit
           disabled={!selectedAgentId || !workspacePath}

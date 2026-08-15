@@ -82,7 +82,6 @@ export default function App() {
       <div className="flex min-h-0 flex-1 w-full">
         <AppSidebar
           activeChatId={activeSession?.chat.id ?? null}
-          workspacePath={workspacePath}
           chats={chats}
           onNewChat={() => startNewChat()}
           onSelectChat={(chatId) => selectChat(chatId)}

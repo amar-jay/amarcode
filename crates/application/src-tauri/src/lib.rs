@@ -279,6 +279,7 @@ fn list_workspace_files(workspace_path: String) -> Result<Vec<String>, String> {
 struct WorkspaceInfo {
     display_name: String,
     is_git_repository: bool,
+    branch_name: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -467,9 +468,26 @@ fn get_workspace_info(workspace_path: String) -> Result<WorkspaceInfo, String> {
         .status
         .success();
 
+    let branch_name = if is_git_repository {
+        let branch = git_output(&path, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+        if branch.status.success() {
+            Some(String::from_utf8_lossy(&branch.stdout).trim().to_string())
+        } else {
+            let commit = git_output(&path, &["rev-parse", "--short", "HEAD"])?;
+            commit
+                .status
+                .success()
+                .then(|| String::from_utf8_lossy(&commit.stdout).trim().to_string())
+        }
+        .filter(|name| !name.is_empty())
+    } else {
+        None
+    };
+
     Ok(WorkspaceInfo {
         display_name,
         is_git_repository,
+        branch_name,
     })
 }
 

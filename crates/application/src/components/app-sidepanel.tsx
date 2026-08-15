@@ -1,5 +1,5 @@
 import { useAtom } from "jotai";
-import { FileDiff, RefreshCw, XIcon } from "lucide-react";
+import { FileDiff, GitBranch, RefreshCw, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { daemonApi, WorkspaceDiff, type WorkspaceChange } from "@/api";
 import { sidePanelOpenAtom } from "@/state";
@@ -26,17 +26,25 @@ interface AppSidePanelProps {
 function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [sheetOpen, setSheetOpen] = useAtom(sidePanelOpenAtom);
   const [dirName, setDirName] = useState("No workspace selected");
+  const [branchName, setBranchName] = useState<string | null>(null);
   const [changes, setChanges] = useState<WorkspaceChange[]>([]);
   useEffect(() => {
     if (!workspacePath) {
       setDirName("No workspace selected");
+      setBranchName(null);
       return;
     }
 
     void daemonApi
       .getWorkspaceInfo(workspacePath)
-      .then((workspace) => setDirName(workspace.displayName))
-      .catch(() => setDirName("Workspace"));
+      .then((workspace) => {
+        setDirName(workspace.displayName);
+        setBranchName(workspace.branchName);
+      })
+      .catch(() => {
+        setDirName("Workspace");
+        setBranchName(null);
+      });
   }, [workspacePath]);
   const workspaceFileTree = useWorkspaceFileTree(sheetOpen, workspacePath);
   const refreshChanges = useCallback(async () => {
@@ -64,9 +72,11 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
 
   return (
     <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+      {/* Keep resize drags from being treated as outside clicks by the sheet. */}
       <SheetContent
         side="right"
         resizable
+        onPointerDownOutside={(event) => event.preventDefault()}
         className={cn(
           workspaceFileTree.selectedPath
             ? "w-280 min-w-[min(100vw-50rem,70rem)] max-w-[80vw]!"
@@ -74,11 +84,23 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         )}
         showCloseButton={false}
       >
-        <SheetHeader className="px-3 py-1 flex-row items-baseline">
-          <SheetTitle className="text-xs font-bold" title={workspacePath || ""}>
-            {dirName || ""}{" "}
+        <SheetHeader className="px-3 py-1 flex-row items-center select-none">
+          <SheetTitle className="text-xs font-bold flex flex-row items-center gap-1">
+            <span>{dirName || ""}</span>
+            {branchName && (
+              <span
+                className="inline-flex max-w-40 items-center gap-1 rounded bg-muted px-1.5 py-[3.5px] font-mono text-[0.65rem] font-normal text-muted-foreground ml-4"
+                title={`Git branch: ${branchName}`}
+              >
+                <GitBranch className="size-3 shrink-0" />
+                <span className="truncate">{branchName}</span>
+              </span>
+            )}
             {changes.length > 0 && (
-              <span className="rounded bg-muted px-1.5 ml-3 py-0.5 text-[0.6rem]">
+              <span
+                className="rounded bg-muted px-1.5 py-1 text-[0.6rem]"
+                title={"" + changes.length + " changes"}
+              >
                 ~ {changes.length}
               </span>
             )}
@@ -96,10 +118,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                         : "",
                   )}
                 />
-                <span
-                  className="truncate font-mono text-xs"
-                  title={workspaceFileTree.selectedPath || ""}
-                >
+                <span className="truncate font-mono text-xs">
                   {workspaceFileTree.selectedPath || ""}
                 </span>
               </>

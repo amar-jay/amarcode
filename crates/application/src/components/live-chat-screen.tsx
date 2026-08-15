@@ -592,7 +592,7 @@ export function LiveChatScreen() {
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
-      <div className="border-t p-4">
+      <div className="px-4 pb-4">
         {live.pendingRequest && (
           <PendingAgentRequestCard
             request={live.pendingRequest}

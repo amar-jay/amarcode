@@ -56,6 +56,7 @@ export interface ApplicationCleanupResult {
 export interface WorkspaceInfo {
   displayName: string;
   isGitRepository: boolean;
+  branchName: string | null;
 }
 
 export interface WorkspaceChange {

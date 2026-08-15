@@ -30,7 +30,6 @@ import type { Chat } from "@/types";
 
 type ChatSidebarProps = {
   activeChatId: string | null;
-  workspacePath: string;
   chats: Chat[];
   onNewChat: () => void;
   onSelectChat: (chatId: string) => void;
@@ -40,7 +39,6 @@ type ChatSidebarProps = {
 
 export function AppSidebar({
   activeChatId,
-  workspacePath,
   chats,
   onNewChat,
   onSelectChat,
@@ -72,7 +70,7 @@ export function AppSidebar({
       <Sidebar
         variant="floating"
         collapsible="icon"
-        className="inset-y-auto! top-9! bottom-0! h-auto!"
+        className="inset-y-auto! top-9! bottom-0! h-auto!  select-none"
       >
         <SidebarHeader className="gap-0 border-b border-sidebar-border">
           <div className="flex items-center gap-1 pl-1.5">
@@ -130,12 +128,12 @@ export function AppSidebar({
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter className="gap-1 border-t border-sidebar-border p-2">
-          <div className="flex min-w-0 items-center gap-2 px-2 py-1 text-[11px] leading-5 text-muted-foreground group-data-[collapsible=icon]:hidden">
+          {/* <div className="flex min-w-0 items-center gap-2 px-2 py-1 text-[11px] leading-5 text-muted-foreground group-data-[collapsible=icon]:hidden">
             <Bot className="size-3.5 shrink-0" />
             <span className="truncate" title={workspacePath}>
               {workspacePath}
             </span>
-          </div>
+          </div> */}
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton onClick={onOpenSettings} tooltip="Settings">
