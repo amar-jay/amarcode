@@ -277,28 +277,29 @@ function AppPromptInput({
             />
           )}
           {/* {!isChatComposer && ( */}
-					    <Tooltip>
-      <TooltipTrigger>
-
-            <PromptInputButton
-              tooltip={{
-                content: workspacePath || "Choose a project folder",
-              }}
-							disabled={isChatComposer}
-              onClick={openDirectory}
-              className="max-w-40"
-							title={workspacePath || ""}
-            >
-              <FolderOpen size={16} />
-              {workspacePath && (
-                <span className="min-w-0 truncate text-left [direction:rtl]">{workspacePath}</span>
-              )}
-            </PromptInputButton>
-			</TooltipTrigger>
-      <TooltipContent>
-        <p>{workspacePath}</p>
-      </TooltipContent>
-			</Tooltip>
+          <Tooltip>
+            <TooltipTrigger>
+              <PromptInputButton
+                tooltip={{
+                  content: workspacePath || "Choose a project folder",
+                }}
+                disabled={isChatComposer}
+                onClick={openDirectory}
+                className="max-w-40"
+                title={workspacePath || ""}
+              >
+                <FolderOpen size={16} />
+                {workspacePath && (
+                  <span className="min-w-0 truncate text-left [direction:rtl]">
+                    {workspacePath}
+                  </span>
+                )}
+              </PromptInputButton>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{workspacePath}</p>
+            </TooltipContent>
+          </Tooltip>
 
           {/* )} */}
         </PromptInputTools>
