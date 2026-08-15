@@ -41,7 +41,7 @@
       SetErrorLevel 1
       Abort
     ${EndIf}
-    ${StrLoc} $2 $1 '"amarcode-daemon.exe",' ">"
+    ${UnStrLoc} $2 $1 '"amarcode-daemon.exe",' ">"
     ${If} $2 = 0
       MessageBox MB_ICONSTOP|MB_OK "The Amarcode background service is still running. Close it and retry the uninstall."
       SetErrorLevel 1
