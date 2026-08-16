@@ -58,7 +58,9 @@ export function WorkspaceFileSearch({
       }}
       className={cn(
         "h-full shrink-0 ml-auto overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none",
-        isOpen ? "w-[calc(100%-4.5rem)] opacity-100! backdrop-blur-none! h-5" : "w-fit",
+        isOpen
+          ? "w-[calc(100%-4.5rem)] opacity-100! backdrop-blur-none! h-5"
+          : "w-fit",
         className,
       )}
     >
@@ -78,7 +80,9 @@ export function WorkspaceFileSearch({
       </button>
       <div
         className={`absolute inset-0 flex origin-right items-center overflow-hidden rounded-md bg-muted/70 text-muted-foreground ring-0 transition-opacity duration-200 focus-within:bg-background focus-within:text-foreground focus-within:ring-0 motion-reduce:transition-none ${
-          isOpen ? "opacity-100 bg-primary-foreground" : "pointer-events-none opacity-0"
+          isOpen
+            ? "opacity-100 bg-primary-foreground"
+            : "pointer-events-none opacity-0"
         }`}
       >
         <Search aria-hidden="true" className="ml-2 size-3.5 shrink-0" />

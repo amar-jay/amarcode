@@ -104,6 +104,7 @@ export const ChainOfThoughtHeader = memo(
 export type ChainOfThoughtStepProps = ComponentProps<"div"> & {
   icon?: LucideIcon;
   label: ReactNode;
+  kind?: string;
   description?: ReactNode;
   status?: "complete" | "active" | "pending";
 };
@@ -112,6 +113,7 @@ const stepStatusStyles = {
   active: "text-foreground/85",
   complete: "text-muted-foreground",
   pending: "text-muted-foreground/50",
+  interrupted: "text-red-500",
 };
 
 export const ChainOfThoughtStep = memo(
@@ -138,7 +140,7 @@ export const ChainOfThoughtStep = memo(
         <div className="absolute top-7 bottom-0 left-1/2 -mx-px w-px bg-border" />
       </div>
       <div className="flex-1 space-y-2 overflow-hidden">
-        <div>{label}</div>
+        {label}
         {description && (
           <div className="text-muted-foreground text-xs">{description}</div>
         )}
