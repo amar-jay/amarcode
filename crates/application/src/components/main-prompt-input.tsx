@@ -63,7 +63,7 @@ const modeIcons: Record<SessionMode, typeof Ruler> = {
   ask: MessageCircle,
 };
 
-function PromptImagePreviews() {
+function PromptAttachmentPreviews() {
   const attachments = usePromptInputAttachments();
   if (attachments.files.length === 0) return null;
 
@@ -74,6 +74,7 @@ function PromptImagePreviews() {
           data={file}
           key={file.id}
           onRemove={() => attachments.remove(file.id)}
+          title={file.filename ?? "Attachment"}
         >
           <AttachmentPreview />
           <AttachmentRemove />
@@ -159,7 +160,7 @@ function toPromptAttachments(
   return files.map((file) => {
     const match = /^data:([^;,]+);base64,(.+)$/s.exec(file.url);
     if (!match?.[1] || !match[2]) {
-      throw new Error("The pasted image could not be prepared for sending.");
+      throw new Error("The attachment could not be prepared for sending.");
     }
     return {
       filename: file.filename ?? null,
@@ -248,7 +249,7 @@ function AppPromptInput({
           agent.unavailable_reason ?? "Selected agent is not installed.",
         );
       const title =
-        text.slice(0, 72) || message.files[0]?.filename || "Image prompt";
+        text.slice(0, 72) || message.files[0]?.filename || "Attachment prompt";
       const chat = await daemonApi.createChat(workspacePath, title);
 
       // Transition immediately. The daemon's prompt RPC remains open until the
@@ -282,7 +283,7 @@ function AppPromptInput({
   const showModeControl = !isChatComposer || selectedAgentId === "codex-acp";
   return (
     <PromptInput
-      accept="image/png,image/jpeg,image/webp,image/gif"
+      accept="image/png,image/jpeg,image/webp,image/gif,text/plain"
       maxFiles={4}
       maxFileSize={10 * 1024 * 1024}
       multiple
@@ -290,7 +291,7 @@ function AppPromptInput({
       onSubmit={handleSubmit}
     >
       <PromptInputBody>
-        <PromptImagePreviews />
+        <PromptAttachmentPreviews />
         <PromptInputTextarea />
       </PromptInputBody>
       <PromptInputFooter>

@@ -48,6 +48,28 @@ The lower-level script accepts repeated `--target` arguments. It builds every
 requested target before making Cloudflare changes and advances `latest.json`
 only after all binary uploads succeed.
 
+Publishing without `--version` opens an interactive release TUI. It lets you
+choose a patch, minor, major, custom, or deliberate same-version release; then
+choose the target set and confirm the complete publication plan. A changed
+version is written to both `crates/daemon/Cargo.toml` and `Cargo.lock` before
+the daemon is built.
+
+The manifest records the exact full Git commit hash used for the release. If
+the worktree has local changes, it also records `sourceDirty: true` so the
+commit is not mistaken for an exact source snapshot.
+
+Publishing is intentionally version-safe: the script refuses to replace an
+existing remote version unless replacement was confirmed in the TUI or
+`--overwrite` is supplied for automation. To publish non-interactively:
+
+```sh
+bun scripts/publish-daemon.ts --version 0.3.4 \
+  --target x86_64-unknown-linux-gnu --target x86_64-pc-windows-gnu
+```
+
+Use `--overwrite` only when intentionally replacing an already published
+version, such as when adding a missing target.
+
 ### Cross-compile Windows from Linux
 
 The daemon can be cross-compiled with Rust's Windows GNU target. Install the

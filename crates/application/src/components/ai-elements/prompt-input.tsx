@@ -65,6 +65,10 @@ import type {
   ReactNode,
   RefObject,
 } from "react";
+
+/** Long pastes are easier for agents to consume as a named text attachment. */
+export const PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES = 10 * 1024;
+const MAX_PASTED_TEXT_ATTACHMENT_BYTES = 1024 * 1024;
 import {
   Children,
   createContext,
@@ -1090,7 +1094,24 @@ export const PromptInputTextarea = ({
       // DOM File objects. Preserve normal text paste, but use Tauri's native
       // clipboard reader when the clipboard has no plain-text payload.
       const pastedText = event.clipboardData?.getData("text/plain") ?? "";
-      if (pastedText || !isTauri()) return;
+      if (pastedText) {
+        const byteLength = new Blob([pastedText]).size;
+        if (byteLength > PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES) {
+          event.preventDefault();
+          if (byteLength > MAX_PASTED_TEXT_ATTACHMENT_BYTES) {
+            console.warn("Pasted text exceeds the 1 MB attachment limit.");
+            return;
+          }
+          const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+          attachments.add([
+            new File([pastedText], `pasted-text-${timestamp}.txt`, {
+              type: "text/plain",
+            }),
+          ]);
+        }
+        return;
+      }
+      if (!isTauri()) return;
 
       event.preventDefault();
       void readNativeClipboardImage()

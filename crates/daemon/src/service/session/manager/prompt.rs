@@ -1,6 +1,7 @@
 //! Prompt turns, per-chat serialization, history hydration, and session modes.
 
 use super::*;
+use base64::Engine as _;
 
 impl SessionManager {
     /// Persist a user message and send it to the agent (starts a run if needed).
@@ -14,10 +15,10 @@ impl SessionManager {
     ) -> Result<PromptResult> {
         let text = text.as_ref().trim();
         if text.is_empty() && attachments.is_empty() {
-            return Err(Error::msg("prompt must contain text or an image"));
+            return Err(Error::msg("prompt must contain text or an attachment"));
         }
-        if attachments.len() > crate::service::attachments::MAX_PROMPT_IMAGES {
-            return Err(Error::msg("a prompt can contain at most 4 images"));
+        if attachments.len() > crate::service::attachments::MAX_PROMPT_ATTACHMENTS {
+            return Err(Error::msg("a prompt can contain at most 4 attachments"));
         }
 
         // Keep session selection/startup and the complete ACP turn atomic for
@@ -61,7 +62,11 @@ impl SessionManager {
                 live.supports_images,
             )
         };
-        if !attachments.is_empty() && !supports_images {
+        if attachments
+            .iter()
+            .any(|attachment| attachment.mime_type.starts_with("image/"))
+            && !supports_images
+        {
             return Err(Error::msg(
                 "the selected agent does not support image prompts",
             ));
@@ -69,7 +74,7 @@ impl SessionManager {
 
         let mut stored_attachments = Vec::with_capacity(attachments.len());
         for attachment in attachments {
-            match self.attachments.save_prompt_image(chat_id, attachment) {
+            match self.attachments.save_prompt_attachment(chat_id, attachment) {
                 Ok(stored) => stored_attachments.push(stored),
                 Err(error) => {
                     for stored in &stored_attachments {
@@ -116,7 +121,11 @@ impl SessionManager {
             message_parts.push(MessagePart {
                 message_id: user_message.id.clone(),
                 ordinal: message_parts.len() as i64,
-                kind: MessagePartKind::Image,
+                kind: if stored.media_type.starts_with("image/") {
+                    MessagePartKind::Image
+                } else {
+                    MessagePartKind::File
+                },
                 content_json: json!({
                     "attachmentId": stored.id,
                     "filename": stored.filename,
@@ -172,13 +181,29 @@ impl SessionManager {
         if !prompt_text.trim().is_empty() {
             prompt_blocks.push(json!({ "type": "text", "text": prompt_text }));
         }
-        prompt_blocks.extend(stored_attachments.iter().map(|stored| {
-            json!({
-                "type": "image",
-                "mimeType": stored.media_type,
-                "data": stored.data,
-            })
-        }));
+        for stored in &stored_attachments {
+            if stored.media_type.starts_with("image/") {
+                prompt_blocks.push(json!({
+                    "type": "image",
+                    "mimeType": stored.media_type,
+                    "data": stored.data,
+                }));
+            } else {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(&stored.data)
+                    .map_err(|_| Error::msg("stored text attachment is not valid base64"))?;
+                let contents = std::str::from_utf8(&bytes)
+                    .map_err(|_| Error::msg("stored text attachment must be UTF-8"))?;
+                prompt_blocks.push(json!({
+                    "type": "text",
+                    "text": format!(
+                        "[Attached file: {}]\n{}\n[End attached file]",
+                        stored.filename.as_deref().unwrap_or("pasted-text.txt"),
+                        contents,
+                    ),
+                }));
+            }
+        }
         let mut params = json!({ "prompt": prompt_blocks });
         if let Some(sid) = &session_id {
             params

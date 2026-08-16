@@ -5,7 +5,9 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use crate::{protocol::rpc::PromptAttachment, Error, Result};
 
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+const MAX_TEXT_BYTES: usize = 1024 * 1024;
 pub const MAX_PROMPT_IMAGES: usize = 4;
+pub const MAX_PROMPT_ATTACHMENTS: usize = 4;
 
 #[derive(Debug, Clone)]
 pub struct StoredPromptAttachment {
@@ -25,11 +27,15 @@ impl AttachmentStore {
         Self { root }
     }
 
-    pub fn save_prompt_image(
+    pub fn save_prompt_attachment(
         &self,
         chat_id: &str,
         attachment: PromptAttachment,
     ) -> Result<StoredPromptAttachment> {
+        if attachment.mime_type == "text/plain" {
+            return self.save_prompt_text(chat_id, attachment);
+        }
+
         validate_component("chat id", chat_id)?;
         if attachment.data.len() > encoded_size_limit() {
             return Err(Error::msg("pasted image exceeds the 10 MB limit"));
@@ -65,6 +71,43 @@ impl AttachmentStore {
             id,
             filename: clean_filename(attachment.filename),
             media_type: media_type.to_owned(),
+            data: attachment.data,
+        })
+    }
+
+    fn save_prompt_text(
+        &self,
+        chat_id: &str,
+        attachment: PromptAttachment,
+    ) -> Result<StoredPromptAttachment> {
+        validate_component("chat id", chat_id)?;
+        if attachment.data.len() > encoded_text_size_limit() {
+            return Err(Error::msg("pasted text exceeds the 1 MB limit"));
+        }
+        let bytes = STANDARD
+            .decode(&attachment.data)
+            .map_err(|_| Error::msg("pasted text is not valid base64"))?;
+        if bytes.len() > MAX_TEXT_BYTES {
+            return Err(Error::msg("pasted text exceeds the 1 MB limit"));
+        }
+        std::str::from_utf8(&bytes).map_err(|_| Error::msg("pasted text must be UTF-8"))?;
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let directory = self.root.join(chat_id);
+        fs::create_dir_all(&directory)?;
+        let final_path = directory.join(format!("{id}.txt"));
+        let temporary_path = directory.join(format!(".{id}.tmp"));
+        fs::write(&temporary_path, &bytes)?;
+        if let Err(error) = fs::rename(&temporary_path, &final_path) {
+            let _ = fs::remove_file(&temporary_path);
+            return Err(error.into());
+        }
+
+        Ok(StoredPromptAttachment {
+            id,
+            filename: clean_filename(attachment.filename)
+                .or_else(|| Some("pasted-text.txt".to_owned())),
+            media_type: "text/plain".to_owned(),
             data: attachment.data,
         })
     }
@@ -115,12 +158,17 @@ fn encoded_size_limit() -> usize {
     MAX_IMAGE_BYTES.div_ceil(3) * 4 + 4
 }
 
-fn supported_types() -> [(&'static str, &'static str); 4] {
+fn encoded_text_size_limit() -> usize {
+    MAX_TEXT_BYTES.div_ceil(3) * 4 + 4
+}
+
+fn supported_types() -> [(&'static str, &'static str); 5] {
     [
         ("image/png", "png"),
         ("image/jpeg", "jpg"),
         ("image/webp", "webp"),
         ("image/gif", "gif"),
+        ("text/plain", "txt"),
     ]
 }
 
@@ -177,5 +225,31 @@ mod tests {
             Some(("image/jpeg", "jpg"))
         );
         assert_eq!(detect_image_type(b"not an image"), None);
+    }
+
+    #[test]
+    fn stores_utf8_text_attachments() {
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let store = AttachmentStore::new(root.clone());
+        let stored = store
+            .save_prompt_attachment(
+                "chat-1",
+                PromptAttachment {
+                    filename: Some("pasted.txt".into()),
+                    mime_type: "text/plain".into(),
+                    data: STANDARD.encode("A long pasted note"),
+                },
+            )
+            .expect("text attachment should be stored");
+
+        assert_eq!(stored.media_type, "text/plain");
+        assert!(root
+            .join("chat-1")
+            .join(format!("{}.txt", stored.id))
+            .is_file());
+        store
+            .delete_chat("chat-1")
+            .expect("chat cleanup should succeed");
+        let _ = fs::remove_dir(root);
     }
 }

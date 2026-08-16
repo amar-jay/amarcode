@@ -18,7 +18,7 @@ import {
   MessageResponse,
 } from "./ai-elements/message";
 import { Shimmer } from "./ai-elements/shimmer";
-import { AttachedImages } from "./attached-image";
+import { AttachedFiles, AttachedImages } from "./attached-image";
 import { DiffArtifactCard } from "./diff-artifact-card";
 import { StreamingCaret } from "./streaming-caret";
 
@@ -71,6 +71,7 @@ export function UserMessage({
             </p>
           )}
           <AttachedImages item={block.item} />
+          <AttachedFiles item={block.item} />
         </MessageContent>
       </Message>
     );
