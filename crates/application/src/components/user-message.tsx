@@ -30,20 +30,17 @@ function reasoningLabel(
   const display = verbose ? text : `${text.slice(0, 320)}…`;
   return (
     <div className="whitespace-pre-wrap space-x-2 space-y-2 mt-1">
-      {kind && <span className="font-bold">{kind}</span>}
+      {kind && <span className="font-bold">{kind.replaceAll("_", " ")}</span>}
       {kind === "execute" && verbose && (
         <>
-          <br /> <code className="font-mono">{display}</code>
+          <br /><code className="font-mono">{display}</code>
         </>
       )}
       {kind === "thinking" && (
         <>
           <br />
-          <code className="ml-1">{cleanThinking(display)}</code>
+          <code className="ml-1 text-xs">{cleanThinking(display)}</code>
         </>
-      )}
-      {kind !== "execute" && kind !== "thinking" && kind !== "search" && (
-        <code className="font-mono">{cleanToolTitle(display)}</code>
       )}
     </div>
   );

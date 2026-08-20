@@ -11,33 +11,41 @@ import {
   Wrench,
   type LucideIcon,
   Dot,
+	ListTree,
 } from "lucide-react";
 
 const TOOL_KIND_ICONS = {
   read: FileText,
+	read_file: FileText,
   edit: Pencil,
   delete: Trash2,
+	list_dir: ListTree,
   move: Move,
-  search: Search,
+	run_terminal_command: Terminal,
+  search: Search,  
+	search_replace: Search, grep: Search,
   execute: Terminal,
   thinking: Dot,
   fetch: Globe,
   other: Wrench,
-} satisfies Record<ToolKind, LucideIcon>;
+} as Record<ToolKind, LucideIcon>;
 
 export type ToolKind =
-  | "read"
+  | "read" | "read_file"
   | "edit"
   | "delete"
   | "move"
-  | "search"
+  | "search" | "search_replace" | "grep"
   | "execute"
   | "thinking"
   | "fetch"
   | "other";
 
 export function getToolKindIcon(kind?: ToolKind): LucideIcon {
-  return kind ? TOOL_KIND_ICONS[kind] : Wrench;
+	console.log("getToolKindIcon kind:", kind);
+	if (!kind) return Wrench;
+	if (!(kind in TOOL_KIND_ICONS)) return Wrench; 
+  return TOOL_KIND_ICONS[kind];
 }
 
 //TODO: use proper one.
@@ -154,7 +162,11 @@ function toolSummary(part: MessagePart, verbose: boolean) {
     let label = getToolLabel(record);
     if (!label) return null;
     const id = stringed(record.toolCallId, label);
-    const kind = stringed(record.kind, "other") as ToolKind;
+		if (!record.kind) {
+			record.kind = cleanToolTitle(label).toLocaleLowerCase();
+		}
+		console.log("tool kind: ", record.kind, "label:", label);
+    const kind = stringed(record.kind, stringed(record.label, "other")) as ToolKind;
 
     // In verbose mode, surface rawInput command when title is generic.
     if (verbose) {
