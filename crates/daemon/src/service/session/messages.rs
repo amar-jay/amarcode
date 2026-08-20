@@ -232,9 +232,12 @@ pub(super) fn append_text_delta(inner: &SessionInner, message_id: &str, delta: &
             .update_message(message_id, &combined, MessageStatus::Streaming)?;
         inner.store.replace_message_parts(message_id, &parts)?;
     } else {
+        // Thought/tool parts may already occupy ordinal 0 (Grok streams
+        // `agent_thought_chunk` before the visible answer).
+        let ordinal = parts.iter().map(|part| part.ordinal).max().unwrap_or(-1) + 1;
         parts.push(MessagePart {
             message_id: message_id.to_owned(),
-            ordinal: 0,
+            ordinal,
             kind: MessagePartKind::Text,
             content_json: json!({ "text": delta }).to_string(),
         });
@@ -246,7 +249,7 @@ pub(super) fn append_text_delta(inner: &SessionInner, message_id: &str, delta: &
             inner,
             EditorEvent::MessagePartAdded {
                 message_id: message_id.to_owned(),
-                ordinal: 0,
+                ordinal,
                 kind: MessagePartKind::Text,
             },
         );
@@ -369,6 +372,93 @@ mod tests {
         assert_eq!(
             take_streaming_messages(&inner, "new-run", "chat-1"),
             vec!["new-message"]
+        );
+    }
+}
+
+#[cfg(test)]
+mod append_tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use tokio::sync::broadcast;
+
+    use crate::{
+        protocol::{MessageRole, MessageStatus, RunStatus},
+        store::{AgentRun, Store},
+    };
+
+    use super::*;
+
+    fn inner_with_assistant_message() -> (SessionInner, String) {
+        let store = Arc::new(Store::open(std::path::Path::new(":memory:")).expect("store"));
+        store.seed_presets().expect("seed agents");
+        store
+            .create_chat(&crate::store::Chat {
+                id: "chat-1".to_owned(),
+                workspace_path: "/tmp/workspace".to_owned(),
+                title: "grok".to_owned(),
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+                updated_at: "2026-01-01T00:00:00Z".to_owned(),
+                archived_at: None,
+            })
+            .expect("create chat");
+        store
+            .create_run(&AgentRun {
+                id: "run-1".to_owned(),
+                chat_id: "chat-1".to_owned(),
+                agent_id: "codex-acp".to_owned(),
+                acp_session_id: Some("session-1".to_owned()),
+                status: RunStatus::Running,
+                started_at: "2026-01-01T00:00:00Z".to_owned(),
+                finished_at: None,
+                error_message: None,
+            })
+            .expect("create run");
+        store
+            .create_message(&Message {
+                id: "msg-1".to_owned(),
+                chat_id: "chat-1".to_owned(),
+                agent_run_id: Some("run-1".to_owned()),
+                role: MessageRole::Assistant,
+                content: String::new(),
+                status: MessageStatus::Streaming,
+                created_at: "2026-01-01T00:00:01Z".to_owned(),
+                updated_at: "2026-01-01T00:00:01Z".to_owned(),
+            })
+            .expect("create message");
+        let (events, _) = broadcast::channel(8);
+        let inner = SessionInner {
+            store,
+            events,
+            prompt_locks: std::sync::Mutex::new(HashMap::new()),
+            by_chat: std::sync::Mutex::new(HashMap::new()),
+            pending: std::sync::Mutex::new(HashMap::new()),
+        };
+        (inner, "msg-1".to_owned())
+    }
+
+    #[test]
+    fn text_after_thinking_is_kept_as_visible_answer() {
+        let (inner, message_id) = inner_with_assistant_message();
+        append_thinking_delta(&inner, &message_id, "planning the reply").expect("thinking");
+        append_text_delta(&inner, &message_id, "Hello ").expect("first text");
+        append_text_delta(&inner, &message_id, "world.").expect("second text");
+        finalize_message(&inner, &message_id, MessageStatus::Complete).expect("finalize");
+
+        let message = inner
+            .store
+            .get_message(&message_id)
+            .expect("load")
+            .expect("message");
+        assert_eq!(message.content, "Hello world.");
+
+        let parts = inner.store.message_parts(&message_id).expect("parts");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].kind, MessagePartKind::Thinking);
+        assert_eq!(parts[1].kind, MessagePartKind::Text);
+        assert_ne!(
+            parts[0].ordinal, parts[1].ordinal,
+            "thinking and text must not share an ordinal"
         );
     }
 }
