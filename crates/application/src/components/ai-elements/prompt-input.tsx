@@ -934,26 +934,24 @@ export const PromptInput = ({
 
         const result = onSubmit({ files: convertedFiles, text }, event);
 
-        // Handle both sync and async onSubmit
+        // Submission has been accepted. Clear immediately rather than waiting
+        // for a long-running agent turn to finish.
+        clear();
+        if (usingProvider) {
+          controller.textInput.clear();
+        }
+
+        // Observe async failures without leaving the form submission pending.
         if (result instanceof Promise) {
           try {
             await result;
-            clear();
-            if (usingProvider) {
-              controller.textInput.clear();
-            }
           } catch {
-            // Don't clear on error - user may want to retry
-          }
-        } else {
-          // Sync function completed without throwing, clear inputs
-          clear();
-          if (usingProvider) {
-            controller.textInput.clear();
+            // The submitted data has already been handed to the consumer,
+            // which owns surfacing any delivery failure.
           }
         }
       } catch {
-        // Don't clear on error - user may want to retry
+        // Synchronous failures happen before acceptance, so preserve the draft.
       }
     },
     [usingProvider, controller, files, onSubmit, clear],

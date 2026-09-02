@@ -22,6 +22,23 @@ import { AttachedFiles, AttachedImages } from "./attached-image";
 import { DiffArtifactCard } from "./diff-artifact-card";
 import { StreamingCaret } from "./streaming-caret";
 
+const messageTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+function formatDuration(start: string, end: string): string {
+  const milliseconds = Math.max(
+    0,
+    new Date(end).getTime() - new Date(start).getTime(),
+  );
+  const seconds = Math.round(milliseconds / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
 function reasoningLabel(
   text: string,
   kind: string,
@@ -33,7 +50,8 @@ function reasoningLabel(
       {kind && <span className="font-bold">{kind.replaceAll("_", " ")}</span>}
       {kind === "execute" && verbose && (
         <>
-          <br /><code className="font-mono">{display}</code>
+          <br />
+          <code className="font-mono">{display}</code>
         </>
       )}
       {kind === "thinking" && (
@@ -49,10 +67,12 @@ export function UserMessage({
   block,
   verboseReasoning,
   waitingLabel,
+  agentNames,
 }: {
   block: ChatBlock;
   verboseReasoning: boolean;
   waitingLabel: string;
+  agentNames: Map<string, string>;
 }) {
   if (block.kind === "user") {
     const { message } = block.item;
@@ -163,6 +183,24 @@ export function UserMessage({
             <CircleX className="size-3.5 shrink-0" />
             <span>{interruption}</span>
           </div>
+        )}
+        {!block.streaming && (
+          <footer
+            className="flex items-center gap-1.5 pt-1 font-mono text-[0.65rem] text-muted-foreground/70"
+            title={new Date(block.completedAt).toLocaleString()}
+          >
+            <time dateTime={block.completedAt}>
+              {messageTimeFormatter.format(new Date(block.completedAt))}
+            </time>
+            <span aria-hidden="true">·</span>
+            <span>{formatDuration(block.startedAt, block.completedAt)}</span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {(block.agentId && agentNames.get(block.agentId)) ??
+                block.agentId ??
+                "Unknown ACP"}
+            </span>
+          </footer>
         )}
       </MessageContent>
     </Message>

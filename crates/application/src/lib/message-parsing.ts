@@ -11,19 +11,20 @@ import {
   Wrench,
   type LucideIcon,
   Dot,
-	ListTree,
+  ListTree,
 } from "lucide-react";
 
 const TOOL_KIND_ICONS = {
   read: FileText,
-	read_file: FileText,
+  read_file: FileText,
   edit: Pencil,
   delete: Trash2,
-	list_dir: ListTree,
+  list_dir: ListTree,
   move: Move,
-	run_terminal_command: Terminal,
-  search: Search,  
-	search_replace: Search, grep: Search,
+  run_terminal_command: Terminal,
+  search: Search,
+  search_replace: Search,
+  grep: Search,
   execute: Terminal,
   thinking: Dot,
   fetch: Globe,
@@ -31,20 +32,23 @@ const TOOL_KIND_ICONS = {
 } as Record<ToolKind, LucideIcon>;
 
 export type ToolKind =
-  | "read" | "read_file"
+  | "read"
+  | "read_file"
   | "edit"
   | "delete"
   | "move"
-  | "search" | "search_replace" | "grep"
+  | "search"
+  | "search_replace"
+  | "grep"
   | "execute"
   | "thinking"
   | "fetch"
   | "other";
 
 export function getToolKindIcon(kind?: ToolKind): LucideIcon {
-	console.log("getToolKindIcon kind:", kind);
-	if (!kind) return Wrench;
-	if (!(kind in TOOL_KIND_ICONS)) return Wrench; 
+  console.log("getToolKindIcon kind:", kind);
+  if (!kind) return Wrench;
+  if (!(kind in TOOL_KIND_ICONS)) return Wrench;
   return TOOL_KIND_ICONS[kind];
 }
 
@@ -110,6 +114,9 @@ export type ChatBlock =
       status: string;
       timeline: TimelineStep[];
       diffs: DiffArtifact[];
+      agentId: string | null;
+      startedAt: string;
+      completedAt: string;
     };
 
 type TimelineStep = {
@@ -162,11 +169,14 @@ function toolSummary(part: MessagePart, verbose: boolean) {
     let label = getToolLabel(record);
     if (!label) return null;
     const id = stringed(record.toolCallId, label);
-		if (!record.kind) {
-			record.kind = cleanToolTitle(label).toLocaleLowerCase();
-		}
-		console.log("tool kind: ", record.kind, "label:", label);
-    const kind = stringed(record.kind, stringed(record.label, "other")) as ToolKind;
+    if (!record.kind) {
+      record.kind = cleanToolTitle(label).toLocaleLowerCase();
+    }
+    console.log("tool kind: ", record.kind, "label:", label);
+    const kind = stringed(
+      record.kind,
+      stringed(record.label, "other"),
+    ) as ToolKind;
 
     // In verbose mode, surface rawInput command when title is generic.
     if (verbose) {
@@ -318,6 +328,9 @@ export function groupChatBlocks(
       status: item.message.status,
       timeline: [],
       diffs: [],
+      agentId: item.agent_id,
+      startedAt: item.message.created_at,
+      completedAt: item.message.updated_at,
     });
   }
 
@@ -354,6 +367,14 @@ export function groupChatBlocks(
           : "complete";
     block.timeline = buildTimeline(block.items, block.streaming, verbose);
     block.diffs = block.items.flatMap((item) => diffArtifacts(item.parts));
+    block.agentId = block.items.find((item) => item.agent_id)?.agent_id ?? null;
+    block.startedAt =
+      previous?.kind === "user"
+        ? previous.item.message.created_at
+        : (block.items[0]?.message.created_at ?? block.startedAt);
+    block.completedAt =
+      block.items[block.items.length - 1]?.message.updated_at ??
+      block.startedAt;
   }
 
   return blocks;

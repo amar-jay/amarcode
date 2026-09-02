@@ -138,15 +138,12 @@ export const FileTreeFolder = ({
   children,
   ...props
 }: FileTreeFolderProps) => {
-  const { expandedPaths, togglePath, selectedPath, onSelect } =
-    useContext(FileTreeContext);
+  const { expandedPaths, togglePath } = useContext(FileTreeContext);
   const isExpanded = expandedPaths.has(path);
-  const isSelected = selectedPath === path;
 
   const handleFolderClick = useCallback(() => {
     togglePath(path);
-    onSelect?.(path);
-  }, [onSelect, path, togglePath]);
+  }, [path, togglePath]);
 
   const folderContextValue = useMemo(
     () => ({ isExpanded, name, path }),
@@ -165,7 +162,6 @@ export const FileTreeFolder = ({
           <button
             className={cn(
               "flex w-full cursor-pointer items-center gap-1 rounded border-none bg-transparent px-2 py-1 text-left transition-colors hover:bg-muted/50",
-              isSelected && "bg-muted",
             )}
             aria-expanded={isExpanded}
             onClick={handleFolderClick}
@@ -242,9 +238,10 @@ export const FileTreeFile = ({
       <div
         className={cn(
           "flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors hover:bg-muted/50",
-          isSelected && "bg-muted",
+          isSelected && "bg-accent text-accent-foreground hover:bg-accent",
           className,
         )}
+        aria-selected={isSelected}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         role="treeitem"

@@ -7,16 +7,14 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import {
-  Message,
-  MessageContent,
-} from "@/components/ai-elements/message";
+import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import type { PromptAttachment } from "@/types";
 import AppPromptInput from "./main-prompt-input";
 import { PendingAgentRequestCard } from "./pending-agent-request";
 import {
   activeSessionAtom,
+  agentsAtom,
   applyLiveChatEventAtom,
   bindSessionAgentAtom,
   liveChatAtom,
@@ -32,9 +30,7 @@ import {
   verboseReasoningAtom,
   type SessionMode,
 } from "@/state";
-import {
-  groupChatBlocks,
-} from "@/lib/message-parsing";
+import { groupChatBlocks } from "@/lib/message-parsing";
 import { UserMessage } from "./user-message";
 
 function TurnLoadingIndicator({ label = "Thinking" }: { label?: string }) {
@@ -61,6 +57,7 @@ export function LiveChatScreen() {
   const live = useAtomValue(liveChatAtom);
   const isWorking = useAtomValue(liveChatIsWorkingAtom);
   const verboseReasoning = useAtomValue(verboseReasoningAtom);
+  const agents = useAtomValue(agentsAtom);
   const agent = useAtomValue(selectedAgentAtom) ?? session?.agent;
   const workspacePath = session?.chat.workspace_path ?? "";
 
@@ -99,6 +96,10 @@ export function LiveChatScreen() {
   const blocks = useMemo(
     () => groupChatBlocks(messages, isWorking, verboseReasoning),
     [messages, isWorking, verboseReasoning],
+  );
+  const agentNames = useMemo(
+    () => new Map(agents.map((candidate) => [candidate.id, candidate.name])),
+    [agents],
   );
 
   if (!session || !live || live.chatId !== session.chat.id) {
@@ -162,6 +163,7 @@ export function LiveChatScreen() {
               block={block}
               verboseReasoning={verboseReasoning}
               waitingLabel={waitingLabel}
+              agentNames={agentNames}
             />
           ))}
           {showTurnPlaceholder && <TurnLoadingIndicator label={waitingLabel} />}

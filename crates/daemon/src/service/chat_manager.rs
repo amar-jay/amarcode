@@ -29,6 +29,7 @@ pub struct ChatDetail {
 pub struct MessageDetail {
     pub message: Message,
     pub parts: Vec<MessagePart>,
+    pub agent_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -78,7 +79,17 @@ impl ChatManager {
         let mut detailed = Vec::with_capacity(messages.len());
         for message in messages {
             let parts = self.store.message_parts(&message.id)?;
-            detailed.push(MessageDetail { message, parts });
+            let run = message
+                .agent_run_id
+                .as_deref()
+                .map(|run_id| self.store.get_run(run_id))
+                .transpose()?
+                .flatten();
+            detailed.push(MessageDetail {
+                message,
+                parts,
+                agent_id: run.as_ref().map(|run| run.agent_id.clone()),
+            });
         }
         Ok(ChatDetail {
             chat,

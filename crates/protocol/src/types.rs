@@ -145,6 +145,7 @@ pub struct MessagePart {
 pub struct MessageDetail {
     pub message: Message,
     pub parts: Vec<MessagePart>,
+    pub agent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

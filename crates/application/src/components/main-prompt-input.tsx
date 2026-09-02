@@ -63,6 +63,31 @@ const modeIcons: Record<SessionMode, typeof Ruler> = {
   ask: MessageCircle,
 };
 
+function AgentLogo({ agentId }: { agentId: string }) {
+  const normalizedId = agentId.toLowerCase();
+  const source = normalizedId.includes("codex")
+    ? "/agents/openai.svg"
+    : normalizedId.includes("claude")
+      ? "/agents/claude.svg"
+      : normalizedId.includes("copilot")
+        ? "/agents/github-copilot.svg"
+        : normalizedId.includes("grok")
+          ? "/agents/grok.svg"
+          : null;
+
+  return source ? (
+    <img
+      src={source}
+      alt=""
+      className="size-4 shrink-0 object-contain dark:invert"
+    />
+  ) : (
+    <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+      <BotIcon className="size-4" aria-hidden="true" />
+    </span>
+  );
+}
+
 function PromptAttachmentPreviews() {
   const attachments = usePromptInputAttachments();
   if (attachments.files.length === 0) return null;
@@ -109,6 +134,7 @@ export function AgentSelection({
       }}
       className="w-full cursor-pointer data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
     >
+      <AgentLogo agentId={agent.id} />
       <span>{stripAcpSuffix(agent.name)}</span>
 
       {!agent.available && (
@@ -132,7 +158,7 @@ export function AgentSelection({
         onClick={() => setOpen(true)}
         className="w-fit"
       >
-        <BotIcon size={16} />
+        <AgentLogo agentId={selectedAgent} />
         {stripAcpSuffix(selectedName)}
       </PromptInputButton>
 

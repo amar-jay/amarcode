@@ -1,5 +1,11 @@
 import { useAtom } from "jotai";
-import { FileDiff, GitBranch, RefreshCw, XIcon } from "lucide-react";
+import {
+  FileDiff,
+  GitBranch,
+  ListFilter,
+  RefreshCw,
+  XIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { daemonApi, WorkspaceDiff, type WorkspaceChange } from "@/api";
 import { sidePanelOpenAtom } from "@/state";
@@ -10,7 +16,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "./ui/sheet";
-import { useWorkspaceFileTree, WorkspaceFileTree } from "./workspace-file-tree";
+import {
+  useWorkspaceFileTree,
+  WorkspaceChangedFiles,
+  WorkspaceFileTree,
+} from "./workspace-file-tree";
 import { WorkspaceDiffViewer } from "./workspace-diff-viewer";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
@@ -29,6 +39,10 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [dirName, setDirName] = useState("No workspace selected");
   const [branchName, setBranchName] = useState<string | null>(null);
   const [changes, setChanges] = useState<WorkspaceChange[]>([]);
+  const [changesLoading, setChangesLoading] = useState(false);
+  const [navigatorView, setNavigatorView] = useState<"files" | "changes">(
+    "files",
+  );
   const [fileSearchQuery, setFileSearchQuery] = useState("");
   useEffect(() => {
     if (!workspacePath) {
@@ -61,10 +75,13 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
       setChanges([]);
       return;
     }
+    setChangesLoading(true);
     try {
       setChanges(await daemonApi.listWorkspaceChanges(workspacePath));
     } catch {
       setChanges([]);
+    } finally {
+      setChangesLoading(false);
     }
   }, [workspacePath]);
 
@@ -80,7 +97,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [diff, setDiff] = useState<WorkspaceDiff>();
 
   return (
-    <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+    <Sheet open={sheetOpen} onOpenChange={setSheetOpen} modal={false}>
       {/* Keep resize drags from being treated as outside clicks by the sheet. */}
       <SheetContent
         side="right"
@@ -93,33 +110,24 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         )}
         showCloseButton={false}
       >
-        <SheetHeader className="relative px-3 py-1 flex-row items-center select-none">
-          <SheetTitle className="text-xs font-bold flex flex-row items-center gap-1">
-            <span>{dirName || ""}</span>
+        <SheetHeader className="relative flex-row items-center gap-2 px-3 py-1 select-none">
+          <SheetTitle className="flex min-w-0 flex-1 flex-row items-center gap-1 overflow-hidden text-xs font-bold">
+            <span className="truncate">{dirName || ""}</span>
             {branchName && (
               <span
-                className="inline-flex max-w-40 items-center gap-1 rounded bg-muted px-1.5 py-[3.5px] font-mono text-[0.65rem] font-normal text-muted-foreground ml-4"
+                className="inline-flex min-w-0 max-w-24 shrink items-center gap-1 rounded bg-muted px-1.5 py-[3.5px] font-mono text-[0.65rem] font-normal text-muted-foreground"
                 title={`Git branch: ${branchName}`}
               >
                 <GitBranch className="size-3 shrink-0" />
                 <span className="truncate">{branchName}</span>
               </span>
             )}
-            {changes.length > 0 && (
-              <p
-                className="rounded bg-muted px-1.5 py-1 text-[0.6rem] max-w-min whitespace-nowrap"
-                title={"" + changes.length + " changes"}
-              >
-                ~ {changes.length}
-              </p>
-            )}
           </SheetTitle>
-          <div className="flex-1" />
           {workspaceFileTree.selectedPath && (
-            <>
+            <div className="flex min-w-0 flex-1 items-center gap-1">
               <FileDiff
                 className={cn(
-                  "size-4 text-muted-foreground",
+                  "size-4 shrink-0 text-muted-foreground",
                   diff?.status === "M" && diff?.comparison === "Unstaged"
                     ? "text-orange-500"
                     : diff?.status === "M" && diff?.comparison === "Staged"
@@ -127,44 +135,71 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                       : "",
                 )}
               />
-              <span className="truncate font-mono text-xs">
+              <span className="min-w-0 truncate font-mono text-xs">
                 {workspaceFileTree.selectedPath || ""}
               </span>
-            </>
+            </div>
           )}
-
-          <div className="flex-1">
+          <div className="ml-auto flex shrink-0 items-center">
+            <Button
+              className="gap-1 px-2"
+              variant={navigatorView === "changes" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() =>
+                setNavigatorView((view) =>
+                  view === "changes" ? "files" : "changes",
+                )
+              }
+              aria-pressed={navigatorView === "changes"}
+              aria-label={
+                navigatorView === "changes"
+                  ? "Show all workspace files"
+                  : "Show changed files"
+              }
+              title={
+                navigatorView === "changes"
+                  ? "Show all files"
+                  : "Show changed files"
+              }
+            >
+              <ListFilter className="size-3.5" />
+              <span className="font-mono text-[0.65rem] tabular-nums">
+                {changes.length}
+              </span>
+            </Button>
             <WorkspaceFileSearch
               active={sheetOpen}
               disabled={!workspaceFileTree.validWorkspace}
               value={fileSearchQuery}
               onValueChange={setFileSearchQuery}
             />
+            <Button
+              disabled={
+                !workspaceFileTree.validWorkspace || workspaceFileTree.isLoading
+              }
+              onClick={() => {
+                void workspaceFileTree.refresh();
+                void refreshChanges();
+              }}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <RefreshCw
+                className={cn(
+                  "size-4",
+                  workspaceFileTree.isLoading && "animate-spin",
+                )}
+              />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setSheetOpen(false)}
+            >
+              <XIcon className="size-4" />
+              <span className="sr-only">Close</span>
+            </Button>
           </div>
-
-          <Button
-            disabled={
-              !workspaceFileTree.validWorkspace || workspaceFileTree.isLoading
-            }
-            onClick={() => {
-              void workspaceFileTree.refresh();
-              void refreshChanges();
-            }}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <RefreshCw
-              className={workspaceFileTree.isLoading ? "animate-spin" : ""}
-            />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => setSheetOpen(false)}
-          >
-            <XIcon />
-            <span className="sr-only">Close</span>
-          </Button>
         </SheetHeader>
 
         <ResizablePanelGroup
@@ -178,16 +213,27 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
             groupResizeBehavior="preserve-pixel-size"
           >
             <div className="flex size-full min-h-0 flex-col">
-              <WorkspaceFileTree
-                {...workspaceFileTree}
-                changes={changesByPath}
-                searchQuery={fileSearchQuery}
-              />
+              {navigatorView === "files" ? (
+                <WorkspaceFileTree
+                  {...workspaceFileTree}
+                  changes={changesByPath}
+                  searchQuery={fileSearchQuery}
+                />
+              ) : (
+                <WorkspaceChangedFiles
+                  changes={changes}
+                  isLoading={changesLoading}
+                  searchQuery={fileSearchQuery}
+                  selectedPath={workspaceFileTree.selectedPath}
+                  setSelectedPath={workspaceFileTree.setSelectedPath}
+                  validWorkspace={workspaceFileTree.validWorkspace}
+                />
+              )}
             </div>
           </ResizablePanel>
           <ResizableHandle withHandle />
           {!!workspaceFileTree.selectedPath && (
-            <ResizablePanel minSize="0px">
+            <ResizablePanel minSize="0px" className="min-h-0 overflow-hidden">
               <WorkspaceDiffViewer
                 selectedPath={workspaceFileTree.selectedPath}
                 workspacePath={workspacePath}

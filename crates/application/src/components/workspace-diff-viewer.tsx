@@ -86,6 +86,7 @@ function DiffCanvas({ diff }: { diff: WorkspaceDiff }) {
 
   useEffect(() => {
     if (!host.current) return;
+    const container = host.current;
     const editor = new EditorView({
       state: EditorState.create({
         doc: diff.after,
@@ -104,12 +105,35 @@ function DiffCanvas({ diff }: { diff: WorkspaceDiff }) {
               })),
         ],
       }),
-      parent: host.current,
+      parent: container,
     });
-    return () => editor.destroy();
+    const resetScroll = () => {
+      container.scrollTo({ left: 0, top: 0 });
+      let ancestor = container.parentElement;
+      while (ancestor && ancestor.dataset.slot !== "sheet-content") {
+        ancestor.scrollTo({ left: 0, top: 0 });
+        ancestor = ancestor.parentElement;
+      }
+      editor.scrollDOM.scrollTo({ left: 0, top: 0 });
+      editor.dispatch({
+        effects: EditorView.scrollIntoView(0, { x: "start", y: "start" }),
+      });
+    };
+    resetScroll();
+    const animationFrame = window.requestAnimationFrame(resetScroll);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      editor.destroy();
+    };
   }, [diff]);
 
-  return <div className="min-h-0 flex-1 overflow-auto" ref={host} />;
+  return (
+    <div
+      className="min-h-0 flex-1 overflow-auto"
+      style={{ overflowAnchor: "none" }}
+      ref={host}
+    />
+  );
 }
 
 export function WorkspaceDiffViewer({
@@ -159,7 +183,7 @@ export function WorkspaceDiffViewer({
 
   return (
     <section
-      className="flex min-w-0 flex-1 flex-col border-l"
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l"
       aria-label="Uncommitted file diff"
     >
       {/* <header className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
@@ -178,7 +202,7 @@ export function WorkspaceDiffViewer({
           <LoaderCircle className="size-4 animate-spin" /> Loading diff
         </div>
       ) : diff ? (
-        <DiffCanvas diff={diff} />
+        <DiffCanvas key={diff.path} diff={diff} />
       ) : (
         <div className="flex flex-1 items-center justify-center px-8 text-center text-xs text-muted-foreground">
           {error ?? "Select a file to preview it here."}

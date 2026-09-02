@@ -25,7 +25,7 @@ export type Message = { id: string, chat_id: string, agent_run_id: string | null
 
 export type MessagePart = { message_id: string, ordinal: number, kind: MessagePartKind, content_json: string, };
 
-export type MessageDetail = { message: Message, parts: Array<MessagePart>, };
+export type MessageDetail = { message: Message, parts: Array<MessagePart>, agent_id: string | null, };
 
 export type ChatDetail = { chat: Chat, messages: Array<MessageDetail>, };
 

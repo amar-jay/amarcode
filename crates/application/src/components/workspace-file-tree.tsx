@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  FileIcon,
-  FileQuestion,
-  FolderOpen,
-  LoaderCircle,
-  RefreshCw,
-} from "lucide-react";
+import { FileIcon, LoaderCircle } from "lucide-react";
 import { daemonApi, type WorkspaceChange } from "@/api";
 import {
   FileTree,
@@ -15,6 +9,7 @@ import {
   FileTreeName,
 } from "@/components/ai-elements/file-tree";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 type FileNode = {
@@ -251,6 +246,119 @@ export function WorkspaceFileTree({
           </span>
         </div>
       )} */}
+    </section>
+  );
+}
+
+const changeLabel = (change: WorkspaceChange) => {
+  if (change.staged && change.unstaged) return "staged + unstaged";
+  if (change.staged) return "staged";
+  return "unstaged";
+};
+
+export function WorkspaceChangedFiles({
+  changes,
+  isLoading,
+  searchQuery,
+  selectedPath,
+  setSelectedPath,
+  validWorkspace,
+}: {
+  changes: WorkspaceChange[];
+  isLoading: boolean;
+  searchQuery: string;
+  selectedPath?: string;
+  setSelectedPath: (path: string) => void;
+  validWorkspace: boolean;
+}) {
+  const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
+  const visibleChanges = useMemo(
+    () =>
+      normalizedQuery
+        ? changes.filter((change) =>
+            change.path.toLocaleLowerCase().includes(normalizedQuery),
+          )
+        : changes,
+    [changes, normalizedQuery],
+  );
+
+  return (
+    <section
+      className="flex min-h-0 flex-1 flex-col"
+      aria-label="Changed files"
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-5 pt-1">
+        {!validWorkspace ? (
+          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+            Choose a workspace to see changed files.
+          </p>
+        ) : isLoading && changes.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 px-2 py-6 text-xs text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" /> Loading changes
+          </div>
+        ) : visibleChanges.length === 0 && normalizedQuery ? (
+          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+            No changed files match your search.
+          </p>
+        ) : visibleChanges.length === 0 ? (
+          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+            No uncommitted changes.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-0.5" role="tree">
+            {visibleChanges.map((change) => {
+              const separator = change.path.lastIndexOf("/");
+              const name = change.path.slice(separator + 1);
+              const directory =
+                separator === -1
+                  ? "Project root"
+                  : change.path.slice(0, separator);
+              const selected = selectedPath === change.path;
+
+              return (
+                <button
+                  key={change.path}
+                  type="button"
+                  role="treeitem"
+                  aria-selected={selected}
+                  className={cn(
+                    "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    selected &&
+                      "bg-accent text-accent-foreground hover:bg-accent",
+                  )}
+                  onClick={() => setSelectedPath(change.path)}
+                  title={change.path}
+                >
+                  <span
+                    className={cn(
+                      "flex size-5 shrink-0 items-center justify-center rounded font-mono text-[0.62rem] font-bold",
+                      change.status === "D"
+                        ? "bg-red-500/10 text-red-500"
+                        : change.status === "A"
+                          ? "bg-emerald-500/10 text-emerald-500"
+                          : "bg-amber-500/10 text-amber-500",
+                    )}
+                    aria-label={`Status ${change.status}`}
+                  >
+                    {change.status}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono text-xs text-foreground">
+                      {name}
+                    </span>
+                    <span className="block truncate font-mono text-[0.65rem] text-muted-foreground">
+                      {directory}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[0.6rem] text-muted-foreground opacity-70 group-hover:opacity-100">
+                    {changeLabel(change)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

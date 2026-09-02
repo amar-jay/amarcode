@@ -147,6 +147,7 @@ fn message_detail_json(detail: &MessageDetail) -> Result<Value> {
     Ok(json!({
         "message": detail.message,
         "parts": detail.parts,
+        "agent_id": detail.agent_id,
     }))
 }
 

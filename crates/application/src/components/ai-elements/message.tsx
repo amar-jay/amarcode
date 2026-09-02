@@ -330,6 +330,9 @@ export const MessageResponse = memo(
       )}
       plugins={streamdownPlugins}
       linkSafety={tauriLinkSafety}
+      controls={{
+        table: { copy: true, download: false, fullscreen: false },
+      }}
       // Dual theme so shiki tokens track light/dark app chrome.
       shikiTheme={["github-light", "github-dark"]}
       lineNumbers
