@@ -2,6 +2,7 @@ import { daemonApi } from "@/api";
 import { MessageDetail, MessagePart } from "@/types";
 import { FileTextIcon, LoaderCircle } from "lucide-react";
 import { useState, useEffect } from "react";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 
 export type StoredImagePart = {
   attachmentId: string;
@@ -18,6 +19,7 @@ function StoredImage({
 }) {
   const [source, setSource] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -47,11 +49,63 @@ function StoredImage({
   return (
     <div className="h-40 max-w-64 overflow-hidden rounded-lg border bg-muted">
       {source ? (
-        <img
-          alt={image.filename || "Pasted image"}
-          className="size-full object-contain"
-          src={source}
-        />
+        <Dialog open={expanded} onOpenChange={setExpanded}>
+          <DialogTrigger asChild>
+            <button
+              type="button"
+              className="size-full cursor-zoom-in rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              aria-label={`Expand ${image.filename || "attached image"}`}
+            >
+              <img
+                alt={image.filename || "Pasted image"}
+                className="size-full object-contain"
+                src={source}
+              />
+            </button>
+          </DialogTrigger>
+          <DialogContent
+            className="top-[calc(50%+1.125rem)] flex h-[85dvh] w-[90vw] max-w-none items-center justify-center overflow-hidden bg-transparent p-6 shadow-none ring-0 sm:max-w-none [&_[data-slot=dialog-close]]:top-3 [&_[data-slot=dialog-close]]:right-3 [&_[data-slot=dialog-close]]:bg-black/50 [&_[data-slot=dialog-close]]:text-white"
+            onPointerDown={(event) => {
+              const target = event.target;
+              if (!(target instanceof HTMLImageElement)) {
+                if (target === event.currentTarget) setExpanded(false);
+                return;
+              }
+
+              const bounds = target.getBoundingClientRect();
+              const imageRatio = target.naturalWidth / target.naturalHeight;
+              const boxRatio = bounds.width / bounds.height;
+              const renderedWidth =
+                imageRatio > boxRatio
+                  ? bounds.width
+                  : bounds.height * imageRatio;
+              const renderedHeight =
+                imageRatio > boxRatio
+                  ? bounds.width / imageRatio
+                  : bounds.height;
+              const left = bounds.left + (bounds.width - renderedWidth) / 2;
+              const top = bounds.top + (bounds.height - renderedHeight) / 2;
+
+              if (
+                event.clientX < left ||
+                event.clientX > left + renderedWidth ||
+                event.clientY < top ||
+                event.clientY > top + renderedHeight
+              ) {
+                setExpanded(false);
+              }
+            }}
+          >
+            <DialogTitle className="sr-only">
+              {image.filename || "Attached image"}
+            </DialogTitle>
+            <img
+              alt={image.filename || "Pasted image"}
+              className="size-full object-contain"
+              src={source}
+            />
+          </DialogContent>
+        </Dialog>
       ) : (
         <div className="flex size-full items-center justify-center">
           <LoaderCircle className="size-4 animate-spin text-muted-foreground" />

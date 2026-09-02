@@ -7,6 +7,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { daemonApi, WorkspaceDiff, type WorkspaceChange } from "@/api";
 import { sidePanelOpenAtom } from "@/state";
 import {
@@ -40,6 +41,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [branchName, setBranchName] = useState<string | null>(null);
   const [changes, setChanges] = useState<WorkspaceChange[]>([]);
   const [changesLoading, setChangesLoading] = useState(false);
+  const [changingStagePath, setChangingStagePath] = useState<string>();
   const [navigatorView, setNavigatorView] = useState<"files" | "changes">(
     "files",
   );
@@ -95,6 +97,46 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   );
 
   const [diff, setDiff] = useState<WorkspaceDiff>();
+
+  const stageFile = useCallback(
+    async (path: string) => {
+      setChangingStagePath(path);
+      try {
+        await daemonApi.stageWorkspaceFile(workspacePath, path);
+        await refreshChanges();
+        if (workspaceFileTree.selectedPath === path) {
+          setDiff(await daemonApi.getWorkspaceFileDiff(workspacePath, path));
+        }
+      } catch (cause) {
+        toast.error(
+          cause instanceof Error ? cause.message : "Could not stage file.",
+        );
+      } finally {
+        setChangingStagePath(undefined);
+      }
+    },
+    [refreshChanges, workspaceFileTree.selectedPath, workspacePath],
+  );
+
+  const unstageFile = useCallback(
+    async (path: string) => {
+      setChangingStagePath(path);
+      try {
+        await daemonApi.unstageWorkspaceFile(workspacePath, path);
+        await refreshChanges();
+        if (workspaceFileTree.selectedPath === path) {
+          setDiff(await daemonApi.getWorkspaceFileDiff(workspacePath, path));
+        }
+      } catch (cause) {
+        toast.error(
+          cause instanceof Error ? cause.message : "Could not unstage file.",
+        );
+      } finally {
+        setChangingStagePath(undefined);
+      }
+    },
+    [refreshChanges, workspaceFileTree.selectedPath, workspacePath],
+  );
 
   return (
     <Sheet open={sheetOpen} onOpenChange={setSheetOpen} modal={false}>
@@ -226,6 +268,9 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                   searchQuery={fileSearchQuery}
                   selectedPath={workspaceFileTree.selectedPath}
                   setSelectedPath={workspaceFileTree.setSelectedPath}
+                  onStage={stageFile}
+                  onUnstage={unstageFile}
+                  changingStagePath={changingStagePath}
                   validWorkspace={workspaceFileTree.validWorkspace}
                 />
               )}

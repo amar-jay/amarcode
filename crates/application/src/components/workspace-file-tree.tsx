@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileIcon, LoaderCircle } from "lucide-react";
+import { FileIcon, LoaderCircle, Minus, Plus } from "lucide-react";
 import { daemonApi, type WorkspaceChange } from "@/api";
 import {
   FileTree,
@@ -262,6 +262,9 @@ export function WorkspaceChangedFiles({
   searchQuery,
   selectedPath,
   setSelectedPath,
+  onStage,
+  onUnstage,
+  changingStagePath,
   validWorkspace,
 }: {
   changes: WorkspaceChange[];
@@ -269,6 +272,9 @@ export function WorkspaceChangedFiles({
   searchQuery: string;
   selectedPath?: string;
   setSelectedPath: (path: string) => void;
+  onStage: (path: string) => Promise<void>;
+  onUnstage: (path: string) => Promise<void>;
+  changingStagePath?: string;
   validWorkspace: boolean;
 }) {
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
@@ -316,9 +322,8 @@ export function WorkspaceChangedFiles({
               const selected = selectedPath === change.path;
 
               return (
-                <button
+                <div
                   key={change.path}
-                  type="button"
                   role="treeitem"
                   aria-selected={selected}
                   className={cn(
@@ -326,34 +331,62 @@ export function WorkspaceChangedFiles({
                     selected &&
                       "bg-accent text-accent-foreground hover:bg-accent",
                   )}
-                  onClick={() => setSelectedPath(change.path)}
                   title={change.path}
                 >
-                  <span
-                    className={cn(
-                      "flex size-5 shrink-0 items-center justify-center rounded font-mono text-[0.62rem] font-bold",
-                      change.status === "D"
-                        ? "bg-red-500/10 text-red-500"
-                        : change.status === "A"
-                          ? "bg-emerald-500/10 text-emerald-500"
-                          : "bg-amber-500/10 text-amber-500",
-                    )}
-                    aria-label={`Status ${change.status}`}
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
+                    onClick={() => setSelectedPath(change.path)}
                   >
-                    {change.status}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-mono text-xs text-foreground">
-                      {name}
+                    <span
+                      className={cn(
+                        "flex size-6 shrink-0 items-center justify-center rounded font-mono text-xs font-bold",
+                        change.status === "D"
+                          ? "text-red-500"
+                          : change.status === "A"
+                            ? "text-emerald-500"
+                            : "text-amber-500",
+                      )}
+                      aria-label={`Status ${change.status}`}
+                    >
+                      {change.status}
                     </span>
-                    <span className="block truncate font-mono text-[0.65rem] text-muted-foreground">
-                      {directory}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-mono text-xs text-foreground">
+                        {name}
+                      </span>
+                      <span className="block truncate font-mono text-[0.65rem] text-muted-foreground">
+                        {directory}
+                      </span>
                     </span>
-                  </span>
-                  <span className="shrink-0 text-[0.6rem] text-muted-foreground opacity-70 group-hover:opacity-100">
-                    {changeLabel(change)}
-                  </span>
-                </button>
+                  </button>
+                  {change.unstaged || change.staged ? (
+                    <button
+                      type="button"
+                      className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-70 outline-none transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                      disabled={changingStagePath === change.path}
+                      aria-label={`${change.unstaged ? "Stage" : "Unstage"} ${change.path}`}
+                      title={change.unstaged ? "Stage file" : "Unstage file"}
+                      onClick={() =>
+                        void (change.unstaged
+                          ? onStage(change.path)
+                          : onUnstage(change.path))
+                      }
+                    >
+                      {changingStagePath === change.path ? (
+                        <LoaderCircle className="size-3.5 animate-spin" />
+                      ) : change.unstaged ? (
+                        <Plus className="size-4" />
+                      ) : (
+                        <Minus className="size-4" />
+                      )}
+                    </button>
+                  ) : (
+                    <span className="shrink-0 text-[0.6rem] text-muted-foreground opacity-70 group-hover:opacity-100">
+                      {changeLabel(change)}
+                    </span>
+                  )}
+                </div>
               );
             })}
           </div>

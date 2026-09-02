@@ -436,6 +436,36 @@ fn list_workspace_changes(workspace_path: String) -> Result<Vec<WorkspaceChange>
 }
 
 #[tauri::command]
+fn stage_workspace_file(workspace_path: String, relative_path: String) -> Result<(), String> {
+    let root = PathBuf::from(workspace_path);
+    if !root.is_dir() {
+        return Err("The selected workspace folder is unavailable.".to_string());
+    }
+    workspace_relative_path(&root, &relative_path)?;
+    let output = git_output(&root, &["add", "--", &relative_path])?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[tauri::command]
+fn unstage_workspace_file(workspace_path: String, relative_path: String) -> Result<(), String> {
+    let root = PathBuf::from(workspace_path);
+    if !root.is_dir() {
+        return Err("The selected workspace folder is unavailable.".to_string());
+    }
+    workspace_relative_path(&root, &relative_path)?;
+    let output = git_output(&root, &["restore", "--staged", "--", &relative_path])?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[tauri::command]
 fn get_workspace_file_diff(
     workspace_path: String,
     relative_path: String,
@@ -562,6 +592,8 @@ pub fn run() {
             list_workspace_files,
             get_workspace_info,
             list_workspace_changes,
+            stage_workspace_file,
+            unstage_workspace_file,
             get_workspace_file_diff,
         ])
         .build(tauri::generate_context!())

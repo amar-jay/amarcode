@@ -160,6 +160,7 @@ export function LiveChatScreen() {
         <ConversationContent className="mx-auto w-full max-w-3xl gap-2 py-8">
           {blocks.map((block) => (
             <UserMessage
+              key={block.key}
               block={block}
               verboseReasoning={verboseReasoning}
               waitingLabel={waitingLabel}
