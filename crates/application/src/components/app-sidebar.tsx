@@ -27,6 +27,7 @@ import type { Chat } from "@/types";
 
 type ChatSidebarProps = {
   activeChatId: string | null;
+  runningChatIds: ReadonlySet<string>;
   chats: Chat[];
   onNewChat: () => void;
   onSelectChat: (chatId: string) => void;
@@ -36,6 +37,7 @@ type ChatSidebarProps = {
 
 export function AppSidebar({
   activeChatId,
+  runningChatIds,
   chats,
   onNewChat,
   onSelectChat,
@@ -89,6 +91,7 @@ export function AppSidebar({
         <SidebarContent className="px-2 py-2">
           <RecentChats
             activeChatId={activeChatId}
+            runningChatIds={runningChatIds}
             chats={chats}
             onSelectChat={onSelectChat}
             onDeleteChat={setChatToDelete}

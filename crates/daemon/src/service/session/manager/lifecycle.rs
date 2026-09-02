@@ -14,7 +14,7 @@ impl SessionManager {
             guard.remove(chat_id)
         };
 
-        let Some(live) = live else {
+        let Some(mut live) = live else {
             return Err(Error::msg(format!("no live run for chat: {chat_id}")));
         };
 
@@ -30,6 +30,14 @@ impl SessionManager {
         );
         // Prefer session/close when the agent advertised it; cancel is enough for now.
         let _ = live.client.kill();
+
+        for message_id in take_streaming_messages_from_live(&mut live) {
+            finalize_message(&self.inner, &message_id, MessageStatus::Interrupted)?;
+            self.emit(EditorEvent::MessageUpdated {
+                message_id,
+                status: MessageStatus::Interrupted,
+            });
+        }
 
         if let Some(user_message_id) = active_user_message_id {
             self.emit(EditorEvent::TurnUpdated {

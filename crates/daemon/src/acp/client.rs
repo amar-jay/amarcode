@@ -22,9 +22,48 @@ use std::{
     time::{Duration, Instant},
 };
 
+use serde::{Serialize, Serializer};
 use serde_json::{json, Value};
 
 use crate::protocol::{AgentEventMethod, AgentRpcMethod, RpcDirection, RpcEnvelope};
+
+/// JSON-RPC request id. ACP uses numbers; Grok also emits string ids
+/// (`skills-reload`, and occasionally agent-initiated requests).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RpcId {
+    Number(u64),
+    String(String),
+}
+
+impl RpcId {
+    fn from_value(value: &Value) -> Option<Self> {
+        if let Some(number) = value.as_u64() {
+            return Some(Self::Number(number));
+        }
+        if let Some(number) = value.as_i64().filter(|number| *number >= 0) {
+            return Some(Self::Number(number as u64));
+        }
+        value.as_str().map(|id| Self::String(id.to_owned()))
+    }
+}
+
+impl fmt::Display for RpcId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Number(id) => write!(formatter, "{id}"),
+            Self::String(id) => write!(formatter, "{id}"),
+        }
+    }
+}
+
+impl Serialize for RpcId {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Number(id) => serializer.serialize_u64(*id),
+            Self::String(id) => serializer.serialize_str(id),
+        }
+    }
+}
 
 pub type AcpResult<T> = Result<T, AcpError>;
 
@@ -100,7 +139,7 @@ pub enum AcpInbound {
         envelope: RpcEnvelope,
     },
     Request {
-        id: u64,
+        id: RpcId,
         method: String,
         params: Value,
     },
@@ -251,13 +290,13 @@ impl AcpClient {
     }
 
     /// Answers an agent-initiated JSON-RPC request delivered as `AcpInbound::Request`.
-    pub fn respond(&self, id: u64, result: Value) -> AcpResult<()> {
+    pub fn respond(&self, id: RpcId, result: Value) -> AcpResult<()> {
         self.write_message(&json!({ "jsonrpc": "2.0", "id": id, "result": result }))
     }
 
     pub fn respond_error(
         &self,
-        id: u64,
+        id: RpcId,
         code: i64,
         message: &str,
         data: Option<Value>,
@@ -366,7 +405,7 @@ fn route_incoming(
 
     if let Some(method) = message.get("method").and_then(Value::as_str) {
         let params = message.get("params").cloned().unwrap_or(Value::Null);
-        if let Some(id) = message.get("id").and_then(Value::as_u64) {
+        if let Some(id) = message.get("id").and_then(RpcId::from_value) {
             let _ = inbound_sender.send(AcpInbound::Request {
                 id,
                 method: method.into(),
@@ -385,11 +424,18 @@ fn route_incoming(
         return;
     }
 
-    let Some(id) = message.get("id").and_then(Value::as_u64) else {
+    let Some(id) = message.get("id").and_then(RpcId::from_value) else {
         let _ = inbound_sender.send(AcpInbound::InvalidMessage {
-            error: "message has neither method nor numeric id".into(),
+            error: "message has neither method nor id".into(),
             raw: raw.into(),
         });
+        return;
+    };
+
+    let RpcId::Number(id) = id else {
+        // Grok emits unsolicited string-id results such as `skills-reload`.
+        // They are not correlated with daemon requests; activity was already
+        // recorded above so the prompt idle timer still resets.
         return;
     };
 
@@ -608,5 +654,89 @@ mod tests {
             pending_receiver.recv().expect("activity notification"),
             PendingEvent::Activity(_)
         ));
+    }
+
+    #[test]
+    fn grok_string_id_results_are_ignored_instead_of_invalid() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (inbound_sender, inbound_receiver) = mpsc::channel();
+
+        route_incoming(
+            r#"{"jsonrpc":"2.0","id":"skills-reload","result":{"result":{"reloaded":1}}}"#,
+            &pending,
+            &inbound_sender,
+        );
+
+        assert!(
+            inbound_receiver.try_recv().is_err(),
+            "vendor string-id results must not surface as invalid ACP messages"
+        );
+    }
+
+    #[test]
+    fn grok_string_id_results_still_count_as_agent_activity() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (pending_sender, pending_receiver) = mpsc::channel();
+        pending.lock().expect("pending").insert(3, pending_sender);
+        let (inbound_sender, _inbound_receiver) = mpsc::channel();
+
+        route_incoming(
+            r#"{"jsonrpc":"2.0","id":"skills-reload","result":{"result":{"reloaded":1}}}"#,
+            &pending,
+            &inbound_sender,
+        );
+
+        assert!(matches!(
+            pending_receiver.recv().expect("activity notification"),
+            PendingEvent::Activity(_)
+        ));
+    }
+
+    #[test]
+    fn string_id_requests_are_forwarded_with_the_same_id() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (inbound_sender, inbound_receiver) = mpsc::channel();
+
+        route_incoming(
+            r#"{"jsonrpc":"2.0","id":"perm-1","method":"session/request_permission","params":{"tool":"list_dir"}}"#,
+            &pending,
+            &inbound_sender,
+        );
+
+        match inbound_receiver.recv().expect("string-id request") {
+            AcpInbound::Request { id, method, params } => {
+                assert_eq!(id, RpcId::String("perm-1".into()));
+                assert_eq!(method, "session/request_permission");
+                assert_eq!(params["tool"], "list_dir");
+            }
+            other => panic!("unexpected inbound message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grok_vendor_notifications_keep_their_method_name() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (inbound_sender, inbound_receiver) = mpsc::channel();
+
+        route_incoming(
+            r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call_delta_chunk","name":"list_dir"}}}"#,
+            &pending,
+            &inbound_sender,
+        );
+
+        match inbound_receiver.recv().expect("vendor notification") {
+            AcpInbound::Notification { event, envelope } => {
+                assert_eq!(
+                    event,
+                    AgentEventMethod::Other("_x.ai/session_notification".into())
+                );
+                assert_eq!(envelope.method, "_x.ai/session_notification");
+                assert_eq!(
+                    envelope.payload["update"]["sessionUpdate"],
+                    "tool_call_delta_chunk"
+                );
+            }
+            other => panic!("unexpected inbound message: {other:?}"),
+        }
     }
 }

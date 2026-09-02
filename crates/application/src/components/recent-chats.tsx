@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, Trash2, X } from "lucide-react";
+import { LoaderCircle, Search, Trash2, X } from "lucide-react";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -42,6 +42,7 @@ function formatFullDate(timestamp: string) {
 
 type RecentChatsProps = {
   activeChatId: string | null;
+  runningChatIds: ReadonlySet<string>;
   chats: Chat[];
   onSelectChat: (chatId: string) => void;
   onDeleteChat: (chat: Chat) => void;
@@ -49,6 +50,7 @@ type RecentChatsProps = {
 
 export function RecentChats({
   activeChatId,
+  runningChatIds,
   chats,
   onSelectChat,
   onDeleteChat,
@@ -150,13 +152,20 @@ export function RecentChats({
               >
                 <span className="min-w-0 flex-1 truncate">{chat.title}</span>
               </SidebarMenuButton>
-              <time
-                dateTime={chat.updated_at}
-                title={formatFullDate(chat.updated_at)}
-                className="pointer-events-none absolute top-1/2 right-1 hidden w-5 -translate-y-1/2 text-center text-[10px] leading-none font-normal tabular-nums text-sidebar-foreground/45 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 group-data-[collapsible=icon]:hidden! md:block motion-reduce:transition-none"
-              >
-                {formatRelativeTime(chat.updated_at, now)}
-              </time>
+              {runningChatIds.has(chat.id) ? (
+                <LoaderCircle
+                  aria-label="Running"
+                  className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 animate-spin text-sidebar-foreground/55 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 group-data-[collapsible=icon]:hidden! motion-reduce:animate-none motion-reduce:transition-none"
+                />
+              ) : (
+                <time
+                  dateTime={chat.updated_at}
+                  title={formatFullDate(chat.updated_at)}
+                  className="pointer-events-none absolute top-1/2 right-1 hidden w-5 -translate-y-1/2 text-center text-[10px] leading-none font-normal tabular-nums text-sidebar-foreground/45 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 group-data-[collapsible=icon]:hidden! md:block motion-reduce:transition-none"
+                >
+                  {formatRelativeTime(chat.updated_at, now)}
+                </time>
+              )}
               <SidebarMenuAction
                 showOnHover
                 aria-label={`Delete ${chat.title}`}

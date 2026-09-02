@@ -10,4 +10,4 @@
 
 pub mod client;
 
-pub use client::{AcpClient, AcpError, AcpInbound, AcpResult};
+pub use client::{AcpClient, AcpError, AcpInbound, AcpResult, RpcId};

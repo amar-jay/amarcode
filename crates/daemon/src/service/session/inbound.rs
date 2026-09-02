@@ -18,7 +18,7 @@ use super::{
     messages::{
         append_text_delta, append_thinking_delta, append_tool_part, complete_run,
         ensure_streaming_message, finalize_message, remove_pending_requests_for_run,
-        take_streaming_messages,
+        take_streaming_messages, take_streaming_messages_from_live,
     },
     types::{PendingAgentRequest, SessionInner},
     util::{emit, extract_text_delta},
@@ -72,7 +72,7 @@ fn handle_inbound(
                 request_id: request_id.clone(),
                 run_id: run_id.to_owned(),
                 chat_id: chat_id.to_owned(),
-                acp_id: id,
+                acp_id: id.clone(),
                 method: method.clone(),
                 params: params.clone(),
             };
@@ -83,7 +83,7 @@ fn handle_inbound(
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             if live.get(chat_id).is_none_or(|live| live.run_id != run_id) {
-                debug!(%run_id, %chat_id, acp_id = id, "ignoring request from replaced ACP run");
+                debug!(%run_id, %chat_id, %id, "ignoring request from replaced ACP run");
                 return Ok(());
             }
             inner
@@ -143,9 +143,19 @@ fn handle_inbound(
                     None
                 }
             };
-            if let Some(live) = disconnected {
-                let agent_id = live.agent_id;
-                let active_user_message_id = live.active_user_message_id;
+            if let Some(mut live) = disconnected {
+                let agent_id = live.agent_id.clone();
+                let active_user_message_id = live.active_user_message_id.clone();
+                for message_id in take_streaming_messages_from_live(&mut live) {
+                    finalize_message(inner, &message_id, MessageStatus::Interrupted)?;
+                    emit(
+                        inner,
+                        EditorEvent::MessageUpdated {
+                            message_id,
+                            status: MessageStatus::Interrupted,
+                        },
+                    );
+                }
                 if let Some(user_message_id) = active_user_message_id {
                     emit(
                         inner,
@@ -345,8 +355,16 @@ fn apply_notification(
         | AgentEventMethod::CommandOutput
         | AgentEventMethod::CommandCompleted
         | AgentEventMethod::PlanUpdated
-        | AgentEventMethod::ContextUsage
-        | AgentEventMethod::Other(_) => {}
+        | AgentEventMethod::ContextUsage => {}
+        AgentEventMethod::Other(_) => {
+            // Grok streams tool/permission telemetry as `_x.ai/session_notification`
+            // with the same `{ update: { sessionUpdate } }` envelope as ACP
+            // `session/update`. Apply it so a hung first tool still lands in
+            // message_parts even if the standard `tool_call` update never arrives.
+            if looks_like_session_update(&envelope.payload) {
+                apply_session_update(inner, run_id, chat_id, &envelope.payload)?;
+            }
+        }
     }
     Ok(())
 }
@@ -367,10 +385,7 @@ fn apply_session_update(
     payload: &Value,
 ) -> Result<()> {
     let update = payload.get("update").unwrap_or(payload);
-    let kind = update
-        .get("sessionUpdate")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let kind = session_update_kind(payload).unwrap_or("");
 
     match kind {
         "agent_message_chunk" => {
@@ -419,17 +434,38 @@ fn apply_session_update(
                 },
             );
         }
-        "tool_call" | "tool_call_update" => {
+        "tool_call" | "tool_call_update" | "tool_call_delta_chunk" => {
             append_tool_part(inner, run_id, chat_id, update)?;
         }
-        "available_commands_update" => {
-            // Informational; already logged in acp_events.
+        "available_commands_update"
+        | "session_info_update"
+        | "usage_update"
+        | "config_option_update"
+        | "session_summary_generated"
+        | "response_completed"
+        | "turn_completed"
+        | "last_turn_summary"
+        | "pending_interaction"
+        | "interaction_resolved"
+        | "model_changed" => {
+            // Informational ACP / Grok telemetry; already logged in acp_events.
+            // `pending_interaction` is resolved inside Grok (yolo), not via
+            // `session/request_permission`, so it must not become ApprovalRequired.
         }
         _ => {
             debug!(%kind, "unhandled sessionUpdate kind");
         }
     }
     Ok(())
+}
+
+fn looks_like_session_update(payload: &Value) -> bool {
+    session_update_kind(payload).is_some()
+}
+
+fn session_update_kind(payload: &Value) -> Option<&str> {
+    let update = payload.get("update").unwrap_or(payload);
+    update.get("sessionUpdate").and_then(Value::as_str)
 }
 
 fn is_reasoning_message_chunk(update: &Value) -> bool {
@@ -449,7 +485,10 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{is_reasoning_message_chunk, new_pending_request_id};
+    use super::{
+        is_reasoning_message_chunk, looks_like_session_update, new_pending_request_id,
+        session_update_kind,
+    };
 
     #[test]
     fn daemon_request_ids_do_not_share_the_acp_id_namespace() {
@@ -476,5 +515,153 @@ mod tests {
             "_meta": { "codex": { "phase": "final_answer" } }
         })));
         assert!(!is_reasoning_message_chunk(&json!({})));
+    }
+
+    #[test]
+    fn grok_session_notification_payloads_look_like_session_updates() {
+        let payload = json!({
+            "sessionId": "s1",
+            "update": {
+                "name": "list_dir",
+                "sessionUpdate": "tool_call_delta_chunk",
+                "tool_call_id": "call-1",
+                "tool_index": 0
+            }
+        });
+        assert!(looks_like_session_update(&payload));
+        assert_eq!(session_update_kind(&payload), Some("tool_call_delta_chunk"));
+    }
+
+    #[test]
+    fn grok_prompt_complete_is_not_a_session_update() {
+        let payload = json!({
+            "sessionId": "s1",
+            "promptId": "p1",
+            "stopReason": "end_turn"
+        });
+        assert!(!looks_like_session_update(&payload));
+        assert_eq!(session_update_kind(&payload), None);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod grok_inbound_tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use serde_json::json;
+    use tokio::sync::broadcast;
+
+    use crate::{
+        acp::AcpClient,
+        protocol::{
+            AgentEventMethod, MessagePartKind, MessageRole, MessageStatus, RpcDirection,
+            RpcEnvelope, RunStatus,
+        },
+        store::{AgentRun, Message, Store},
+    };
+
+    use super::super::types::LiveRun;
+    use super::{apply_notification, SessionInner};
+
+    fn sleeping_client() -> Arc<AcpClient> {
+        let arguments = vec!["-c".to_owned(), "sleep 30".to_owned()];
+        let (client, _inbound) =
+            AcpClient::spawn("/bin/sh", &arguments, &[], None).expect("spawn sleeping test agent");
+        Arc::new(client)
+    }
+
+    #[test]
+    fn grok_tool_call_delta_notification_is_stored_as_a_tool_part() {
+        let store = Arc::new(Store::open(std::path::Path::new(":memory:")).expect("store"));
+        store.seed_presets().expect("seed agents");
+        store
+            .create_chat(&crate::store::Chat {
+                id: "chat-1".to_owned(),
+                workspace_path: "/tmp/workspace".to_owned(),
+                title: "grok".to_owned(),
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+                updated_at: "2026-01-01T00:00:00Z".to_owned(),
+                archived_at: None,
+            })
+            .expect("create chat");
+        store
+            .create_run(&AgentRun {
+                id: "run-1".to_owned(),
+                chat_id: "chat-1".to_owned(),
+                agent_id: "grok-acp".to_owned(),
+                acp_session_id: Some("session-1".to_owned()),
+                status: RunStatus::Running,
+                started_at: "2026-01-01T00:00:00Z".to_owned(),
+                finished_at: None,
+                error_message: None,
+            })
+            .expect("create run");
+        store
+            .create_message(&Message {
+                id: "msg-1".to_owned(),
+                chat_id: "chat-1".to_owned(),
+                agent_run_id: Some("run-1".to_owned()),
+                role: MessageRole::Assistant,
+                content: "I'll start by mapping the repo.".to_owned(),
+                status: MessageStatus::Streaming,
+                created_at: "2026-01-01T00:00:01Z".to_owned(),
+                updated_at: "2026-01-01T00:00:01Z".to_owned(),
+            })
+            .expect("create message");
+
+        let (events, _) = broadcast::channel(8);
+        let inner = SessionInner {
+            store: Arc::clone(&store),
+            events,
+            prompt_locks: std::sync::Mutex::new(HashMap::new()),
+            by_chat: std::sync::Mutex::new(HashMap::from([(
+                "chat-1".to_owned(),
+                LiveRun {
+                    run_id: "run-1".to_owned(),
+                    agent_id: "grok-acp".to_owned(),
+                    client: sleeping_client(),
+                    acp_session_id: Some("session-1".to_owned()),
+                    supports_images: false,
+                    session_configuration: Default::default(),
+                    needs_history_hydration: false,
+                    streaming_message_ids: HashMap::from([(
+                        "__default__".to_owned(),
+                        "msg-1".to_owned(),
+                    )]),
+                    last_streaming_message_id: Some("msg-1".to_owned()),
+                    active_user_message_id: Some("user-1".to_owned()),
+                },
+            )])),
+            pending: std::sync::Mutex::new(HashMap::new()),
+        };
+
+        let envelope = RpcEnvelope {
+            direction: RpcDirection::Received,
+            method: "_x.ai/session_notification".into(),
+            payload: json!({
+                "sessionId": "session-1",
+                "update": {
+                    "arguments_delta": "{\"target_directory\":\"/tmp/workspace\"}",
+                    "name": "list_dir",
+                    "sessionUpdate": "tool_call_delta_chunk",
+                    "tool_call_id": "call-1",
+                    "tool_index": 0
+                }
+            }),
+        };
+        apply_notification(
+            &inner,
+            "run-1",
+            "chat-1",
+            AgentEventMethod::Other("_x.ai/session_notification".into()),
+            &envelope,
+        )
+        .expect("apply grok tool notification");
+
+        let parts = store.message_parts("msg-1").expect("parts");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].kind, MessagePartKind::ToolCall);
+        assert!(parts[0].content_json.contains("list_dir"));
+        assert!(parts[0].content_json.contains("tool_call_delta_chunk"));
     }
 }

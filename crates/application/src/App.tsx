@@ -17,6 +17,8 @@ import {
   composerSessionModeAtom,
   defaultAgentIdAtom,
   defaultSessionModeAtom,
+  latestTurnByChatAtom,
+  liveChatIsWorkingAtom,
   openStartedChatAtom,
   paletteAtom,
   refreshChatsAtom,
@@ -61,6 +63,16 @@ export default function App() {
   const [composerMode, setComposerMode] = useAtom(composerSessionModeAtom);
   const chats = useAtomValue(chatsAtom);
   const activeSession = useAtomValue(activeSessionAtom);
+  const latestTurns = useAtomValue(latestTurnByChatAtom);
+  const activeChatIsWorking = useAtomValue(liveChatIsWorkingAtom);
+  const runningChatIds = new Set(
+    Object.entries(latestTurns)
+      .filter(([, turn]) => turn.status === "started")
+      .map(([chatId]) => chatId),
+  );
+  if (activeChatIsWorking && activeSession) {
+    runningChatIds.add(activeSession.chat.id);
+  }
 
   const toasterTheme =
     theme === "system"
@@ -82,6 +94,7 @@ export default function App() {
       <div className="flex min-h-0 flex-1 w-full">
         <AppSidebar
           activeChatId={activeSession?.chat.id ?? null}
+          runningChatIds={runningChatIds}
           chats={chats}
           onNewChat={() => startNewChat()}
           onSelectChat={(chatId) => selectChat(chatId)}

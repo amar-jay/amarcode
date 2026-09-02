@@ -49,7 +49,7 @@ fn stale_pending_request_cannot_target_replacement_client() {
             request_id: "daemon-request".to_owned(),
             run_id: "old-run".to_owned(),
             chat_id: "chat-1".to_owned(),
-            acp_id: 1,
+            acp_id: crate::acp::RpcId::Number(1),
             method: "session/request_permission".to_owned(),
             params: Value::Null,
         },
@@ -154,7 +154,7 @@ fn failed_prompt_interrupts_partial_messages() {
             request_id: "pending".to_owned(),
             run_id: "run-1".to_owned(),
             chat_id: "chat-1".to_owned(),
-            acp_id: 1,
+            acp_id: crate::acp::RpcId::Number(1),
             method: "session/request_permission".to_owned(),
             params: Value::Null,
         },
@@ -184,5 +184,101 @@ fn failed_prompt_interrupts_partial_messages() {
             .expect("message row")
             .status,
         MessageStatus::Interrupted
+    );
+}
+
+#[test]
+fn cancel_interrupts_partial_messages() {
+    let store = Arc::new(Store::open(Path::new(":memory:")).expect("store"));
+    store.seed_presets().expect("seed agents");
+    store
+        .create_chat(&crate::store::Chat {
+            id: "chat-1".to_owned(),
+            workspace_path: "/tmp/workspace".to_owned(),
+            title: "cancel".to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+            archived_at: None,
+        })
+        .expect("create chat");
+    store
+        .create_run(&AgentRun {
+            id: "run-1".to_owned(),
+            chat_id: "chat-1".to_owned(),
+            agent_id: "grok-acp".to_owned(),
+            acp_session_id: Some("session-1".to_owned()),
+            status: RunStatus::Running,
+            started_at: "2026-01-01T00:00:00Z".to_owned(),
+            finished_at: None,
+            error_message: None,
+        })
+        .expect("create run");
+    store
+        .create_message(&Message {
+            id: "partial-message".to_owned(),
+            chat_id: "chat-1".to_owned(),
+            agent_run_id: Some("run-1".to_owned()),
+            role: MessageRole::Assistant,
+            content: "I'll start by mapping".to_owned(),
+            status: MessageStatus::Streaming,
+            created_at: "2026-01-01T00:00:01Z".to_owned(),
+            updated_at: "2026-01-01T00:00:01Z".to_owned(),
+        })
+        .expect("create partial message");
+    store
+        .replace_message_parts(
+            "partial-message",
+            &[MessagePart {
+                message_id: "partial-message".to_owned(),
+                ordinal: 0,
+                kind: MessagePartKind::Text,
+                content_json: json!({ "text": "I'll start by mapping" }).to_string(),
+            }],
+        )
+        .expect("create message part");
+
+    let (events, _) = broadcast::channel(8);
+    let manager = SessionManager::new(
+        Arc::clone(&store),
+        AgentManager::new(Arc::clone(&store), PathBuf::from("/tmp/tools")),
+        events,
+        PathBuf::from("/tmp/amarcode-test-attachments"),
+    );
+    manager.inner.by_chat.lock().expect("live runs").insert(
+        "chat-1".to_owned(),
+        LiveRun {
+            run_id: "run-1".to_owned(),
+            agent_id: "grok-acp".to_owned(),
+            client: sleeping_client(),
+            acp_session_id: Some("session-1".to_owned()),
+            supports_images: false,
+            session_configuration: SessionConfiguration::default(),
+            needs_history_hydration: false,
+            streaming_message_ids: HashMap::from([(
+                "upstream".to_owned(),
+                "partial-message".to_owned(),
+            )]),
+            last_streaming_message_id: Some("partial-message".to_owned()),
+            active_user_message_id: Some("user-message".to_owned()),
+        },
+    );
+
+    manager.cancel("chat-1").expect("cancel");
+
+    assert_eq!(
+        store
+            .get_message("partial-message")
+            .expect("message")
+            .expect("message row")
+            .status,
+        MessageStatus::Interrupted
+    );
+    assert_eq!(
+        store
+            .get_run("run-1")
+            .expect("run")
+            .expect("run row")
+            .status,
+        RunStatus::Stopped
     );
 }

@@ -9,7 +9,11 @@ use std::{
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-use crate::{acp::AcpClient, protocol::EditorEvent, store::Store};
+use crate::{
+    acp::{AcpClient, RpcId},
+    protocol::EditorEvent,
+    store::Store,
+};
 
 use super::session_config::SessionConfiguration;
 
@@ -37,7 +41,7 @@ pub struct PendingAgentRequest {
     pub request_id: String,
     pub run_id: String,
     pub chat_id: String,
-    pub acp_id: u64,
+    pub acp_id: RpcId,
     pub method: String,
     pub params: Value,
 }
