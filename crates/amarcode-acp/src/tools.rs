@@ -1,4 +1,8 @@
-use std::path::{Component, Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Component, Path, PathBuf},
+    sync::Mutex,
+};
 
 use agent_client_protocol::{
     schema::v1::{
@@ -18,10 +22,41 @@ use crate::provider::ModelToolCall;
 
 const MAX_OUTPUT: usize = 64 * 1024;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum PermissionKey {
+    WriteFile {
+        path: String,
+    },
+    RunCommand {
+        command: String,
+        args: Vec<String>,
+        cwd: String,
+    },
+}
+
+/// Decisions selected with an ACP `*_always` option, scoped to one session.
+#[derive(Debug, Default)]
+pub struct PermissionState {
+    remembered: Mutex<HashMap<PermissionKey, bool>>,
+}
+
+impl PermissionState {
+    fn decision(&self, key: &PermissionKey) -> Option<bool> {
+        self.remembered.lock().ok()?.get(key).copied()
+    }
+
+    fn remember(&self, key: PermissionKey, allowed: bool) {
+        if let Ok(mut remembered) = self.remembered.lock() {
+            remembered.insert(key, allowed);
+        }
+    }
+}
+
 pub async fn execute(
     call: &ModelToolCall,
     workspace: &Path,
     mode: &str,
+    permissions: &PermissionState,
     session_id: &SessionId,
     connection: &ConnectionTo<Client>,
     mut cancellation: watch::Receiver<bool>,
@@ -48,7 +83,7 @@ pub async fn execute(
         SessionUpdate::ToolCall(started.clone()),
     ));
 
-    if matches!(call.name.as_str(), "write_file" | "run_command") {
+    if let Some(permission_key) = permission_key(call, &arguments) {
         if mode != "code" {
             return finish(
                 connection,
@@ -57,21 +92,41 @@ pub async fn execute(
                 Err(format!("{} is only available in code mode", call.name)),
             );
         }
-        let permission = connection.send_request(RequestPermissionRequest::new(
-            session_id.clone(),
-            ToolCallUpdate::from(started),
-            vec![
-                PermissionOption::new("allow-once", "Allow once", PermissionOptionKind::AllowOnce),
-                PermissionOption::new("reject-once", "Reject", PermissionOptionKind::RejectOnce),
-            ],
-        ));
-        let response = tokio::select! {
-            result = permission.block_task() => result,
-            _ = cancellation.changed() => return finish(connection, session_id, call, Err("cancelled".into())),
+        let allowed = if let Some(allowed) = permissions.decision(&permission_key) {
+            allowed
+        } else {
+            let permission = connection.send_request(RequestPermissionRequest::new(
+                session_id.clone(),
+                ToolCallUpdate::from(started),
+                vec![
+                    PermissionOption::new(
+                        "allow-once",
+                        "Allow once",
+                        PermissionOptionKind::AllowOnce,
+                    ),
+                    PermissionOption::new(
+                        "allow-always",
+                        "Allow for this session",
+                        PermissionOptionKind::AllowAlways,
+                    ),
+                    PermissionOption::new(
+                        "reject-once",
+                        "Reject",
+                        PermissionOptionKind::RejectOnce,
+                    ),
+                    PermissionOption::new(
+                        "reject-always",
+                        "Reject for this session",
+                        PermissionOptionKind::RejectAlways,
+                    ),
+                ],
+            ));
+            let response = tokio::select! {
+                result = permission.block_task() => result,
+                _ = cancellation.changed() => return finish(connection, session_id, call, Err("cancelled".into())),
+            };
+            permission_outcome(response, permissions, permission_key)
         };
-        let allowed = matches!(response,
-            Ok(response) if matches!(&response.outcome, RequestPermissionOutcome::Selected(selected) if selected.option_id.to_string() == "allow-once")
-        );
         if !allowed {
             return finish(
                 connection,
@@ -111,6 +166,47 @@ pub async fn execute(
         other => Err(format!("unknown tool: {other}")),
     };
     finish(connection, session_id, call, result)
+}
+
+fn permission_key(call: &ModelToolCall, arguments: &Value) -> Option<PermissionKey> {
+    match call.name.as_str() {
+        "write_file" => Some(PermissionKey::WriteFile {
+            path: arguments.get("path")?.as_str()?.to_owned(),
+        }),
+        "run_command" => Some(PermissionKey::RunCommand {
+            command: arguments.get("command")?.as_str()?.to_owned(),
+            args: optional_string_array(arguments, "args").ok()?,
+            cwd: arguments
+                .get("cwd")
+                .and_then(Value::as_str)
+                .unwrap_or(".")
+                .to_owned(),
+        }),
+        _ => None,
+    }
+}
+
+fn permission_outcome<E>(
+    response: Result<agent_client_protocol::schema::v1::RequestPermissionResponse, E>,
+    permissions: &PermissionState,
+    key: PermissionKey,
+) -> bool {
+    let Ok(response) = response else { return false };
+    let RequestPermissionOutcome::Selected(selected) = response.outcome else {
+        return false;
+    };
+    match selected.option_id.to_string().as_str() {
+        "allow-once" => true,
+        "allow-always" => {
+            permissions.remember(key, true);
+            true
+        }
+        "reject-always" => {
+            permissions.remember(key, false);
+            false
+        }
+        _ => false,
+    }
 }
 
 async fn run_command(
@@ -503,12 +599,66 @@ fn truncate(mut value: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::schema::v1::{RequestPermissionResponse, SelectedPermissionOutcome};
 
     #[test]
     fn rejects_parent_and_absolute_paths() {
         assert!(safe_relative("../secret").is_err());
         assert!(safe_relative("/etc/passwd").is_err());
         assert!(safe_relative("src/lib.rs").is_ok());
+    }
+
+    #[test]
+    fn permission_keys_are_exact_and_stable() {
+        let call = ModelToolCall {
+            id: "call-1".into(),
+            name: "run_command".into(),
+            arguments: String::new(),
+        };
+        let first = permission_key(
+            &call,
+            &json!({ "command": "cargo", "args": ["test"], "cwd": "." }),
+        );
+        let same = permission_key(
+            &call,
+            &json!({ "cwd": ".", "args": ["test"], "command": "cargo" }),
+        );
+        let different = permission_key(
+            &call,
+            &json!({ "command": "cargo", "args": ["build"], "cwd": "." }),
+        );
+        assert_eq!(first, same);
+        assert_ne!(first, different);
+    }
+
+    #[test]
+    fn always_outcomes_are_remembered() {
+        let permissions = PermissionState::default();
+        let allowed_key = PermissionKey::WriteFile {
+            path: "src/lib.rs".into(),
+        };
+        let allowed = RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+            SelectedPermissionOutcome::new("allow-always"),
+        ));
+        assert!(permission_outcome(
+            Ok::<_, ()>(allowed),
+            &permissions,
+            allowed_key.clone(),
+        ));
+        assert_eq!(permissions.decision(&allowed_key), Some(true));
+
+        let rejected_key = PermissionKey::WriteFile {
+            path: "src/main.rs".into(),
+        };
+        let rejected = RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+            SelectedPermissionOutcome::new("reject-always"),
+        ));
+        assert!(!permission_outcome(
+            Ok::<_, ()>(rejected),
+            &permissions,
+            rejected_key.clone(),
+        ));
+        assert_eq!(permissions.decision(&rejected_key), Some(false));
     }
 
     #[cfg(unix)]

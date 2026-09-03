@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import { notifyAttention } from "@/lib/notify";
+import { exactCommand } from "@/lib/command-display";
 import type { JsonValue } from "@/types";
 
 export type PendingAgentRequest = {
@@ -51,26 +52,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return null;
   return value as Record<string, unknown>;
-}
-
-/** Agents sometimes format a command for display with Markdown or HTML code wrappers. */
-function displayCommand(value: string): string {
-  let trimmed = value.trim();
-  const htmlCode = trimmed.match(/^<code(?:\s[^>]*)?>([\s\S]*)<\/code>$/i);
-  if (htmlCode) trimmed = htmlCode[1].trim();
-
-  const fencedCode = trimmed.match(/^```[^\n]*\n?([\s\S]*?)\n?```$/);
-  if (fencedCode) trimmed = fencedCode[1].trim();
-
-  const inlineCode = trimmed.match(/^`([\s\S]*)`$/);
-  if (inlineCode) trimmed = inlineCode[1];
-
-  // Some agents serialize the entire command as a JSON-like quoted string.
-  // Hide only a matching outer pair; shell quotes inside the command remain.
-  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
 }
 
 function inputRequestPresentation(
@@ -160,7 +141,9 @@ function actionSummary(details: JsonValue): ActionSummary | null {
     (rawInput && typeof rawInput.command === "string" && rawInput.command) ||
     (typeof tool.command === "string" && tool.command) ||
     undefined;
-  const command = rawCommand ? displayCommand(rawCommand) : undefined;
+  const command = rawCommand
+    ? exactCommand(rawCommand, rawInput?.args)
+    : undefined;
   const cwd =
     (rawInput && typeof rawInput.cwd === "string" && rawInput.cwd) ||
     (typeof tool.cwd === "string" && tool.cwd) ||
@@ -241,13 +224,6 @@ export function PendingAgentRequestCard({
   onRespond: (result: JsonValue) => Promise<void>;
 }) {
   const isApproval = request.kind === "approval";
-  useEffect(() => {
-    const title = isApproval ? "Permission required" : "Input needed";
-    const body = isApproval
-      ? "Amarcode is waiting for your approval."
-      : "Amarcode is waiting for your response.";
-    notifyAttention(`agent-request:${request.requestId}`, title, body);
-  }, [isApproval, request.requestId]);
   const presentation = useMemo(
     () => (isApproval ? null : inputRequestPresentation(request.details)),
     [isApproval, request.details],
@@ -260,6 +236,16 @@ export function PendingAgentRequestCard({
     () => (isApproval ? actionSummary(request.details) : null),
     [isApproval, request.details],
   );
+  useEffect(() => {
+    const title = isApproval ? "Permission required" : "Input needed";
+    const body = isApproval
+      ? (action?.command ??
+        action?.path ??
+        action?.title ??
+        "Amarcode is waiting for your approval.")
+      : (presentation?.message ?? "Amarcode is waiting for your response.");
+    notifyAttention(`agent-request:${request.requestId}`, title, body);
+  }, [action, isApproval, presentation, request.requestId]);
 
   const orderedOptions = useMemo(() => {
     if (options.length === 0) {

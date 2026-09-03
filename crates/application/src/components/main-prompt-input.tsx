@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAtom } from "jotai";
 import {
   PromptInput,
   PromptInputBody,
@@ -30,6 +31,8 @@ import {
   FolderOpen,
   MessageCircle,
   Ruler,
+  ShieldCheck,
+  ShieldQuestion,
   Wrench,
 } from "lucide-react";
 import {
@@ -44,9 +47,15 @@ import {
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
+import { cn } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AgentInfo, Chat, PromptAttachment } from "@/types";
-import { SESSION_MODES, type SessionMode } from "@/state";
+import {
+  permissionModeAtom,
+  SESSION_MODES,
+  type PermissionMode,
+  type SessionMode,
+} from "@/state";
 
 export type { SessionMode };
 const SET_MODES = SESSION_MODES;
@@ -62,6 +71,24 @@ const modeIcons: Record<SessionMode, typeof Ruler> = {
   build: Wrench,
   ask: MessageCircle,
 };
+
+const permissionModes: Array<{
+  value: PermissionMode;
+  label: string;
+}> = [
+  {
+    value: "confirm",
+    label: "Confirm",
+  },
+  {
+    value: "auto-edit",
+    label: "Auto-edit",
+  },
+  {
+    value: "full-agentic",
+    label: "Agentic",
+  },
+];
 
 function AgentLogo({ agentId }: { agentId: string }) {
   const normalizedId = agentId.toLowerCase();
@@ -231,6 +258,7 @@ function AppPromptInput({
 }: AppPromptInputProps) {
   const [uncontrolledMode, setUncontrolledMode] =
     useState<SessionMode>("build");
+  const [permissionMode, setPermissionMode] = useAtom(permissionModeAtom);
   const mode = sessionMode ?? uncontrolledMode;
   const ModeIcon = modeIcons[mode];
   const isChatComposer = Boolean(onSendPrompt);
@@ -352,6 +380,42 @@ function AppPromptInput({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <PromptInputButton
+                size="sm"
+                className={cn(
+                  "hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
+                )}
+              >
+                {permissionMode === "confirm" ? (
+                  <ShieldQuestion className="size-4" />
+                ) : (
+                  <ShieldCheck className="size-4" />
+                )}
+                <span>
+                  {permissionModes.find((item) => item.value === permissionMode)
+                    ?.label ?? "Confirm actions"}
+                </span>
+              </PromptInputButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center" className="w-24">
+              {permissionModes.map((item) => (
+                <DropdownMenuItem
+                  key={item.value}
+                  onSelect={() => setPermissionMode(item.value)}
+                  className="opacity-100 items-center py-1 min-h-0 text-foreground hover:text-foreground!"
+                >
+                  <span className="min-w-0 flex-1 ">
+                    <span className="block text-xs py-0">{item.label}</span>
+                  </span>
+                  {permissionMode === item.value && (
+                    <Check className="size-3.5 shrink-0" />
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           {onAgentSelected && (
             <AgentSelection
               setSelectedAgent={selectAgent}

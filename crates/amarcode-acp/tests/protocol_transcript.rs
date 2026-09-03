@@ -371,6 +371,7 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
     thread::spawn(move || {
         for body in [
             "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-command\",\"type\":\"function\",\"function\":{\"name\":\"run_command\",\"arguments\":\"{\\\"command\\\":\\\"/bin/echo\\\",\\\"args\\\":[\\\"hello terminal\\\"],\\\"cwd\\\":\\\".\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-command-again\",\"type\":\"function\",\"function\":{\"name\":\"run_command\",\"arguments\":\"{\\\"command\\\":\\\"/bin/echo\\\",\\\"args\\\":[\\\"hello terminal\\\"],\\\"cwd\\\":\\\".\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
             "data: {\"choices\":[{\"delta\":{\"content\":\"Command completed.\"}}]}\n\ndata: [DONE]\n\n",
         ] {
             let (mut socket, _) = listener.accept().expect("provider connection");
@@ -444,7 +445,12 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
                     message["params"]["toolCall"]["rawInput"]["args"],
                     json!(["hello terminal"])
                 );
-                json!({ "outcome": { "outcome": "selected", "optionId": "allow-once" } })
+                assert!(message["params"]["options"]
+                    .as_array()
+                    .is_some_and(|options| options.iter().any(|option| {
+                        option["optionId"] == "allow-always" && option["kind"] == "allow_always"
+                    })));
+                json!({ "outcome": { "outcome": "selected", "optionId": "allow-always" } })
             }
             "terminal/create" => {
                 assert_eq!(message["params"]["command"], "/bin/echo");
@@ -470,6 +476,10 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
             "terminal/create",
             "terminal/wait_for_exit",
             "terminal/output",
+            "terminal/release",
+            "terminal/create",
+            "terminal/wait_for_exit",
+            "terminal/output",
             "terminal/release"
         ]
     );
@@ -482,5 +492,10 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
         .expect("second request");
     assert!(second_request.contains("hello terminal"));
     assert!(second_request.contains("exit code 0"));
+    let third_request = request_receiver
+        .recv_timeout(TIMEOUT)
+        .expect("third request");
+    assert!(third_request.contains("call-command-again"));
+    assert!(third_request.matches("exit code 0").count() >= 2);
     let _ = fs::remove_dir_all(workspace);
 }

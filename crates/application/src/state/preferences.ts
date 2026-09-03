@@ -1,5 +1,6 @@
 import { atomWithStorage } from "jotai/utils";
 import { parseSessionMode, type SessionMode } from "./session-mode";
+import type { PermissionMode } from "./permission-mode";
 
 export type Theme = "light" | "dark" | "system";
 export type Palette = "monochrome" | "ember";
@@ -48,6 +49,14 @@ export const defaultAgentIdAtom = atomWithStorage<string>(
 export const defaultSessionModeAtom = atomWithStorage<SessionMode>(
   "amarcode-default-session-mode",
   parseSessionMode(localStorage.getItem("amarcode-default-session-mode")),
+  undefined,
+  { getOnInit: true },
+);
+
+/** How aggressively agent actions are approved from the prompt composer. */
+export const permissionModeAtom = atomWithStorage<PermissionMode>(
+  "amarcode-permission-mode",
+  "confirm",
   undefined,
   { getOnInit: true },
 );

@@ -64,14 +64,18 @@ model loop. The built-in tools are `read_file`, `list_directory`, `search_text`,
 `write_file`, and `run_command`. All paths are restricted to the session
 workspace, symlink escapes are rejected, and output is bounded. `write_file`
 and `run_command` are available only in code mode and require approval through
-ACP `session/request_permission`.
+ACP `session/request_permission`. Permission prompts offer allow/reject once and
+allow/reject for the session. Remembered decisions use exact operation keys:
+the target path for writes, and the executable, full argument vector, and
+working directory for commands. They are discarded when the ACP session closes.
 
 Commands use ACP's client-owned terminal lifecycle: `terminal/create`, an
 embedded terminal tool-call update, `terminal/wait_for_exit`, `terminal/output`,
 and `terminal/release`. Cancellation sends `terminal/kill` before release. The
 executable and argument vector are kept separate rather than interpreted by a
-shell. Amarcode consumes a one-time permission matching the exact command,
-arguments, and workspace-relative working directory before it starts a process.
+shell. Amarcode requires a permission matching the exact command, arguments,
+and workspace-relative working directory before it starts a process; an
+`allow_always` permission remains reusable for that ACP session.
 
 Tool calls are streamed to the client using typed ACP `tool_call` and
 `tool_call_update` events. Calls and results remain structured in provider

@@ -33,6 +33,7 @@ struct Session {
     history: Vec<serde_json::Value>,
     mode: String,
     active_turn: Option<ActiveTurn>,
+    permissions: Arc<crate::tools::PermissionState>,
 }
 
 struct ActiveTurn {
@@ -84,6 +85,7 @@ impl Runtime {
                 history: Vec::new(),
                 mode: "ask".into(),
                 active_turn: None,
+                permissions: Arc::new(crate::tools::PermissionState::default()),
             },
         );
         NewSessionResponse::new(session_id).config_options(self.config_options("ask"))
@@ -166,6 +168,7 @@ impl Runtime {
         PathBuf,
         String,
         Vec<serde_json::Value>,
+        Arc<crate::tools::PermissionState>,
         watch::Receiver<bool>,
     )> {
         let prompt = extract_prompt_text(&request.prompt);
@@ -196,6 +199,7 @@ impl Runtime {
             session.cwd.clone(),
             session.mode.clone(),
             history,
+            Arc::clone(&session.permissions),
             cancellation,
         ))
     }
@@ -298,7 +302,7 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
             async move |request: PromptRequest,
                         responder: Responder<PromptResponse>,
                         connection: ConnectionTo<Client>| {
-                let (turn_id, cwd, mode, history, cancellation) =
+                let (turn_id, cwd, mode, history, permissions, cancellation) =
                     match prompt_runtime.begin_turn(&request).await {
                         Ok(turn) => turn,
                         Err(error) => return responder.respond_with_error(error),
@@ -311,7 +315,7 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                 connection.clone().spawn(async move {
                     let outcome = tokio::select! {
                         outcome = run_agent_turn(
-                            &runtime, history, cwd, mode, session_id.clone(), message_id,
+                            &runtime, history, cwd, mode, permissions, session_id.clone(), message_id,
                             connection, cancellation,
                         ) => outcome,
                         _ = request_cancellation.cancelled() => {
@@ -369,6 +373,7 @@ async fn run_agent_turn(
     mut history: Vec<serde_json::Value>,
     cwd: PathBuf,
     mode: String,
+    permissions: Arc<crate::tools::PermissionState>,
     session_id: SessionId,
     mut message_id: agent_client_protocol::schema::v1::MessageId,
     connection: ConnectionTo<Client>,
@@ -403,6 +408,7 @@ async fn run_agent_turn(
                 call,
                 &cwd,
                 &mode,
+                &permissions,
                 &session_id,
                 &connection,
                 cancellation.clone(),
@@ -475,14 +481,14 @@ mod tests {
         let runtime = runtime();
         let first = runtime.new_session(NewSessionRequest::new("/one")).await;
         let second = runtime.new_session(NewSessionRequest::new("/two")).await;
-        let (_, _, _, _, first_cancel) = runtime
+        let (_, _, _, _, _, first_cancel) = runtime
             .begin_turn(&PromptRequest::new(
                 first.session_id.clone(),
                 vec!["one".into()],
             ))
             .await
             .expect("begin first turn");
-        let (_, _, _, _, second_cancel) = runtime
+        let (_, _, _, _, _, second_cancel) = runtime
             .begin_turn(&PromptRequest::new(
                 second.session_id.clone(),
                 vec!["two".into()],

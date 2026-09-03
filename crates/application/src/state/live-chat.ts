@@ -10,6 +10,8 @@ import type {
 } from "@/types";
 import type { PendingAgentRequest } from "@/components/pending-agent-request";
 import type { SessionMode } from "./session-mode";
+import { automaticApprovalResult, shouldAutoApprove } from "./permission-mode";
+import { permissionModeAtom } from "./preferences";
 import { getLatestTurnForChat } from "./daemon-events";
 import { refreshChatsAtom } from "./chats";
 import { activeSessionAtom } from "./navigation";
@@ -246,6 +248,27 @@ export const applyLiveChatEventAtom = atom(
         event.type === "questionRequired") &&
       (event.payload.run_id === live.runId || live.turnStatus === "started")
     ) {
+      if (
+        event.type === "approvalRequired" &&
+        shouldAutoApprove(get(permissionModeAtom), event.payload.details)
+      ) {
+        void daemonApi
+          .respondPermission(event.payload.request_id, {
+            result: automaticApprovalResult(event.payload.details),
+          })
+          .catch((cause: unknown) => {
+            const current = get(liveChatAtom);
+            if (!current) return;
+            set(liveChatAtom, {
+              ...current,
+              error:
+                cause instanceof Error
+                  ? cause.message
+                  : "Unable to auto-approve the agent action.",
+            });
+          });
+        return;
+      }
       set(liveChatAtom, {
         ...live,
         runId: event.payload.run_id,

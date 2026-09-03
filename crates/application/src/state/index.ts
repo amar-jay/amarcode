@@ -16,6 +16,7 @@
  */
 
 export * from "./session-mode";
+export * from "./permission-mode";
 export * from "./preferences";
 export * from "./workspace";
 export * from "./ui";

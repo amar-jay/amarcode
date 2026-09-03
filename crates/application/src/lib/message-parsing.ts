@@ -13,6 +13,7 @@ import {
   Dot,
   ListTree,
 } from "lucide-react";
+import { exactCommand } from "@/lib/command-display";
 
 const TOOL_KIND_ICONS = {
   read: FileText,
@@ -90,6 +91,7 @@ type ToolMessage = {
 
   rawInput?: {
     command?: string;
+    args?: unknown[];
     cwd?: string;
     [key: string]: unknown;
   };
@@ -149,11 +151,11 @@ function stringed(value: unknown, fallback: string): string {
 function getToolLabel(msg: ToolMessage): string | undefined {
   switch ("string") {
     case typeof msg.title:
-      return msg.title?.trim().toLocaleLowerCase();
+      return msg.title?.trim();
     case typeof msg.name:
-      return msg.name?.trim().toLocaleLowerCase();
+      return msg.name?.trim();
     case typeof msg.toolName:
-      return msg.toolName?.trim().toLocaleLowerCase();
+      return msg.toolName?.trim();
   }
 }
 
@@ -161,7 +163,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function toolSummary(part: MessagePart, verbose: boolean) {
+function toolSummary(part: MessagePart, _verbose: boolean) {
   try {
     const value = JSON.parse(part.content_json);
     if (typeof value !== "object" || value === null) return null;
@@ -178,11 +180,15 @@ function toolSummary(part: MessagePart, verbose: boolean) {
       stringed(record.label, "other"),
     ) as ToolKind;
 
-    // In verbose mode, surface rawInput command when title is generic.
-    if (verbose) {
-      const command = isRecord(record.rawInput)
-        ? stringed(record.rawInput.command, stringed(record.command, label))
-        : label;
+    // Commands are security-sensitive: always show the exact executable and argv.
+    if (
+      isRecord(record.rawInput) &&
+      typeof record.rawInput.command === "string"
+    ) {
+      const command = exactCommand(
+        stringed(record.rawInput.command, stringed(record.command, label)),
+        record.rawInput.args,
+      );
       return { id, label: command, kind };
     }
     return { id, label, kind };

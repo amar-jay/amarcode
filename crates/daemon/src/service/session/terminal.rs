@@ -51,6 +51,7 @@ struct CommandPermission {
     command: String,
     args: Vec<String>,
     cwd: Option<String>,
+    reusable: bool,
 }
 
 pub(super) fn is_terminal_method(method: &str) -> bool {
@@ -166,10 +167,29 @@ impl TerminalManager {
         request: &Value,
         response: &Value,
     ) {
-        let allowed = response
+        let selected_id = response
             .pointer("/outcome/optionId")
-            .and_then(Value::as_str)
-            .is_some_and(|id| id.starts_with("allow"));
+            .and_then(Value::as_str);
+        let Some(selected_id) = selected_id else {
+            return;
+        };
+        let selected_kind = request
+            .get("options")
+            .and_then(Value::as_array)
+            .and_then(|options| {
+                options.iter().find(|option| {
+                    option
+                        .get("optionId")
+                        .or_else(|| option.get("option_id"))
+                        .and_then(Value::as_str)
+                        == Some(selected_id)
+                })
+            })
+            .and_then(|option| option.get("kind"))
+            .and_then(Value::as_str);
+        let allowed = selected_kind
+            .is_some_and(|kind| matches!(kind, "allow_once" | "allow_always"))
+            || (selected_kind.is_none() && selected_id.starts_with("allow"));
         if !allowed {
             return;
         }
@@ -191,6 +211,7 @@ impl TerminalManager {
             command: command.to_owned(),
             args,
             cwd: raw.get("cwd").and_then(Value::as_str).map(str::to_owned),
+            reusable: selected_kind == Some("allow_always"),
         };
         if let Ok(mut permissions) = self.permissions.lock() {
             permissions.push(permission);
@@ -299,7 +320,13 @@ impl TerminalManager {
                 && permitted_cwd.as_deref() == Some(cwd)
         });
         position
-            .map(|index| permissions.remove(index))
+            .map(|index| {
+                if permissions[index].reusable {
+                    permissions[index].clone()
+                } else {
+                    permissions.remove(index)
+                }
+            })
             .ok_or_else(|| {
                 Error::msg(
                     "terminal command was not approved with an exact command-specific permission",
@@ -557,6 +584,35 @@ mod tests {
             &json!({ "outcome": { "outcome": "selected", "optionId": "reject-once" } }),
         );
         assert!(manager.permissions.lock().expect("permissions").is_empty());
+    }
+
+    #[test]
+    fn allow_always_permission_is_reusable() {
+        let workspace = temp_workspace();
+        let manager = TerminalManager::default();
+        manager.record_permission(
+            "run",
+            "chat",
+            &json!({
+                "toolCall": { "rawInput": { "command": "/bin/echo", "args": ["ok"], "cwd": "." } },
+                "options": [
+                    { "optionId": "allow-session", "name": "Always allow", "kind": "allow_always" }
+                ]
+            }),
+            &json!({ "outcome": { "outcome": "selected", "optionId": "allow-session" } }),
+        );
+        let request = CreateTerminalRequest::new("session", "/bin/echo")
+            .args(vec!["ok".into()])
+            .cwd(workspace.clone());
+
+        manager
+            .consume_permission("run", "chat", &workspace, &workspace, &request)
+            .expect("first use");
+        manager
+            .consume_permission("run", "chat", &workspace, &workspace, &request)
+            .expect("reused permission");
+        assert_eq!(manager.permissions.lock().expect("permissions").len(), 1);
+        let _ = std::fs::remove_dir_all(workspace);
     }
 
     #[cfg(unix)]
