@@ -35,3 +35,16 @@ several configured `amarcode-acp` instances advertise distinct identities.
 `provider.baseUrl` and `provider.apiKey` are also accepted for compatibility
 with camelCase configuration producers. Keep this file private because it
 contains the API key.
+
+## Protocol behavior
+
+The adapter uses the official typed ACP Rust SDK over stdio. Each `session/new`
+request creates an independent UUID-addressed in-memory session, and subsequent
+requests are routed by their explicit `sessionId`. Prompt turns run concurrently
+with protocol input so `session/cancel` can stop an active provider request or
+stream and return a `cancelled` stop reason.
+
+The adapter currently advertises only the optional `session/close` capability.
+Session load, resume, list, delete, authentication, images, audio, embedded
+context, and MCP capabilities are not advertised because they are not yet
+implemented. Session state remains in memory and is lost when the process exits.

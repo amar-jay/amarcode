@@ -466,6 +466,38 @@ fn unstage_workspace_file(workspace_path: String, relative_path: String) -> Resu
 }
 
 #[tauri::command]
+fn stage_all_workspace_files(workspace_path: String) -> Result<(), String> {
+    let root = PathBuf::from(workspace_path);
+    if !root.is_dir() {
+        return Err("The selected workspace folder is unavailable.".to_string());
+    }
+    let output = git_output(&root, &["add", "--all"])?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[tauri::command]
+fn commit_workspace_changes(workspace_path: String, message: String) -> Result<(), String> {
+    let root = PathBuf::from(workspace_path);
+    if !root.is_dir() {
+        return Err("The selected workspace folder is unavailable.".to_string());
+    }
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("Enter a commit message.".to_string());
+    }
+    let output = git_output(&root, &["commit", "-m", message])?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[tauri::command]
 fn get_workspace_file_diff(
     workspace_path: String,
     relative_path: String,
@@ -594,6 +626,8 @@ pub fn run() {
             list_workspace_changes,
             stage_workspace_file,
             unstage_workspace_file,
+            stage_all_workspace_files,
+            commit_workspace_changes,
             get_workspace_file_diff,
         ])
         .build(tauri::generate_context!())

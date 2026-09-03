@@ -17,6 +17,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { TooltipHandle } from "node_modules/@base-ui/react/tooltip/store/TooltipHandle.mjs";
 
 type FileNode = {
   kind: "file";
@@ -418,7 +420,7 @@ export function WorkspaceChangedFiles({
             <span>
               {stagedCount} staged · {unstagedCount} unstaged
             </span>
-            {unstagedCount > 0 && (
+            {/* {unstagedCount > 0 && (
               <button
                 type="button"
                 className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-foreground/75 outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
@@ -432,7 +434,7 @@ export function WorkspaceChangedFiles({
                 )}
                 Stage all
               </button>
-            )}
+            )} */}
           </div>
           <form
             className="flex gap-1.5"
@@ -448,9 +450,39 @@ export function WorkspaceChangedFiles({
               aria-label="Commit message"
               className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2.5 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
+            {/* </Button> */}
+						<Tooltip>
+							<TooltipTrigger asChild>
+  					<Button
+						variant={"secondary"}
+              type="submit"
+              size="sm"
+							name="Commit"
+              className="h-8 gap-1.5 px-2.5"
+              onClick={() => void onStageAll()}
+              disabled={
+								unstagedCount == 0 || stagingAll || committing
+              }
+            >
+
+                {stagingAll ? (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                ) : (
+                  <Plus className="size-3.5" />
+                )}
+            </Button>
+							</TooltipTrigger>
+							<TooltipContent align="end" side="top">
+								Stage all changes
+							</TooltipContent>
+						</Tooltip>
+
+						<Tooltip>
+							<TooltipTrigger asChild>
             <Button
               type="submit"
               size="sm"
+							name="Commit"
               className="h-8 gap-1.5 px-2.5"
               disabled={
                 stagedCount === 0 || !commitMessage.trim() || committing
@@ -461,8 +493,12 @@ export function WorkspaceChangedFiles({
               ) : (
                 <GitCommitHorizontal className="size-3.5" />
               )}
-              Commit
             </Button>
+							</TooltipTrigger>
+							<TooltipContent align="end" side="right">
+								Commit changes
+							</TooltipContent>
+						</Tooltip>
           </form>
         </div>
       )}

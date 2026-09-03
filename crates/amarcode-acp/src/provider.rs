@@ -1,8 +1,17 @@
-use futures_util::StreamExt;
-use reqwest::Client;
+use std::{path::Path, pin::Pin};
+
+use agent_client_protocol::{
+    schema::v1::{
+        ContentBlock, ContentChunk, MessageId, SessionId, SessionNotification, SessionUpdate,
+        TextContent,
+    },
+    Client as AcpClient, ConnectionTo,
+};
+use futures_util::{Stream, StreamExt};
+use reqwest::{Client as HttpClient, Response};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::sync::watch;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -29,19 +38,8 @@ impl Config {
             .collect::<Vec<_>>()
             .join(" ")
     }
-}
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct ProviderConfig {
-    #[serde(alias = "baseUrl")]
-    pub base_url: String,
-    #[serde(alias = "apiKey")]
-    pub api_key: String,
-    pub model: String,
-}
-
-impl Config {
-    pub fn from_file(path: &std::path::Path) -> Result<Self, String> {
+    pub fn from_file(path: &Path) -> Result<Self, String> {
         let contents = std::fs::read_to_string(path)
             .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
         let mut config: Self = serde_json::from_str(&contents)
@@ -64,6 +62,15 @@ impl Config {
         }
         Ok(config)
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderConfig {
+    #[serde(alias = "baseUrl")]
+    pub base_url: String,
+    #[serde(alias = "apiKey")]
+    pub api_key: String,
+    pub model: String,
 }
 
 impl ProviderConfig {
@@ -90,13 +97,24 @@ pub struct Message {
     pub content: String,
 }
 
+pub enum Completion {
+    Completed(String),
+    Cancelled,
+}
+
 pub async fn stream_completion(
-    client: &Client,
+    client: &HttpClient,
     config: &Config,
     history: &[Message],
-    session_id: &str,
-    stdout: &mut (impl AsyncWrite + Unpin),
-) -> Result<String, String> {
+    session_id: SessionId,
+    message_id: MessageId,
+    connection: ConnectionTo<AcpClient>,
+    mut cancellation: watch::Receiver<bool>,
+) -> Result<Completion, String> {
+    if *cancellation.borrow() {
+        return Ok(Completion::Cancelled);
+    }
+
     let body = json!({
         "model": config.provider.model,
         "messages": history.iter().map(|message| json!({
@@ -105,68 +123,108 @@ pub async fn stream_completion(
         })).collect::<Vec<_>>(),
         "stream": true,
     });
-    let response = client
+    let request = client
         .post(config.provider.endpoint())
         .bearer_auth(&config.provider.api_key)
         .json(&body)
-        .send()
-        .await
-        .map_err(|error| format!("provider request failed: {error}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!(
-            "provider returned {status}: {}",
-            error_message(&body)
-        ));
-    }
+        .send();
+    let response = tokio::select! {
+        response = request => response.map_err(|error| format!("provider request failed: {error}"))?,
+        _ = cancellation.changed() => return Ok(Completion::Cancelled),
+    };
+    let response = check_response(response).await?;
+    stream_response(
+        Box::pin(response.bytes_stream()),
+        session_id,
+        message_id,
+        connection,
+        cancellation,
+    )
+    .await
+}
 
-    let mut stream = response.bytes_stream();
+async fn check_response(response: Response) -> Result<Response, String> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    let body = response.text().await.unwrap_or_default();
+    Err(format!(
+        "provider returned {status}: {}",
+        error_message(&body)
+    ))
+}
+
+async fn stream_response(
+    mut stream: Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>>,
+    session_id: SessionId,
+    message_id: MessageId,
+    connection: ConnectionTo<AcpClient>,
+    mut cancellation: watch::Receiver<bool>,
+) -> Result<Completion, String> {
     let mut buffer = String::new();
     let mut answer = String::new();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = tokio::select! {
+            chunk = stream.next() => chunk,
+            _ = cancellation.changed() => return Ok(Completion::Cancelled),
+        };
+        let Some(chunk) = chunk else { break };
         let chunk = chunk.map_err(|error| format!("provider stream failed: {error}"))?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
         while let Some(index) = buffer.find('\n') {
             let line = buffer[..index].trim_end_matches('\r').to_owned();
             buffer.drain(..=index);
-            if let Some(data) = line.strip_prefix("data:") {
-                let data = data.trim();
-                if data == "[DONE]" {
-                    continue;
-                }
-                let value: Value = serde_json::from_str(data)
-                    .map_err(|error| format!("invalid provider event: {error}"))?;
-                if let Some(error) = value.get("error") {
-                    return Err(error_message(&error.to_string()));
-                }
-                let text = value["choices"][0]["delta"]["content"]
-                    .as_str()
-                    .unwrap_or_default();
-                if !text.is_empty() {
-                    answer.push_str(text);
-                    write_line(
-                        stdout,
-                        &json!({
-                            "jsonrpc": "2.0",
-                            "method": "session/update",
-                            "params": {
-                                "sessionId": session_id,
-                                "update": {
-                                    "sessionUpdate": "agent_message_chunk",
-                                    "messageId": "amarcode-response",
-                                    "content": { "type": "text", "text": text }
-                                }
-                            }
-                        }),
-                    )
-                    .await
-                    .map_err(|error| format!("ACP write failed: {error}"))?;
-                }
-            }
+            process_sse_line(&line, &mut answer, &session_id, &message_id, &connection)?;
         }
     }
-    Ok(answer)
+    if !buffer.is_empty() {
+        process_sse_line(
+            buffer.trim_end_matches('\r'),
+            &mut answer,
+            &session_id,
+            &message_id,
+            &connection,
+        )?;
+    }
+    Ok(Completion::Completed(answer))
+}
+
+fn process_sse_line(
+    line: &str,
+    answer: &mut String,
+    session_id: &SessionId,
+    message_id: &MessageId,
+    connection: &ConnectionTo<AcpClient>,
+) -> Result<(), String> {
+    let Some(data) = line.strip_prefix("data:") else {
+        return Ok(());
+    };
+    let data = data.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return Ok(());
+    }
+    let value: Value =
+        serde_json::from_str(data).map_err(|error| format!("invalid provider event: {error}"))?;
+    if let Some(error) = value.get("error") {
+        return Err(error_message(&error.to_string()));
+    }
+    let text = value["choices"][0]["delta"]["content"]
+        .as_str()
+        .unwrap_or_default();
+    if text.is_empty() {
+        return Ok(());
+    }
+    answer.push_str(text);
+    connection
+        .send_notification(SessionNotification::new(
+            session_id.clone(),
+            SessionUpdate::AgentMessageChunk(
+                ContentChunk::new(ContentBlock::Text(TextContent::new(text)))
+                    .message_id(message_id.clone()),
+            ),
+        ))
+        .map_err(|error| format!("ACP write failed: {error}"))
 }
 
 fn error_message(body: &str) -> String {
@@ -181,9 +239,45 @@ fn error_message(body: &str) -> String {
         .unwrap_or_else(|| body.trim().to_owned())
 }
 
-async fn write_line(stdout: &mut (impl AsyncWrite + Unpin), value: &Value) -> std::io::Result<()> {
-    let line = serde_json::to_string(value).expect("ACP message must serialize");
-    stdout.write_all(line.as_bytes()).await?;
-    stdout.write_all(b"\n").await?;
-    stdout.flush().await
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config(name: &str) -> Config {
+        Config {
+            name: name.into(),
+            provider: ProviderConfig {
+                base_url: "https://example.test/v1".into(),
+                api_key: "secret".into(),
+                model: "test-model".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn derives_agent_title_from_name() {
+        assert_eq!(
+            test_config("local_qwen-coder.v2").title(),
+            "Local Qwen Coder V2"
+        );
+    }
+
+    #[test]
+    fn parses_json_config() {
+        let path =
+            std::env::temp_dir().join(format!("amarcode-acp-config-{}.json", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"{
+                "name":"test-agent",
+                "provider":{"baseUrl":"https://example.test/v1/","apiKey":"secret","model":"test-model"}
+            }"#,
+        )
+        .expect("write config");
+        let config = Config::from_file(&path).expect("parse config");
+        assert_eq!(config.name, "test-agent");
+        assert_eq!(config.provider.base_url, "https://example.test/v1");
+        assert_eq!(config.provider.model, "test-model");
+        std::fs::remove_file(path).expect("remove config");
+    }
 }

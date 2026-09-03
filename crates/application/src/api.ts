@@ -138,6 +138,13 @@ export const daemonApi = {
     relativePath: string,
   ): Promise<void> =>
     invoke("unstage_workspace_file", { workspacePath, relativePath }),
+  stageAllWorkspaceFiles: (workspacePath: string): Promise<void> =>
+    invoke("stage_all_workspace_files", { workspacePath }),
+  commitWorkspaceChanges: (
+    workspacePath: string,
+    message: string,
+  ): Promise<void> =>
+    invoke("commit_workspace_changes", { workspacePath, message }),
   getWorkspaceFileDiff: (
     workspacePath: string,
     relativePath: string,
