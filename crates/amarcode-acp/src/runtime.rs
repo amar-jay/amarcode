@@ -380,8 +380,9 @@ async fn run_agent_turn(
     cancellation: watch::Receiver<bool>,
 ) -> Result<Completion<Vec<serde_json::Value>>, String> {
     const MAX_TOOL_ROUNDS: usize = 16;
+    let mut search_group: Option<SearchPresentationGroup> = None;
     for _ in 0..MAX_TOOL_ROUNDS {
-        let completion = provider::stream_completion(
+        let completion = match provider::stream_completion(
             &runtime.http,
             &runtime.config,
             &history,
@@ -391,19 +392,52 @@ async fn run_agent_turn(
             connection.clone(),
             cancellation.clone(),
         )
-        .await?;
+        .await
+        {
+            Ok(completion) => completion,
+            Err(error) => {
+                finish_active_search_group(&connection, &session_id, search_group.take(), true);
+                return Err(error);
+            }
+        };
         let Completion::Completed(mut turn) = completion else {
+            finish_active_search_group(&connection, &session_id, search_group.take(), true);
             return Ok(Completion::Cancelled);
         };
         normalize_tool_ids(&mut turn);
         history.push(provider::assistant_message(&turn));
         if turn.tool_calls.is_empty() {
+            finish_active_search_group(&connection, &session_id, search_group.take(), false);
             return Ok(Completion::Completed(history));
         }
         for call in &turn.tool_calls {
             if *cancellation.borrow() {
+                finish_active_search_group(&connection, &session_id, search_group.take(), true);
                 return Ok(Completion::Cancelled);
             }
+            if crate::tools::is_search_tool(call) {
+                if search_group.is_none() {
+                    let group_id = format!("search-group-{}", Uuid::new_v4());
+                    crate::tools::begin_search_group(&connection, &session_id, &group_id);
+                    search_group = Some(SearchPresentationGroup {
+                        id: group_id,
+                        count: 0,
+                        failed: 0,
+                    });
+                }
+                let group = search_group.as_mut().expect("search group initialized");
+                group.count += 1;
+                let output = match crate::tools::execute_grouped_search(call, &cwd) {
+                    Ok(output) => output,
+                    Err(error) => {
+                        group.failed += 1;
+                        format!("Error: {error}")
+                    }
+                };
+                history.push(provider::tool_message(call, &output));
+                continue;
+            }
+            finish_active_search_group(&connection, &session_id, search_group.take(), false);
             let output = crate::tools::execute(
                 call,
                 &cwd,
@@ -418,7 +452,31 @@ async fn run_agent_turn(
         }
         message_id = agent_client_protocol::schema::v1::MessageId::new(Uuid::new_v4().to_string());
     }
+    finish_active_search_group(&connection, &session_id, search_group.take(), true);
     Err("maximum tool-call rounds exceeded".into())
+}
+
+struct SearchPresentationGroup {
+    id: String,
+    count: usize,
+    failed: usize,
+}
+
+fn finish_active_search_group(
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+    group: Option<SearchPresentationGroup>,
+    interrupted: bool,
+) {
+    if let Some(group) = group {
+        crate::tools::finish_search_group(
+            connection,
+            session_id,
+            &group.id,
+            group.count,
+            group.failed + usize::from(interrupted),
+        );
+    }
 }
 
 fn normalize_tool_ids(turn: &mut ModelTurn) {

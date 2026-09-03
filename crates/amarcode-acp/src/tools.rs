@@ -22,6 +22,72 @@ use crate::provider::ModelToolCall;
 
 const MAX_OUTPUT: usize = 64 * 1024;
 
+pub fn is_search_tool(call: &ModelToolCall) -> bool {
+    matches!(call.name.as_str(), "search_text" | "list_directory")
+}
+
+/// Execute a read-only search call without publishing its individual ACP
+/// lifecycle. The runtime uses this for multi-call batches and publishes one
+/// synthetic search lifecycle while retaining every real result in model
+/// history.
+pub fn execute_grouped_search(call: &ModelToolCall, workspace: &Path) -> Result<String, String> {
+    let arguments = serde_json::from_str::<Value>(&call.arguments)
+        .map_err(|error| format!("invalid arguments: {error}"))?;
+    match call.name.as_str() {
+        "search_text" => search_text(workspace, &arguments),
+        "list_directory" => list_directory(workspace, &arguments),
+        other => Err(format!("cannot group non-search tool: {other}")),
+    }
+}
+
+pub fn begin_search_group(
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+    group_id: &str,
+) {
+    let started = AcpToolCall::new(group_id.to_owned(), "Searching")
+        .kind(ToolKind::Search)
+        .status(ToolCallStatus::InProgress)
+        .raw_input(json!({ "grouped": true }));
+    let _ = connection.send_notification(SessionNotification::new(
+        session_id.clone(),
+        SessionUpdate::ToolCall(started),
+    ));
+}
+
+pub fn finish_search_group(
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+    group_id: &str,
+    count: usize,
+    failed: usize,
+) {
+    let status = if failed == 0 {
+        ToolCallStatus::Completed
+    } else {
+        ToolCallStatus::Failed
+    };
+    let summary = if failed == 0 {
+        format!("Completed {count} search operations")
+    } else {
+        format!("Completed {count} search operations with {failed} failure(s)")
+    };
+    let fields = ToolCallUpdateFields::new()
+        .status(status)
+        .content(vec![ToolCallContent::from(ContentBlock::Text(
+            agent_client_protocol::schema::v1::TextContent::new(summary.clone()),
+        ))])
+        .raw_output(json!({
+            "operationCount": count,
+            "failedOperationCount": failed,
+            "text": summary,
+        }));
+    let _ = connection.send_notification(SessionNotification::new(
+        session_id.clone(),
+        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(group_id.to_owned(), fields)),
+    ));
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum PermissionKey {
     WriteFile {
@@ -600,6 +666,22 @@ fn truncate(mut value: String) -> String {
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{RequestPermissionResponse, SelectedPermissionOutcome};
+
+    fn model_call(name: &str) -> ModelToolCall {
+        ModelToolCall {
+            id: "call-1".into(),
+            name: name.into(),
+            arguments: "{}".into(),
+        }
+    }
+
+    #[test]
+    fn groups_only_read_only_search_operations() {
+        assert!(is_search_tool(&model_call("search_text")));
+        assert!(is_search_tool(&model_call("list_directory")));
+        assert!(!is_search_tool(&model_call("read_file")));
+        assert!(!is_search_tool(&model_call("run_command")));
+    }
 
     #[test]
     fn rejects_parent_and_absolute_paths() {
