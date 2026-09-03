@@ -547,7 +547,7 @@ mod tests {
     fn temp_workspace() -> PathBuf {
         let path = std::env::temp_dir().join(format!("amarcode-terminal-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&path).expect("create test workspace");
-        path
+        path.canonicalize().expect("canonicalize test workspace")
     }
 
     fn allow(manager: &TerminalManager, command: &str, args: &[&str]) {
