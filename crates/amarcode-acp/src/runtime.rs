@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use agent_client_protocol::{
     schema::{
@@ -19,7 +19,7 @@ use reqwest::Client as HttpClient;
 use tokio::sync::{watch, Mutex};
 use uuid::Uuid;
 
-use crate::provider::{self, Completion, Config, Message};
+use crate::provider::{self, Completion, Config, ModelTurn};
 
 #[derive(Clone)]
 struct Runtime {
@@ -29,8 +29,8 @@ struct Runtime {
 }
 
 struct Session {
-    _cwd: String,
-    history: Vec<Message>,
+    cwd: PathBuf,
+    history: Vec<serde_json::Value>,
     mode: String,
     active_turn: Option<ActiveTurn>,
 }
@@ -38,6 +38,7 @@ struct Session {
 struct ActiveTurn {
     id: Uuid,
     cancel: watch::Sender<bool>,
+    history_len: usize,
 }
 
 pub async fn serve(config: Config) -> agent_client_protocol::Result<()> {
@@ -79,7 +80,7 @@ impl Runtime {
         self.sessions.lock().await.insert(
             session_id.clone(),
             Session {
-                _cwd: request.cwd.to_string_lossy().into_owned(),
+                cwd: request.cwd,
                 history: Vec::new(),
                 mode: "ask".into(),
                 active_turn: None,
@@ -160,7 +161,13 @@ impl Runtime {
     async fn begin_turn(
         &self,
         request: &PromptRequest,
-    ) -> agent_client_protocol::Result<(Uuid, Vec<Message>, watch::Receiver<bool>)> {
+    ) -> agent_client_protocol::Result<(
+        Uuid,
+        PathBuf,
+        String,
+        Vec<serde_json::Value>,
+        watch::Receiver<bool>,
+    )> {
         let prompt = extract_prompt_text(&request.prompt);
         if prompt.is_empty() {
             return Err(Error::invalid_params().data("prompt must contain text"));
@@ -172,21 +179,33 @@ impl Runtime {
         if session.active_turn.is_some() {
             return Err(Error::invalid_request().data("session already has an active turn"));
         }
-        session.history.push(Message {
-            role: "user",
-            content: prompt,
-        });
+        let history_len = session.history.len();
+        session
+            .history
+            .push(serde_json::json!({ "role": "user", "content": prompt }));
         let history = session.history.clone();
         let turn_id = Uuid::new_v4();
         let (cancel, cancellation) = watch::channel(false);
         session.active_turn = Some(ActiveTurn {
             id: turn_id,
             cancel,
+            history_len,
         });
-        Ok((turn_id, history, cancellation))
+        Ok((
+            turn_id,
+            session.cwd.clone(),
+            session.mode.clone(),
+            history,
+            cancellation,
+        ))
     }
 
-    async fn finish_turn(&self, session_id: &SessionId, turn_id: Uuid, answer: Option<String>) {
+    async fn finish_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: Uuid,
+        history: Option<Vec<serde_json::Value>>,
+    ) {
         let mut sessions = self.sessions.lock().await;
         let Some(session) = sessions.get_mut(session_id) else {
             return;
@@ -198,14 +217,11 @@ impl Runtime {
         {
             return;
         }
-        session.active_turn = None;
-        if let Some(answer) = answer {
-            session.history.push(Message {
-                role: "assistant",
-                content: answer,
-            });
+        let active = session.active_turn.take().expect("checked active turn");
+        if let Some(history) = history {
+            session.history = history;
         } else {
-            let _ = session.history.pop();
+            session.history.truncate(active.history_len);
         }
     }
 }
@@ -282,7 +298,7 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
             async move |request: PromptRequest,
                         responder: Responder<PromptResponse>,
                         connection: ConnectionTo<Client>| {
-                let (turn_id, history, cancellation) =
+                let (turn_id, cwd, mode, history, cancellation) =
                     match prompt_runtime.begin_turn(&request).await {
                         Ok(turn) => turn,
                         Err(error) => return responder.respond_with_error(error),
@@ -294,14 +310,9 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                     agent_client_protocol::schema::v1::MessageId::new(Uuid::new_v4().to_string());
                 connection.clone().spawn(async move {
                     let outcome = tokio::select! {
-                        outcome = provider::stream_completion(
-                            &runtime.http,
-                            &runtime.config,
-                            &history,
-                            session_id.clone(),
-                            message_id,
-                            connection,
-                            cancellation,
+                        outcome = run_agent_turn(
+                            &runtime, history, cwd, mode, session_id.clone(), message_id,
+                            connection, cancellation,
                         ) => outcome,
                         _ = request_cancellation.cancelled() => {
                             runtime.cancel(&session_id).await;
@@ -310,9 +321,9 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                         }
                     };
                     match outcome {
-                        Ok(Completion::Completed(answer)) => {
+                        Ok(Completion::Completed(history)) => {
                             runtime
-                                .finish_turn(&session_id, turn_id, Some(answer))
+                                .finish_turn(&session_id, turn_id, Some(history))
                                 .await;
                             responder.respond(PromptResponse::new(StopReason::EndTurn))
                         }
@@ -347,6 +358,68 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
             },
             agent_client_protocol::on_receive_request!(),
         )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "turn execution requires explicit protocol, workspace, model-history, and cancellation state"
+)]
+async fn run_agent_turn(
+    runtime: &Runtime,
+    mut history: Vec<serde_json::Value>,
+    cwd: PathBuf,
+    mode: String,
+    session_id: SessionId,
+    mut message_id: agent_client_protocol::schema::v1::MessageId,
+    connection: ConnectionTo<Client>,
+    cancellation: watch::Receiver<bool>,
+) -> Result<Completion<Vec<serde_json::Value>>, String> {
+    const MAX_TOOL_ROUNDS: usize = 16;
+    for _ in 0..MAX_TOOL_ROUNDS {
+        let completion = provider::stream_completion(
+            &runtime.http,
+            &runtime.config,
+            &history,
+            session_id.clone(),
+            message_id,
+            connection.clone(),
+            cancellation.clone(),
+        )
+        .await?;
+        let Completion::Completed(mut turn) = completion else {
+            return Ok(Completion::Cancelled);
+        };
+        normalize_tool_ids(&mut turn);
+        history.push(provider::assistant_message(&turn));
+        if turn.tool_calls.is_empty() {
+            return Ok(Completion::Completed(history));
+        }
+        for call in &turn.tool_calls {
+            if *cancellation.borrow() {
+                return Ok(Completion::Cancelled);
+            }
+            let output = crate::tools::execute(
+                call,
+                &cwd,
+                &mode,
+                &session_id,
+                &connection,
+                cancellation.clone(),
+            )
+            .await;
+            history.push(provider::tool_message(call, &output));
+        }
+        message_id = agent_client_protocol::schema::v1::MessageId::new(Uuid::new_v4().to_string());
+    }
+    Err("maximum tool-call rounds exceeded".into())
+}
+
+fn normalize_tool_ids(turn: &mut ModelTurn) {
+    for call in &mut turn.tool_calls {
+        if call.id.is_empty() {
+            call.id = Uuid::new_v4().to_string();
+        }
+    }
 }
 
 fn extract_prompt_text(prompt: &[ContentBlock]) -> String {
@@ -392,7 +465,7 @@ mod tests {
         let sessions = runtime.sessions.lock().await;
         assert_eq!(sessions[&first.session_id].mode, "code");
         assert_eq!(sessions[&second.session_id].mode, "ask");
-        assert_eq!(sessions[&first.session_id]._cwd, "/workspace");
+        assert_eq!(sessions[&first.session_id].cwd, PathBuf::from("/workspace"));
     }
 
     #[tokio::test]
@@ -400,14 +473,14 @@ mod tests {
         let runtime = runtime();
         let first = runtime.new_session(NewSessionRequest::new("/one")).await;
         let second = runtime.new_session(NewSessionRequest::new("/two")).await;
-        let (_, _, first_cancel) = runtime
+        let (_, _, _, _, first_cancel) = runtime
             .begin_turn(&PromptRequest::new(
                 first.session_id.clone(),
                 vec!["one".into()],
             ))
             .await
             .expect("begin first turn");
-        let (_, _, second_cancel) = runtime
+        let (_, _, _, _, second_cancel) = runtime
             .begin_turn(&PromptRequest::new(
                 second.session_id.clone(),
                 vec!["two".into()],

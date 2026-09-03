@@ -2,6 +2,7 @@ use std::{env, path::PathBuf};
 
 mod provider;
 mod runtime;
+mod tools;
 
 use provider::Config;
 

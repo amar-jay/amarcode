@@ -48,3 +48,17 @@ The adapter currently advertises only the optional `session/close` capability.
 Session load, resume, list, delete, authentication, images, audio, embedded
 context, and MCP capabilities are not advertised because they are not yet
 implemented. Session state remains in memory and is lost when the process exits.
+
+## Tools
+
+OpenAI-compatible function calling is executed as an iterative model → tool →
+model loop. The built-in tools are `read_file`, `list_directory`, `search_text`,
+and `write_file`. All paths are restricted to the session workspace, symlink
+escapes are rejected, and output is bounded. `write_file` is available only in
+code mode and requires approval through ACP `session/request_permission`.
+
+Tool calls are streamed to the client using typed ACP `tool_call` and
+`tool_call_update` events. Calls and results remain structured in provider
+history so the model can continue after each tool execution. A turn is limited
+to 16 tool-call rounds and remains cancellable while waiting for the provider or
+for permission.

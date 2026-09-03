@@ -272,3 +272,80 @@ fn transcript_streams_a_uuid_message_id() {
         .expect("message id");
     Uuid::parse_str(message_id).expect("UUID message id");
 }
+
+#[test]
+fn transcript_executes_tool_and_returns_result_to_model() {
+    let listener = match TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping socket transcript test: sandbox forbids loopback listeners");
+            return;
+        }
+        Err(error) => panic!("bind provider: {error}"),
+    };
+    let address = listener.local_addr().expect("provider address");
+    let (request_sender, request_receiver) = mpsc::channel();
+    thread::spawn(move || {
+        for body in [
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-read\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"hello.txt\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"I read the file.\"}}]}\n\ndata: [DONE]\n\n",
+        ] {
+            let (mut socket, _) = listener.accept().expect("provider connection");
+            let mut request = [0_u8; 16_384];
+            let size = socket.read(&mut request).expect("read HTTP request");
+            request_sender
+                .send(String::from_utf8_lossy(&request[..size]).into_owned())
+                .expect("capture request");
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .expect("write provider response");
+            socket.flush().expect("flush provider response");
+        }
+    });
+
+    let workspace = std::env::temp_dir().join(format!("amarcode-tools-{}", Uuid::new_v4()));
+    fs::create_dir(&workspace).expect("create workspace");
+    fs::write(workspace.join("hello.txt"), "hello from tool").expect("write fixture");
+
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session_id = new_session(&mut agent, 2, workspace.to_str().expect("workspace path"));
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "session/prompt",
+        "params": {
+            "sessionId": session_id,
+            "prompt": [{ "type": "text", "text": "Read hello.txt" }]
+        }
+    }));
+
+    let (response, messages) = agent.response_with_messages(3);
+    assert_eq!(response["result"]["stopReason"], "end_turn");
+    assert!(messages.iter().any(|message| {
+        message["params"]["update"]["sessionUpdate"] == "tool_call"
+            && message["params"]["update"]["toolCallId"] == "call-read"
+    }));
+    assert!(messages.iter().any(|message| {
+        message["params"]["update"]["sessionUpdate"] == "tool_call_update"
+            && message["params"]["update"]["toolCallId"] == "call-read"
+            && message["params"]["update"]["status"] == "completed"
+    }));
+    assert!(messages.iter().any(|message| {
+        message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
+            && message["params"]["update"]["content"]["text"] == "I read the file."
+    }));
+
+    let _first_request = request_receiver
+        .recv_timeout(TIMEOUT)
+        .expect("first request");
+    let second_request = request_receiver
+        .recv_timeout(TIMEOUT)
+        .expect("second request");
+    assert!(second_request.contains("\"role\":\"tool\""));
+    assert!(second_request.contains("hello from tool"));
+    let _ = fs::remove_dir_all(workspace);
+}

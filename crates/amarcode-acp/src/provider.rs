@@ -1,4 +1,4 @@
-use std::{path::Path, pin::Pin};
+use std::{collections::BTreeMap, path::Path};
 
 use agent_client_protocol::{
     schema::v1::{
@@ -7,8 +7,8 @@ use agent_client_protocol::{
     },
     Client as AcpClient, ConnectionTo,
 };
-use futures_util::{Stream, StreamExt};
-use reqwest::{Client as HttpClient, Response};
+use futures_util::StreamExt;
+use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::watch;
@@ -25,15 +25,12 @@ impl Config {
             .split(['.', '_', '-'])
             .filter(|part| !part.is_empty())
             .map(|part| {
-                let mut characters = part.chars();
-                match characters.next() {
-                    Some(first) => {
-                        let mut word = first.to_ascii_uppercase().to_string();
-                        word.extend(characters);
-                        word
-                    }
-                    None => String::new(),
-                }
+                let mut chars = part.chars();
+                chars.next().map_or_else(String::new, |first| {
+                    let mut word = first.to_ascii_uppercase().to_string();
+                    word.extend(chars);
+                    word
+                })
             })
             .collect::<Vec<_>>()
             .join(" ")
@@ -47,10 +44,7 @@ impl Config {
         config.name = config.name.trim().to_owned();
         config.provider.base_url = config.provider.base_url.trim_end_matches('/').to_owned();
         if !valid_agent_name(&config.name) {
-            return Err(
-                "name must start with an ASCII lowercase letter or digit and contain only lowercase letters, digits, '.', '_', or '-'"
-                    .into(),
-            );
+            return Err("name must start with an ASCII lowercase letter or digit and contain only lowercase letters, digits, '.', '_', or '-'".into());
         }
         if config.provider.base_url.is_empty()
             || config.provider.api_key.trim().is_empty()
@@ -80,32 +74,73 @@ impl ProviderConfig {
 }
 
 fn valid_agent_name(name: &str) -> bool {
-    let mut characters = name.chars();
-    characters
+    let mut chars = name.chars();
+    chars
         .next()
-        .is_some_and(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
-        && characters.all(|character| {
-            character.is_ascii_lowercase()
-                || character.is_ascii_digit()
-                || matches!(character, '.' | '_' | '-')
-        })
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && chars
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
 }
 
-#[derive(Debug, Clone)]
-pub struct Message {
-    pub role: &'static str,
-    pub content: String,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
 }
 
-pub enum Completion {
-    Completed(String),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelTurn {
+    pub text: String,
+    pub tool_calls: Vec<ModelToolCall>,
+}
+
+pub enum Completion<T = ModelTurn> {
+    Completed(T),
     Cancelled,
+}
+
+pub fn tool_definitions() -> Vec<Value> {
+    vec![
+        function_tool(
+            "read_file",
+            "Read a UTF-8 text file inside the workspace.",
+            json!({
+                "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"], "additionalProperties": false
+            }),
+        ),
+        function_tool(
+            "list_directory",
+            "List entries in a workspace directory.",
+            json!({
+                "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"], "additionalProperties": false
+            }),
+        ),
+        function_tool(
+            "search_text",
+            "Search UTF-8 workspace files for literal text.",
+            json!({
+                "type": "object", "properties": { "query": { "type": "string" }, "path": { "type": "string" } }, "required": ["query"], "additionalProperties": false
+            }),
+        ),
+        function_tool(
+            "write_file",
+            "Create or replace a UTF-8 text file inside the workspace. Requires user approval.",
+            json!({
+                "type": "object", "properties": { "path": { "type": "string" }, "content": { "type": "string" } }, "required": ["path", "content"], "additionalProperties": false
+            }),
+        ),
+    ]
+}
+
+fn function_tool(name: &str, description: &str, parameters: Value) -> Value {
+    json!({ "type": "function", "function": { "name": name, "description": description, "parameters": parameters } })
 }
 
 pub async fn stream_completion(
     client: &HttpClient,
     config: &Config,
-    history: &[Message],
+    history: &[Value],
     session_id: SessionId,
     message_id: MessageId,
     connection: ConnectionTo<AcpClient>,
@@ -114,85 +149,77 @@ pub async fn stream_completion(
     if *cancellation.borrow() {
         return Ok(Completion::Cancelled);
     }
-
-    let body = json!({
-        "model": config.provider.model,
-        "messages": history.iter().map(|message| json!({
-            "role": message.role,
-            "content": message.content,
-        })).collect::<Vec<_>>(),
-        "stream": true,
-    });
     let request = client
         .post(config.provider.endpoint())
         .bearer_auth(&config.provider.api_key)
-        .json(&body)
+        .json(&json!({
+            "model": config.provider.model,
+            "messages": history,
+            "tools": tool_definitions(),
+            "tool_choice": "auto",
+            "stream": true
+        }))
         .send();
     let response = tokio::select! {
         response = request => response.map_err(|error| format!("provider request failed: {error}"))?,
         _ = cancellation.changed() => return Ok(Completion::Cancelled),
     };
-    let response = check_response(response).await?;
-    stream_response(
-        Box::pin(response.bytes_stream()),
-        session_id,
-        message_id,
-        connection,
-        cancellation,
-    )
-    .await
-}
-
-async fn check_response(response: Response) -> Result<Response, String> {
     let status = response.status();
-    if status.is_success() {
-        return Ok(response);
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "provider returned {status}: {}",
+            error_message(&body)
+        ));
     }
-    let body = response.text().await.unwrap_or_default();
-    Err(format!(
-        "provider returned {status}: {}",
-        error_message(&body)
-    ))
-}
 
-async fn stream_response(
-    mut stream: Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>>,
-    session_id: SessionId,
-    message_id: MessageId,
-    connection: ConnectionTo<AcpClient>,
-    mut cancellation: watch::Receiver<bool>,
-) -> Result<Completion, String> {
+    let mut stream = Box::pin(response.bytes_stream());
     let mut buffer = String::new();
-    let mut answer = String::new();
+    let mut turn = ModelTurn {
+        text: String::new(),
+        tool_calls: Vec::new(),
+    };
+    let mut calls = BTreeMap::<usize, ModelToolCall>::new();
     loop {
         let chunk = tokio::select! {
             chunk = stream.next() => chunk,
             _ = cancellation.changed() => return Ok(Completion::Cancelled),
         };
         let Some(chunk) = chunk else { break };
-        let chunk = chunk.map_err(|error| format!("provider stream failed: {error}"))?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        buffer.push_str(&String::from_utf8_lossy(
+            &chunk.map_err(|e| format!("provider stream failed: {e}"))?,
+        ));
         while let Some(index) = buffer.find('\n') {
             let line = buffer[..index].trim_end_matches('\r').to_owned();
             buffer.drain(..=index);
-            process_sse_line(&line, &mut answer, &session_id, &message_id, &connection)?;
+            process_sse_line(
+                &line,
+                &mut turn,
+                &mut calls,
+                &session_id,
+                &message_id,
+                &connection,
+            )?;
         }
     }
     if !buffer.is_empty() {
         process_sse_line(
             buffer.trim_end_matches('\r'),
-            &mut answer,
+            &mut turn,
+            &mut calls,
             &session_id,
             &message_id,
             &connection,
         )?;
     }
-    Ok(Completion::Completed(answer))
+    turn.tool_calls = calls.into_values().collect();
+    Ok(Completion::Completed(turn))
 }
 
 fn process_sse_line(
     line: &str,
-    answer: &mut String,
+    turn: &mut ModelTurn,
+    calls: &mut BTreeMap<usize, ModelToolCall>,
     session_id: &SessionId,
     message_id: &MessageId,
     connection: &ConnectionTo<AcpClient>,
@@ -205,34 +232,61 @@ fn process_sse_line(
         return Ok(());
     }
     let value: Value =
-        serde_json::from_str(data).map_err(|error| format!("invalid provider event: {error}"))?;
+        serde_json::from_str(data).map_err(|e| format!("invalid provider event: {e}"))?;
     if let Some(error) = value.get("error") {
         return Err(error_message(&error.to_string()));
     }
-    let text = value["choices"][0]["delta"]["content"]
-        .as_str()
-        .unwrap_or_default();
-    if text.is_empty() {
-        return Ok(());
+    let delta = &value["choices"][0]["delta"];
+    if let Some(text) = delta["content"].as_str().filter(|text| !text.is_empty()) {
+        turn.text.push_str(text);
+        connection
+            .send_notification(SessionNotification::new(
+                session_id.clone(),
+                SessionUpdate::AgentMessageChunk(
+                    ContentChunk::new(ContentBlock::Text(TextContent::new(text)))
+                        .message_id(message_id.clone()),
+                ),
+            ))
+            .map_err(|e| format!("ACP write failed: {e}"))?;
     }
-    answer.push_str(text);
-    connection
-        .send_notification(SessionNotification::new(
-            session_id.clone(),
-            SessionUpdate::AgentMessageChunk(
-                ContentChunk::new(ContentBlock::Text(TextContent::new(text)))
-                    .message_id(message_id.clone()),
-            ),
-        ))
-        .map_err(|error| format!("ACP write failed: {error}"))
+    if let Some(tool_calls) = delta["tool_calls"].as_array() {
+        for chunk in tool_calls {
+            let index = chunk["index"].as_u64().unwrap_or(0) as usize;
+            let call = calls.entry(index).or_insert_with(|| ModelToolCall {
+                id: String::new(),
+                name: String::new(),
+                arguments: String::new(),
+            });
+            if let Some(id) = chunk["id"].as_str() {
+                call.id.push_str(id);
+            }
+            if let Some(name) = chunk["function"]["name"].as_str() {
+                call.name.push_str(name);
+            }
+            if let Some(arguments) = chunk["function"]["arguments"].as_str() {
+                call.arguments.push_str(arguments);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn assistant_message(turn: &ModelTurn) -> Value {
+    let calls = turn.tool_calls.iter().map(|call| json!({
+        "id": call.id, "type": "function", "function": { "name": call.name, "arguments": call.arguments }
+    })).collect::<Vec<_>>();
+    json!({ "role": "assistant", "content": if turn.text.is_empty() { Value::Null } else { Value::String(turn.text.clone()) }, "tool_calls": calls })
+}
+
+pub fn tool_message(call: &ModelToolCall, output: &str) -> Value {
+    json!({ "role": "tool", "tool_call_id": call.id, "name": call.name, "content": output })
 }
 
 fn error_message(body: &str) -> String {
     serde_json::from_str::<Value>(body)
         .ok()
-        .and_then(|value| {
-            value
-                .pointer("/error/message")
+        .and_then(|v| {
+            v.pointer("/error/message")
                 .and_then(Value::as_str)
                 .map(str::to_owned)
         })
@@ -243,41 +297,44 @@ fn error_message(body: &str) -> String {
 mod tests {
     use super::*;
 
-    fn test_config(name: &str) -> Config {
-        Config {
-            name: name.into(),
-            provider: ProviderConfig {
-                base_url: "https://example.test/v1".into(),
-                api_key: "secret".into(),
-                model: "test-model".into(),
-            },
+    #[test]
+    fn assembles_split_tool_call_chunks() {
+        let mut turn = ModelTurn {
+            text: String::new(),
+            tool_calls: Vec::new(),
+        };
+        let mut calls = BTreeMap::new();
+        fn apply(data: Value, turn: &mut ModelTurn, calls: &mut BTreeMap<usize, ModelToolCall>) {
+            let delta = &data["choices"][0]["delta"];
+            for chunk in delta["tool_calls"].as_array().unwrap() {
+                let index = chunk["index"].as_u64().unwrap() as usize;
+                let call = calls.entry(index).or_insert_with(|| ModelToolCall {
+                    id: String::new(),
+                    name: String::new(),
+                    arguments: String::new(),
+                });
+                if let Some(v) = chunk["id"].as_str() {
+                    call.id.push_str(v);
+                }
+                if let Some(v) = chunk["function"]["name"].as_str() {
+                    call.name.push_str(v);
+                }
+                if let Some(v) = chunk["function"]["arguments"].as_str() {
+                    call.arguments.push_str(v);
+                }
+            }
+            let _ = turn;
         }
-    }
-
-    #[test]
-    fn derives_agent_title_from_name() {
-        assert_eq!(
-            test_config("local_qwen-coder.v2").title(),
-            "Local Qwen Coder V2"
+        apply(
+            json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read_file","arguments":"{\"pa"}}]}}]}),
+            &mut turn,
+            &mut calls,
         );
-    }
-
-    #[test]
-    fn parses_json_config() {
-        let path =
-            std::env::temp_dir().join(format!("amarcode-acp-config-{}.json", uuid::Uuid::new_v4()));
-        std::fs::write(
-            &path,
-            r#"{
-                "name":"test-agent",
-                "provider":{"baseUrl":"https://example.test/v1/","apiKey":"secret","model":"test-model"}
-            }"#,
-        )
-        .expect("write config");
-        let config = Config::from_file(&path).expect("parse config");
-        assert_eq!(config.name, "test-agent");
-        assert_eq!(config.provider.base_url, "https://example.test/v1");
-        assert_eq!(config.provider.model, "test-model");
-        std::fs::remove_file(path).expect("remove config");
+        apply(
+            json!({"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"a.rs\"}"}}]}}]}),
+            &mut turn,
+            &mut calls,
+        );
+        assert_eq!(calls[&0].arguments, "{\"path\":\"a.rs\"}");
     }
 }

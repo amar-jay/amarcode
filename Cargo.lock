@@ -117,6 +117,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]
