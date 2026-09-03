@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/amarcode-acp",
   "crates/application/src-tauri",
   "crates/daemon",
   "crates/protocol",

@@ -1,0 +1,16 @@
+[package]
+name = "amarcode-acp"
+version = "0.1.0"
+description = "ACP adapter for OpenAI-compatible chat completion APIs"
+edition = "2021"
+
+[[bin]]
+name = "amarcode-acp"
+path = "src/main.rs"
+
+[dependencies]
+futures-util = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt-multi-thread", "sync"] }
