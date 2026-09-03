@@ -1,6 +1,6 @@
 [package]
 name = "amarcode-daemon"
-version = "0.4.1"
+version = "0.5.0"
 description = "Background service for Amarcode"
 edition = "2021"
 

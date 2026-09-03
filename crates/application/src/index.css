@@ -197,7 +197,7 @@
 }
 
 /* Menus use an inverted glass surface so they remain distinct from the workbench canvas. */
-[data-slot="select-content"],
+/* [data-slot="select-content"],
 [data-slot="dropdown-menu-content"],
 [data-slot="dropdown-menu-sub-content"],
 [data-slot="hover-card-content"] {
@@ -214,7 +214,7 @@
     var(--background) 18%,
     transparent
   ) !important;
-}
+} */
 
 [data-slot="select-content"] [data-slot="select-item"],
 [data-slot="dropdown-menu-content"] [data-slot$="-item"],
