@@ -21,7 +21,8 @@ Configuration:
   "provider": {
     "base_url": "https://api.openai.com/v1",
     "api_key": "sk-...",
-    "model": "gpt-4.1"
+    "model": "gpt-4.1",
+    "reasoning": { "enabled": true }
   }
 }
 ```
@@ -35,6 +36,13 @@ several configured `amarcode-acp` instances advertise distinct identities.
 `provider.baseUrl` and `provider.apiKey` are also accepted for compatibility
 with camelCase configuration producers. Keep this file private because it
 contains the API key.
+
+`provider.reasoning` is optional and is forwarded unchanged to compatible
+providers. Reasoning defaults to `{ "enabled": true }` for `openrouter.ai`;
+set it explicitly to `{ "enabled": false }` to disable it. Other providers
+remain opt-in. Streamed `reasoning_details`, `reasoning`, and
+`reasoning_content` are rendered as ACP thought chunks. Structured
+`reasoning_details` are reassembled and preserved across tool-call rounds.
 
 ## Protocol behavior
 

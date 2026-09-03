@@ -287,7 +287,7 @@ fn transcript_executes_tool_and_returns_result_to_model() {
     let (request_sender, request_receiver) = mpsc::channel();
     thread::spawn(move || {
         for body in [
-            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-read\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"hello.txt\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
+            "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"I should inspect the file.\",\"id\":\"reasoning-1\",\"index\":0}]}}]}\n\ndata: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-read\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"hello.txt\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
             "data: {\"choices\":[{\"delta\":{\"content\":\"I read the file.\"}}]}\n\ndata: [DONE]\n\n",
         ] {
             let (mut socket, _) = listener.accept().expect("provider connection");
@@ -326,6 +326,10 @@ fn transcript_executes_tool_and_returns_result_to_model() {
     let (response, messages) = agent.response_with_messages(3);
     assert_eq!(response["result"]["stopReason"], "end_turn");
     assert!(messages.iter().any(|message| {
+        message["params"]["update"]["sessionUpdate"] == "agent_thought_chunk"
+            && message["params"]["update"]["content"]["text"] == "I should inspect the file."
+    }));
+    assert!(messages.iter().any(|message| {
         message["params"]["update"]["sessionUpdate"] == "tool_call"
             && message["params"]["update"]["toolCallId"] == "call-read"
     }));
@@ -347,6 +351,8 @@ fn transcript_executes_tool_and_returns_result_to_model() {
         .expect("second request");
     assert!(second_request.contains("\"role\":\"tool\""));
     assert!(second_request.contains("hello from tool"));
+    assert!(second_request.contains("\"reasoning_details\""));
+    assert!(second_request.contains("I should inspect the file."));
     let _ = fs::remove_dir_all(workspace);
 }
 

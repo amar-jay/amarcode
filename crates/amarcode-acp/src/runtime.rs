@@ -380,6 +380,7 @@ async fn run_agent_turn(
             &runtime.http,
             &runtime.config,
             &history,
+            &mode,
             session_id.clone(),
             message_id,
             connection.clone(),
@@ -443,6 +444,7 @@ mod tests {
                 base_url: "https://example.test/v1".into(),
                 api_key: "secret".into(),
                 model: "test-model".into(),
+                reasoning: None,
             },
         })
     }

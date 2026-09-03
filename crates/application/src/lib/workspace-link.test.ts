@@ -24,6 +24,11 @@ describe("workspaceFileTarget", () => {
     expect(
       workspaceFileTarget(`file://${root}/crates/app.ts#L3C2`, root),
     ).toEqual({ path: "crates/app.ts", line: 3, column: 2 });
+    expect(workspaceFileTarget(`file://${root}/src/lib.rs:19`, root)).toEqual({
+      path: "src/lib.rs",
+      line: 19,
+      column: undefined,
+    });
   });
 
   test("rejects traversal and absolute paths outside the workspace", () => {

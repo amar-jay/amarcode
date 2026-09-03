@@ -11,7 +11,9 @@ pnpm-lock.yaml
 # build outputs
 dist/
 build/
+credentials/
 
+.*.json
 # os files
 .ds_store
 

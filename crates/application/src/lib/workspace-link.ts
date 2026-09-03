@@ -76,6 +76,15 @@ export function workspaceFileTarget(
     value = decode(value);
   }
 
+  if (line === undefined) {
+    const suffixLocation = value.match(/:(\d+)(?::(\d+))?$/);
+    if (suffixLocation) {
+      line = Number(suffixLocation[1]);
+      column = suffixLocation[2] ? Number(suffixLocation[2]) : undefined;
+      value = value.slice(0, suffixLocation.index);
+    }
+  }
+
   const root = normalizedPath(workspaceRoot);
   let path = normalizedPath(value);
   if (path.startsWith("/")) {
