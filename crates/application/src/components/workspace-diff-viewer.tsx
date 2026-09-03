@@ -15,7 +15,7 @@ import { python } from "@codemirror/lang-python";
 import { yaml } from "@codemirror/lang-yaml";
 import { sql } from "@codemirror/lang-sql";
 import { lineNumbers, EditorView } from "@codemirror/view";
-import { FileDiff, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { daemonApi, type WorkspaceDiff } from "@/api";
 
 function languageForPath(path: string): Extension {
@@ -168,12 +168,15 @@ export function WorkspaceDiffViewer({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    setDiff(undefined);
-    setError(undefined);
     if (!workspacePath || !selectedPath) return;
 
     let cancelled = false;
-    setLoading(true);
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setDiff(undefined);
+      setError(undefined);
+      setLoading(true);
+    });
     void daemonApi
       .getWorkspaceFileDiff(workspacePath, selectedPath)
       .then((nextDiff) => {

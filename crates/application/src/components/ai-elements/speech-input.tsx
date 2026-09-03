@@ -162,7 +162,7 @@ export const SpeechInput = ({
     speechRecognition.addEventListener("error", handleError);
 
     recognitionRef.current = speechRecognition;
-    setIsRecognitionReady(true);
+    queueMicrotask(() => setIsRecognitionReady(true));
 
     return () => {
       speechRecognition.removeEventListener("start", handleStart);

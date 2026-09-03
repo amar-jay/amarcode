@@ -166,7 +166,7 @@ function toolSummary(part: MessagePart, verbose: boolean) {
     const value = JSON.parse(part.content_json);
     if (typeof value !== "object" || value === null) return null;
     const record = value as ToolMessage;
-    let label = getToolLabel(record);
+    const label = getToolLabel(record);
     if (!label) return null;
     const id = stringed(record.toolCallId, label);
     if (!record.kind) {

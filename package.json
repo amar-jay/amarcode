@@ -10,6 +10,7 @@
     "build": "bun run --cwd crates/application build",
     "tauri": "bun run --cwd crates/application tauri",
     "app:test": "bun run --cwd crates/application test",
+    "app:lint": "bun run --cwd crates/application lint",
     "app:dev": "bun run --cwd crates/application tauri:dev",
     "app:build": "bun run --cwd crates/application tauri:build",
     "daemon": "cargo run -p amarcode-daemon --bin amarcode-daemon -- run",
@@ -28,6 +29,7 @@
     "protocol:generate": "cargo run -p amarcode-protocol --bin generate-protocol-types",
     "protocol:check": "cargo test -p amarcode-protocol checked_in_typescript_bindings_are_current",
     "tsc": "bun run --cwd crates/application tsc",
+    "lint:check": "bun run app:lint:check",
     "test": "bun run app:test && bun run worker:test",
     "clippy": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
     "prettify": "bun run prettier -w . --ignore-path .gitignore --ignore-path .prettierignore && cargo fmt --all"

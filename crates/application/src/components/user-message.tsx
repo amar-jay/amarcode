@@ -2,7 +2,6 @@ import {
   splitLeadingWarning,
   assistantMessageTone,
   cleanThinking,
-  cleanToolTitle,
   ChatBlock,
 } from "@/lib/message-parsing";
 import { LoaderCircle, AlertTriangle, CircleX } from "lucide-react";

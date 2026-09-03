@@ -13,7 +13,6 @@ import { sidePanelOpenAtom, workspaceFileOpenRequestAtom } from "@/state";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "./ui/sheet";
@@ -55,8 +54,10 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [selectedLine, setSelectedLine] = useState<number>();
   useEffect(() => {
     if (!workspacePath) {
-      setDirName("No workspace selected");
-      setBranchName(null);
+      queueMicrotask(() => {
+        setDirName("No workspace selected");
+        setBranchName(null);
+      });
       return;
     }
 
@@ -72,7 +73,9 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
       });
   }, [workspacePath]);
 
-  useEffect(() => setFileSearchQuery(""), [workspacePath]);
+  useEffect(() => {
+    queueMicrotask(() => setFileSearchQuery(""));
+  }, [workspacePath]);
 
   const workspaceFileTree = useWorkspaceFileTree(
     sheetOpen,
@@ -82,19 +85,21 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
 
   useEffect(() => {
     if (!fileOpenRequest || !workspacePath) return;
-    workspaceFileTree.setSelectedPath(fileOpenRequest.path);
-    workspaceFileTree.setExpanded(
-      new Set(
-        fileOpenRequest.path
-          .split("/")
-          .slice(0, -1)
-          .map((_, index, parts) => parts.slice(0, index + 1).join("/")),
-      ),
-    );
-    setSelectedLine(fileOpenRequest.line);
-    setNavigatorView("files");
-    setFileSearchQuery("");
-    setFileOpenRequest(null);
+    queueMicrotask(() => {
+      workspaceFileTree.setSelectedPath(fileOpenRequest.path);
+      workspaceFileTree.setExpanded(
+        new Set(
+          fileOpenRequest.path
+            .split("/")
+            .slice(0, -1)
+            .map((_, index, parts) => parts.slice(0, index + 1).join("/")),
+        ),
+      );
+      setSelectedLine(fileOpenRequest.line);
+      setNavigatorView("files");
+      setFileSearchQuery("");
+      setFileOpenRequest(null);
+    });
   }, [fileOpenRequest, setFileOpenRequest, workspacePath]);
 
   const selectPath: typeof workspaceFileTree.setSelectedPath = useCallback(
@@ -120,7 +125,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   }, [workspacePath]);
 
   useEffect(() => {
-    if (sheetOpen) void refreshChanges();
+    if (sheetOpen) queueMicrotask(() => void refreshChanges());
   }, [refreshChanges, sheetOpen]);
 
   const changesByPath = useMemo(

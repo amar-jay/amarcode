@@ -18,7 +18,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
-import { TooltipHandle } from "node_modules/@base-ui/react/tooltip/store/TooltipHandle.mjs";
 
 type FileNode = {
   kind: "file";
@@ -170,8 +169,10 @@ export function useWorkspaceFileTree(
   }, [active, normalizedSearchQuery, refresh]);
 
   useEffect(() => {
-    setSelectedPath(undefined);
-    setExpanded(new Set());
+    queueMicrotask(() => {
+      setSelectedPath(undefined);
+      setExpanded(new Set());
+    });
   }, [workspacePath]);
 
   const tree = useMemo(() => makeTree(files), [files]);

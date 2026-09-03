@@ -93,7 +93,7 @@ function Carousel({
 
   React.useEffect(() => {
     if (!api) return;
-    onSelect(api);
+    queueMicrotask(() => onSelect(api));
     api.on("reInit", onSelect);
     api.on("select", onSelect);
 
@@ -106,7 +106,7 @@ function Carousel({
     <CarouselContext.Provider
       value={{
         carouselRef,
-        api: api,
+        api,
         opts,
         orientation:
           orientation || (opts?.axis === "y" ? "vertical" : "horizontal"),

@@ -42,7 +42,7 @@ export function DaemonConnectionDialog({
     ? `${status.reason} It runs for your user account, starts at login, and remains available when this window closes.`
     : status.status === "downloading"
       ? status.total > 0
-        ? Math.round((status.received / status.total) * 100) + "% downloaded"
+        ? `${Math.round((status.received / status.total) * 100)  }% downloaded`
         : "Downloading the daemon for this platform."
       : isError
         ? status.error

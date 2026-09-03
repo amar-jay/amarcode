@@ -117,7 +117,7 @@ export const useAudioDevices = () => {
   }, [loading]);
 
   useEffect(() => {
-    loadDevicesWithoutPermission();
+    queueMicrotask(loadDevicesWithoutPermission);
   }, [loadDevicesWithoutPermission]);
 
   useEffect(() => {

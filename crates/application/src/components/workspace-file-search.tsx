@@ -20,6 +20,8 @@ export function WorkspaceFileSearch({
   const [isOpen, setIsOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isSearchVisible =
+    isOpen && active && !disabled && (isFocused || Boolean(value));
 
   useEffect(() => {
     if (isOpen) inputRef.current?.focus();
@@ -27,15 +29,9 @@ export function WorkspaceFileSearch({
 
   useEffect(() => {
     if (!active || disabled) {
-      setIsOpen(false);
-      setIsFocused(false);
       onValueChange("");
     }
   }, [active, disabled, onValueChange]);
-
-  useEffect(() => {
-    if (!value && !isFocused) setIsOpen(false);
-  }, [isFocused, value]);
 
   const closeSearch = () => {
     setIsOpen(false);
@@ -58,7 +54,7 @@ export function WorkspaceFileSearch({
       }}
       className={cn(
         "h-full shrink-0 ml-auto overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none",
-        isOpen
+        isSearchVisible
           ? "w-[calc(100%-4.5rem)] opacity-100! backdrop-blur-none! h-5"
           : "w-fit",
         className,
@@ -71,7 +67,7 @@ export function WorkspaceFileSearch({
         title="Search workspace files"
         onClick={() => setIsOpen(true)}
         className={`inset-0 right-0 flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-[opacity,transform,color,background-color] hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none ${
-          isOpen
+          isSearchVisible
             ? "pointer-events-none translate-x-1 opacity-0"
             : "translate-x-0 opacity-100"
         }`}
@@ -96,7 +92,7 @@ export function WorkspaceFileSearch({
           }}
           aria-label="Search workspace files"
           placeholder="Search files"
-          tabIndex={isOpen ? 0 : -1}
+          tabIndex={isSearchVisible ? 0 : -1}
           className="min-w-0 flex-1 bg-transparent px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
         />
         <button
@@ -104,7 +100,7 @@ export function WorkspaceFileSearch({
           aria-label="Close file search"
           title="Close search"
           onClick={closeSearch}
-          tabIndex={isOpen ? 0 : -1}
+          tabIndex={isSearchVisible ? 0 : -1}
           className="mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         >
           <X className="size-3.5" />

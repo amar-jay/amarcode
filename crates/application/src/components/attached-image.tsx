@@ -23,8 +23,11 @@ function StoredImage({
 
   useEffect(() => {
     let active = true;
-    setSource(null);
-    setFailed(false);
+    queueMicrotask(() => {
+      if (!active) return;
+      setSource(null);
+      setFailed(false);
+    });
     void daemonApi
       .getAttachment(chatId, image.attachmentId)
       .then((result) => {

@@ -1,9 +1,8 @@
 /**
  * @deprecated Prefer `agentsAtom` / `loadAgentsAtom` from `@/state`.
  */
-import { useAtomValue } from "jotai";
+import { useSetAtom, useAtomValue } from "jotai";
 import { useEffect } from "react";
-import { useSetAtom } from "jotai";
 import { agentsAtom, loadAgentsAtom } from "@/state/agents";
 
 export function useAgentCatalog() {

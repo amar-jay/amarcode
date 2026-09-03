@@ -208,13 +208,7 @@ export const JSXPreviewContent = memo(
     } = useJSXPreview();
     const errorReportedRef = useRef<string | null>(null);
     const lastGoodJsxRef = useRef("");
-    const [hadError, setHadError] = useState(false);
-
-    // Reset error tracking when jsx changes
-    useEffect(() => {
-      errorReportedRef.current = null;
-      setHadError(false);
-    }, [processedJsx]);
+    const [errorJsx, setErrorJsx] = useState<string | null>(null);
 
     const handleError = useCallback(
       (err: Error) => {
@@ -226,7 +220,7 @@ export const JSXPreviewContent = memo(
 
         // During streaming, suppress errors and fall back to last good JSX
         if (isStreaming) {
-          setHadError(true);
+          setErrorJsx(processedJsx);
           return;
         }
 
@@ -246,7 +240,9 @@ export const JSXPreviewContent = memo(
 
     // During streaming, if the current JSX errored, re-render with last good version
     const displayJsx =
-      isStreaming && hadError ? lastGoodJsxRef.current : processedJsx;
+      isStreaming && errorJsx === processedJsx
+        ? lastGoodJsxRef.current
+        : processedJsx;
 
     return (
       <div className={cn("jsx-preview-content", className)} {...props}>
