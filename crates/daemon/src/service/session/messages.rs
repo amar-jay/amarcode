@@ -366,6 +366,7 @@ mod tests {
                 },
             )])),
             pending: std::sync::Mutex::new(HashMap::new()),
+            terminals: Default::default(),
         };
 
         assert!(take_streaming_messages(&inner, "old-run", "chat-1").is_empty());
@@ -433,6 +434,7 @@ mod append_tests {
             prompt_locks: std::sync::Mutex::new(HashMap::new()),
             by_chat: std::sync::Mutex::new(HashMap::new()),
             pending: std::sync::Mutex::new(HashMap::new()),
+            terminals: Default::default(),
         };
         (inner, "msg-1".to_owned())
     }

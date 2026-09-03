@@ -2,10 +2,11 @@ use std::path::{Component, Path, PathBuf};
 
 use agent_client_protocol::{
     schema::v1::{
-        ContentBlock, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-        RequestPermissionRequest, SessionId, SessionNotification, SessionUpdate,
-        ToolCall as AcpToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
-        ToolCallUpdateFields, ToolKind,
+        ContentBlock, CreateTerminalRequest, KillTerminalRequest, PermissionOption,
+        PermissionOptionKind, ReleaseTerminalRequest, RequestPermissionOutcome,
+        RequestPermissionRequest, SessionId, SessionNotification, SessionUpdate, Terminal,
+        TerminalOutputRequest, ToolCall as AcpToolCall, ToolCallContent, ToolCallStatus,
+        ToolCallUpdate, ToolCallUpdateFields, ToolKind, WaitForTerminalExitRequest,
     },
     Client, ConnectionTo,
 };
@@ -47,13 +48,13 @@ pub async fn execute(
         SessionUpdate::ToolCall(started.clone()),
     ));
 
-    if call.name == "write_file" {
+    if matches!(call.name.as_str(), "write_file" | "run_command") {
         if mode != "code" {
             return finish(
                 connection,
                 session_id,
                 call,
-                Err("write_file is only available in code mode".into()),
+                Err(format!("{} is only available in code mode", call.name)),
             );
         }
         let permission = connection.send_request(RequestPermissionRequest::new(
@@ -91,12 +92,142 @@ pub async fn execute(
     if *cancellation.borrow() {
         return finish(connection, session_id, call, Err("cancelled".into()));
     }
+    if call.name == "run_command" {
+        return run_command(
+            workspace,
+            &arguments,
+            connection,
+            session_id,
+            call,
+            cancellation,
+        )
+        .await;
+    }
     let result = match call.name.as_str() {
         "read_file" => read_file(workspace, &arguments),
         "list_directory" => list_directory(workspace, &arguments),
         "search_text" => search_text(workspace, &arguments),
         "write_file" => write_file(workspace, &arguments),
         other => Err(format!("unknown tool: {other}")),
+    };
+    finish(connection, session_id, call, result)
+}
+
+async fn run_command(
+    workspace: &Path,
+    args: &Value,
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+    call: &ModelToolCall,
+    mut cancellation: watch::Receiver<bool>,
+) -> String {
+    let command = match required_str(args, "command") {
+        Ok(command) if !command.is_empty() => command,
+        Ok(_) => {
+            return finish(
+                connection,
+                session_id,
+                call,
+                Err("command must not be empty".into()),
+            )
+        }
+        Err(error) => return finish(connection, session_id, call, Err(error)),
+    };
+    let command_args = match optional_string_array(args, "args") {
+        Ok(args) => args,
+        Err(error) => return finish(connection, session_id, call, Err(error)),
+    };
+    let cwd = match existing_path(
+        workspace,
+        args.get("cwd").and_then(Value::as_str).unwrap_or("."),
+    ) {
+        Ok(path) if path.is_dir() => path,
+        Ok(path) => {
+            return finish(
+                connection,
+                session_id,
+                call,
+                Err(format!(
+                    "working directory is not a directory: {}",
+                    path.display()
+                )),
+            )
+        }
+        Err(error) => return finish(connection, session_id, call, Err(error)),
+    };
+
+    let create = CreateTerminalRequest::new(session_id.clone(), command)
+        .args(command_args)
+        .cwd(cwd)
+        .output_byte_limit(MAX_OUTPUT as u64);
+    let created = tokio::select! {
+        result = connection.send_request(create).block_task() => result,
+        _ = cancellation.changed() => {
+            return finish(connection, session_id, call, Err("cancelled".into()));
+        }
+    };
+    let terminal_id = match created {
+        Ok(response) => response.terminal_id,
+        Err(error) => {
+            return finish(
+                connection,
+                session_id,
+                call,
+                Err(format!("failed to create terminal: {error}")),
+            )
+        }
+    };
+
+    terminal_update(connection, session_id, call, terminal_id.clone());
+    let wait = connection.send_request(WaitForTerminalExitRequest::new(
+        session_id.clone(),
+        terminal_id.clone(),
+    ));
+    let exit = tokio::select! {
+        result = wait.block_task() => result.map_err(|error| format!("failed waiting for terminal: {error}")),
+        _ = cancellation.changed() => {
+            let _ = connection
+                .send_request(KillTerminalRequest::new(session_id.clone(), terminal_id.clone()))
+                .block_task()
+                .await;
+            Err("cancelled".into())
+        }
+    };
+
+    let output = connection
+        .send_request(TerminalOutputRequest::new(
+            session_id.clone(),
+            terminal_id.clone(),
+        ))
+        .block_task()
+        .await;
+    let _ = connection
+        .send_request(ReleaseTerminalRequest::new(session_id.clone(), terminal_id))
+        .block_task()
+        .await;
+
+    let result = match (exit, output) {
+        (Ok(exit), Ok(output)) => {
+            let status = exit.exit_status;
+            let status_text = status.exit_code.map_or_else(
+                || format!("signal {}", status.signal.as_deref().unwrap_or("unknown")),
+                |code| format!("exit code {code}"),
+            );
+            let rendered = truncate(format!("{}\n[{status_text}]", output.output));
+            if status.exit_code == Some(0) {
+                Ok(rendered)
+            } else {
+                Err(rendered)
+            }
+        }
+        (Err(error), Ok(output)) if error == "cancelled" => {
+            Err(truncate(format!("cancelled\n{}", output.output)))
+        }
+        (Err(error), Ok(output)) if !output.output.is_empty() => {
+            Err(truncate(format!("{error}\n{}", output.output)))
+        }
+        (Err(error), _) => Err(error),
+        (_, Err(error)) => Err(format!("failed reading terminal output: {error}")),
     };
     finish(connection, session_id, call, result)
 }
@@ -230,20 +361,84 @@ fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("missing string argument: {key}"))
 }
 
+fn optional_string_array(args: &Value, key: &str) -> Result<Vec<String>, String> {
+    let Some(value) = args.get(key) else {
+        return Ok(Vec::new());
+    };
+    value
+        .as_array()
+        .ok_or_else(|| format!("{key} must be an array of strings"))?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| format!("{key} must contain only strings"))
+        })
+        .collect()
+}
+
 fn tool_kind(name: &str) -> ToolKind {
     match name {
         "read_file" => ToolKind::Read,
         "list_directory" | "search_text" => ToolKind::Search,
         "write_file" => ToolKind::Edit,
+        "run_command" => ToolKind::Execute,
         _ => ToolKind::Other,
     }
 }
 
 fn tool_title(call: &ModelToolCall, args: &Value) -> String {
+    if call.name == "run_command" {
+        let command = args
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or("<invalid command>");
+        let suffix = args
+            .get("args")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(quote_command_part)
+            .collect::<Vec<_>>()
+            .join(" ");
+        return if suffix.is_empty() {
+            command.to_owned()
+        } else {
+            format!("{command} {suffix}")
+        };
+    }
     args.get("path").and_then(Value::as_str).map_or_else(
         || call.name.clone(),
         |path| format!("{} {path}", call.name.replace('_', " ")),
     )
+}
+
+fn quote_command_part(value: &str) -> String {
+    if value
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || "-._/:=@+".contains(character))
+    {
+        value.to_owned()
+    } else {
+        format!("{:?}", value)
+    }
+}
+
+fn terminal_update(
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+    call: &ModelToolCall,
+    terminal_id: agent_client_protocol::schema::v1::TerminalId,
+) {
+    let fields = ToolCallUpdateFields::new()
+        .status(ToolCallStatus::InProgress)
+        .content(vec![ToolCallContent::Terminal(Terminal::new(terminal_id))]);
+    let _ = connection.send_notification(SessionNotification::new(
+        session_id.clone(),
+        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(call.id.clone(), fields)),
+    ));
 }
 
 fn update(

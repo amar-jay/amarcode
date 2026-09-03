@@ -16,6 +16,7 @@ use crate::{
 };
 
 use super::session_config::SessionConfiguration;
+use super::terminal::TerminalManager;
 
 pub(super) const ACP_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 // Prompt turns routinely outlive control RPCs. Only prolonged silence should
@@ -81,4 +82,5 @@ pub(super) struct SessionInner {
     pub(super) prompt_locks: Mutex<HashMap<String, Weak<Mutex<()>>>>,
     pub(super) by_chat: Mutex<HashMap<String, LiveRun>>,
     pub(super) pending: Mutex<HashMap<String, PendingAgentRequest>>,
+    pub(super) terminals: TerminalManager,
 }

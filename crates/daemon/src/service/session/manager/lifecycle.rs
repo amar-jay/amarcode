@@ -21,6 +21,7 @@ impl SessionManager {
         let active_user_message_id = live.active_user_message_id.clone();
         let run_id = live.run_id.clone();
         remove_pending_requests_for_run(&self.inner, &run_id);
+        self.inner.terminals.release_run(&run_id);
 
         let _ = self.acp_notify(
             &run_id,
@@ -204,6 +205,7 @@ impl SessionManager {
         };
 
         remove_pending_requests_for_run(&self.inner, run_id);
+        self.inner.terminals.release_run(run_id);
         let _ = live.client.notify(
             AgentRpcMethod::Cancel,
             json!({ "sessionId": live.acp_session_id }),
@@ -260,6 +262,7 @@ impl SessionManager {
             .and_then(|mut guard| guard.remove(chat_id));
         if let Some(live) = removed {
             remove_pending_requests_for_run(&self.inner, &live.run_id);
+            self.inner.terminals.release_run(&live.run_id);
             let _ = live.client.kill();
             if let Some(user_message_id) = live.active_user_message_id {
                 let _ = self.inner.events.send(EditorEvent::TurnUpdated {

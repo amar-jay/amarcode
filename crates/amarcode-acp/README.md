@@ -53,9 +53,17 @@ implemented. Session state remains in memory and is lost when the process exits.
 
 OpenAI-compatible function calling is executed as an iterative model → tool →
 model loop. The built-in tools are `read_file`, `list_directory`, `search_text`,
-and `write_file`. All paths are restricted to the session workspace, symlink
-escapes are rejected, and output is bounded. `write_file` is available only in
-code mode and requires approval through ACP `session/request_permission`.
+`write_file`, and `run_command`. All paths are restricted to the session
+workspace, symlink escapes are rejected, and output is bounded. `write_file`
+and `run_command` are available only in code mode and require approval through
+ACP `session/request_permission`.
+
+Commands use ACP's client-owned terminal lifecycle: `terminal/create`, an
+embedded terminal tool-call update, `terminal/wait_for_exit`, `terminal/output`,
+and `terminal/release`. Cancellation sends `terminal/kill` before release. The
+executable and argument vector are kept separate rather than interpreted by a
+shell. Amarcode consumes a one-time permission matching the exact command,
+arguments, and workspace-relative working directory before it starts a process.
 
 Tool calls are streamed to the client using typed ACP `tool_call` and
 `tool_call_update` events. Calls and results remain structured in provider

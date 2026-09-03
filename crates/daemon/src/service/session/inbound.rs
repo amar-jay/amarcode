@@ -20,6 +20,7 @@ use super::{
         ensure_streaming_message, finalize_message, remove_pending_requests_for_run,
         take_streaming_messages, take_streaming_messages_from_live,
     },
+    terminal::is_terminal_method,
     types::{PendingAgentRequest, SessionInner},
     util::{emit, extract_text_delta},
 };
@@ -43,7 +44,7 @@ pub(super) fn spawn_inbound_worker(
 }
 
 fn handle_inbound(
-    inner: &SessionInner,
+    inner: &Arc<SessionInner>,
     run_id: &str,
     chat_id: &str,
     msg: AcpInbound,
@@ -66,6 +67,18 @@ fn handle_inbound(
                 payload: params.clone(),
             };
             inner.store.save_acp_envelope(run_id, &envelope)?;
+
+            if is_terminal_method(&method) {
+                super::terminal::spawn_terminal_request(
+                    Arc::clone(inner),
+                    run_id.to_owned(),
+                    chat_id.to_owned(),
+                    id,
+                    method,
+                    params,
+                );
+                return Ok(());
+            }
 
             let request_id = new_pending_request_id();
             let pending = PendingAgentRequest {
@@ -130,6 +143,7 @@ fn handle_inbound(
         }
         AcpInbound::Disconnected => {
             debug!(%run_id, "ACP disconnected");
+            inner.terminals.release_run(run_id);
             // Check and remove atomically so an old reader cannot remove a
             // replacement that became live between two lock acquisitions.
             let disconnected = {
@@ -633,6 +647,7 @@ mod grok_inbound_tests {
                 },
             )])),
             pending: std::sync::Mutex::new(HashMap::new()),
+            terminals: Default::default(),
         };
 
         let envelope = RpcEnvelope {

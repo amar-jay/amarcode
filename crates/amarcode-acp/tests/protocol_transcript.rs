@@ -349,3 +349,132 @@ fn transcript_executes_tool_and_returns_result_to_model() {
     assert!(second_request.contains("hello from tool"));
     let _ = fs::remove_dir_all(workspace);
 }
+
+#[test]
+fn transcript_uses_permissioned_acp_terminal_lifecycle() {
+    let listener = match TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping socket transcript test: sandbox forbids loopback listeners");
+            return;
+        }
+        Err(error) => panic!("bind provider: {error}"),
+    };
+    let address = listener.local_addr().expect("provider address");
+    let (request_sender, request_receiver) = mpsc::channel();
+    thread::spawn(move || {
+        for body in [
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-command\",\"type\":\"function\",\"function\":{\"name\":\"run_command\",\"arguments\":\"{\\\"command\\\":\\\"/bin/echo\\\",\\\"args\\\":[\\\"hello terminal\\\"],\\\"cwd\\\":\\\".\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Command completed.\"}}]}\n\ndata: [DONE]\n\n",
+        ] {
+            let (mut socket, _) = listener.accept().expect("provider connection");
+            let mut request = [0_u8; 16_384];
+            let size = socket.read(&mut request).expect("read HTTP request");
+            request_sender
+                .send(String::from_utf8_lossy(&request[..size]).into_owned())
+                .expect("capture request");
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .expect("write provider response");
+            socket.flush().expect("flush provider response");
+        }
+    });
+
+    let workspace = std::env::temp_dir().join(format!("amarcode-terminal-{}", Uuid::new_v4()));
+    fs::create_dir(&workspace).expect("create workspace");
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session_id = new_session(&mut agent, 2, workspace.to_str().expect("workspace path"));
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "session/set_config_option",
+        "params": { "sessionId": session_id, "configId": "mode", "value": "code" }
+    }));
+    let _ = agent.response(3);
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "session/prompt",
+        "params": {
+            "sessionId": session_id,
+            "prompt": [{ "type": "text", "text": "Run echo" }]
+        }
+    }));
+
+    let mut methods = Vec::new();
+    let mut saw_terminal_content = false;
+    loop {
+        let message = agent.output.recv_timeout(TIMEOUT).expect("ACP message");
+        if message.get("id").and_then(Value::as_u64) == Some(4) {
+            assert_eq!(message["result"]["stopReason"], "end_turn");
+            break;
+        }
+        if message["method"] == "session/update" {
+            saw_terminal_content |= message["params"]["update"]["content"]
+                .as_array()
+                .is_some_and(|content| {
+                    content.iter().any(|item| {
+                        item["type"] == "terminal" && item["terminalId"] == "terminal-1"
+                    })
+                });
+            continue;
+        }
+        let Some(method) = message.get("method").and_then(Value::as_str) else {
+            continue;
+        };
+        methods.push(method.to_owned());
+        let id = message["id"].clone();
+        let result = match method {
+            "session/request_permission" => {
+                assert_eq!(
+                    message["params"]["toolCall"]["rawInput"]["command"],
+                    "/bin/echo"
+                );
+                assert_eq!(
+                    message["params"]["toolCall"]["rawInput"]["args"],
+                    json!(["hello terminal"])
+                );
+                json!({ "outcome": { "outcome": "selected", "optionId": "allow-once" } })
+            }
+            "terminal/create" => {
+                assert_eq!(message["params"]["command"], "/bin/echo");
+                assert_eq!(message["params"]["args"], json!(["hello terminal"]));
+                json!({ "terminalId": "terminal-1" })
+            }
+            "terminal/wait_for_exit" => json!({ "exitCode": 0 }),
+            "terminal/output" => json!({
+                "output": "hello terminal\n",
+                "truncated": false,
+                "exitStatus": { "exitCode": 0 }
+            }),
+            "terminal/release" => json!({}),
+            other => panic!("unexpected agent request: {other}"),
+        };
+        agent.send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+    }
+
+    assert_eq!(
+        methods,
+        [
+            "session/request_permission",
+            "terminal/create",
+            "terminal/wait_for_exit",
+            "terminal/output",
+            "terminal/release"
+        ]
+    );
+    assert!(saw_terminal_content);
+    let _first_request = request_receiver
+        .recv_timeout(TIMEOUT)
+        .expect("first request");
+    let second_request = request_receiver
+        .recv_timeout(TIMEOUT)
+        .expect("second request");
+    assert!(second_request.contains("hello terminal"));
+    assert!(second_request.contains("exit code 0"));
+    let _ = fs::remove_dir_all(workspace);
+}

@@ -37,6 +37,12 @@ impl SessionManager {
         } else {
             result
         };
+        self.inner.terminals.record_permission(
+            &pending.run_id,
+            &pending.chat_id,
+            &pending.params,
+            &result,
+        );
 
         let envelope = RpcEnvelope {
             direction: RpcDirection::Sent,

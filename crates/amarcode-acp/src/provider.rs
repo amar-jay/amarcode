@@ -130,6 +130,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object", "properties": { "path": { "type": "string" }, "content": { "type": "string" } }, "required": ["path", "content"], "additionalProperties": false
             }),
         ),
+        function_tool(
+            "run_command",
+            "Run an executable in the workspace through the ACP client's terminal service. Pass the executable and arguments separately; shell syntax is not interpreted. Requires user approval for the exact command.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "Executable name or absolute path." },
+                    "args": { "type": "array", "items": { "type": "string" }, "default": [] },
+                    "cwd": { "type": "string", "description": "Optional workspace-relative working directory.", "default": "." }
+                },
+                "required": ["command"],
+                "additionalProperties": false
+            }),
+        ),
     ]
 }
 

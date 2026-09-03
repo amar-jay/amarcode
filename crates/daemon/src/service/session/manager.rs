@@ -62,6 +62,7 @@ impl SessionManager {
                 prompt_locks: std::sync::Mutex::new(HashMap::new()),
                 by_chat: std::sync::Mutex::new(HashMap::new()),
                 pending: std::sync::Mutex::new(HashMap::new()),
+                terminals: Default::default(),
             }),
         }
     }
@@ -193,7 +194,8 @@ impl SessionManager {
                     },
                     "elicitation": {
                         "form": {}
-                    }
+                    },
+                    "terminal": true
                 },
                 "clientInfo": {
                     "name": "amarcode-daemon",

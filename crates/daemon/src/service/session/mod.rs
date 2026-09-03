@@ -24,6 +24,7 @@ mod inbound;
 mod manager;
 mod messages;
 mod session_config;
+mod terminal;
 mod types;
 mod util;
 
