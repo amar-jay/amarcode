@@ -42,6 +42,9 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [changes, setChanges] = useState<WorkspaceChange[]>([]);
   const [changesLoading, setChangesLoading] = useState(false);
   const [changingStagePath, setChangingStagePath] = useState<string>();
+  const [stagingAll, setStagingAll] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [committing, setCommitting] = useState(false);
   const [navigatorView, setNavigatorView] = useState<"files" | "changes">(
     "files",
   );
@@ -137,6 +140,59 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     },
     [refreshChanges, workspaceFileTree.selectedPath, workspacePath],
   );
+
+  const stageAllFiles = useCallback(async () => {
+    setStagingAll(true);
+    try {
+      await daemonApi.stageAllWorkspaceFiles(workspacePath);
+      await refreshChanges();
+      if (workspaceFileTree.selectedPath) {
+        setDiff(
+          await daemonApi.getWorkspaceFileDiff(
+            workspacePath,
+            workspaceFileTree.selectedPath,
+          ),
+        );
+      }
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not stage files.",
+      );
+    } finally {
+      setStagingAll(false);
+    }
+  }, [refreshChanges, workspaceFileTree.selectedPath, workspacePath]);
+
+  const commitChanges = useCallback(async () => {
+    const message = commitMessage.trim();
+    if (!message) return;
+    setCommitting(true);
+    try {
+      await daemonApi.commitWorkspaceChanges(workspacePath, message);
+      setCommitMessage("");
+      const nextChanges = await daemonApi.listWorkspaceChanges(workspacePath);
+      setChanges(nextChanges);
+      const selectedPath = workspaceFileTree.selectedPath;
+      if (
+        selectedPath &&
+        nextChanges.some((change) => change.path === selectedPath)
+      ) {
+        setDiff(
+          await daemonApi.getWorkspaceFileDiff(workspacePath, selectedPath),
+        );
+      } else {
+        workspaceFileTree.setSelectedPath(undefined);
+        setDiff(undefined);
+      }
+      toast.success("Changes committed.");
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not commit changes.",
+      );
+    } finally {
+      setCommitting(false);
+    }
+  }, [commitMessage, workspaceFileTree, workspacePath]);
 
   return (
     <Sheet open={sheetOpen} onOpenChange={setSheetOpen} modal={false}>
@@ -271,6 +327,12 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                   onStage={stageFile}
                   onUnstage={unstageFile}
                   changingStagePath={changingStagePath}
+                  commitMessage={commitMessage}
+                  onCommitMessageChange={setCommitMessage}
+                  onStageAll={stageAllFiles}
+                  stagingAll={stagingAll}
+                  onCommit={commitChanges}
+                  committing={committing}
                   validWorkspace={workspaceFileTree.validWorkspace}
                 />
               )}

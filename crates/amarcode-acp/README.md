@@ -17,12 +17,21 @@ Configuration:
 
 ```json
 {
-  "base_url": "https://api.openai.com/v1",
-  "api_key": "sk-...",
-  "model": "gpt-4.1"
+  "name": "openai-codex",
+  "provider": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "sk-...",
+    "model": "gpt-4.1"
+  }
 }
 ```
 
-`baseUrl` and `apiKey` are also accepted for compatibility with camelCase
-configuration producers. Keep this file private because it contains the API
-key.
+`name` is the stable identifier advertised to Amarcode. It must contain only
+lowercase ASCII letters, digits, `.`, `_`, or `-`. The display title is derived
+by splitting the name on `.`, `_`, and `-`, then capitalizing each word; for
+example, `local_qwen-coder.v2` is displayed as `Local Qwen Coder V2`. This lets
+several configured `amarcode-acp` instances advertise distinct identities.
+
+`provider.baseUrl` and `provider.apiKey` are also accepted for compatibility
+with camelCase configuration producers. Keep this file private because it
+contains the API key.

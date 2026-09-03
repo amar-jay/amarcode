@@ -6,6 +6,33 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
+    pub name: String,
+    pub provider: ProviderConfig,
+}
+
+impl Config {
+    pub fn title(&self) -> String {
+        self.name
+            .split(['.', '_', '-'])
+            .filter(|part| !part.is_empty())
+            .map(|part| {
+                let mut characters = part.chars();
+                match characters.next() {
+                    Some(first) => {
+                        let mut word = first.to_ascii_uppercase().to_string();
+                        word.extend(characters);
+                        word
+                    }
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderConfig {
     #[serde(alias = "baseUrl")]
     pub base_url: String,
     #[serde(alias = "apiKey")]
@@ -19,19 +46,42 @@ impl Config {
             .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
         let mut config: Self = serde_json::from_str(&contents)
             .map_err(|error| format!("invalid JSON in {}: {error}", path.display()))?;
-        config.base_url = config.base_url.trim_end_matches('/').to_owned();
-        if config.base_url.is_empty()
-            || config.api_key.trim().is_empty()
-            || config.model.trim().is_empty()
+        config.name = config.name.trim().to_owned();
+        config.provider.base_url = config.provider.base_url.trim_end_matches('/').to_owned();
+        if !valid_agent_name(&config.name) {
+            return Err(
+                "name must start with an ASCII lowercase letter or digit and contain only lowercase letters, digits, '.', '_', or '-'"
+                    .into(),
+            );
+        }
+        if config.provider.base_url.is_empty()
+            || config.provider.api_key.trim().is_empty()
+            || config.provider.model.trim().is_empty()
         {
-            return Err("base_url, api_key, and model must not be empty".into());
+            return Err(
+                "provider.base_url, provider.api_key, and provider.model must not be empty".into(),
+            );
         }
         Ok(config)
     }
+}
 
+impl ProviderConfig {
     fn endpoint(&self) -> String {
         format!("{}/chat/completions", self.base_url)
     }
+}
+
+fn valid_agent_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    characters
+        .next()
+        .is_some_and(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+        && characters.all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '.' | '_' | '-')
+        })
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +98,7 @@ pub async fn stream_completion(
     stdout: &mut (impl AsyncWrite + Unpin),
 ) -> Result<String, String> {
     let body = json!({
-        "model": config.model,
+        "model": config.provider.model,
         "messages": history.iter().map(|message| json!({
             "role": message.role,
             "content": message.content,
@@ -56,8 +106,8 @@ pub async fn stream_completion(
         "stream": true,
     });
     let response = client
-        .post(config.endpoint())
-        .bearer_auth(&config.api_key)
+        .post(config.provider.endpoint())
+        .bearer_auth(&config.provider.api_key)
         .json(&body)
         .send()
         .await

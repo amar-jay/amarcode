@@ -73,8 +73,8 @@ async fn main() -> io::Result<()> {
                             }
                         },
                         "agentInfo": {
-                            "name": "amarcode-acp",
-                            "title": "OpenAI-compatible API",
+                            "name": config.name,
+                            "title": config.title(),
                             "version": env!("CARGO_PKG_VERSION")
                         },
                         "authMethods": [{
@@ -109,7 +109,7 @@ async fn main() -> io::Result<()> {
                     id,
                     json!({
                         "sessionId": session_id,
-                        "configOptions": config_options("ask", &config.model)
+                        "configOptions": config_options("ask", &config.provider.model)
                     }),
                 )
                 .await?;
@@ -124,7 +124,7 @@ async fn main() -> io::Result<()> {
                         id,
                         json!({
                             "sessionId": session.id,
-                            "configOptions": config_options(&session.mode, &config.model)
+                            "configOptions": config_options(&session.mode, &config.provider.model)
                         }),
                     )
                     .await?;
@@ -181,7 +181,7 @@ async fn main() -> io::Result<()> {
                     reply(
                         &mut stdout,
                         id,
-                        json!({ "configOptions": config_options(mode, &config.model) }),
+                        json!({ "configOptions": config_options(mode, &config.provider.model) }),
                     )
                     .await?;
                 } else {
@@ -385,12 +385,29 @@ mod tests {
             std::env::temp_dir().join(format!("amarcode-acp-config-{}.json", std::process::id()));
         std::fs::write(
             &path,
-            r#"{"baseUrl":"https://example.test/v1/","apiKey":"secret","model":"test-model"}"#,
+            r#"{
+                "name":"test-agent",
+                "provider":{"baseUrl":"https://example.test/v1/","apiKey":"secret","model":"test-model"}
+            }"#,
         )
         .expect("write config");
         let config = Config::from_file(&path).expect("parse config");
-        assert_eq!(config.base_url, "https://example.test/v1");
-        assert_eq!(config.model, "test-model");
+        assert_eq!(config.name, "test-agent");
+        assert_eq!(config.provider.base_url, "https://example.test/v1");
+        assert_eq!(config.provider.model, "test-model");
         std::fs::remove_file(path).expect("remove config");
+    }
+
+    #[test]
+    fn derives_agent_title_from_name() {
+        let config = Config {
+            name: "local_qwen-coder.v2".into(),
+            provider: provider::ProviderConfig {
+                base_url: "https://example.test/v1".into(),
+                api_key: "secret".into(),
+                model: "test-model".into(),
+            },
+        };
+        assert_eq!(config.title(), "Local Qwen Coder V2");
     }
 }

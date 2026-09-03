@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileIcon, LoaderCircle, Minus, Plus } from "lucide-react";
+import {
+  FileIcon,
+  GitCommitHorizontal,
+  LoaderCircle,
+  Minus,
+  Plus,
+} from "lucide-react";
 import { daemonApi, type WorkspaceChange } from "@/api";
 import {
   FileTree,
@@ -265,6 +271,12 @@ export function WorkspaceChangedFiles({
   onStage,
   onUnstage,
   changingStagePath,
+  commitMessage,
+  onCommitMessageChange,
+  onStageAll,
+  stagingAll,
+  onCommit,
+  committing,
   validWorkspace,
 }: {
   changes: WorkspaceChange[];
@@ -275,6 +287,12 @@ export function WorkspaceChangedFiles({
   onStage: (path: string) => Promise<void>;
   onUnstage: (path: string) => Promise<void>;
   changingStagePath?: string;
+  commitMessage: string;
+  onCommitMessageChange: (message: string) => void;
+  onStageAll: () => Promise<void>;
+  stagingAll: boolean;
+  onCommit: () => Promise<void>;
+  committing: boolean;
   validWorkspace: boolean;
 }) {
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
@@ -287,13 +305,15 @@ export function WorkspaceChangedFiles({
         : changes,
     [changes, normalizedQuery],
   );
+  const stagedCount = changes.filter((change) => change.staged).length;
+  const unstagedCount = changes.filter((change) => change.unstaged).length;
 
   return (
     <section
       className="flex min-h-0 flex-1 flex-col"
       aria-label="Changed files"
     >
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-5 pt-1">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 pt-1">
         {!validWorkspace ? (
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">
             Choose a workspace to see changed files.
@@ -392,6 +412,60 @@ export function WorkspaceChangedFiles({
           </div>
         )}
       </div>
+      {validWorkspace && changes.length > 0 && (
+        <div className="shrink-0 space-y-2 border-t bg-muted/20 p-2.5">
+          <div className="flex items-center justify-between font-mono text-[0.65rem] text-muted-foreground">
+            <span>
+              {stagedCount} staged · {unstagedCount} unstaged
+            </span>
+            {unstagedCount > 0 && (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-foreground/75 outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                disabled={stagingAll || committing}
+                onClick={() => void onStageAll()}
+              >
+                {stagingAll ? (
+                  <LoaderCircle className="size-3 animate-spin" />
+                ) : (
+                  <Plus className="size-3" />
+                )}
+                Stage all
+              </button>
+            )}
+          </div>
+          <form
+            className="flex gap-1.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onCommit();
+            }}
+          >
+            <input
+              value={commitMessage}
+              onChange={(event) => onCommitMessageChange(event.target.value)}
+              placeholder="Commit message"
+              aria-label="Commit message"
+              className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2.5 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 gap-1.5 px-2.5"
+              disabled={
+                stagedCount === 0 || !commitMessage.trim() || committing
+              }
+            >
+              {committing ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <GitCommitHorizontal className="size-3.5" />
+              )}
+              Commit
+            </Button>
+          </form>
+        </div>
+      )}
     </section>
   );
 }
