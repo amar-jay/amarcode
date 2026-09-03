@@ -81,7 +81,13 @@ const readOnlyExtensions = (path: string): Extension[] => [
   ),
 ];
 
-function DiffCanvas({ diff }: { diff: WorkspaceDiff }) {
+function DiffCanvas({
+  diff,
+  selectedLine,
+}: {
+  diff: WorkspaceDiff;
+  selectedLine?: number;
+}) {
   const host = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -115,8 +121,17 @@ function DiffCanvas({ diff }: { diff: WorkspaceDiff }) {
         ancestor = ancestor.parentElement;
       }
       editor.scrollDOM.scrollTo({ left: 0, top: 0 });
+      const line = Math.min(
+        Math.max(selectedLine ?? 1, 1),
+        editor.state.doc.lines,
+      );
+      const position = editor.state.doc.line(line).from;
       editor.dispatch({
-        effects: EditorView.scrollIntoView(0, { x: "start", y: "start" }),
+        selection: { anchor: position },
+        effects: EditorView.scrollIntoView(position, {
+          x: "start",
+          y: "center",
+        }),
       });
     };
     resetScroll();
@@ -125,7 +140,7 @@ function DiffCanvas({ diff }: { diff: WorkspaceDiff }) {
       window.cancelAnimationFrame(animationFrame);
       editor.destroy();
     };
-  }, [diff]);
+  }, [diff, selectedLine]);
 
   return (
     <div
@@ -138,11 +153,13 @@ function DiffCanvas({ diff }: { diff: WorkspaceDiff }) {
 
 export function WorkspaceDiffViewer({
   selectedPath,
+  selectedLine,
   workspacePath,
   diff,
   setDiff,
 }: {
   selectedPath?: string;
+  selectedLine?: number;
   workspacePath: string;
   diff?: WorkspaceDiff;
   setDiff: (diff?: WorkspaceDiff) => void;
@@ -202,7 +219,11 @@ export function WorkspaceDiffViewer({
           <LoaderCircle className="size-4 animate-spin" /> Loading diff
         </div>
       ) : diff ? (
-        <DiffCanvas key={diff.path} diff={diff} />
+        <DiffCanvas
+          key={`${diff.path}:${selectedLine ?? ""}`}
+          diff={diff}
+          selectedLine={selectedLine}
+        />
       ) : (
         <div className="flex flex-1 items-center justify-center px-8 text-center text-xs text-muted-foreground">
           {error ?? "Select a file to preview it here."}

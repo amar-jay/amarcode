@@ -25,7 +25,19 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
+import { Streamdown, type ExtraProps } from "streamdown";
+import { useAtomValue, useSetAtom } from "jotai";
+import { daemonApi } from "@/api";
+import {
+  sidePanelOpenAtom,
+  workspaceFileOpenRequestAtom,
+  workspacePathAtom,
+} from "@/state";
+import {
+  looksLikeWorkspaceFileTarget,
+  workspaceFileTarget,
+} from "@/lib/workspace-link";
+import { notify } from "@/lib/notify";
 import { tauriLinkSafety } from "./tauri-link-safety";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -321,8 +333,54 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
+function WorkspaceAwareLink({
+  href = "",
+  onClick,
+  ...props
+}: ComponentProps<"a"> & ExtraProps) {
+  const workspacePath = useAtomValue(workspacePathAtom);
+  const setOpenRequest = useSetAtom(workspaceFileOpenRequestAtom);
+  const setSidePanelOpen = useSetAtom(sidePanelOpenAtom);
+
+  return (
+    <a
+      href={href}
+      onClick={(event) => {
+        if (!looksLikeWorkspaceFileTarget(href)) {
+          onClick?.(event);
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        const target = workspaceFileTarget(href, workspacePath);
+        if (!target) {
+          notify("This file link is outside the active workspace.", "error");
+          return;
+        }
+
+        void daemonApi
+          .getWorkspaceFileDiff(workspacePath, target.path)
+          .then(() => {
+            setOpenRequest({ path: target.path, line: target.line });
+            setSidePanelOpen(true);
+          })
+          .catch((cause: unknown) => {
+            notify(
+              cause instanceof Error
+                ? cause.message
+                : "Unable to open this workspace file.",
+              "error",
+            );
+          });
+      }}
+      {...props}
+    />
+  );
+}
+
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
+  ({ className, components, ...props }: MessageResponseProps) => (
     <Streamdown
       className={cn(
         "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
@@ -336,6 +394,7 @@ export const MessageResponse = memo(
       // Dual theme so shiki tokens track light/dark app chrome.
       shikiTheme={["github-light", "github-dark"]}
       lineNumbers
+      components={{ ...components, a: WorkspaceAwareLink }}
       {...props}
     />
   ),

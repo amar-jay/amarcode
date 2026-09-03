@@ -9,7 +9,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { daemonApi, WorkspaceDiff, type WorkspaceChange } from "@/api";
-import { sidePanelOpenAtom } from "@/state";
+import { sidePanelOpenAtom, workspaceFileOpenRequestAtom } from "@/state";
 import {
   Sheet,
   SheetContent,
@@ -37,6 +37,9 @@ interface AppSidePanelProps {
 }
 function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [sheetOpen, setSheetOpen] = useAtom(sidePanelOpenAtom);
+  const [fileOpenRequest, setFileOpenRequest] = useAtom(
+    workspaceFileOpenRequestAtom,
+  );
   const [dirName, setDirName] = useState("No workspace selected");
   const [branchName, setBranchName] = useState<string | null>(null);
   const [changes, setChanges] = useState<WorkspaceChange[]>([]);
@@ -49,6 +52,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     "files",
   );
   const [fileSearchQuery, setFileSearchQuery] = useState("");
+  const [selectedLine, setSelectedLine] = useState<number>();
   useEffect(() => {
     if (!workspacePath) {
       setDirName("No workspace selected");
@@ -74,6 +78,31 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     sheetOpen,
     workspacePath,
     fileSearchQuery,
+  );
+
+  useEffect(() => {
+    if (!fileOpenRequest || !workspacePath) return;
+    workspaceFileTree.setSelectedPath(fileOpenRequest.path);
+    workspaceFileTree.setExpanded(
+      new Set(
+        fileOpenRequest.path
+          .split("/")
+          .slice(0, -1)
+          .map((_, index, parts) => parts.slice(0, index + 1).join("/")),
+      ),
+    );
+    setSelectedLine(fileOpenRequest.line);
+    setNavigatorView("files");
+    setFileSearchQuery("");
+    setFileOpenRequest(null);
+  }, [fileOpenRequest, setFileOpenRequest, workspacePath]);
+
+  const selectPath: typeof workspaceFileTree.setSelectedPath = useCallback(
+    (path) => {
+      setSelectedLine(undefined);
+      workspaceFileTree.setSelectedPath(path);
+    },
+    [workspaceFileTree.setSelectedPath],
   );
   const refreshChanges = useCallback(async () => {
     if (!workspacePath) {
@@ -316,6 +345,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                   {...workspaceFileTree}
                   changes={changesByPath}
                   searchQuery={fileSearchQuery}
+                  setSelectedPath={selectPath}
                 />
               ) : (
                 <WorkspaceChangedFiles
@@ -323,7 +353,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                   isLoading={changesLoading}
                   searchQuery={fileSearchQuery}
                   selectedPath={workspaceFileTree.selectedPath}
-                  setSelectedPath={workspaceFileTree.setSelectedPath}
+                  setSelectedPath={selectPath}
                   onStage={stageFile}
                   onUnstage={unstageFile}
                   changingStagePath={changingStagePath}
@@ -343,6 +373,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
             <ResizablePanel minSize="0px" className="min-h-0 overflow-hidden">
               <WorkspaceDiffViewer
                 selectedPath={workspaceFileTree.selectedPath}
+                selectedLine={selectedLine}
                 workspacePath={workspacePath}
                 setDiff={setDiff}
                 diff={diff}

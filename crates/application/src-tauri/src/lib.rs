@@ -398,8 +398,18 @@ fn workspace_relative_path(root: &Path, relative_path: &str) -> Result<PathBuf, 
     {
         return Err("The requested file must be inside the workspace.".to_string());
     }
-    let full_path = root.join(relative);
-    if !full_path.starts_with(root) {
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|_| "The selected workspace folder is unavailable.".to_string())?;
+    let full_path = canonical_root.join(relative);
+    // Existing symlinks must also resolve inside the workspace. Missing paths
+    // are retained for Git operations such as staging a deletion.
+    if full_path.exists()
+        && !full_path
+            .canonicalize()
+            .map_err(|error| error.to_string())?
+            .starts_with(&canonical_root)
+    {
         return Err("The requested file must be inside the workspace.".to_string());
     }
     Ok(full_path)

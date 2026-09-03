@@ -1,4 +1,4 @@
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { MouseEvent } from "react";
 import type { LinkSafetyConfig, LinkSafetyModalProps } from "streamdown";
 import { Button } from "@/components/ui/button";
@@ -12,24 +12,12 @@ import {
 } from "@/components/ui/dialog";
 import { notify } from "@/lib/notify";
 
-function localPath(target: string): string | null {
-  if (target.startsWith("/")) return target;
-
-  try {
-    const url = new URL(target);
-    return url.protocol === "file:" ? decodeURIComponent(url.pathname) : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function openExternalTarget(target: string) {
-  const path = localPath(target);
-  if (path) {
-    await openPath(path);
-    return;
+  const url = new URL(target);
+  if (!["http:", "https:", "mailto:", "tel:"].includes(url.protocol)) {
+    throw new Error(`Unsupported external link protocol: ${url.protocol}`);
   }
-  await openUrl(target);
+  await openUrl(url.toString());
 }
 
 export function handleExternalLinkClick(event: MouseEvent<HTMLAnchorElement>) {
