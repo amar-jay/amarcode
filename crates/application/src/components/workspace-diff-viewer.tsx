@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorState, type Extension } from "@codemirror/state";
 import {
   defaultHighlightStyle,
@@ -198,8 +198,6 @@ export function WorkspaceDiffViewer({
       cancelled = true;
     };
   }, [selectedPath, workspacePath]);
-
-  const title = useMemo(() => selectedPath ?? "Select a file", [selectedPath]);
 
   return (
     <section

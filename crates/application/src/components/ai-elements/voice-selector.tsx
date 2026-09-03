@@ -193,7 +193,7 @@ export const VoiceSelectorGender = ({
   children,
   ...props
 }: VoiceSelectorGenderProps) => {
-  let icon: ReactNode | null = null;
+  let icon: ReactNode | null;
 
   switch (value) {
     case "male": {
@@ -273,7 +273,7 @@ export const VoiceSelectorAccent = ({
   children,
   ...props
 }: VoiceSelectorAccentProps) => {
-  let emoji: string | null = null;
+  let emoji: string | null;
 
   switch (value) {
     case "american": {

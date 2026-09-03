@@ -106,9 +106,10 @@ export const SpeechInput = ({
   const onAudioRecordedRef =
     useRef<SpeechInputProps["onAudioRecorded"]>(onAudioRecorded);
 
-  // Keep refs in sync
-  onTranscriptionChangeRef.current = onTranscriptionChange;
-  onAudioRecordedRef.current = onAudioRecorded;
+  useEffect(() => {
+    onTranscriptionChangeRef.current = onTranscriptionChange;
+    onAudioRecordedRef.current = onAudioRecorded;
+  }, [onAudioRecorded, onTranscriptionChange]);
 
   // Initialize Speech Recognition when mode is speech-recognition
   useEffect(() => {

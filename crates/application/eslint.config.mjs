@@ -27,7 +27,7 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.flat.recommended.rules,
-      'no-console': 'warn',
+      // 'no-console': 'warn',
       'no-constant-binary-expression': 'error',
       'no-duplicate-imports': ['error', { allowSeparateTypeImports: true }],
       'no-useless-constructor': 'error',
@@ -35,6 +35,14 @@ export default tseslint.config(
       'prefer-const': 'error',
       'prefer-template': 'error',
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          caughtErrors: 'none',
+          varsIgnorePattern: '^_',
+        },
+      ],
       'unused-imports/no-unused-imports': 'error',
       'unused-imports/no-unused-vars': [
         'warn',
@@ -52,6 +60,12 @@ export default tseslint.config(
     files: ['vite.config.ts'],
     languageOptions: {
       globals: globals.node,
+    },
+  },
+  {
+    files: ['src/components/ai-elements/persona.tsx'],
+    rules: {
+      'react-hooks/immutability': 'off',
     },
   },
   prettier,

@@ -207,7 +207,7 @@ export const JSXPreviewContent = memo(
       onErrorProp,
     } = useJSXPreview();
     const errorReportedRef = useRef<string | null>(null);
-    const lastGoodJsxRef = useRef("");
+    const [lastGoodJsx, setLastGoodJsxState] = useState("");
     const [errorJsx, setErrorJsx] = useState<string | null>(null);
 
     const handleError = useCallback(
@@ -233,7 +233,7 @@ export const JSXPreviewContent = memo(
     // Track the last JSX that rendered without error
     useEffect(() => {
       if (!errorReportedRef.current) {
-        lastGoodJsxRef.current = processedJsx;
+      queueMicrotask(() => setLastGoodJsxState(processedJsx));
         setLastGoodJsx(processedJsx);
       }
     }, [processedJsx, setLastGoodJsx]);
@@ -241,7 +241,7 @@ export const JSXPreviewContent = memo(
     // During streaming, if the current JSX errored, re-render with last good version
     const displayJsx =
       isStreaming && errorJsx === processedJsx
-        ? lastGoodJsxRef.current
+        ? lastGoodJsx
         : processedJsx;
 
     return (

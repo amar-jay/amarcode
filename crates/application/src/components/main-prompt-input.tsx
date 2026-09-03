@@ -149,7 +149,6 @@ export function AgentSelection({
     </CommandItem>
   );
   const availableAgents = agents.filter((agent) => agent.available);
-  const unavailableAgents = agents.filter((agent) => !agent.available);
 
   return (
     <div className="flex flex-col gap-4">

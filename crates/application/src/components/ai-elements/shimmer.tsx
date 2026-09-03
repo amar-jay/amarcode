@@ -23,6 +23,12 @@ const getMotionComponent = (element: keyof JSX.IntrinsicElements) => {
   return component;
 };
 
+const motionElements = {
+  div: getMotionComponent("div"),
+  p: getMotionComponent("p"),
+  span: getMotionComponent("span"),
+};
+
 export interface TextShimmerProps {
   children: string;
   as?: ElementType;
@@ -38,9 +44,8 @@ const ShimmerComponent = ({
   duration = 2,
   spread = 2,
 }: TextShimmerProps) => {
-  const MotionComponent = getMotionComponent(
-    Component as keyof JSX.IntrinsicElements,
-  );
+  const MotionComponent =
+    motionElements[Component as keyof typeof motionElements] ?? motionElements.p;
 
   const dynamicSpread = useMemo(
     () => (children?.length ?? 0) * spread,

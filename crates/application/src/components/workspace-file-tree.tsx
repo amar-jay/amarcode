@@ -124,6 +124,7 @@ export function useWorkspaceFileTree(
   const [selectedPath, setSelectedPath] = useState<string>();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const requestId = useRef(0);
+  const refreshRef = useRef<(() => Promise<void>) | null>(null);
   const validWorkspace = !!workspacePath;
   const normalizedSearchQuery = searchQuery.trim();
 
@@ -148,13 +149,17 @@ export function useWorkspaceFileTree(
         dismissible: false,
         action: {
           label: "Retry",
-          onClick: () => void refresh(),
+          onClick: () => void refreshRef.current?.(),
         },
       });
     } finally {
       if (currentRequestId === requestId.current) setIsLoading(false);
     }
   }, [normalizedSearchQuery, workspacePath]);
+
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
 
   useEffect(() => {
     if (!active) return;

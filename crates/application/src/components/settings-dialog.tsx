@@ -16,7 +16,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { daemonApi, type ApplicationCleanupStatus } from "@/api";
-import type { Palette as AppPalette, Theme } from "@/state";
+import type { Palette as AppPalette, Theme, SessionMode } from "@/state";
 import { verboseReasoningAtom } from "@/state";
 import {
   Breadcrumb,
@@ -78,7 +78,6 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import type { AgentInfo } from "@/types";
-import type { SessionMode } from "@/state";
 
 type SettingsPage = "appearance" | "general" | "agent";
 
