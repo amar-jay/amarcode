@@ -5,10 +5,10 @@ use super::*;
 impl SessionManager {
     /// Run ACP `authenticate` for an agent (live session if present, else a short probe).
     pub fn authenticate_agent(&self, agent_id: &str, method_id: Option<&str>) -> Result<()> {
-        let method_id = method_id.unwrap_or("agent");
-        let params = json!({ "methodId": method_id });
-
-        if let Some((run_id, client)) = self.live_client_for_agent(agent_id)? {
+        if let (Some(method_id), Some((run_id, client))) =
+            (method_id, self.live_client_for_agent(agent_id)?)
+        {
+            let params = json!({ "methodId": method_id });
             self.acp_request(&run_id, &client, AgentRpcMethod::Authenticate, params)
                 .map_err(Error::from)?;
             return Ok(());
@@ -34,11 +34,27 @@ impl SessionManager {
             }),
             ACP_REQUEST_TIMEOUT,
         );
-        if let Err(error) = initialize {
-            let failure = self.classify_client_failure(&client, &error);
-            let _ = client.kill();
-            return Err(failure.into());
-        }
+        let initialize = match initialize {
+            Ok(response) => response,
+            Err(error) => {
+                let failure = self.classify_client_failure(&client, &error);
+                let _ = client.kill();
+                return Err(failure.into());
+            }
+        };
+        let method_id = match method_id {
+            Some(method_id) => method_id.to_owned(),
+            None => match first_auth_method_id(&initialize) {
+                Some(method_id) => method_id,
+                None => {
+                    let _ = client.kill();
+                    return Err(Error::msg(
+                        "agent did not advertise an authentication method",
+                    ));
+                }
+            },
+        };
+        let params = json!({ "methodId": method_id });
         let auth = client.request(AgentRpcMethod::Authenticate, params, ACP_REQUEST_TIMEOUT);
         let failure = auth
             .as_ref()
@@ -184,5 +200,33 @@ impl SessionManager {
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?;
         Ok(guard.values().cloned().collect())
+    }
+}
+
+fn first_auth_method_id(initialize: &Value) -> Option<String> {
+    initialize
+        .get("authMethods")
+        .or_else(|| initialize.get("auth_methods"))?
+        .as_array()?
+        .iter()
+        .find_map(|method| method.get("id")?.as_str().map(str::to_owned))
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::first_auth_method_id;
+
+    #[test]
+    fn chooses_an_id_advertised_by_initialize() {
+        let response = serde_json::json!({
+            "authMethods": [
+                { "id": "oauth-personal", "name": "Log in with Google" },
+                { "id": "gemini-api-key", "name": "Gemini API key" }
+            ]
+        });
+        assert_eq!(
+            first_auth_method_id(&response).as_deref(),
+            Some("oauth-personal")
+        );
     }
 }

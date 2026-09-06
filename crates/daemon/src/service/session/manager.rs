@@ -211,6 +211,11 @@ impl SessionManager {
             .pointer("/agentCapabilities/promptCapabilities/image")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let advertised_auth_methods = initialize_response
+            .get("authMethods")
+            .or_else(|| initialize_response.get("auth_methods"))
+            .filter(|methods| methods.as_array().is_some_and(|items| !items.is_empty()))
+            .cloned();
         if let Some(live) = self
             .inner
             .by_chat
@@ -292,7 +297,14 @@ impl SessionManager {
         })();
         let (acp_session_id, needs_history_hydration, session_configuration) = match session_setup {
             Ok(value) => value,
-            Err(failure) => {
+            Err(mut failure) => {
+                if failure.kind == crate::protocol::AgentFailureKind::AuthRequired
+                    && !failure.auth_methods.as_ref().is_some_and(|methods| {
+                        methods.as_array().is_some_and(|items| !items.is_empty())
+                    })
+                {
+                    failure.auth_methods = advertised_auth_methods;
+                }
                 self.remove_live_run(chat_id, &run.id);
                 let _ = client.kill();
                 self.maybe_emit_auth_required(agent_id, Some(&run.id), &failure);

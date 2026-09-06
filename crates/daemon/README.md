@@ -37,7 +37,9 @@ development. Set it to an empty value to disable startup synchronization.
 
 ## What this process is for
 
-```
+![Daemon Diagram](./assets/daemon-diagram.png)
+<img src="./assets/daemon-diagram.png" width="50%" />
+<!-- ```
 ┌──────────────┐   TCP JSON lines    ┌─────────────────────────────┐
 │ Editor / CLI │ ◄─────────────────► │       amarcode-daemon       │
 └──────────────┘   (subscribe for    │                             │
@@ -53,7 +55,7 @@ development. Set it to an empty value to disable startup synchronization.
                                         │ (claude, copilot│
                                         │  codex, grok, …)│
                                         └─────────────────┘
-```
+``` -->
 
 The daemon is the **system of record** for chats, messages, runs, and agents.
 The UI is a client: it does not own the agent process or the SQLite file.

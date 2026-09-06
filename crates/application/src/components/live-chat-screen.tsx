@@ -106,6 +106,16 @@ function LiveChatFailureBanner({
   const [deleting, setDeleting] = useState(false);
   const { title, Icon } = failureBannerCopy(errorKind);
   const showSignIn = errorKind === "auth_required" && Boolean(authRequired);
+  const authMethods = Array.isArray(authRequired?.methods)
+    ? authRequired.methods.filter(
+        (method): method is { id: string; name?: string } =>
+          typeof method === "object" &&
+          method !== null &&
+          !Array.isArray(method) &&
+          typeof method.id === "string",
+      )
+    : [];
+  const preferredAuthMethod = authMethods[0];
   const busy = signingIn || deleting;
 
   return (
@@ -131,7 +141,10 @@ function LiveChatFailureBanner({
                 if (!authRequired) return;
                 setSigningIn(true);
                 void daemonApi
-                  .authenticateAgent(authRequired.agentId)
+                  .authenticateAgent(
+                    authRequired.agentId,
+                    preferredAuthMethod?.id,
+                  )
                   .then(() => {
                     notify("Sign-in completed", "success");
                     onSignedIn();
@@ -151,7 +164,7 @@ function LiveChatFailureBanner({
                   Signing in…
                 </span>
               ) : (
-                "Sign in"
+                (preferredAuthMethod?.name ?? "Sign in")
               )}
             </Button>
           )}
