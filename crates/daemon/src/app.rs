@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use tokio::{net::TcpListener, sync::broadcast};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     instance_lock::InstanceLock,
@@ -57,6 +57,15 @@ impl App {
         let stopped = store.stop_interrupted_runs()?;
         if stopped > 0 {
             info!(count = stopped, "marked interrupted agent runs as stopped");
+        }
+
+        if let Some(source) = config.acp_registry_source.as_deref() {
+            match crate::registry::synchronize(&config.app_dir, source).await {
+                Ok(path) => info!(path = %path.display(), "ACP registry synchronized"),
+                Err(error) => {
+                    warn!(%error, "ACP registry synchronization failed; retaining any existing checkout")
+                }
+            }
         }
 
         let (events, _) = broadcast::channel(EVENT_BUS_CAPACITY);
@@ -119,6 +128,7 @@ mod tests {
             db_path: app_dir.join("workspace.sqlite3"),
             app_dir: app_dir.clone(),
             daemon_addr: "127.0.0.1:0".to_owned(),
+            acp_registry_source: None,
         };
         let first = App::new(config.clone()).await.expect("start first app");
         first

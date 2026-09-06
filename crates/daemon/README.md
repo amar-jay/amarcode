@@ -4,6 +4,25 @@ Background service for Amarcode. Owns durable workspace state, talks to ACP
 coding agents as subprocesses, and exposes a local TCP JSON-line API for the
 editor / CLI.
 
+## ACP registry checkout
+
+The upstream ACP registry is pinned for local development as the
+`vendor/acp-registry` Git submodule. Initialize it after cloning Amarcode with:
+
+```sh
+git submodule update --init --recursive
+```
+
+At daemon startup, Amarcode also maintains a shallow runtime checkout at
+`{app_dir}/acp-registry`. The first startup clones
+`https://github.com/amar-jay/acp-registry.git`; later startups fast-forward the
+checkout to `origin/main`. Synchronization is best-effort: if the source is
+temporarily unavailable, startup continues and keeps the last successful
+checkout.
+
+Set `AMARCODE_ACP_REGISTRY_SOURCE` to another Git URL or a local repository for
+development. Set it to an empty value to disable startup synchronization.
+
 > **Scope note for contributors:** the client wire contract lives in the
 > workspace's `amarcode-protocol` crate and is shared with the desktop shell.
 > Do not re-declare those wire types in either consumer.

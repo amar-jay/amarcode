@@ -1,0 +1,3 @@
+[submodule "vendor/acp-registry"]
+	path = vendor/acp-registry
+	url = https://github.com/amar-jay/acp-registry.git
