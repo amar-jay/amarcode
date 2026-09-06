@@ -37,8 +37,9 @@ development. Set it to an empty value to disable startup synchronization.
 
 ## What this process is for
 
-![Daemon Diagram](./assets/daemon-diagram.png)
-<img src="./assets/daemon-diagram.png" width="50%" />
+<div align="center">
+<img src="./assets/daemon-diagram.png" width="75%" />
+</div>
 <!-- ```
 ┌──────────────┐   TCP JSON lines    ┌─────────────────────────────┐
 │ Editor / CLI │ ◄─────────────────► │       amarcode-daemon       │
