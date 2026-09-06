@@ -8,7 +8,7 @@
 use std::{fs, path::Path};
 
 use crate::{
-    app_dir,
+    config,
     service_control::{ServiceController, ServiceState},
     Error, Result,
 };
@@ -16,8 +16,8 @@ use crate::{
 /// Stop and unregister the native service, verify its absence, then remove the
 /// platform-owned daemon data directory. The operation is idempotent.
 pub fn purge_default<C: ServiceController>(controller: &C) -> Result<()> {
-    let requested = app_dir::resolve()?;
-    let expected = app_dir::resolve_default()?;
+    let requested = config::resolve()?;
+    let expected = config::resolve_default()?;
     purge(controller, &requested, &expected)
 }
 

@@ -11,9 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{Error, Result};
-
-const LOCK_FILE_SUFFIX: &str = ".amarcode.lock";
+use crate::{config, Error, Result};
 
 /// Keeps exclusive ownership of one daemon database for its entire lifetime.
 #[derive(Debug)]
@@ -123,7 +121,7 @@ fn lock_path(db_path: &Path) -> Result<PathBuf> {
         .file_name()
         .unwrap_or_else(|| std::ffi::OsStr::new("workspace.sqlite3"))
         .to_os_string();
-    lock_name.push(LOCK_FILE_SUFFIX);
+    lock_name.push(config::LOCK_FILE_SUFFIX);
     Ok(canonical_db.with_file_name(lock_name))
 }
 

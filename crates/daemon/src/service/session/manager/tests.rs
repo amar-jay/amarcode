@@ -76,7 +76,18 @@ fn stale_pending_request_cannot_target_replacement_client() {
 #[test]
 fn failed_prompt_interrupts_partial_messages() {
     let store = Arc::new(Store::open(Path::new(":memory:")).expect("store"));
-    store.seed_presets().expect("seed agents");
+    store
+        .save_agent(&crate::protocol::AgentDefinition {
+            id: "codex-acp".into(),
+            name: "Codex".into(),
+            command: "test-agent".into(),
+            arguments: vec![],
+            environment: vec![],
+            is_preset: false,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        })
+        .expect("create agent");
     store
         .create_chat(&crate::store::Chat {
             id: "chat-1".to_owned(),
@@ -190,7 +201,18 @@ fn failed_prompt_interrupts_partial_messages() {
 #[test]
 fn cancel_interrupts_partial_messages() {
     let store = Arc::new(Store::open(Path::new(":memory:")).expect("store"));
-    store.seed_presets().expect("seed agents");
+    store
+        .save_agent(&crate::protocol::AgentDefinition {
+            id: "grok-acp".into(),
+            name: "Grok".into(),
+            command: "test-agent".into(),
+            arguments: vec![],
+            environment: vec![],
+            is_preset: false,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        })
+        .expect("create agent");
     store
         .create_chat(&crate::store::Chat {
             id: "chat-1".to_owned(),

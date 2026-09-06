@@ -587,7 +587,18 @@ mod grok_inbound_tests {
     #[test]
     fn grok_tool_call_delta_notification_is_stored_as_a_tool_part() {
         let store = Arc::new(Store::open(std::path::Path::new(":memory:")).expect("store"));
-        store.seed_presets().expect("seed agents");
+        store
+            .save_agent(&crate::protocol::AgentDefinition {
+                id: "grok-acp".into(),
+                name: "Grok".into(),
+                command: "test-agent".into(),
+                arguments: vec![],
+                environment: vec![],
+                is_preset: false,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .expect("create agent");
         store
             .create_chat(&crate::store::Chat {
                 id: "chat-1".to_owned(),

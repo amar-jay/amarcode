@@ -40,7 +40,7 @@ pub struct App {
 }
 
 impl App {
-    /// Open the store, seed presets, construct managers.
+    /// Open the store, refresh registry agents, and construct managers.
     pub async fn new(config: Config) -> Result<Self> {
         info!(
             app_dir = %config.app_dir.display(),
@@ -53,17 +53,28 @@ impl App {
         // it discovers the RPC port is already occupied.
         let instance_lock = InstanceLock::acquire(&config.db_path)?;
         let store = Arc::new(Store::open(&config.db_path)?);
-        store.seed_presets()?;
         let stopped = store.stop_interrupted_runs()?;
         if stopped > 0 {
             info!(count = stopped, "marked interrupted agent runs as stopped");
         }
 
+        let registry_path = crate::registry::checkout_path(&config.app_dir);
         if let Some(source) = config.acp_registry_source.as_deref() {
             match crate::registry::synchronize(&config.app_dir, source).await {
                 Ok(path) => info!(path = %path.display(), "ACP registry synchronized"),
                 Err(error) => {
                     warn!(%error, "ACP registry synchronization failed; retaining any existing checkout")
+                }
+            }
+        }
+        if registry_path.is_dir() {
+            match crate::registry::load_agents(&registry_path) {
+                Ok(agents) => {
+                    store.sync_presets(&agents)?;
+                    info!(count = agents.len(), "loaded ACP agents from registry");
+                }
+                Err(error) => {
+                    warn!(%error, "failed loading ACP registry; retaining stored agent catalog")
                 }
             }
         }
@@ -131,6 +142,19 @@ mod tests {
             acp_registry_source: None,
         };
         let first = App::new(config.clone()).await.expect("start first app");
+        first
+            .store
+            .save_agent(&crate::protocol::AgentDefinition {
+                id: "codex-acp".into(),
+                name: "Codex".into(),
+                command: "test-agent".into(),
+                arguments: vec![],
+                environment: vec![],
+                is_preset: false,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .expect("create agent");
         first
             .store
             .create_chat(&Chat {

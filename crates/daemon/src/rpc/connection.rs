@@ -333,7 +333,18 @@ mod tests {
     fn persisted_relationships_filter_run_message_and_session_events() {
         let store =
             Arc::new(Store::open(std::path::Path::new(":memory:")).expect("in-memory store"));
-        store.seed_presets().expect("seed agents");
+        store
+            .save_agent(&crate::protocol::AgentDefinition {
+                id: "test-agent".into(),
+                name: "Test agent".into(),
+                command: "test-agent".into(),
+                arguments: vec![],
+                environment: vec![],
+                is_preset: false,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .expect("create agent");
         let agent_id = store.agents().expect("agents")[0].id.clone();
         store
             .create_chat(&Chat {

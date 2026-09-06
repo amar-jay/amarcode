@@ -10,9 +10,9 @@
 //!
 //! Keep parsing and defaults here; do not open the database or bind sockets.
 
-use std::path::PathBuf;
+use std::{env, path::PathBuf};
 
-use crate::{app_dir, Result};
+use crate::{Error, Result};
 
 /// Default TCP address for the JSON-line RPC server.
 pub const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:43821";
@@ -22,6 +22,8 @@ pub const DEFAULT_DB_NAME: &str = "workspace.sqlite3";
 
 /// ACP registry maintained for Amarcode's agent catalog.
 pub const DEFAULT_ACP_REGISTRY_SOURCE: &str = "https://github.com/amar-jay/acp-registry.git";
+
+pub const LOCK_FILE_SUFFIX: &str = ".amarcode.lock";
 
 /// Daemon configuration.
 #[derive(Debug, Clone)]
@@ -37,7 +39,7 @@ pub struct Config {
 impl Config {
     /// Load config from environment variables and platform defaults.
     pub fn from_env() -> Result<Self> {
-        let app_dir = app_dir::resolve()?;
+        let app_dir = resolve()?;
         let daemon_addr = std::env::var("AMARCODE_DAEMON_ADDR")
             .unwrap_or_else(|_| DEFAULT_DAEMON_ADDR.to_string());
         let db_path = std::env::var("AMARCODE_STORE_PATH")
@@ -55,5 +57,52 @@ impl Config {
             db_path,
             acp_registry_source,
         })
+    }
+}
+
+/// Resolve the Amarcode application data directory.
+///
+/// Uses `AMARCODE_APPDIR` when set, otherwise the platform default.
+pub fn resolve() -> Result<PathBuf> {
+    if let Some(dir) = env::var_os("AMARCODE_APPDIR") {
+        if !dir.is_empty() {
+            return Ok(PathBuf::from(dir));
+        }
+    }
+
+    resolve_default()
+}
+
+/// Resolve the platform-owned Amarcode data directory without honoring
+/// overrides. Destructive cleanup uses this as its allowlisted target so an
+/// environment variable can never turn `purge` into an arbitrary directory
+/// deletion primitive.
+pub fn resolve_default() -> Result<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;
+        Ok(PathBuf::from(home).join(".amarcode"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let local =
+            env::var_os("LOCALAPPDATA").ok_or_else(|| Error::msg("LOCALAPPDATA is not set"))?;
+        Ok(PathBuf::from(local).join("amarcode"))
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;
+        Ok(PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join("amarcode"))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    {
+        let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;
+        Ok(PathBuf::from(home).join(".amarcode"))
     }
 }

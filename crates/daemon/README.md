@@ -20,6 +20,12 @@ checkout to `origin/main`. Synchronization is best-effort: if the source is
 temporarily unavailable, startup continues and keeps the last successful
 checkout.
 
+After synchronization, the daemon rebuilds its preset agent catalog from the
+registry's `agent.json` manifests. Package distributions are translated to
+`npx --yes <package>` or `uvx <package>` launch commands. Platform binary
+entries retain their registry-declared command path and remain unavailable
+until their archive has been installed into the managed tools directory.
+
 Set `AMARCODE_ACP_REGISTRY_SOURCE` to another Git URL or a local repository for
 development. Set it to an empty value to disable startup synchronization.
 
