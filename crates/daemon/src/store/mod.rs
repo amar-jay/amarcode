@@ -29,8 +29,17 @@ pub mod events;
 pub mod messages;
 pub mod runs;
 
-/// Ordered migrations embedded at compile time (filename order).
-const MIGRATIONS: &[&str] = &[include_str!("../../migrations/0001_initial.sql")];
+/// Ordered migrations embedded at compile time (id, SQL).
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "0001_initial",
+        include_str!("../../migrations/0001_initial.sql"),
+    ),
+    (
+        "0002_agents_available",
+        include_str!("../../migrations/0002_agents_available.sql"),
+    ),
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRun {
@@ -101,9 +110,7 @@ impl Store {
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(to_error)?;
 
-        for sql in MIGRATIONS {
-            connection.execute_batch(sql).map_err(to_error)?;
-        }
+        apply_migrations(&connection)?;
 
         Ok(Self(Mutex::new(connection)))
     }
@@ -127,6 +134,63 @@ impl Store {
 
 pub(crate) fn now() -> String {
     Utc::now().to_rfc3339()
+}
+
+fn apply_migrations(connection: &Connection) -> Result<()> {
+    connection
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS _migrations (
+                id TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            ) STRICT;",
+        )
+        .map_err(to_error)?;
+
+    // Existing databases created before migration tracking already ran 0001.
+    if table_exists(connection, "agents")? && !migration_applied(connection, "0001_initial")? {
+        record_migration(connection, "0001_initial")?;
+    }
+
+    for &(id, sql) in MIGRATIONS {
+        if migration_applied(connection, id)? {
+            continue;
+        }
+        connection.execute_batch(sql).map_err(to_error)?;
+        record_migration(connection, id)?;
+    }
+    Ok(())
+}
+
+fn table_exists(connection: &Connection, name: &str) -> Result<bool> {
+    let exists: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [name],
+            |row| row.get(0),
+        )
+        .map_err(to_error)?;
+    Ok(exists > 0)
+}
+
+fn migration_applied(connection: &Connection, id: &str) -> Result<bool> {
+    let exists: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM _migrations WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .map_err(to_error)?;
+    Ok(exists > 0)
+}
+
+fn record_migration(connection: &Connection, id: &str) -> Result<()> {
+    connection
+        .execute(
+            "INSERT INTO _migrations (id, applied_at) VALUES (?1, ?2)",
+            rusqlite::params![id, now()],
+        )
+        .map_err(to_error)?;
+    Ok(())
 }
 
 pub(crate) fn to_error(error: impl std::fmt::Display) -> Error {

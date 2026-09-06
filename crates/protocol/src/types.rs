@@ -86,23 +86,25 @@ pub struct AgentDefinition {
     pub command: String,
     pub arguments: Vec<String>,
     pub environment: Vec<(String, String)>,
-    pub is_preset: bool,
+    /// Whether the launch command currently resolves on this host.
+    pub available: bool,
     pub created_at: String,
     pub updated_at: String,
 }
 
-/// An agent definition annotated with availability on the daemon host.
+/// An agent definition annotated with live resolution details for the UI.
 ///
-/// Availability is intentionally not persisted: it depends on the daemon's
-/// current tools directory and process environment.
+/// `available` mirrors the persisted agents.available column after the daemon
+/// refreshes host resolution. `resolved_command` / `unavailable_reason` are
+/// computed at list time for diagnostics.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct AgentInfo {
     pub id: String,
     pub name: String,
+    pub icon: Option<String>,
     pub command: String,
     pub arguments: Vec<String>,
     pub environment: Vec<(String, String)>,
-    pub is_preset: bool,
     pub created_at: String,
     pub updated_at: String,
     pub available: bool,

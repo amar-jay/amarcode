@@ -20,11 +20,11 @@ checkout to `origin/main`. Synchronization is best-effort: if the source is
 temporarily unavailable, startup continues and keeps the last successful
 checkout.
 
-After synchronization, the daemon rebuilds its preset agent catalog from the
+After synchronization, the daemon rebuilds its agent catalog from the
 registry's `agent.json` manifests. Package distributions are translated to
-`npx --yes <package>` or `uvx <package>` launch commands. Platform binary
-entries retain their registry-declared command path and remain unavailable
-until their archive has been installed into the managed tools directory.
+`bunx <package>` or `uvx <package>` launch commands. Platform binary
+entries retain their registry-declared command path. Host availability is
+resolved against managed tools and PATH, then persisted on each agent row.
 
 Set `AMARCODE_ACP_REGISTRY_SOURCE` to another Git URL or a local repository for
 development. Set it to an empty value to disable startup synchronization.
@@ -194,7 +194,7 @@ had.
 
 3. **`App::new`**
    - Open SQLite, apply migrations
-   - Seed preset agents
+   - Sync registry agents and refresh persisted availability
    - Mark any leftover `starting`/`running` runs as `stopped`
    - Create `EditorEvent` broadcast bus
 
@@ -252,7 +252,7 @@ SQLite file, embedded migrations under `migrations/`.
 
 | Table           | Purpose                                              |
 | --------------- | ---------------------------------------------------- |
-| `agents`        | Preset + user agent definitions (command, args, env) |
+| `agents`        | Agent definitions (command, args, env, available)    |
 | `chats`         | Conversations scoped by `workspace_path`             |
 | `agent_runs`    | One execution of an agent inside a chat              |
 | `messages`      | Chat messages                                        |

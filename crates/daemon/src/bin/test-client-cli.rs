@@ -651,7 +651,7 @@ fn register_agent(id: &str, name: &str, command: &std::path::Path) -> Result<(),
             command: command.to_string_lossy().into_owned(),
             arguments: vec![],
             environment: vec![],
-            is_preset: false,
+            available: false,
             created_at: now.clone(),
             updated_at: now,
         })

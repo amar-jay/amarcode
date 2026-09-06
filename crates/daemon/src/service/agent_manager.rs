@@ -13,6 +13,8 @@ use std::{
     sync::Arc,
 };
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+
 use crate::{
     protocol::AgentInfo,
     store::{AgentDefinition, Store},
@@ -34,13 +36,18 @@ pub struct ResolvedAgent {
 pub struct AgentManager {
     store: Arc<Store>,
     tools_dir: PathBuf,
+    registry_dir: PathBuf,
 }
 
 impl AgentManager {
-    pub fn new(store: Arc<Store>, tools_dir: impl Into<PathBuf>) -> Self {
+    pub fn new(store: Arc<Store>, app_dir: impl Into<PathBuf>) -> Self {
+        let app_dir = app_dir.into();
+        let tools_dir = app_dir.join("tools");
+        let registry_dir = app_dir.join(crate::registry::CHECKOUT_DIRECTORY);
         Self {
             store,
-            tools_dir: tools_dir.into(),
+            tools_dir,
+            registry_dir,
         }
     }
 
@@ -49,6 +56,7 @@ impl AgentManager {
     }
 
     pub fn list(&self) -> Result<Vec<AgentInfo>> {
+        self.refresh_availability()?;
         Ok(self
             .store
             .agents()?
@@ -57,11 +65,22 @@ impl AgentManager {
             .collect())
     }
 
+    /// Resolve each agent command on this host and persist `available`.
+    pub fn refresh_availability(&self) -> Result<()> {
+        for agent in self.store.agents()? {
+            let available = find_command(&self.tools_dir, &agent).is_some();
+            if agent.available != available {
+                self.store.set_agent_available(&agent.id, available)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn get(&self, id: &str) -> Result<Option<AgentDefinition>> {
         self.store.get_agent(id)
     }
 
-    /// Upsert a user-defined (or preset) agent definition.
+    /// Upsert an agent definition.
     pub fn save(&self, agent: &AgentDefinition) -> Result<()> {
         self.store.save_agent(agent)
     }
@@ -75,16 +94,17 @@ impl AgentManager {
         environment: Vec<(String, String)>,
     ) -> Result<AgentDefinition> {
         let now = timestamp();
-        let agent = AgentDefinition {
+        let mut agent = AgentDefinition {
             id: uuid::Uuid::new_v4().to_string(),
             name: name.into(),
             command: command.into(),
             arguments,
             environment,
-            is_preset: false,
+            available: false,
             created_at: now.clone(),
             updated_at: now,
         };
+        agent.available = find_command(&self.tools_dir, &agent).is_some();
         self.store.save_agent(&agent)?;
         Ok(agent)
     }
@@ -105,7 +125,7 @@ impl AgentManager {
 
     pub fn resolve_definition(&self, agent: &AgentDefinition) -> Result<ResolvedAgent> {
         let command = find_command(&self.tools_dir, agent)
-            .ok_or_else(|| Error::msg(unavailable_reason(&agent.command)))?;
+            .ok_or_else(|| Error::msg(unavailable_reason(agent)))?;
         Ok(ResolvedAgent {
             agent_id: agent.id.clone(),
             name: agent.name.clone(),
@@ -120,21 +140,44 @@ impl AgentManager {
         AgentInfo {
             id: agent.id.clone(),
             name: agent.name.clone(),
+            icon: self.registry_icon(agent),
             command: agent.command.clone(),
             arguments: agent.arguments.clone(),
             environment: agent.environment.clone(),
-            is_preset: agent.is_preset,
             created_at: agent.created_at.clone(),
             updated_at: agent.updated_at.clone(),
-            available: resolved.is_some(),
+            available: agent.available,
             resolved_command: resolved
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned()),
-            unavailable_reason: resolved
-                .is_none()
-                .then(|| unavailable_reason(&agent.command)),
+            unavailable_reason: (!agent.available).then(|| unavailable_reason(agent)),
         }
     }
+
+    fn registry_icon(&self, agent: &AgentDefinition) -> Option<String> {
+        if !valid_registry_id(&agent.id) {
+            return None;
+        }
+        let bytes = std::fs::read(self.registry_dir.join(&agent.id).join("icon.svg")).ok()?;
+        // Registry icons are tiny; avoid putting an unexpectedly large file on
+        // the JSON-line protocol if a checkout has been modified locally.
+        if bytes.len() > 256 * 1024 {
+            return None;
+        }
+        Some(format!(
+            "data:image/svg+xml;base64,{}",
+            BASE64.encode(bytes)
+        ))
+    }
+}
+
+fn valid_registry_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit() && index > 0
+                || byte == b'-' && index > 0
+        })
 }
 
 fn find_command(tools_dir: &Path, agent: &AgentDefinition) -> Option<PathBuf> {
@@ -166,11 +209,14 @@ fn find_command(tools_dir: &Path, agent: &AgentDefinition) -> Option<PathBuf> {
         .find_map(|directory| executable_path(&directory.join(&as_path), &agent.environment))
 }
 
-fn unavailable_reason(command: &str) -> String {
-    if command.trim().is_empty() {
+fn unavailable_reason(agent: &AgentDefinition) -> String {
+    if agent.command.trim().is_empty() {
         "Agent command is empty".into()
     } else {
-        format!("Executable '{command}' was not found in managed tools or PATH")
+        format!(
+            "Executable '{}' was not found in managed tools or PATH",
+            agent.command
+        )
     }
 }
 
@@ -251,7 +297,7 @@ mod tests {
             command: command.into(),
             arguments: vec![],
             environment,
-            is_preset: false,
+            available: false,
             created_at: String::new(),
             updated_at: String::new(),
         }
@@ -323,7 +369,22 @@ mod tests {
         );
 
         assert_eq!(find_command(&tools, &definition), None);
-        assert!(unavailable_reason(&definition.command).contains(&definition.command));
+        assert!(unavailable_reason(&definition).contains(&definition.command));
         std::fs::remove_dir_all(tools).expect("remove test directory");
+    }
+
+    #[test]
+    fn resolves_bunx_from_path_like_any_other_command() {
+        let tools = test_directory();
+        let bin = test_directory();
+        let expected = create_test_command(&bin, "bunx");
+        let definition = agent(
+            "bunx",
+            vec![("PATH".into(), bin.to_string_lossy().into_owned())],
+        );
+
+        assert_eq!(find_command(&tools, &definition), Some(expected));
+        std::fs::remove_dir_all(tools).expect("remove tools directory");
+        std::fs::remove_dir_all(bin).expect("remove bin directory");
     }
 }

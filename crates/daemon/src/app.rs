@@ -83,7 +83,10 @@ impl App {
         let tools_dir = config.app_dir.join("tools");
         std::fs::create_dir_all(&tools_dir).ok();
 
-        let agents = AgentManager::new(Arc::clone(&store), tools_dir);
+        let agents = AgentManager::new(Arc::clone(&store), &config.app_dir);
+        if let Err(error) = agents.refresh_availability() {
+            warn!(%error, "failed refreshing agent availability");
+        }
         let chats = ChatManager::new(Arc::clone(&store), events.clone());
         let sessions = SessionManager::new(
             Arc::clone(&store),
@@ -150,7 +153,7 @@ mod tests {
                 command: "test-agent".into(),
                 arguments: vec![],
                 environment: vec![],
-                is_preset: false,
+                available: false,
                 created_at: "2026-01-01T00:00:00Z".into(),
                 updated_at: "2026-01-01T00:00:00Z".into(),
             })

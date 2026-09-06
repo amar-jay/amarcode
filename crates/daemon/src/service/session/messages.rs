@@ -399,7 +399,7 @@ mod append_tests {
                 command: "test-agent".into(),
                 arguments: vec![],
                 environment: vec![],
-                is_preset: false,
+                available: false,
                 created_at: "2026-01-01T00:00:00Z".into(),
                 updated_at: "2026-01-01T00:00:00Z".into(),
             })

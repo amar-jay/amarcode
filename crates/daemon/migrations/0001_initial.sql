@@ -3,7 +3,7 @@
 -- Applied on store open (in order by filename). Keep migrations append-only.
 --
 -- Tables:
---   agents        — agent definitions (presets + user-defined)
+--   agents        — agent definitions (command, args, env; see 0002 for available)
 --   chats         — user-visible conversations in a workspace
 --   agent_runs    — one agent execution inside a chat
 --   messages      — chat messages

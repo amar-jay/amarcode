@@ -490,7 +490,7 @@ fn insert_mock_agent_with_environment(
             command: mock_agent.to_string_lossy().into_owned(),
             arguments: vec![],
             environment,
-            is_preset: false,
+            available: false,
             created_at: now.into(),
             updated_at: now.into(),
         })

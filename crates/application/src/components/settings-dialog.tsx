@@ -286,7 +286,7 @@ function AgentDefaultsPanel({
         setAgentPickerOpen(false);
       }}
     >
-      <AgentLogo agentId={agent.id} />
+      <AgentLogo icon={agent.icon} />
       <span className="mr-auto">{agent.name.replace(/\s*\bACP\s*$/i, "")}</span>
       {!agent.available ? (
         <span className="ml-auto text-xs text-muted-foreground">
@@ -326,8 +326,11 @@ function AgentDefaultsPanel({
                 aria-expanded={agentPickerOpen}
                 className="w-full cursor-pointer justify-between font-normal"
               >
-                {selectedAgent?.name.replace(/\s*\bACP\s*$/i, "") ??
-                  "Choose an agent"}
+                <span className="flex min-w-0 items-center gap-2">
+                  <AgentLogo icon={selectedAgent?.icon} />
+                  {selectedAgent?.name.replace(/\s*\bACP\s*$/i, "") ??
+                    "Choose an agent"}
+                </span>
                 <ChevronsUpDown className="size-4 text-muted-foreground" />
               </Button>
             </PopoverTrigger>

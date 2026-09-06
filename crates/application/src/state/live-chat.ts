@@ -114,6 +114,34 @@ export const clearLiveChatAtom = atom(null, (_get, set) => {
   set(liveChatAtom, null);
 });
 
+/** End the optimistic working state when a home-composer prompt fails. */
+export const failStartedPromptAtom = atom(
+  null,
+  (
+    get,
+    set,
+    input: {
+      chatId: string;
+      error: string;
+    },
+  ) => {
+    const session = get(activeSessionAtom);
+    if (session?.chat.id === input.chatId) {
+      set(activeSessionAtom, { ...session, initialTurnActive: false });
+    }
+
+    const live = get(liveChatAtom);
+    if (live?.chatId === input.chatId) {
+      set(liveChatAtom, {
+        ...live,
+        turnStatus: "failed",
+        pendingRequest: null,
+        error: input.error,
+      });
+    }
+  },
+);
+
 function patchLive(
   get: () => LiveChatState | null,
   set: (v: LiveChatState) => void,

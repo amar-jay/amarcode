@@ -142,9 +142,9 @@ struct BinaryDistribution {
 impl RegistryAgent {
     fn into_definition(self) -> Option<AgentDefinition> {
         let (command, mut arguments, environment) = if let Some(package) = self.distribution.npx {
-            let mut arguments = vec!["--yes".to_owned(), package.package];
+            let mut arguments = vec![package.package];
             arguments.extend(package.args);
-            ("npx".to_owned(), arguments, package.env)
+            ("bunx".to_owned(), arguments, package.env)
         } else if let Some(package) = self.distribution.uvx {
             let mut arguments = vec![package.package];
             arguments.extend(package.args);
@@ -162,7 +162,7 @@ impl RegistryAgent {
             command,
             arguments,
             environment: environment.into_iter().collect(),
-            is_preset: true,
+            available: false,
             created_at: now.clone(),
             updated_at: now,
         })
@@ -264,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn translates_npx_distribution_to_launch_definition() {
+    fn translates_npx_distribution_to_bunx_launch_definition() {
         let agent: RegistryAgent = serde_json::from_value(serde_json::json!({
             "id": "example-agent",
             "name": "Example",
@@ -278,12 +278,9 @@ mod tests {
         }))
         .expect("registry agent");
         let definition = agent.into_definition().expect("launch definition");
-        assert_eq!(definition.command, "npx");
-        assert_eq!(
-            definition.arguments,
-            ["--yes", "@example/agent@1.2.3", "--acp"]
-        );
+        assert_eq!(definition.command, "bunx");
+        assert_eq!(definition.arguments, ["@example/agent@1.2.3", "--acp"]);
         assert_eq!(definition.environment, [("EXAMPLE".into(), "yes".into())]);
-        assert!(definition.is_preset);
+        assert!(!definition.available);
     }
 }

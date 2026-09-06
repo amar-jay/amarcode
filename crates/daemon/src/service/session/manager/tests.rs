@@ -23,7 +23,7 @@ fn stale_pending_request_cannot_target_replacement_client() {
     let (events, _) = broadcast::channel(4);
     let manager = SessionManager::new(
         Arc::clone(&store),
-        AgentManager::new(store, PathBuf::from("/tmp/tools")),
+        AgentManager::new(store, PathBuf::from("/tmp/amarcode-test")),
         events,
         PathBuf::from("/tmp/amarcode-test-attachments"),
     );
@@ -83,7 +83,7 @@ fn failed_prompt_interrupts_partial_messages() {
             command: "test-agent".into(),
             arguments: vec![],
             environment: vec![],
-            is_preset: false,
+            available: false,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
         })
@@ -137,7 +137,7 @@ fn failed_prompt_interrupts_partial_messages() {
     let (events, _) = broadcast::channel(8);
     let manager = SessionManager::new(
         Arc::clone(&store),
-        AgentManager::new(Arc::clone(&store), PathBuf::from("/tmp/tools")),
+        AgentManager::new(Arc::clone(&store), PathBuf::from("/tmp/amarcode-test")),
         events,
         PathBuf::from("/tmp/amarcode-test-attachments"),
     );
@@ -208,7 +208,7 @@ fn cancel_interrupts_partial_messages() {
             command: "test-agent".into(),
             arguments: vec![],
             environment: vec![],
-            is_preset: false,
+            available: false,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
         })
@@ -262,7 +262,7 @@ fn cancel_interrupts_partial_messages() {
     let (events, _) = broadcast::channel(8);
     let manager = SessionManager::new(
         Arc::clone(&store),
-        AgentManager::new(Arc::clone(&store), PathBuf::from("/tmp/tools")),
+        AgentManager::new(Arc::clone(&store), PathBuf::from("/tmp/amarcode-test")),
         events,
         PathBuf::from("/tmp/amarcode-test-attachments"),
     );

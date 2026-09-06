@@ -24,6 +24,7 @@ import {
   refreshChatsAtom,
   selectAgentByIdAtom,
   selectedAgentAtom,
+  failStartedPromptAtom,
   selectChatAtom,
   setWorkspacePathAtom,
   settingsOpenAtom,
@@ -56,6 +57,7 @@ export default function App() {
   const setWorkspacePath = useSetAtom(setWorkspacePathAtom);
   const agents = useAtomValue(agentsAtom);
   const selectedAgent = useAtomValue(selectedAgentAtom);
+  const failStartedPrompt = useSetAtom(failStartedPromptAtom);
   const [defaultAgentId, setDefaultAgentId] = useAtom(defaultAgentIdAtom);
   const [defaultSessionMode, setDefaultSessionMode] = useAtom(
     defaultSessionModeAtom,
@@ -125,6 +127,9 @@ export default function App() {
                 onChatStarted={(chat, agent, _workspacePath, sessionMode) => {
                   openStartedChat({ chat, agent, sessionMode });
                   void refreshChats();
+                }}
+                onStartedPromptFailed={(chatId, error) => {
+                  failStartedPrompt({ chatId, error });
                 }}
               />
             </div>
