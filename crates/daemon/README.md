@@ -29,6 +29,7 @@ resolved against managed tools and PATH, then persisted on each agent row.
 Set `AMARCODE_ACP_REGISTRY_SOURCE` to another Git URL or a local repository for
 development. Set it to an empty value to disable startup synchronization.
 
+>[!NOTE]
 > **Scope note for contributors:** the client wire contract lives in the
 > workspace's `amarcode-protocol` crate and is shared with the desktop shell.
 > Do not re-declare those wire types in either consumer.
