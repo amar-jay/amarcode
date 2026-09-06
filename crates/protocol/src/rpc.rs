@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::{AgentInfo, AgentRuntimeStatus, Chat};
+use crate::{
+    AgentInfo, AgentRuntimeStatus, Chat, SessionConfigAssignment, SessionConfigOption,
+    SessionConfigValue,
+};
 
 pub mod methods {
     pub const HEALTH: &str = "health";
@@ -17,7 +20,7 @@ pub mod methods {
     pub const GET_ATTACHMENT: &str = "get_attachment";
     pub const DELETE_CHAT: &str = "delete_chat";
     pub const PROMPT: &str = "prompt";
-    pub const SET_SESSION_MODE: &str = "set_session_mode";
+    pub const SET_SESSION_CONFIG_OPTION: &str = "set_session_config_option";
     pub const CANCEL: &str = "cancel";
     pub const RESPOND_PERMISSION: &str = "respond_permission";
     pub const RESPOND_INPUT: &str = "respond_input";
@@ -179,15 +182,20 @@ pub struct PromptParams {
     #[serde(default)]
     pub attachments: Vec<PromptAttachment>,
     #[serde(default)]
-    pub plan_mode: bool,
-    #[serde(default)]
-    pub session_mode: Option<String>,
+    pub config_values: Vec<SessionConfigAssignment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct SetSessionModeParams {
+pub struct SetSessionConfigOptionParams {
     pub chat_id: String,
-    pub mode: String,
+    pub config_id: String,
+    pub value: SessionConfigValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SetSessionConfigOptionResult {
+    pub chat_id: String,
+    pub options: Vec<SessionConfigOption>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -8,11 +8,12 @@ pub use events::{EditorEvent, EventLine};
 pub use types::{
     AgentDefinition, AgentFailureKind, AgentInfo, AgentRuntimeStatus, Chat, ChatDetail,
     GetChatResult, Message, MessageDetail, MessagePart, MessagePartKind, MessageRole,
-    MessageStatus, RunStatus, TurnStatus,
+    MessageStatus, RunStatus, SessionConfigAssignment, SessionConfigOption,
+    SessionConfigSelectChoice, SessionConfigValue, TurnStatus,
 };
 
 /// Increment when a wire change is not backward compatible.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Deterministic checked-in TypeScript contract consumed by the React app.
 pub fn typescript_bindings() -> String {
@@ -29,6 +30,10 @@ pub fn typescript_bindings() -> String {
         AgentRuntimeStatus::decl(&config),
         AgentDefinition::decl(&config),
         AgentInfo::decl(&config),
+        SessionConfigSelectChoice::decl(&config),
+        SessionConfigOption::decl(&config),
+        SessionConfigValue::decl(&config),
+        SessionConfigAssignment::decl(&config),
         Chat::decl(&config),
         Message::decl(&config),
         MessagePart::decl(&config),
@@ -50,7 +55,8 @@ pub fn typescript_bindings() -> String {
         rpc::GetAttachmentResult::decl(&config),
         rpc::PromptAttachment::decl(&config),
         rpc::PromptParams::decl(&config),
-        rpc::SetSessionModeParams::decl(&config),
+        rpc::SetSessionConfigOptionParams::decl(&config),
+        rpc::SetSessionConfigOptionResult::decl(&config),
         rpc::PromptResultDto::decl(&config),
         rpc::CancelResult::decl(&config),
         rpc::RespondAgentError::decl(&config),

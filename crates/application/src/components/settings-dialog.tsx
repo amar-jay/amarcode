@@ -16,7 +16,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { daemonApi, type ApplicationCleanupStatus } from "@/api";
-import type { Palette as AppPalette, Theme, SessionMode } from "@/state";
+import type { Palette as AppPalette, Theme } from "@/state";
 import { verboseReasoningAtom } from "@/state";
 import {
   Breadcrumb,
@@ -61,7 +61,6 @@ import {
   FieldContent,
   FieldDescription,
   FieldLabel,
-  FieldLegend,
   FieldSet,
 } from "@/components/ui/field";
 import {
@@ -144,8 +143,6 @@ export function SettingsDialog({
   agents,
   defaultAgentId,
   onDefaultAgentChange,
-  defaultSessionMode,
-  onDefaultSessionModeChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -156,8 +153,6 @@ export function SettingsDialog({
   agents: AgentInfo[];
   defaultAgentId: string;
   onDefaultAgentChange: (agentId: string) => void;
-  defaultSessionMode: SessionMode;
-  onDefaultSessionModeChange: (mode: SessionMode) => void;
 }) {
   const [page, setPage] = useState<SettingsPage>("appearance");
   const [restoreWorkspace, setRestoreWorkspace] = usePreference(
@@ -238,8 +233,6 @@ export function SettingsDialog({
                   agents={agents}
                   defaultAgentId={defaultAgentId}
                   onDefaultAgentChange={onDefaultAgentChange}
-                  defaultSessionMode={defaultSessionMode}
-                  onDefaultSessionModeChange={onDefaultSessionModeChange}
                 />
               ) : (
                 <GeneralPanel
@@ -263,14 +256,10 @@ function AgentDefaultsPanel({
   agents,
   defaultAgentId,
   onDefaultAgentChange,
-  defaultSessionMode,
-  onDefaultSessionModeChange,
 }: {
   agents: AgentInfo[];
   defaultAgentId: string;
   onDefaultAgentChange: (agentId: string) => void;
-  defaultSessionMode: SessionMode;
-  onDefaultSessionModeChange: (mode: SessionMode) => void;
 }) {
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
@@ -361,8 +350,8 @@ function AgentDefaultsPanel({
     <div className="mx-auto w-full max-w-132">
       <h2 className="text-base font-medium">Agent defaults</h2>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        These choices are used when you start a new chat. Existing conversations
-        keep their current session settings.
+        Choose the agent used for new chats. Session configuration is provided
+        by each agent and its last choices are remembered locally.
       </p>
       <Separator className="my-6" />
       <FieldSet className="gap-7">
@@ -415,39 +404,6 @@ function AgentDefaultsPanel({
             </PopoverContent>
           </Popover>
         </Field>
-        <FieldSet>
-          <FieldLegend>Default session mode</FieldLegend>
-          <FieldDescription>
-            Controls how Codex starts new sessions.
-          </FieldDescription>
-          <RadioGroup
-            value={defaultSessionMode}
-            onValueChange={(value) =>
-              onDefaultSessionModeChange(value as SessionMode)
-            }
-          >
-            {(["plan", "build", "ask"] as const).map((mode) => (
-              <Field key={mode} orientation="horizontal">
-                <RadioGroupItem value={mode} id={`default-mode-${mode}`} />
-                <FieldContent>
-                  <FieldLabel
-                    htmlFor={`default-mode-${mode}`}
-                    className="capitalize"
-                  >
-                    {mode}
-                  </FieldLabel>
-                  <FieldDescription>
-                    {mode === "plan"
-                      ? "Plan before implementation"
-                      : mode === "build"
-                        ? "Work with agent access"
-                        : "Review without edits"}
-                  </FieldDescription>
-                </FieldContent>
-              </Field>
-            ))}
-          </RadioGroup>
-        </FieldSet>
       </FieldSet>
     </div>
   );

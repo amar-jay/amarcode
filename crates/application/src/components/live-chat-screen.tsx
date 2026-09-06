@@ -18,7 +18,12 @@ import { Shimmer } from "@/components/ai-elements/shimmer";
 import type { AgentFailureKind, PromptAttachment } from "@/types";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import AppPromptInput from "./main-prompt-input";
 import { PendingAgentRequestCard } from "./pending-agent-request";
@@ -35,13 +40,12 @@ import {
   refreshChatsAtom,
   respondLiveRequestAtom,
   selectedAgentAtom,
-  setLiveSessionModeAtom,
+  setLiveSessionConfigOptionAtom,
   startNewChatAtom,
   stopLiveChatAtom,
   submitLivePromptAtom,
   subscribeDaemonEvents,
   verboseReasoningAtom,
-  type SessionMode,
 } from "@/state";
 import { groupChatBlocks } from "@/lib/message-parsing";
 import { UserMessage } from "./user-message";
@@ -204,7 +208,7 @@ export function LiveChatScreen() {
   const loadLiveChat = useSetAtom(loadLiveChatAtom);
   const applyEvent = useSetAtom(applyLiveChatEventAtom);
   const submitPrompt = useSetAtom(submitLivePromptAtom);
-  const changeMode = useSetAtom(setLiveSessionModeAtom);
+  const changeSessionConfig = useSetAtom(setLiveSessionConfigOptionAtom);
   const stop = useSetAtom(stopLiveChatAtom);
   const respond = useSetAtom(respondLiveRequestAtom);
   const bindAgent = useSetAtom(bindSessionAgentAtom);
@@ -269,10 +273,10 @@ export function LiveChatScreen() {
   const submit = async (
     text: string,
     attachments: PromptAttachment[],
-    mode: SessionMode,
+    configValues: import("@/types").SessionConfigAssignment[],
   ) => {
     if (!agent) return;
-    await submitPrompt({ text, attachments, mode, agentId: agent.id });
+    await submitPrompt({ text, attachments, configValues, agentId: agent.id });
   };
 
   return (
@@ -333,9 +337,7 @@ export function LiveChatScreen() {
             error={live.error}
             errorKind={live.errorKind}
             authRequired={live.authRequired}
-            canDeleteChat={
-              !live.loading && !isWorking && messages.length === 0
-            }
+            canDeleteChat={!live.loading && !isWorking && messages.length === 0}
             onSignedIn={() => clearFailure()}
             onDeleteChat={async () => {
               await daemonApi.deleteChat(live.chatId);
@@ -349,8 +351,10 @@ export function LiveChatScreen() {
           selectedAgentId={agent?.id ?? ""}
           onAgentSelected={(next) => bindAgent(next)}
           onSendPrompt={submit}
-          sessionMode={live.sessionMode}
-          onSessionModeChange={(mode) => void changeMode(mode)}
+          sessionConfig={live.sessionConfig}
+          onSessionConfigChange={(configId, value) =>
+            changeSessionConfig({ configId, value })
+          }
           isWorking={isWorking}
           onStop={() => void stop()}
         />

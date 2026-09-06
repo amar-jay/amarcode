@@ -1,10 +1,8 @@
 import { atom } from "jotai";
 import type { AgentInfo, Chat } from "@/types";
 import { chatsAtom } from "./chats";
-import { defaultSessionModeAtom } from "./preferences";
 import { selectedAgentAtom, selectAgentAtom } from "./agents";
 import { workspacePathAtom } from "./workspace";
-import type { SessionMode } from "./session-mode";
 
 /**
  * Which surface the main pane shows.
@@ -17,13 +15,9 @@ export type ActiveSession = {
   initialRunId: string | null;
   /** Home composer just kicked off a prompt for this chat. */
   initialTurnActive?: boolean;
-  sessionMode?: SessionMode;
 };
 
 export const activeSessionAtom = atom<ActiveSession | null>(null);
-
-/** Home composer mode — reset from defaults when starting a new chat. */
-export const composerSessionModeAtom = atom<SessionMode>("build");
 
 /** Open an existing chat from the sidebar. */
 export const selectChatAtom = atom(null, (get, set, chatId: string) => {
@@ -39,9 +33,8 @@ export const selectChatAtom = atom(null, (get, set, chatId: string) => {
 });
 
 /** Return to the home composer. */
-export const startNewChatAtom = atom(null, (get, set) => {
+export const startNewChatAtom = atom(null, (_get, set) => {
   set(activeSessionAtom, null);
-  set(composerSessionModeAtom, get(defaultSessionModeAtom));
 });
 
 /** After home composer creates a chat + fires a prompt. */
@@ -53,7 +46,6 @@ export const openStartedChatAtom = atom(
     payload: {
       chat: Chat;
       agent: AgentInfo;
-      sessionMode: SessionMode;
     },
   ) => {
     set(selectAgentAtom, payload.agent);
@@ -62,7 +54,6 @@ export const openStartedChatAtom = atom(
       agent: payload.agent,
       initialRunId: null,
       initialTurnActive: true,
-      sessionMode: payload.sessionMode,
     });
   },
 );

@@ -10,11 +10,12 @@ use serde_json::{json, Value};
 
 use crate::{
     protocol::rpc::{
-        methods, CancelParams, CancelResult, CreateChatParams, DeleteChatParams, DeleteChatResult,
-        AuthenticateAgentParams, AuthenticateAgentResult, GetAttachmentParams, GetAttachmentResult,
-        GetChatParams, HealthResult, InstallAgentParams, ListAgentsResult,
+        methods, AuthenticateAgentParams, AuthenticateAgentResult, CancelParams, CancelResult,
+        CreateChatParams, DeleteChatParams, DeleteChatResult, GetAttachmentParams,
+        GetAttachmentResult, GetChatParams, HealthResult, InstallAgentParams, ListAgentsResult,
         ListChatsParams, ListChatsResult, PromptParams, PromptResultDto, RespondAgentParams,
-        RespondAgentResult, SetSessionModeParams, SubscribeEventsParams, VersionResult,
+        RespondAgentResult, SetSessionConfigOptionParams, SetSessionConfigOptionResult,
+        SubscribeEventsParams, VersionResult,
     },
     service::{ChatDetail, MessageDetail, PromptResult},
     App, Error, Result,
@@ -43,9 +44,9 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         // agents (read / install)
         methods::LIST_AGENTS => Ok(DispatchOutcome::Result(list_agents(app)?)),
         methods::INSTALL_AGENT => Ok(DispatchOutcome::Result(install_agent(app, params).await?)),
-        methods::AUTHENTICATE_AGENT => {
-            Ok(DispatchOutcome::Result(authenticate_agent(app, params).await?))
-        }
+        methods::AUTHENTICATE_AGENT => Ok(DispatchOutcome::Result(
+            authenticate_agent(app, params).await?,
+        )),
 
         // chats (read / CRUD)
         methods::CREATE_CHAT => Ok(DispatchOutcome::Result(create_chat(app, params)?)),
@@ -56,8 +57,8 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
 
         // sessions (ACP — may block; run off the async worker)
         methods::PROMPT => Ok(DispatchOutcome::Result(prompt(app, params).await?)),
-        methods::SET_SESSION_MODE => Ok(DispatchOutcome::Result(
-            set_session_mode(app, params).await?,
+        methods::SET_SESSION_CONFIG_OPTION => Ok(DispatchOutcome::Result(
+            set_session_config_option(app, params).await?,
         )),
         methods::CANCEL => Ok(DispatchOutcome::Result(cancel(app, params).await?)),
         methods::RESPOND_PERMISSION | methods::RESPOND_INPUT => {
@@ -111,7 +112,10 @@ async fn authenticate_agent(app: &App, params: Value) -> Result<Value> {
     }
     let agent_id = p.agent_id;
     let method_id = p.method_id;
-    tokio::task::block_in_place(|| app.sessions.authenticate_agent(&agent_id, method_id.as_deref()))?;
+    tokio::task::block_in_place(|| {
+        app.sessions
+            .authenticate_agent(&agent_id, method_id.as_deref())
+    })?;
     to_value(AuthenticateAgentResult { ok: true })
 }
 
@@ -166,6 +170,7 @@ fn chat_detail_json(detail: &ChatDetail) -> Result<Value> {
     Ok(json!({
         "chat": detail.chat,
         "messages": messages,
+        "session_config": detail.session_config,
     }))
 }
 
@@ -192,27 +197,29 @@ async fn prompt(app: &App, params: Value) -> Result<Value> {
     let agent_id = p.agent_id;
     let text = p.text;
     let attachments = p.attachments;
-    let session_mode = p
-        .session_mode
-        .or_else(|| p.plan_mode.then(|| "plan".to_owned()));
+    let config_values = p.config_values;
 
     // ACP spawn/request is blocking; keep the async runtime free.
     let result = tokio::task::block_in_place(|| {
-        app.sessions.prompt(
-            &chat_id,
-            &agent_id,
-            text,
-            attachments,
-            session_mode.as_deref(),
-        )
+        app.sessions
+            .prompt(&chat_id, &agent_id, text, attachments, config_values)
     })?;
     to_value(prompt_dto(result))
 }
 
-async fn set_session_mode(app: &App, params: Value) -> Result<Value> {
-    let p: SetSessionModeParams = parse_params(params)?;
-    tokio::task::block_in_place(|| app.sessions.set_session_mode(&p.chat_id, &p.mode))?;
-    Ok(json!({ "chat_id": p.chat_id, "mode": p.mode }))
+async fn set_session_config_option(app: &App, params: Value) -> Result<Value> {
+    let p: SetSessionConfigOptionParams = parse_params(params)?;
+    let chat_id = p.chat_id.clone();
+    let options = tokio::task::block_in_place(|| {
+        app.sessions.set_session_config_option(
+            &p.chat_id,
+            crate::protocol::SessionConfigAssignment {
+                config_id: p.config_id,
+                value: p.value,
+            },
+        )
+    })?;
+    to_value(SetSessionConfigOptionResult { chat_id, options })
 }
 
 async fn cancel(app: &App, params: Value) -> Result<Value> {

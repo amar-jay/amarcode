@@ -11,7 +11,7 @@ impl SessionManager {
         agent_id: &str,
         text: impl AsRef<str>,
         attachments: Vec<crate::protocol::rpc::PromptAttachment>,
-        session_mode: Option<&str>,
+        config_values: Vec<crate::protocol::SessionConfigAssignment>,
     ) -> Result<PromptResult> {
         let text = text.as_ref().trim();
         if text.is_empty() && attachments.is_empty() {
@@ -42,7 +42,10 @@ impl SessionManager {
             }
         };
         if needs_start {
-            self.start_run_locked(chat_id, agent_id, session_mode)?;
+            self.start_run_locked(chat_id, agent_id)?;
+        }
+        if !config_values.is_empty() {
+            self.apply_config_assignments(chat_id, &config_values, true)?;
         }
 
         let (run_id, client, session_id, needs_history_hydration, supports_images) = {
@@ -243,8 +246,7 @@ impl SessionManager {
         // persists notifications on a separate worker. Wait for that worker
         // before finalizing the messages from this turn.
         if let Err(err) = client.sync_inbound(ACP_REQUEST_TIMEOUT) {
-            let failure =
-                with_stderr_detail(classify_acp_failure(&err), &client.stderr_tail());
+            let failure = with_stderr_detail(classify_acp_failure(&err), &client.stderr_tail());
             if let Err(cleanup_error) =
                 self.terminate_failed_prompt(chat_id, &run_id, &user_message.id, &failure)
             {
@@ -313,8 +315,24 @@ impl SessionManager {
         Ok(lock)
     }
 
-    /// Change an active ACP session using the configuration it advertised.
-    pub fn set_session_mode(&self, chat_id: &str, mode: &str) -> Result<()> {
+    pub fn set_session_config_option(
+        &self,
+        chat_id: &str,
+        assignment: crate::protocol::SessionConfigAssignment,
+    ) -> Result<Vec<crate::protocol::SessionConfigOption>> {
+        self.apply_config_assignments(chat_id, std::slice::from_ref(&assignment), false)?;
+        self.current_session_config(chat_id)
+    }
+
+    pub(super) fn apply_config_assignments(
+        &self,
+        chat_id: &str,
+        assignments: &[crate::protocol::SessionConfigAssignment],
+        skip_invalid: bool,
+    ) -> Result<()> {
+        if assignments.is_empty() {
+            return Ok(());
+        }
         let (run_id, client, session_id, mut configuration) = {
             let guard = self
                 .inner
@@ -332,36 +350,66 @@ impl SessionManager {
             )
         };
         let session_id = session_id.ok_or_else(|| Error::msg("ACP session has not started"))?;
-        let applied =
-            configure_session(&session_id, &mut configuration, mode, |method, params| {
-                self.acp_request(
+        for assignment in assignments {
+            let value = match configuration.validate_assignment(assignment) {
+                Ok(value) => value,
+                Err(_) if skip_invalid => continue,
+                Err(error) => return Err(error),
+            };
+            let response = self
+                .acp_request(
                     &run_id,
                     &client,
-                    AgentRpcMethod::Other(method.to_owned()),
-                    params,
+                    AgentRpcMethod::Other(SET_CONFIG_OPTION_METHOD.to_owned()),
+                    set_config_params(&session_id, &assignment.config_id, &value),
                 )
-                .map_err(Error::from)
-            })?;
-        if !applied {
-            return Err(Error::msg(
-                "agent does not advertise a compatible session mode configuration",
-            ));
+                .map_err(Error::from)?;
+            configuration = SessionConfiguration::from_response(&response);
         }
-
-        let mut live_runs = self
-            .inner
-            .by_chat
-            .lock()
-            .map_err(|_| Error::msg("session lock poisoned"))?;
-        if let Some(live) = live_runs
-            .get_mut(chat_id)
-            .filter(|live| live.run_id == run_id)
         {
-            live.session_configuration = configuration;
-            Ok(())
-        } else {
-            Err(Error::msg("session was replaced while changing its mode"))
+            let mut live_runs = self
+                .inner
+                .by_chat
+                .lock()
+                .map_err(|_| Error::msg("session lock poisoned"))?;
+            if let Some(live) = live_runs
+                .get_mut(chat_id)
+                .filter(|live| live.run_id == run_id)
+            {
+                live.session_configuration = configuration.clone();
+            } else {
+                return Err(Error::msg(
+                    "session was replaced while changing configuration",
+                ));
+            }
         }
+        self.publish_session_config(chat_id, &configuration)
+    }
+
+    pub(super) fn publish_session_config(
+        &self,
+        chat_id: &str,
+        configuration: &SessionConfiguration,
+    ) -> Result<()> {
+        let options = configuration.as_protocol();
+        self.inner.store.set_session_config(chat_id, &options)?;
+        self.emit(EditorEvent::SessionConfigUpdated {
+            chat_id: chat_id.to_owned(),
+            options,
+        });
+        Ok(())
+    }
+
+    pub(super) fn current_session_config(
+        &self,
+        chat_id: &str,
+    ) -> Result<Vec<crate::protocol::SessionConfigOption>> {
+        if let Ok(guard) = self.inner.by_chat.lock() {
+            if let Some(live) = guard.get(chat_id) {
+                return Ok(live.session_configuration.as_protocol());
+            }
+        }
+        self.inner.store.session_config(chat_id)
     }
 
     /// Provide an isolated fallback when an agent cannot resume its own saved

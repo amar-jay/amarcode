@@ -23,6 +23,7 @@ use crate::{
 pub struct ChatDetail {
     pub chat: Chat,
     pub messages: Vec<MessageDetail>,
+    pub session_config: Vec<crate::protocol::SessionConfigOption>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,9 +92,11 @@ impl ChatManager {
                 agent_id: run.as_ref().map(|run| run.agent_id.clone()),
             });
         }
+        let session_config = self.store.session_config(id)?;
         Ok(ChatDetail {
             chat,
             messages: detailed,
+            session_config,
         })
     }
 

@@ -39,6 +39,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0002_agents_available",
         include_str!("../../migrations/0002_agents_available.sql"),
     ),
+    (
+        "0003_chat_session_config",
+        include_str!("../../migrations/0003_chat_session_config.sql"),
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

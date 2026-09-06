@@ -15,6 +15,9 @@ fn main() {
     let mut stdout = io::stdout();
     let mut session_id = String::from("mock-session-1");
     let mut session_mode = String::from("ask");
+    let mut brave_mode = false;
+    let mut model = String::from("capable");
+    let mut thought_level = String::from("balanced");
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -77,28 +80,79 @@ fn main() {
                     id,
                     json!({
                         "sessionId": session_id,
-                        "configOptions": mode_config_options(&session_mode),
+                        "configOptions": config_options(
+                            &session_mode,
+                            brave_mode,
+                            &model,
+                            &thought_level,
+                        ),
                     }),
                 );
             }
             Some("session/set_config_option") => {
-                if params.get("configId").and_then(Value::as_str) != Some("mode") {
-                    reply_error(&mut stdout, id, -32602, "Unknown config option");
-                    continue;
+                match params.get("configId").and_then(Value::as_str) {
+                    Some("mode") => {
+                        let Some(value) = params.get("value").and_then(Value::as_str) else {
+                            reply_error(&mut stdout, id, -32602, "Mode value must be an id");
+                            continue;
+                        };
+                        if !matches!(value, "ask" | "code") {
+                            reply_error(&mut stdout, id, -32602, "Unsupported mode");
+                            continue;
+                        }
+                        session_mode = value.to_owned();
+                    }
+                    Some("brave_mode") => {
+                        let Some(value) = params.get("value").and_then(Value::as_bool) else {
+                            reply_error(&mut stdout, id, -32602, "brave_mode must be boolean");
+                            continue;
+                        };
+                        brave_mode = value;
+                    }
+                    Some("model") => {
+                        let Some(value) = params.get("value").and_then(Value::as_str) else {
+                            reply_error(&mut stdout, id, -32602, "Model value must be an id");
+                            continue;
+                        };
+                        if !matches!(value, "fast" | "capable") {
+                            reply_error(&mut stdout, id, -32602, "Unsupported model");
+                            continue;
+                        }
+                        model = value.to_owned();
+                        thought_level = if model == "fast" { "low" } else { "balanced" }.into();
+                    }
+                    Some("thought_level") => {
+                        let Some(value) = params.get("value").and_then(Value::as_str) else {
+                            reply_error(&mut stdout, id, -32602, "Thought level must be an id");
+                            continue;
+                        };
+                        let supported = if model == "fast" {
+                            matches!(value, "low" | "medium")
+                        } else {
+                            matches!(value, "balanced" | "high")
+                        };
+                        if !supported {
+                            reply_error(&mut stdout, id, -32602, "Unsupported thought level");
+                            continue;
+                        }
+                        thought_level = value.to_owned();
+                    }
+                    _ => {
+                        reply_error(&mut stdout, id, -32602, "Unknown config option");
+                        continue;
+                    }
                 }
-                let Some(value) = params.get("value").and_then(Value::as_str) else {
-                    reply_error(&mut stdout, id, -32602, "Mode value must be an id");
-                    continue;
-                };
-                if !matches!(value, "ask" | "code") {
-                    reply_error(&mut stdout, id, -32602, "Unsupported mode");
-                    continue;
-                }
-                session_mode = value.to_owned();
                 reply(
                     &mut stdout,
                     id,
-                    json!({ "configOptions": mode_config_options(&session_mode) }),
+                    json!({
+                        "configOptions": config_options(
+                            &session_mode,
+                            brave_mode,
+                            &model,
+                            &thought_level,
+                        )
+                    }),
                 );
             }
             Some("session/prompt") => {
@@ -179,18 +233,56 @@ fn main() {
     }
 }
 
-fn mode_config_options(current: &str) -> Value {
-    json!([{
-        "id": "mode",
-        "name": "Session mode",
-        "category": "mode",
-        "type": "select",
-        "currentValue": current,
-        "options": [
-            { "value": "ask", "name": "Ask" },
-            { "value": "code", "name": "Code" }
-        ]
-    }])
+fn config_options(mode: &str, brave_mode: bool, model: &str, thought_level: &str) -> Value {
+    let thought_options = if model == "fast" {
+        json!([
+            { "value": "low", "name": "Low" },
+            { "value": "medium", "name": "Medium" }
+        ])
+    } else {
+        json!([
+            { "value": "balanced", "name": "Balanced" },
+            { "value": "high", "name": "High" }
+        ])
+    };
+    json!([
+        {
+            "id": "mode",
+            "name": "Session mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": mode,
+            "options": [
+                { "value": "ask", "name": "Ask" },
+                { "value": "code", "name": "Code" }
+            ]
+        },
+        {
+            "id": "brave_mode",
+            "name": "Brave Mode",
+            "type": "boolean",
+            "currentValue": brave_mode
+        },
+        {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": model,
+            "options": [
+                { "value": "fast", "name": "Fast" },
+                { "value": "capable", "name": "Capable" }
+            ]
+        },
+        {
+            "id": "thought_level",
+            "name": "Thought level",
+            "category": "model_config",
+            "type": "select",
+            "currentValue": thought_level,
+            "options": thought_options
+        }
+    ])
 }
 
 fn extract_prompt_text(params: &Value) -> String {

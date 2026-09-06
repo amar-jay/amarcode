@@ -1,6 +1,6 @@
 //! Persistence for the `chats` table.
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::{map_chat, to_error, Chat, Store};
 use crate::Result;
@@ -53,6 +53,40 @@ impl Store {
         match rows.next() {
             Some(row) => Ok(Some(row.map_err(to_error)?)),
             None => Ok(None),
+        }
+    }
+
+    pub fn set_session_config(
+        &self,
+        id: &str,
+        options: &[crate::protocol::SessionConfigOption],
+    ) -> Result<()> {
+        self.connection()?
+            .execute(
+                "UPDATE chats SET session_config_json=?2, updated_at=?3 WHERE id=?1",
+                params![
+                    id,
+                    serde_json::to_string(options).map_err(to_error)?,
+                    super::now()
+                ],
+            )
+            .map_err(to_error)?;
+        Ok(())
+    }
+
+    pub fn session_config(&self, id: &str) -> Result<Vec<crate::protocol::SessionConfigOption>> {
+        let connection = self.connection()?;
+        let json: Option<String> = connection
+            .query_row(
+                "SELECT session_config_json FROM chats WHERE id=?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(to_error)?;
+        match json {
+            Some(value) if !value.is_empty() => super::parse_json(&value).map_err(to_error),
+            _ => Ok(Vec::new()),
         }
     }
 

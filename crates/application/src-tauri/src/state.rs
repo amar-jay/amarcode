@@ -11,12 +11,12 @@ use crate::{
     daemon::{DaemonBridge, EventSubscription},
     protocol::{
         rpc::{
-            methods, AuthenticateAgentResult, CancelResult, DeleteChatResult,
-            GetAttachmentResult, HealthResult, InstallAgentResult, ListAgentsResult,
-            ListChatsResult, PromptAttachment, PromptResultDto, RespondAgentParams,
-            RespondAgentResult, VersionResult,
+            methods, AuthenticateAgentResult, CancelResult, DeleteChatResult, GetAttachmentResult,
+            HealthResult, InstallAgentResult, ListAgentsResult, ListChatsResult, PromptAttachment,
+            PromptResultDto, RespondAgentParams, RespondAgentResult, SetSessionConfigOptionResult,
+            VersionResult,
         },
-        AgentInfo, Chat, GetChatResult,
+        AgentInfo, Chat, GetChatResult, SessionConfigAssignment, SessionConfigValue,
     },
 };
 
@@ -120,7 +120,7 @@ impl AppState {
         agent_id: String,
         text: String,
         attachments: Vec<PromptAttachment>,
-        session_mode: Option<String>,
+        config_values: Vec<SessionConfigAssignment>,
     ) -> Result<PromptResultDto, String> {
         self.call(
             methods::PROMPT,
@@ -129,19 +129,27 @@ impl AppState {
                 "agent_id": agent_id,
                 "text": text,
                 "attachments": attachments,
-                "session_mode": session_mode,
+                "config_values": config_values,
             }),
         )
         .await
     }
 
-    pub async fn set_session_mode(&self, chat_id: String, mode: String) -> Result<(), String> {
-        self.call::<Value>(
-            methods::SET_SESSION_MODE,
-            json!({ "chat_id": chat_id, "mode": mode }),
+    pub async fn set_session_config_option(
+        &self,
+        chat_id: String,
+        config_id: String,
+        value: SessionConfigValue,
+    ) -> Result<SetSessionConfigOptionResult, String> {
+        self.call(
+            methods::SET_SESSION_CONFIG_OPTION,
+            json!({
+                "chat_id": chat_id,
+                "config_id": config_id,
+                "value": value,
+            }),
         )
         .await
-        .map(|_| ())
     }
 
     pub async fn cancel(&self, chat_id: String) -> Result<CancelResult, String> {

@@ -190,20 +190,23 @@ async fn prompt(
     agent_id: String,
     text: String,
     attachments: Vec<PromptAttachment>,
-    session_mode: Option<String>,
+    config_values: Vec<amarcode_protocol::SessionConfigAssignment>,
 ) -> Result<PromptResultDto, String> {
     state
-        .prompt(chat_id, agent_id, text, attachments, session_mode)
+        .prompt(chat_id, agent_id, text, attachments, config_values)
         .await
 }
 
 #[tauri::command]
-async fn set_session_mode(
+async fn set_session_config_option(
     state: State<'_, AppState>,
     chat_id: String,
-    mode: String,
-) -> Result<(), String> {
-    state.set_session_mode(chat_id, mode).await
+    config_id: String,
+    value: amarcode_protocol::SessionConfigValue,
+) -> Result<amarcode_protocol::rpc::SetSessionConfigOptionResult, String> {
+    state
+        .set_session_config_option(chat_id, config_id, value)
+        .await
 }
 
 #[tauri::command]
@@ -645,7 +648,7 @@ pub fn run() {
             get_attachment,
             delete_chat,
             prompt,
-            set_session_mode,
+            set_session_config_option,
             cancel,
             respond_permission,
             respond_input,

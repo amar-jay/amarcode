@@ -16,13 +16,7 @@ import {
   ensureDaemonEventStream,
   subscribeDaemonEvents,
 } from "./daemon-events";
-import {
-  defaultAgentIdAtom,
-  defaultSessionModeAtom,
-  paletteAtom,
-  themeAtom,
-} from "./preferences";
-import { composerSessionModeAtom } from "./navigation";
+import { defaultAgentIdAtom, paletteAtom, themeAtom } from "./preferences";
 import { liveChatAtom, loadLiveChatAtom } from "./live-chat";
 
 /**
@@ -44,7 +38,6 @@ export function useAppBootstrap() {
   const theme = useAtomValue(themeAtom);
   const palette = useAtomValue(paletteAtom);
   const defaultAgentId = useAtomValue(defaultAgentIdAtom);
-  const defaultSessionMode = useAtomValue(defaultSessionModeAtom);
   const selectedAgent = useAtomValue(selectedAgentAtom);
   const selectedAgentId = useAtomValue(selectedAgentIdAtom);
 
@@ -52,7 +45,6 @@ export function useAppBootstrap() {
   const refreshChats = useSetAtom(refreshChatsAtom);
   const loadLiveChat = useSetAtom(loadLiveChatAtom);
   const setSelectedAgentId = useSetAtom(selectedAgentIdAtom);
-  const setComposerMode = useSetAtom(composerSessionModeAtom);
   const retryDaemon = useCallback(
     () => setDaemonAttempt((attempt) => attempt + 1),
     [],
@@ -195,11 +187,6 @@ export function useAppBootstrap() {
   useEffect(() => {
     if (!selectedAgentId) setSelectedAgentId(defaultAgentId);
   }, [defaultAgentId, selectedAgentId, setSelectedAgentId]);
-
-  // Home composer mode tracks the settings default until the user overrides it.
-  useEffect(() => {
-    setComposerMode(defaultSessionMode);
-  }, [defaultSessionMode, setComposerMode]);
 
   return {
     daemonConnection,

@@ -14,9 +14,7 @@ import {
   activeSessionAtom,
   agentsAtom,
   chatsAtom,
-  composerSessionModeAtom,
   defaultAgentIdAtom,
-  defaultSessionModeAtom,
   latestTurnByChatAtom,
   liveChatIsWorkingAtom,
   openStartedChatAtom,
@@ -59,10 +57,6 @@ export default function App() {
   const selectedAgent = useAtomValue(selectedAgentAtom);
   const failStartedPrompt = useSetAtom(failStartedPromptAtom);
   const [defaultAgentId, setDefaultAgentId] = useAtom(defaultAgentIdAtom);
-  const [defaultSessionMode, setDefaultSessionMode] = useAtom(
-    defaultSessionModeAtom,
-  );
-  const [composerMode, setComposerMode] = useAtom(composerSessionModeAtom);
   const chats = useAtomValue(chatsAtom);
   const activeSession = useAtomValue(activeSessionAtom);
   const latestTurns = useAtomValue(latestTurnByChatAtom);
@@ -122,10 +116,8 @@ export default function App() {
                 onWorkspacePathChange={setWorkspacePath}
                 selectedAgentId={selectedAgent?.id ?? ""}
                 onAgentSelected={(agent) => selectAgentById(agent.id)}
-                sessionMode={composerMode}
-                onSessionModeChange={setComposerMode}
-                onChatStarted={(chat, agent, _workspacePath, sessionMode) => {
-                  openStartedChat({ chat, agent, sessionMode });
+                onChatStarted={(chat, agent) => {
+                  openStartedChat({ chat, agent });
                   void refreshChats();
                 }}
                 onStartedPromptFailed={(chatId, error) => {
@@ -155,8 +147,6 @@ export default function App() {
           setDefaultAgentId(agentId);
           selectAgentById(agentId);
         }}
-        defaultSessionMode={defaultSessionMode}
-        onDefaultSessionModeChange={setDefaultSessionMode}
       />
       {daemonConnection.status !== "ready" && (
         <DaemonConnectionDialog

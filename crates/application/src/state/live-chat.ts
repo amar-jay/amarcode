@@ -7,15 +7,18 @@ import type {
   JsonValue,
   PromptAttachment,
   RunStatus,
+  SessionConfigAssignment,
+  SessionConfigOption,
+  SessionConfigValue,
   TurnStatus,
 } from "@/types";
 import type { PendingAgentRequest } from "@/components/pending-agent-request";
-import type { SessionMode } from "./session-mode";
 import { automaticApprovalResult, shouldAutoApprove } from "./permission-mode";
 import { permissionModeAtom } from "./preferences";
 import { getLatestTurnForChat } from "./daemon-events";
 import { refreshChatsAtom } from "./chats";
 import { activeSessionAtom } from "./navigation";
+import { rememberSessionConfig } from "./session-config";
 
 function isChatDetail(value: Chat | ChatDetail): value is ChatDetail {
   return "messages" in value;
@@ -33,7 +36,7 @@ export type LiveChatState = {
   turnStatus: TurnStatus | null;
   pendingRequest: PendingAgentRequest | null;
   contextRestoration: string | null;
-  sessionMode: SessionMode;
+  sessionConfig: SessionConfigOption[];
   loading: boolean;
   error: string | null;
   errorKind: AgentFailureKind | null;
@@ -55,7 +58,7 @@ const emptyLiveChat = (
   turnStatus: null,
   pendingRequest: null,
   contextRestoration: null,
-  sessionMode: "build",
+  sessionConfig: [],
   loading: true,
   error: null,
   errorKind: null,
@@ -74,7 +77,6 @@ export type OpenLiveChatInput = {
   chatId: string;
   initialRunId?: string | null;
   initialTurnActive?: boolean;
-  sessionMode?: SessionMode;
 };
 
 /**
@@ -93,7 +95,6 @@ export const openLiveChatAtom = atom(
             chatId,
             initialRunId: session?.initialRunId,
             initialTurnActive: session?.initialTurnActive,
-            sessionMode: session?.sessionMode,
           }
         : input;
 
@@ -112,7 +113,6 @@ export const openLiveChatAtom = atom(
         runStatus: turnStatus === "started" ? "running" : null,
         // Prefer observed turn status over the navigation "just started" flag.
         turnStatus,
-        sessionMode: seed.sessionMode ?? "build",
         loading: true,
       }),
     );
@@ -201,6 +201,7 @@ export const loadLiveChatAtom = atom(
         set(liveChatAtom, {
           ...current,
           detail: result,
+          sessionConfig: result.session_config ?? current.sessionConfig,
           loading: false,
           error: null,
         });
@@ -269,6 +270,17 @@ export const applyLiveChatEventAtom = atom(
       };
       set(liveChatAtom, next);
       void set(scheduleLiveChatRefreshAtom);
+      return;
+    }
+
+    if (
+      event.type === "sessionConfigUpdated" &&
+      event.payload.chat_id === live.chatId
+    ) {
+      const options = event.payload.options;
+      const session = get(activeSessionAtom);
+      if (session?.agent?.id) rememberSessionConfig(session.agent.id, options);
+      set(liveChatAtom, { ...live, sessionConfig: options });
       return;
     }
 
@@ -378,8 +390,8 @@ export const submitLivePromptAtom = atom(
     input: {
       text: string;
       attachments: PromptAttachment[];
-      mode: SessionMode;
       agentId: string;
+      configValues?: SessionConfigAssignment[];
     },
   ) => {
     const live = get(liveChatAtom);
@@ -393,7 +405,6 @@ export const submitLivePromptAtom = atom(
     set(liveChatAtom, {
       ...live,
       turnStatus: "started",
-      sessionMode: input.mode,
       error: null,
     });
 
@@ -403,7 +414,7 @@ export const submitLivePromptAtom = atom(
         input.agentId,
         input.text.trim(),
         input.attachments,
-        input.mode,
+        input.configValues ?? [],
       );
       const current = get(liveChatAtom);
       if (!current || current.chatId !== live.chatId) return;
@@ -430,17 +441,42 @@ export const submitLivePromptAtom = atom(
   },
 );
 
-export const setLiveSessionModeAtom = atom(
+export const setLiveSessionConfigOptionAtom = atom(
   null,
-  async (get, set, mode: SessionMode) => {
+  async (get, set, input: { configId: string; value: SessionConfigValue }) => {
     const live = get(liveChatAtom);
     if (!live) return;
-    set(liveChatAtom, { ...live, sessionMode: mode });
+    const optimistic = live.sessionConfig.map((option) =>
+      option.id === input.configId
+        ? {
+            ...option,
+            current_value:
+              input.value.type === "boolean"
+                ? input.value.value
+                : input.value.value,
+          }
+        : option,
+    );
+    set(liveChatAtom, { ...live, sessionConfig: optimistic });
+    const session = get(activeSessionAtom);
+    if (session?.agent?.id) {
+      rememberSessionConfig(session.agent.id, optimistic);
+    }
     try {
-      await daemonApi.setSessionMode(live.chatId, mode);
+      const result = await daemonApi.setSessionConfigOption(
+        live.chatId,
+        input.configId,
+        input.value,
+      );
+      const current = get(liveChatAtom);
+      if (!current || current.chatId !== live.chatId) return;
+      set(liveChatAtom, { ...current, sessionConfig: result.options });
+      const activeSession = get(activeSessionAtom);
+      if (activeSession?.agent?.id) {
+        rememberSessionConfig(activeSession.agent.id, result.options);
+      }
     } catch (cause) {
-      // Historical chat may have no live ACP session yet.
-      console.info("Session mode will apply when this chat starts:", cause);
+      console.info("Session config will apply when this chat starts:", cause);
     }
   },
 );

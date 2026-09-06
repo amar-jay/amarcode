@@ -1,5 +1,4 @@
 import { atomWithStorage } from "jotai/utils";
-import { parseSessionMode, type SessionMode } from "./session-mode";
 import type { PermissionMode } from "./permission-mode";
 
 export type Theme = "light" | "dark" | "system";
@@ -41,14 +40,6 @@ export const paletteAtom = atomWithStorage<Palette>(
 export const defaultAgentIdAtom = atomWithStorage<string>(
   "amarcode-default-agent",
   "codex-acp",
-  undefined,
-  { getOnInit: true },
-);
-
-/** Default plan/build/ask mode for new chats. */
-export const defaultSessionModeAtom = atomWithStorage<SessionMode>(
-  "amarcode-default-session-mode",
-  parseSessionMode(localStorage.getItem("amarcode-default-session-mode")),
   undefined,
   { getOnInit: true },
 );

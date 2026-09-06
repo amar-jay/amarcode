@@ -55,7 +55,7 @@ describe("failed home-composer prompts", () => {
       turnStatus: "started",
       pendingRequest: null,
       contextRestoration: null,
-      sessionMode: "build",
+      sessionConfig: [],
       loading: true,
       error: null,
       errorKind: null,

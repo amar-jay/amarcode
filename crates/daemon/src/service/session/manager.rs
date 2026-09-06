@@ -28,17 +28,18 @@ use crate::{
 };
 
 use super::{
-    classify_acp_failure, classify_message, with_stderr_detail, ClassifiedFailure,
+    classify_acp_failure, classify_message,
     inbound::spawn_inbound_worker,
     messages::{
         finalize_message, remove_pending_requests_for_run, take_streaming_messages_from_live,
     },
-    session_config::{configure_session, SessionConfiguration},
+    session_config::{set_config_params, SessionConfiguration, SET_CONFIG_OPTION_METHOD},
     types::{
         LiveRun, PendingAgentRequest, PromptResult, SessionInner, ACP_PROMPT_IDLE_TIMEOUT,
         ACP_PROMPT_TOTAL_TIMEOUT, ACP_REQUEST_TIMEOUT,
     },
     util::{extract_session_id, extract_stop_reason, normalize_permission_result, timestamp},
+    with_stderr_detail, ClassifiedFailure,
 };
 
 pub struct SessionManager {
@@ -77,26 +78,16 @@ impl SessionManager {
     }
 
     /// Start a new agent run for a chat (spawns ACP, initialize + resume/new session).
-    pub fn start_run(
-        &self,
-        chat_id: &str,
-        agent_id: &str,
-        session_mode: Option<&str>,
-    ) -> Result<AgentRun> {
+    pub fn start_run(&self, chat_id: &str, agent_id: &str) -> Result<AgentRun> {
         let prompt_lock = self.prompt_lock(chat_id)?;
         let _prompt_guard = prompt_lock
             .lock()
             .map_err(|_| Error::msg("prompt lock poisoned"))?;
-        self.start_run_locked(chat_id, agent_id, session_mode)
+        self.start_run_locked(chat_id, agent_id)
     }
 
     /// Start a run while the caller holds this chat's prompt lock.
-    fn start_run_locked(
-        &self,
-        chat_id: &str,
-        agent_id: &str,
-        session_mode: Option<&str>,
-    ) -> Result<AgentRun> {
+    fn start_run_locked(&self, chat_id: &str, agent_id: &str) -> Result<AgentRun> {
         let chat = self
             .inner
             .store
@@ -299,46 +290,16 @@ impl SessionManager {
                 ))
             }
         })();
-        let (acp_session_id, needs_history_hydration, mut session_configuration) =
-            match session_setup {
-                Ok(value) => value,
-                Err(failure) => {
-                    self.remove_live_run(chat_id, &run.id);
-                    let _ = client.kill();
-                    self.maybe_emit_auth_required(agent_id, Some(&run.id), &failure);
-                    let _ = self.fail_run(&run.id, &failure);
-                    return Err(failure.into());
-                }
-            };
-
-        if let (Some(mode), Some(session_id)) = (session_mode, acp_session_id.as_deref()) {
-            match configure_session(
-                session_id,
-                &mut session_configuration,
-                mode,
-                |method, params| {
-                    self.acp_request(
-                        &run.id,
-                        &client,
-                        AgentRpcMethod::Other(method.to_owned()),
-                        params,
-                    )
-                    .map_err(Error::from)
-                },
-            ) {
-                Ok(true) => {}
-                Ok(false) => {
-                    debug!(%agent_id, %mode, "agent does not advertise a compatible session mode; retaining its default");
-                }
-                Err(err) => {
-                    let failure = classify_message(&err.to_string());
-                    self.remove_live_run(chat_id, &run.id);
-                    let _ = client.kill();
-                    let _ = self.fail_run(&run.id, &failure);
-                    return Err(failure.into());
-                }
+        let (acp_session_id, needs_history_hydration, session_configuration) = match session_setup {
+            Ok(value) => value,
+            Err(failure) => {
+                self.remove_live_run(chat_id, &run.id);
+                let _ = client.kill();
+                self.maybe_emit_auth_required(agent_id, Some(&run.id), &failure);
+                let _ = self.fail_run(&run.id, &failure);
+                return Err(failure.into());
             }
-        }
+        };
 
         self.inner.store.update_run(
             &run.id,
@@ -369,9 +330,10 @@ impl SessionManager {
             .filter(|live| live.run_id == run.id)
             .ok_or_else(|| Error::msg("agent disconnected during session startup"))?;
         live.acp_session_id = acp_session_id.clone();
-        live.session_configuration = session_configuration;
+        live.session_configuration = session_configuration.clone();
         live.needs_history_hydration = needs_history_hydration;
         drop(live_runs);
+        self.publish_session_config(chat_id, &session_configuration)?;
 
         let mut run = run;
         run.status = RunStatus::Running;

@@ -226,9 +226,11 @@ fn event_matches(
         }
         EditorEvent::WorkspaceFilesChanged { .. }
         | EditorEvent::AgentConnectionChanged { .. }
-        | EditorEvent::AgentAuthRequired { .. } => {
-            return Ok(false)
-        }
+        | EditorEvent::AgentAuthRequired { .. } => return Ok(false),
+        EditorEvent::SessionConfigUpdated { chat_id, .. } => EventScope {
+            chat_id: Some(chat_id.clone()),
+            ..EventScope::default()
+        },
     };
 
     // Run rows provide the relationships omitted from compact event payloads.

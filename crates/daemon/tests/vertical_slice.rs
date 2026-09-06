@@ -136,7 +136,7 @@ async fn create_chat_prompt_store_and_events() {
                     "mime_type": "image/png",
                     "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
                 }],
-                "session_mode": "build"
+                "config_values": [{ "config_id": "mode", "value": { "type": "id", "value": "code" } }]
             }
         }),
     )
@@ -155,6 +155,25 @@ async fn create_chat_prompt_store_and_events() {
         .as_str()
         .expect("user_message_id")
         .to_owned();
+
+    let configured = rpc(
+        &addr,
+        json!({
+            "method": "set_session_config_option",
+            "params": {
+                "chat_id": chat_id,
+                "config_id": "brave_mode",
+                "value": { "type": "boolean", "value": true }
+            }
+        }),
+    )
+    .await
+    .expect("set_session_config_option");
+    assert_eq!(
+        configured["result"]["options"][1]["current_value"],
+        json!(true),
+        "boolean config should round-trip through ACP: {configured}"
+    );
 
     // Collect events for a short window (store-first means events trail ACP).
     let mut saw_chat_updated = false;

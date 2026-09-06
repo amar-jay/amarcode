@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::{AgentFailureKind, MessagePartKind, MessageStatus, RunStatus, TurnStatus};
+use crate::{
+    AgentFailureKind, MessagePartKind, MessageStatus, RunStatus, SessionConfigOption, TurnStatus,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventLine {
@@ -76,5 +78,9 @@ pub enum EditorEvent {
         #[serde(default)]
         run_id: Option<String>,
         methods: Value,
+    },
+    SessionConfigUpdated {
+        chat_id: String,
+        options: Vec<SessionConfigOption>,
     },
 }

@@ -14,6 +14,9 @@ import type {
   PromptResult,
   PromptAttachment,
   RespondAgentResult,
+  SessionConfigAssignment,
+  SessionConfigOption,
+  SessionConfigValue,
 } from "./types";
 
 export type DaemonEventStreamStatus =
@@ -159,7 +162,10 @@ export const daemonApi = {
     runtime_status: "ready" | "auth_required" | "unavailable" | "error";
     runtime_message?: string | null;
   }> => invoke("install_agent", { agentId }),
-  authenticateAgent: (agentId: string, methodId?: string): Promise<{ ok: boolean }> =>
+  authenticateAgent: (
+    agentId: string,
+    methodId?: string,
+  ): Promise<{ ok: boolean }> =>
     invoke("authenticate_agent", { agentId, methodId }),
 
   createChat: (workspacePath: string, title?: string): Promise<Chat> =>
@@ -181,13 +187,15 @@ export const daemonApi = {
     agentId: string,
     text: string,
     attachments: PromptAttachment[],
-    sessionMode?: "plan" | "build" | "ask",
+    configValues?: SessionConfigAssignment[],
   ): Promise<PromptResult> =>
-    invoke("prompt", { chatId, agentId, text, attachments, sessionMode }),
-  setSessionMode: (
+    invoke("prompt", { chatId, agentId, text, attachments, configValues }),
+  setSessionConfigOption: (
     chatId: string,
-    mode: "plan" | "build" | "ask",
-  ): Promise<void> => invoke("set_session_mode", { chatId, mode }),
+    configId: string,
+    value: SessionConfigValue,
+  ): Promise<{ chat_id: string; options: SessionConfigOption[] }> =>
+    invoke("set_session_config_option", { chatId, configId, value }),
   cancel: (chatId: string): Promise<CancelResult> =>
     invoke("cancel", { chatId }),
 

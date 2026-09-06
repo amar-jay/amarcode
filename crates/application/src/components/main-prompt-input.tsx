@@ -25,45 +25,28 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Check,
-  FolderOpen,
-  MessageCircle,
-  Ruler,
-  ShieldCheck,
-  ShieldQuestion,
-  Wrench,
-} from "lucide-react";
-import { AgentLogo } from "@/components/agent-logo";
-
+import { Check, FolderOpen, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AgentInfo, Chat, PromptAttachment } from "@/types";
+import type {
+  AgentInfo,
+  Chat,
+  PromptAttachment,
+  SessionConfigAssignment,
+  SessionConfigOption,
+  SessionConfigValue,
+} from "@/types";
+import { permissionModeAtom, type PermissionMode } from "@/state";
 import {
-  permissionModeAtom,
-  SESSION_MODES,
-  type PermissionMode,
-  type SessionMode,
-} from "@/state";
+  assignmentsFromOptions,
+  loadLastSessionConfig,
+  rememberSessionConfig,
+} from "@/state/session-config";
 import { AgentSelectionDialog } from "./agent-selection-dialog";
-
-export type { SessionMode };
-const SET_MODES = SESSION_MODES;
-
-const modeLabels: Record<SessionMode, string> = {
-  plan: "Plan",
-  build: "Build",
-  ask: "Ask",
-};
-
-const modeIcons: Record<SessionMode, typeof Ruler> = {
-  plan: Ruler,
-  build: Wrench,
-  ask: MessageCircle,
-};
+import { SessionConfigControls } from "./session-config-controls";
 
 const permissionModes: Array<{
   value: PermissionMode;
@@ -104,7 +87,6 @@ function PromptAttachmentPreviews() {
   );
 }
 
-
 function toPromptAttachments(
   files: PromptInputMessage["files"],
 ): PromptAttachment[] {
@@ -122,17 +104,12 @@ function toPromptAttachments(
 }
 
 interface AppPromptInputProps {
-  onChatStarted?: (
-    chat: Chat,
-    agent: AgentInfo,
-    workspacePath: string,
-    sessionMode: SessionMode,
-  ) => void;
+  onChatStarted?: (chat: Chat, agent: AgentInfo, workspacePath: string) => void;
   onStartedPromptFailed?: (chatId: string, error: string) => void;
   onSendPrompt?: (
     text: string,
     attachments: PromptAttachment[],
-    sessionMode: SessionMode,
+    configValues: SessionConfigAssignment[],
   ) => Promise<void>;
   workspacePath: string;
   onWorkspacePathChange?: (workspacePath: string) => void;
@@ -140,8 +117,11 @@ interface AppPromptInputProps {
   onAgentSelected?: (agent: AgentInfo) => void;
   isWorking?: boolean;
   onStop?: () => void;
-  sessionMode?: SessionMode;
-  onSessionModeChange?: (mode: SessionMode) => Promise<void> | void;
+  sessionConfig?: SessionConfigOption[];
+  onSessionConfigChange?: (
+    configId: string,
+    value: SessionConfigValue,
+  ) => Promise<void> | void;
 }
 
 function AppPromptInput({
@@ -154,15 +134,24 @@ function AppPromptInput({
   onAgentSelected,
   isWorking = false,
   onStop,
-  sessionMode,
-  onSessionModeChange,
+  sessionConfig,
+  onSessionConfigChange,
 }: AppPromptInputProps) {
-  const [uncontrolledMode, setUncontrolledMode] =
-    useState<SessionMode>("build");
   const [permissionMode, setPermissionMode] = useAtom(permissionModeAtom);
-  const mode = sessionMode ?? uncontrolledMode;
-  const ModeIcon = modeIcons[mode];
+  const [pendingConfig, setPendingConfig] = useState<{
+    agentId: string;
+    options: SessionConfigOption[];
+  }>({ agentId: selectedAgentId, options: [] });
   const isChatComposer = Boolean(onSendPrompt);
+  const lastKnown = loadLastSessionConfig(selectedAgentId);
+  const pendingOptions =
+    pendingConfig.agentId === selectedAgentId ? pendingConfig.options : [];
+  const options =
+    sessionConfig !== undefined
+      ? sessionConfig
+      : pendingOptions.length
+        ? pendingOptions
+        : lastKnown;
 
   const openDirectory = async () => {
     try {
@@ -186,7 +175,7 @@ function AppPromptInput({
     const attachments = toPromptAttachments(message.files);
     if (!text && attachments.length === 0) return;
     if (onSendPrompt) {
-      await onSendPrompt(text, attachments, mode);
+      await onSendPrompt(text, attachments, assignmentsFromOptions(options));
       return;
     }
     if (!workspacePath || !selectedAgentId) {
@@ -208,9 +197,15 @@ function AppPromptInput({
 
       // Transition immediately. The daemon's prompt RPC remains open until the
       // agent turn finishes, while the chat screen renders via the event stream.
-      onChatStarted?.(chat, agent, workspacePath, mode);
+      onChatStarted?.(chat, agent, workspacePath);
       void daemonApi
-        .prompt(chat.id, selectedAgentId, text, attachments, mode)
+        .prompt(
+          chat.id,
+          selectedAgentId,
+          text,
+          attachments,
+          assignmentsFromOptions(options),
+        )
         .catch((error: unknown) => {
           console.error("Error submitting prompt:", error);
           const message =
@@ -235,11 +230,29 @@ function AppPromptInput({
     const agent = agents.find((candidate) => candidate.id === agentId);
     if (agent) onAgentSelected?.(agent);
   };
-  const selectMode = async (nextMode: SessionMode) => {
-    if (onSessionModeChange) await onSessionModeChange(nextMode);
-    else setUncontrolledMode(nextMode);
+  const selectConfig = async (configId: string, value: SessionConfigValue) => {
+    if (onSessionConfigChange) {
+      await onSessionConfigChange(configId, value);
+      return;
+    }
+    setPendingConfig((current) => {
+      const base =
+        current.agentId === selectedAgentId && current.options.length
+          ? current.options
+          : options;
+      const next = base.map((option) =>
+        option.id === configId
+          ? {
+              ...option,
+              current_value:
+                value.type === "boolean" ? value.value : value.value,
+            }
+          : option,
+      );
+      rememberSessionConfig(selectedAgentId, next);
+      return { agentId: selectedAgentId, options: next };
+    });
   };
-  const showModeControl = !isChatComposer || selectedAgentId === "codex-acp";
   return (
     <PromptInput
       accept="image/png,image/jpeg,image/webp,image/gif,text/plain"
@@ -255,37 +268,11 @@ function AppPromptInput({
       </PromptInputBody>
       <PromptInputFooter>
         <PromptInputTools>
-          {showModeControl && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <PromptInputButton
-                  size="sm"
-                  className="w-12 mx-auto ring-0 focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                >
-                  <ModeIcon size={3} />
-                  <span>{modeLabels[mode]}</span>
-                </PromptInputButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-8">
-                {SET_MODES.map((value) => {
-                  const Icon = modeIcons[value];
-
-                  return (
-                    <DropdownMenuItem
-                      key={value}
-                      onSelect={() => void selectMode(value)}
-                    >
-                      <Icon size={3} />
-                      <span>{modeLabels[value]}</span>
-                      {mode === value && (
-                        <Check className="ml-auto size-3.5 text-current" />
-                      )}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          <SessionConfigControls
+            options={options}
+            disabled={isWorking}
+            onChange={(configId, value) => void selectConfig(configId, value)}
+          />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <PromptInputButton

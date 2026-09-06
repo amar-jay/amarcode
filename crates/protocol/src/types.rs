@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use ts_rs::TS;
 
 macro_rules! string_enum {
@@ -169,6 +170,47 @@ pub struct MessageDetail {
 pub struct ChatDetail {
     pub chat: Chat,
     pub messages: Vec<MessageDetail>,
+    #[serde(default)]
+    pub session_config: Vec<SessionConfigOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SessionConfigSelectChoice {
+    pub value: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct SessionConfigOption {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(rename = "type")]
+    pub option_type: String,
+    #[ts(type = "JsonValue")]
+    pub current_value: Value,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<SessionConfigSelectChoice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "type")]
+pub enum SessionConfigValue {
+    #[serde(rename = "id")]
+    Id { value: String },
+    #[serde(rename = "boolean")]
+    Boolean { value: bool },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SessionConfigAssignment {
+    pub config_id: String,
+    pub value: SessionConfigValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

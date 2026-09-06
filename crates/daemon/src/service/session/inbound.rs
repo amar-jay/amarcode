@@ -459,10 +459,31 @@ fn apply_session_update(
         "tool_call" | "tool_call_update" | "tool_call_delta_chunk" => {
             append_tool_part(inner, run_id, chat_id, update)?;
         }
+        "config_option_update" => {
+            let configuration = super::session_config::SessionConfiguration::from_update(update);
+            let mut guard = inner
+                .by_chat
+                .lock()
+                .map_err(|_| Error::msg("session lock poisoned"))?;
+            let Some(live) = guard.get_mut(chat_id).filter(|live| live.run_id == run_id) else {
+                return Ok(());
+            };
+            live.session_configuration = configuration.clone();
+            drop(guard);
+
+            let options = configuration.as_protocol();
+            inner.store.set_session_config(chat_id, &options)?;
+            emit(
+                inner,
+                EditorEvent::SessionConfigUpdated {
+                    chat_id: chat_id.to_owned(),
+                    options,
+                },
+            );
+        }
         "available_commands_update"
         | "session_info_update"
         | "usage_update"
-        | "config_option_update"
         | "session_summary_generated"
         | "response_completed"
         | "turn_completed"

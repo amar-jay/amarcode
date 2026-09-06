@@ -1,298 +1,282 @@
-//! Agent-neutral ACP session configuration.
+//! ACP session configuration snapshots.
 //!
-//! Agents advertise their own option ids and values in `configOptions`.
-//! This module translates Amarcode's canonical plan/build/ask modes only when
-//! those advertised options contain a compatible value. Unsupported agents
-//! retain their defaults; no executable-name checks belong here.
+//! Agents advertise options on `session/new` and after `session/set_config_option`.
+//! Amarcode stores the snapshot as-is and applies user changes without mapping
+//! onto a hardcoded plan/build/ask vocabulary.
 
 use serde_json::{json, Value};
 
-use crate::{Error, Result};
+use crate::{
+    protocol::{
+        SessionConfigAssignment, SessionConfigOption, SessionConfigSelectChoice, SessionConfigValue,
+    },
+    Error, Result,
+};
 
-const SET_CONFIG_OPTION_METHOD: &str = "session/set_config_option";
+pub(super) const SET_CONFIG_OPTION_METHOD: &str = "session/set_config_option";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct SessionConfiguration {
-    options: Vec<SessionConfigOption>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct SessionConfigOption {
-    id: String,
-    category: Option<String>,
-    kind: String,
-    current_value: Value,
-    values: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct ConfigChange {
-    config_id: String,
-    value_type: &'static str,
-    value: Value,
+    pub(super) options: Vec<SessionConfigOption>,
 }
 
 impl SessionConfiguration {
     pub(super) fn from_response(response: &Value) -> Self {
-        let options = response
-            .get("configOptions")
-            .or_else(|| response.get("config_options"))
+        Self::from_options_value(
+            response
+                .get("configOptions")
+                .or_else(|| response.get("config_options")),
+        )
+    }
+
+    pub(super) fn from_update(update: &Value) -> Self {
+        Self::from_options_value(
+            update
+                .get("configOptions")
+                .or_else(|| update.get("config_options")),
+        )
+    }
+
+    pub(super) fn from_options_value(value: Option<&Value>) -> Self {
+        let options = value
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(SessionConfigOption::from_value)
+            .filter_map(parse_option)
             .collect();
         Self { options }
     }
 
-    fn is_empty(&self) -> bool {
-        self.options.is_empty()
+    pub(super) fn as_protocol(&self) -> Vec<SessionConfigOption> {
+        self.options.clone()
     }
 
-    fn mode_changes(&self, mode: &str) -> Result<(bool, Vec<ConfigChange>)> {
-        if !matches!(mode, "plan" | "build" | "ask") {
-            return Err(Error::msg("mode must be plan, build, or ask"));
-        }
-
-        let has_collaboration_mode = self
+    pub(super) fn validate_assignment(
+        &self,
+        assignment: &SessionConfigAssignment,
+    ) -> Result<SessionConfigValue> {
+        let option = self
             .options
             .iter()
-            .any(|option| option.id == "collaboration_mode");
-        let mut changes = Vec::new();
-        let mut supported = false;
-
-        for option in &self.options {
-            if !matches!(option.kind.as_str(), "select" | "id") {
-                continue;
-            }
-            let candidates: &[&str] = match option.id.as_str() {
-                // Codex and any compatible agent may expose planning as a
-                // separate collaboration dimension.
-                "collaboration_mode" => match mode {
-                    "plan" => &["plan"],
-                    "build" | "ask" => &["default"],
-                    _ => unreachable!(),
-                },
-                // `mode` is standardized only as a category, not as a fixed
-                // value vocabulary. Select the first value the agent actually
-                // advertised, ordered by closest semantic match.
-                "mode" => mode_candidates(mode, has_collaboration_mode),
-                _ if option.category.as_deref() == Some("mode") => {
-                    mode_candidates(mode, has_collaboration_mode)
+            .find(|option| option.id == assignment.config_id)
+            .ok_or_else(|| {
+                Error::msg(format!(
+                    "unknown session config option: {}",
+                    assignment.config_id
+                ))
+            })?;
+        match (option.option_type.as_str(), &assignment.value) {
+            ("select", SessionConfigValue::Id { value }) => {
+                if option.options.iter().any(|choice| choice.value == *value) {
+                    Ok(assignment.value.clone())
+                } else {
+                    Err(Error::msg(format!(
+                        "invalid value {value} for {}",
+                        option.id
+                    )))
                 }
-                _ => continue,
-            };
-
-            let Some(value) = candidates
-                .iter()
-                .find(|candidate| option.values.iter().any(|value| value == **candidate))
-            else {
-                continue;
-            };
-            supported = true;
-            if option.current_value.as_str() == Some(value) {
-                continue;
             }
-            changes.push(ConfigChange {
-                config_id: option.id.clone(),
-                value_type: "id",
-                value: json!(value),
-            });
+            ("boolean", SessionConfigValue::Boolean { .. }) => Ok(assignment.value.clone()),
+            (option_type, _) => Err(Error::msg(format!(
+                "cannot set {option_type} option {} with this value",
+                option.id
+            ))),
         }
-        Ok((supported, changes))
     }
 }
 
-impl SessionConfigOption {
-    fn from_value(value: &Value) -> Option<Self> {
-        let id = value
-            .get("id")
-            .or_else(|| value.get("configId"))
-            .or_else(|| value.get("config_id"))?
-            .as_str()?
-            .to_owned();
-        let kind = value
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("select")
-            .to_owned();
-        let values = value
-            .get("options")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|option| option.get("value")?.as_str().map(str::to_owned))
-            .collect();
-        Some(Self {
-            id,
-            category: value
-                .get("category")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            kind,
-            current_value: value
-                .get("currentValue")
-                .or_else(|| value.get("current_value"))
-                .cloned()
-                .unwrap_or(Value::Null),
-            values,
-        })
-    }
-}
-
-fn mode_candidates(mode: &str, has_collaboration_mode: bool) -> &'static [&'static str] {
-    match mode {
-        "plan" if has_collaboration_mode => &["agent", "code", "default"],
-        "plan" => &["plan", "ask", "read-only", "read_only"],
-        "build" => &["agent", "code", "build", "acceptEdits", "default"],
-        "ask" => &["read-only", "read_only", "ask", "plan", "default"],
-        _ => &[],
-    }
-}
-
-/// Apply a canonical mode using only options advertised by the active agent.
-///
-/// Returns `Ok(false)` when the agent has no compatible session mode option.
-/// Each successful response replaces the cached options because ACP responses
-/// are complete snapshots and dependent values may have changed.
-pub(super) fn configure_session<F>(
+pub(super) fn set_config_params(
     session_id: &str,
-    configuration: &mut SessionConfiguration,
-    mode: &str,
-    mut request: F,
-) -> Result<bool>
-where
-    F: FnMut(&str, Value) -> Result<Value>,
-{
-    let (supported, changes) = configuration.mode_changes(mode)?;
-    if !supported {
-        return Ok(false);
+    config_id: &str,
+    value: &SessionConfigValue,
+) -> Value {
+    match value {
+        SessionConfigValue::Id { value } => json!({
+            "sessionId": session_id,
+            "configId": config_id,
+            "type": "id",
+            "value": value,
+        }),
+        SessionConfigValue::Boolean { value } => json!({
+            "sessionId": session_id,
+            "configId": config_id,
+            "type": "boolean",
+            "value": value,
+        }),
     }
+}
 
-    for change in changes {
-        let config_id = change.config_id.clone();
-        let selected_value = change.value.clone();
-        let response = request(
-            SET_CONFIG_OPTION_METHOD,
-            json!({
-                "sessionId": session_id,
-                "configId": change.config_id,
-                "type": change.value_type,
-                "value": change.value,
-            }),
-        )?;
-        let updated = SessionConfiguration::from_response(&response);
-        if !updated.is_empty() {
-            *configuration = updated;
-        } else if let Some(option) = configuration
-            .options
-            .iter_mut()
-            .find(|option| option.id == config_id)
-        {
-            option.current_value = selected_value;
-        }
-    }
-    Ok(true)
+fn parse_option(value: &Value) -> Option<SessionConfigOption> {
+    let id = value
+        .get("id")
+        .or_else(|| value.get("configId"))
+        .or_else(|| value.get("config_id"))?
+        .as_str()?
+        .to_owned();
+    let name = value
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or(&id)
+        .to_owned();
+    let option_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_owned();
+    let current_value = value
+        .get("currentValue")
+        .or_else(|| value.get("current_value"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let options = value
+        .get("options")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|choice| {
+            Some(SessionConfigSelectChoice {
+                value: choice.get("value")?.as_str()?.to_owned(),
+                name: choice
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .or_else(|| choice.get("value").and_then(Value::as_str))?
+                    .to_owned(),
+                description: choice
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            })
+        })
+        .collect();
+    Some(SessionConfigOption {
+        id,
+        name,
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        category: value
+            .get("category")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        option_type,
+        current_value,
+        options,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn codex_options() -> Value {
-        json!({
+    #[test]
+    fn parses_select_and_boolean_options() {
+        let configuration = SessionConfiguration::from_response(&json!({
             "configOptions": [
                 {
                     "id": "mode",
+                    "name": "Session Mode",
                     "category": "mode",
                     "type": "select",
-                    "currentValue": "read-only",
+                    "currentValue": "ask",
                     "options": [
-                        { "value": "read-only", "name": "Read only" },
-                        { "value": "agent", "name": "Agent" }
+                        { "value": "ask", "name": "Ask" },
+                        { "value": "code", "name": "Code" }
                     ]
                 },
                 {
-                    "id": "collaboration_mode",
-                    "category": "mode",
-                    "type": "select",
-                    "currentValue": "default",
-                    "options": [
-                        { "value": "default", "name": "Default" },
-                        { "value": "plan", "name": "Plan" }
-                    ]
+                    "id": "brave_mode",
+                    "name": "Brave Mode",
+                    "type": "boolean",
+                    "currentValue": false
                 }
             ]
-        })
-    }
-
-    #[test]
-    fn codex_plan_uses_both_advertised_dimensions() {
-        let configuration = SessionConfiguration::from_response(&codex_options());
-        let (_, changes) = configuration.mode_changes("plan").expect("plan changes");
-        assert_eq!(changes.len(), 2);
-        assert!(changes
-            .iter()
-            .any(|change| { change.config_id == "mode" && change.value == json!("agent") }));
-        assert!(changes.iter().any(|change| {
-            change.config_id == "collaboration_mode" && change.value == json!("plan")
         }));
+        assert_eq!(configuration.options.len(), 2);
+        assert_eq!(configuration.options[0].option_type, "select");
+        assert_eq!(configuration.options[1].current_value, json!(false));
     }
 
     #[test]
-    fn generic_agent_mode_uses_only_advertised_values() {
-        let response = json!({
+    fn ignores_unknown_types_for_assignment_but_keeps_them() {
+        let configuration = SessionConfiguration::from_response(&json!({
             "configOptions": [{
-                "configId": "mode",
-                "category": "mode",
-                "type": "select",
-                "currentValue": "ask",
-                "options": [
-                    { "value": "ask", "name": "Ask" },
-                    { "value": "code", "name": "Code" }
-                ]
-            }]
-        });
-        let configuration = SessionConfiguration::from_response(&response);
-        let (_, changes) = configuration.mode_changes("build").expect("build changes");
-        assert_eq!(changes[0].value, json!("code"));
-    }
-
-    #[test]
-    fn agent_without_mode_configuration_is_unsupported() {
-        let mut configuration = SessionConfiguration::from_response(&json!({
-            "configOptions": [{
-                "id": "model",
-                "type": "select",
-                "currentValue": "one",
-                "options": [{ "value": "one", "name": "One" }]
+                "id": "temperature",
+                "name": "Temperature",
+                "type": "number",
+                "currentValue": 0.2
             }]
         }));
-        let applied = configure_session("session", &mut configuration, "build", |_, _| {
-            panic!("unsupported configuration must not send a request")
-        })
-        .expect("configuration result");
-        assert!(!applied);
+        assert_eq!(configuration.options[0].option_type, "number");
+        let error = configuration
+            .validate_assignment(&SessionConfigAssignment {
+                config_id: "temperature".into(),
+                value: SessionConfigValue::Id {
+                    value: "0.2".into(),
+                },
+            })
+            .expect_err("unknown types cannot be set");
+        assert!(error.to_string().contains("cannot set"));
     }
 
     #[test]
-    fn already_selected_mode_is_supported_without_a_request() {
-        let mut configuration = SessionConfiguration::from_response(&json!({
+    fn rejects_select_values_not_advertised() {
+        let configuration = SessionConfiguration::from_response(&json!({
             "configOptions": [{
                 "id": "mode",
-                "category": "mode",
+                "name": "Mode",
                 "type": "select",
-                "currentValue": "code",
-                "options": [
-                    { "value": "ask", "name": "Ask" },
-                    { "value": "code", "name": "Code" }
-                ]
+                "currentValue": "ask",
+                "options": [{ "value": "ask", "name": "Ask" }]
             }]
         }));
-        let applied = configure_session("session", &mut configuration, "build", |_, _| {
-            panic!("an already selected mode must not send a request")
-        })
-        .expect("configuration result");
-        assert!(applied);
+        assert!(configuration
+            .validate_assignment(&SessionConfigAssignment {
+                config_id: "mode".into(),
+                value: SessionConfigValue::Id {
+                    value: "code".into(),
+                },
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn empty_response_is_a_complete_empty_snapshot() {
+        let configuration = SessionConfiguration::from_response(&json!({
+            "configOptions": []
+        }));
+        assert!(configuration.options.is_empty());
+    }
+
+    #[test]
+    fn builds_acp_wire_values_for_select_and_boolean() {
+        assert_eq!(
+            set_config_params(
+                "session-1",
+                "mode",
+                &SessionConfigValue::Id {
+                    value: "code".into()
+                },
+            ),
+            json!({
+                "sessionId": "session-1",
+                "configId": "mode",
+                "type": "id",
+                "value": "code"
+            })
+        );
+        assert_eq!(
+            set_config_params(
+                "session-1",
+                "brave_mode",
+                &SessionConfigValue::Boolean { value: true },
+            ),
+            json!({
+                "sessionId": "session-1",
+                "configId": "brave_mode",
+                "type": "boolean",
+                "value": true
+            })
+        );
     }
 }
