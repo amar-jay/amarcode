@@ -26,7 +26,7 @@ impl Store {
             .collect::<HashSet<_>>();
 
         for agent in agents {
-            save_agent_in(&transaction, agent)?;
+            save_registry_agent_in(&transaction, agent)?;
         }
 
         let stale_ids = {
@@ -133,6 +133,51 @@ fn save_agent_in(connection: &rusqlite::Connection, agent: &AgentDefinition) -> 
              ON CONFLICT(id) DO UPDATE SET name=excluded.name, command=excluded.command,
              arguments_json=excluded.arguments_json, environment_json=excluded.environment_json,
              updated_at=excluded.updated_at",
+            params![
+                agent.id,
+                agent.name,
+                agent.command,
+                json_string(&agent.arguments)?,
+                json_string(&agent.environment)?,
+                agent.available,
+                agent.created_at,
+                now(),
+            ],
+        )
+        .map_err(to_error)?;
+    Ok(())
+}
+
+/// Registry sync upsert that keeps an already-installed absolute launch path.
+fn save_registry_agent_in(
+    connection: &rusqlite::Connection,
+    agent: &AgentDefinition,
+) -> Result<()> {
+    connection
+        .execute(
+            "INSERT INTO agents (id,name,command,arguments_json,environment_json,available,created_at,updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+             ON CONFLICT(id) DO UPDATE SET
+               name=excluded.name,
+               command=CASE
+                 WHEN substr(agents.command, 1, 1) IN ('/', '\\')
+                   OR substr(agents.command, 2, 1) = ':'
+                 THEN agents.command
+                 ELSE excluded.command
+               END,
+               arguments_json=CASE
+                 WHEN substr(agents.command, 1, 1) IN ('/', '\\')
+                   OR substr(agents.command, 2, 1) = ':'
+                 THEN agents.arguments_json
+                 ELSE excluded.arguments_json
+               END,
+               environment_json=CASE
+                 WHEN substr(agents.command, 1, 1) IN ('/', '\\')
+                   OR substr(agents.command, 2, 1) = ':'
+                 THEN agents.environment_json
+                 ELSE excluded.environment_json
+               END,
+               updated_at=excluded.updated_at",
             params![
                 agent.id,
                 agent.name,

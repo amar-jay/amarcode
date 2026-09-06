@@ -17,6 +17,7 @@
 //! live `EditorEvent` or RPC `result` that depends on that state.
 //! See [`session`] and the crate README ("Store-first write path").
 
+pub mod agent_install;
 pub mod agent_manager;
 pub mod attachments;
 pub mod chat_manager;

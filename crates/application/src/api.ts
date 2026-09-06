@@ -152,6 +152,8 @@ export const daemonApi = {
     invoke("get_workspace_file_diff", { workspacePath, relativePath }),
 
   listAgents: (): Promise<AgentInfo[]> => invoke("list_agents"),
+  installAgent: (agentId: string): Promise<AgentInfo> =>
+    invoke("install_agent", { agentId }),
 
   createChat: (workspacePath: string, title?: string): Promise<Chat> =>
     invoke("create_chat", { workspacePath, title }),

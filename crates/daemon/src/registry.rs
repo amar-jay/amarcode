@@ -93,12 +93,7 @@ pub fn load_agents(checkout: &Path) -> Result<Vec<AgentDefinition>> {
                 manifest.display()
             ))
         })?;
-        let agent: RegistryAgent = serde_json::from_str(&contents).map_err(|error| {
-            Error::msg(format!(
-                "invalid ACP registry manifest {}: {error}",
-                manifest.display()
-            ))
-        })?;
+        let agent = parse_manifest(&manifest, &contents)?;
         if let Some(definition) = agent.into_definition() {
             definitions.push(definition);
         }
@@ -107,36 +102,78 @@ pub fn load_agents(checkout: &Path) -> Result<Vec<AgentDefinition>> {
     Ok(definitions)
 }
 
-#[derive(Debug, Deserialize)]
-struct RegistryAgent {
-    id: String,
-    name: String,
-    distribution: RegistryDistribution,
+/// Load one registry manifest by agent id from an existing checkout.
+pub fn load_agent_manifest(checkout: &Path, agent_id: &str) -> Result<RegistryAgent> {
+    if !valid_registry_id(agent_id) {
+        return Err(Error::msg(format!("invalid registry agent id: {agent_id}")));
+    }
+    let manifest = checkout.join(agent_id).join("agent.json");
+    if !manifest.is_file() {
+        return Err(Error::msg(format!(
+            "registry manifest not found for agent {agent_id}"
+        )));
+    }
+    let contents = std::fs::read_to_string(&manifest).map_err(|error| {
+        Error::msg(format!(
+            "failed to read ACP registry manifest {}: {error}",
+            manifest.display()
+        ))
+    })?;
+    parse_manifest(&manifest, &contents)
 }
 
-#[derive(Debug, Deserialize)]
-struct RegistryDistribution {
-    npx: Option<PackageDistribution>,
-    uvx: Option<PackageDistribution>,
-    binary: Option<BTreeMap<String, BinaryDistribution>>,
+fn parse_manifest(path: &Path, contents: &str) -> Result<RegistryAgent> {
+    serde_json::from_str(contents).map_err(|error| {
+        Error::msg(format!(
+            "invalid ACP registry manifest {}: {error}",
+            path.display()
+        ))
+    })
 }
 
-#[derive(Debug, Deserialize)]
-struct PackageDistribution {
-    package: String,
-    #[serde(default)]
-    args: Vec<String>,
-    #[serde(default)]
-    env: BTreeMap<String, String>,
+fn valid_registry_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit() && index > 0
+                || byte == b'-' && index > 0
+        })
 }
 
-#[derive(Debug, Deserialize)]
-struct BinaryDistribution {
-    cmd: String,
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegistryAgent {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub distribution: RegistryDistribution,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegistryDistribution {
+    pub npx: Option<PackageDistribution>,
+    pub uvx: Option<PackageDistribution>,
+    pub binary: Option<BTreeMap<String, BinaryDistribution>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PackageDistribution {
+    pub package: String,
     #[serde(default)]
-    args: Vec<String>,
+    pub args: Vec<String>,
     #[serde(default)]
-    env: BTreeMap<String, String>,
+    pub env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BinaryDistribution {
+    pub archive: String,
+    pub cmd: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub sha256: Option<String>,
 }
 
 impl RegistryAgent {
@@ -169,7 +206,7 @@ impl RegistryAgent {
     }
 }
 
-fn current_binary_target() -> Option<&'static str> {
+pub fn current_binary_target() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("darwin-aarch64"),
         ("macos", "x86_64") => Some("darwin-x86_64"),
@@ -268,6 +305,7 @@ mod tests {
         let agent: RegistryAgent = serde_json::from_value(serde_json::json!({
             "id": "example-agent",
             "name": "Example",
+            "version": "1.2.3",
             "distribution": {
                 "npx": {
                     "package": "@example/agent@1.2.3",

@@ -11,7 +11,7 @@ pub use types::{
 };
 
 /// Increment when a wire change is not backward compatible.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Deterministic checked-in TypeScript contract consumed by the React app.
 pub fn typescript_bindings() -> String {
@@ -35,6 +35,7 @@ pub fn typescript_bindings() -> String {
         rpc::HealthResult::decl(&config),
         rpc::VersionResult::decl(&config),
         rpc::SubscribeEventsParams::decl(&config),
+        rpc::InstallAgentParams::decl(&config),
         rpc::CreateChatParams::decl(&config),
         rpc::ListChatsParams::decl(&config),
         rpc::GetChatParams::decl(&config),

@@ -9,6 +9,7 @@ pub mod methods {
     pub const VERSION: &str = "version";
     pub const SUBSCRIBE_EVENTS: &str = "subscribe_events";
     pub const LIST_AGENTS: &str = "list_agents";
+    pub const INSTALL_AGENT: &str = "install_agent";
     pub const CREATE_CHAT: &str = "create_chat";
     pub const LIST_CHATS: &str = "list_chats";
     pub const GET_CHAT: &str = "get_chat";
@@ -84,6 +85,16 @@ pub struct SubscribeEventsResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListAgentsResult {
     pub agents: Vec<AgentInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct InstallAgentParams {
+    pub agent_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallAgentResult {
+    pub agent: AgentInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

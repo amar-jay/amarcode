@@ -12,8 +12,8 @@ use crate::{
     protocol::{
         rpc::{
             methods, CancelResult, DeleteChatResult, GetAttachmentResult, HealthResult,
-            ListAgentsResult, ListChatsResult, PromptAttachment, PromptResultDto,
-            RespondAgentParams, RespondAgentResult, VersionResult,
+            InstallAgentResult, ListAgentsResult, ListChatsResult, PromptAttachment,
+            PromptResultDto, RespondAgentParams, RespondAgentResult, VersionResult,
         },
         AgentInfo, Chat, GetChatResult,
     },
@@ -43,6 +43,13 @@ impl AppState {
             .call::<ListAgentsResult>(methods::LIST_AGENTS, Value::Null)
             .await?
             .agents)
+    }
+
+    pub async fn install_agent(&self, agent_id: String) -> Result<AgentInfo, String> {
+        Ok(self
+            .call::<InstallAgentResult>(methods::INSTALL_AGENT, json!({ "agent_id": agent_id }))
+            .await?
+            .agent)
     }
 
     pub async fn create_chat(

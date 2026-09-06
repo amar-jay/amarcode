@@ -11,9 +11,10 @@ use serde_json::{json, Value};
 use crate::{
     protocol::rpc::{
         methods, CancelParams, CancelResult, CreateChatParams, DeleteChatParams, DeleteChatResult,
-        GetAttachmentParams, GetAttachmentResult, GetChatParams, HealthResult, ListAgentsResult,
-        ListChatsParams, ListChatsResult, PromptParams, PromptResultDto, RespondAgentParams,
-        RespondAgentResult, SetSessionModeParams, SubscribeEventsParams, VersionResult,
+        GetAttachmentParams, GetAttachmentResult, GetChatParams, HealthResult, InstallAgentParams,
+        InstallAgentResult, ListAgentsResult, ListChatsParams, ListChatsResult, PromptParams,
+        PromptResultDto, RespondAgentParams, RespondAgentResult, SetSessionModeParams,
+        SubscribeEventsParams, VersionResult,
     },
     service::{ChatDetail, MessageDetail, PromptResult},
     App, Error, Result,
@@ -39,8 +40,9 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::VERSION => Ok(DispatchOutcome::Result(version()?)),
         methods::SUBSCRIBE_EVENTS => Ok(DispatchOutcome::Subscribe(parse_params(params)?)),
 
-        // agents (read)
+        // agents (read / install)
         methods::LIST_AGENTS => Ok(DispatchOutcome::Result(list_agents(app)?)),
+        methods::INSTALL_AGENT => Ok(DispatchOutcome::Result(install_agent(app, params).await?)),
 
         // chats (read / CRUD)
         methods::CREATE_CHAT => Ok(DispatchOutcome::Result(create_chat(app, params)?)),
@@ -87,6 +89,16 @@ fn version() -> Result<Value> {
 fn list_agents(app: &App) -> Result<Value> {
     let agents = app.agents.list()?;
     to_value(ListAgentsResult { agents })
+}
+
+async fn install_agent(app: &App, params: Value) -> Result<Value> {
+    let p: InstallAgentParams = parse_params(params)?;
+    if p.agent_id.trim().is_empty() {
+        return Err(Error::msg("agent_id must not be empty"));
+    }
+    let agent_id = p.agent_id;
+    let agent = tokio::task::block_in_place(|| app.agents.install(&agent_id))?;
+    to_value(InstallAgentResult { agent })
 }
 
 // --- chats -----------------------------------------------------------------

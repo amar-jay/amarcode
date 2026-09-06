@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAtom } from "jotai";
+import { useAtom, useSetAtom } from "jotai";
 import {
   Check,
   Bot,
@@ -79,6 +79,8 @@ import {
 } from "@/components/ui/command";
 import type { AgentInfo } from "@/types";
 import { AgentLogo } from "@/components/agent-logo";
+import { installAgentAtom } from "@/state/agents";
+import { notify } from "@/lib/notify";
 
 type SettingsPage = "appearance" | "general" | "agent";
 
@@ -271,34 +273,83 @@ function AgentDefaultsPanel({
   onDefaultSessionModeChange: (mode: SessionMode) => void;
 }) {
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const [installingId, setInstallingId] = useState<string | null>(null);
+  const installAgent = useSetAtom(installAgentAtom);
   const selectedAgent = agents.find((agent) => agent.id === defaultAgentId);
   const availableAgents = agents.filter((agent) => agent.available);
-  const unavailableAgents = agents.filter((agent) => !agent.available);
-  const renderAgent = (agent: AgentInfo) => (
-    <CommandItem
-      className="w-full! cursor-pointer space-x-auto rounded-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
-      disabled={!agent.available}
-      title={agent.unavailable_reason ?? undefined}
-      key={agent.id}
-      value={`${agent.name} ${agent.id}`}
-      onSelect={() => {
-        onDefaultAgentChange(agent.id);
-        setAgentPickerOpen(false);
-      }}
-    >
-      <AgentLogo icon={agent.icon} />
-      <span className="mr-auto">{agent.name.replace(/\s*\bACP\s*$/i, "")}</span>
-      {!agent.available ? (
-        <span className="ml-auto text-xs text-muted-foreground">
-          Not installed
+  const installableAgents = agents.filter((agent) => !agent.available);
+
+  const handleInstall = async (agent: AgentInfo) => {
+    if (installingId) return;
+    setInstallingId(agent.id);
+    try {
+      const installed = await installAgent(agent.id);
+      onDefaultAgentChange(installed.id);
+      setAgentPickerOpen(false);
+      notify(
+        `${installed.name.replace(/\s*\bACP\s*$/i, "")} installed`,
+        "success",
+      );
+    } catch (error) {
+      console.error("Failed to install agent:", error);
+      notify(
+        error instanceof Error
+          ? error.message
+          : `Failed to install ${agent.name.replace(/\s*\bACP\s*$/i, "")}.`,
+        "error",
+      );
+    } finally {
+      setInstallingId(null);
+    }
+  };
+
+  const renderAgent = (agent: AgentInfo) => {
+    const installing = installingId === agent.id;
+    return (
+      <CommandItem
+        className="w-full! cursor-pointer space-x-auto rounded-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
+        disabled={installingId !== null && !installing}
+        title={agent.unavailable_reason ?? undefined}
+        key={agent.id}
+        value={`${agent.name} ${agent.id}`}
+        onSelect={() => {
+          if (!agent.available) return;
+          onDefaultAgentChange(agent.id);
+          setAgentPickerOpen(false);
+        }}
+      >
+        <AgentLogo icon={agent.icon} />
+        <span className="mr-auto">
+          {agent.name.replace(/\s*\bACP\s*$/i, "")}
         </span>
-      ) : (
-        <Check
-          className={`ml-auto size-4 ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`}
-        />
-      )}
-    </CommandItem>
-  );
+        {!agent.available ? (
+          <button
+            type="button"
+            className="ml-auto rounded-md px-2 py-0.5 text-xs font-medium text-primary hover:bg-foreground/10 disabled:opacity-50"
+            disabled={installingId !== null}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void handleInstall(agent);
+            }}
+          >
+            {installing ? (
+              <span className="inline-flex items-center gap-1">
+                <LoaderCircle className="size-3 animate-spin" />
+                Installing…
+              </span>
+            ) : (
+              "Install"
+            )}
+          </button>
+        ) : (
+          <Check
+            className={`ml-auto size-4 ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`}
+          />
+        )}
+      </CommandItem>
+    );
+  };
   return (
     <div className="mx-auto w-full max-w-132">
       <h2 className="text-base font-medium">Agent defaults</h2>
@@ -347,9 +398,9 @@ function AgentDefaultsPanel({
                       {availableAgents.map(renderAgent)}
                     </CommandGroup>
                   )}
-                  {unavailableAgents.length > 0 && (
-                    <CommandGroup heading="Not installed">
-                      {unavailableAgents.map(renderAgent)}
+                  {installableAgents.length > 0 && (
+                    <CommandGroup heading="Install">
+                      {installableAgents.map(renderAgent)}
                     </CommandGroup>
                   )}
                 </CommandList>

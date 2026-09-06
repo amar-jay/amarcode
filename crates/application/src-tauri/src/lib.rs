@@ -124,6 +124,14 @@ async fn list_agents(state: State<'_, AppState>) -> Result<Vec<AgentInfo>, Strin
 }
 
 #[tauri::command]
+async fn install_agent(
+    state: State<'_, AppState>,
+    agent_id: String,
+) -> Result<AgentInfo, String> {
+    state.install_agent(agent_id).await
+}
+
+#[tauri::command]
 async fn create_chat(
     state: State<'_, AppState>,
     workspace_path: String,
@@ -620,6 +628,7 @@ pub fn run() {
             daemon_health,
             daemon_version,
             list_agents,
+            install_agent,
             create_chat,
             list_chats,
             get_chat,

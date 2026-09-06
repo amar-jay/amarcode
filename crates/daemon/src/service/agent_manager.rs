@@ -55,6 +55,20 @@ impl AgentManager {
         &self.tools_dir
     }
 
+    pub fn registry_dir(&self) -> &Path {
+        &self.registry_dir
+    }
+
+    /// Whether this agent can be launched without a first-run package download.
+    pub fn is_available(&self, agent: &AgentDefinition) -> bool {
+        agent_is_available(&self.tools_dir, agent)
+    }
+
+    /// Build the UI-facing info row for one stored agent (after availability refresh).
+    pub fn agent_info(&self, agent: &AgentDefinition) -> AgentInfo {
+        self.info(agent)
+    }
+
     pub fn list(&self) -> Result<Vec<AgentInfo>> {
         self.refresh_availability()?;
         Ok(self

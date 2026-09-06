@@ -28,6 +28,31 @@ export const loadAgentsAtom = atom(null, async (get, set) => {
   }
 });
 
+/** Force-refresh the agent catalog from the daemon. */
+export const reloadAgentsAtom = atom(null, async (_get, set) => {
+  set(agentsLoadStateAtom, "loading");
+  try {
+    const agents = await daemonApi.listAgents();
+    set(agentsAtom, agents);
+    set(agentsLoadStateAtom, "ready");
+    return agents;
+  } catch (error) {
+    set(agentsLoadStateAtom, "error");
+    throw error;
+  }
+});
+
+/** Install a registry agent, then merge the updated row into the catalog. */
+export const installAgentAtom = atom(null, async (get, set, agentId: string) => {
+  const agent = await daemonApi.installAgent(agentId);
+  const agents = get(agentsAtom);
+  const next = agents.some((candidate) => candidate.id === agent.id)
+    ? agents.map((candidate) => (candidate.id === agent.id ? agent : candidate))
+    : [...agents, agent];
+  set(agentsAtom, next);
+  return agent;
+});
+
 /**
  * Agent currently selected in the home/chat composer.
  * Falls back to the default agent id when unset.
