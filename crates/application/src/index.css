@@ -232,6 +232,14 @@
   color: var(--accent-foreground) !important;
 }
 
+[data-slot="command-item"]:not([data-disabled="true"]):is(
+    :hover,
+    [data-selected="true"]
+  ) {
+  background: var(--accent) !important;
+  color: var(--accent-foreground) !important;
+}
+
 *[data-tauri-drag-region] {
   app-region: drag;
 }

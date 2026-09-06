@@ -34,7 +34,6 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".to_string());
-    info!(%peer, "client connected");
 
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
@@ -68,7 +67,7 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
                 // the acknowledgement is being written is then queued for this
                 // subscriber instead of falling into a registration gap.
                 let receiver = acknowledge_subscription(&mut writer, &app.events).await?;
-                debug!(%peer, ?filter, "entering event subscription mode");
+                info!(%peer, ?filter, "entering event subscription mode");
                 return stream_events(
                     &mut writer,
                     &mut lines,
@@ -84,7 +83,6 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
         }
     }
 
-    info!(%peer, "client disconnected");
     Ok(())
 }
 

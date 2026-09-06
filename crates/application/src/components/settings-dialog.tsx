@@ -78,6 +78,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import type { AgentInfo } from "@/types";
+import { AgentLogo } from "@/components/agent-logo";
 
 type SettingsPage = "appearance" | "general" | "agent";
 
@@ -275,7 +276,7 @@ function AgentDefaultsPanel({
   const unavailableAgents = agents.filter((agent) => !agent.available);
   const renderAgent = (agent: AgentInfo) => (
     <CommandItem
-      className="cursor-pointer rounded-none w-full! space-x-auto data-disabled:cursor-not-allowed data-disabled:opacity-50"
+      className="w-full! cursor-pointer space-x-auto rounded-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
       disabled={!agent.available}
       title={agent.unavailable_reason ?? undefined}
       key={agent.id}
@@ -285,6 +286,7 @@ function AgentDefaultsPanel({
         setAgentPickerOpen(false);
       }}
     >
+      <AgentLogo agentId={agent.id} />
       <span className="mr-auto">{agent.name.replace(/\s*\bACP\s*$/i, "")}</span>
       {!agent.available ? (
         <span className="ml-auto text-xs text-muted-foreground">
@@ -322,7 +324,7 @@ function AgentDefaultsPanel({
                 variant="outline"
                 role="combobox"
                 aria-expanded={agentPickerOpen}
-                className="w-full justify-between font-normal"
+                className="w-full cursor-pointer justify-between font-normal"
               >
                 {selectedAgent?.name.replace(/\s*\bACP\s*$/i, "") ??
                   "Choose an agent"}
@@ -481,10 +483,6 @@ function AppearancePanel({
           </label>
         ))}
       </RadioGroup>
-      <p className="mt-6 rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-[11px] leading-4 text-muted-foreground">
-        System uses your device preference and updates automatically when it
-        changes.
-      </p>
     </div>
   );
 }
