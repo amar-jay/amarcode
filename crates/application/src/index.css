@@ -224,16 +224,12 @@
 }
 
 [data-slot="select-content"]
-  [data-slot="select-item"]:is(:focus, [data-highlighted]),
-[data-slot="dropdown-menu-content"] [data-slot$="-item"]:focus,
-[data-slot="dropdown-menu-sub-content"] [data-slot$="-item"]:focus,
-[data-slot="hover-card-content"] [data-slot$="-item"]:focus {
-  background: color-mix(
-    in oklab,
-    var(--background) 16%,
-    transparent
-  ) !important;
-  color: var(--background) !important;
+  [data-slot="select-item"]:not([data-disabled]):is(:hover, :focus, [data-highlighted]),
+[data-slot="dropdown-menu-content"] [data-slot$="-item"]:not([data-disabled]):is(:hover, :focus),
+[data-slot="dropdown-menu-sub-content"] [data-slot$="-item"]:not([data-disabled]):is(:hover, :focus),
+[data-slot="hover-card-content"] [data-slot$="-item"]:not([data-disabled]):is(:hover, :focus) {
+  background: var(--accent) !important;
+  color: var(--accent-foreground) !important;
 }
 
 *[data-tauri-drag-region] {
