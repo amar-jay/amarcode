@@ -62,3 +62,9 @@ impl From<crate::acp::AcpError> for Error {
         Self::msg(value.to_string())
     }
 }
+
+impl From<crate::service::ClassifiedFailure> for Error {
+    fn from(value: crate::service::ClassifiedFailure) -> Self {
+        Self::msg(value.message)
+    }
+}

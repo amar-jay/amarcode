@@ -172,6 +172,7 @@ pub struct AcpClient {
     next_id: AtomicU64,
     pending: Arc<Mutex<HashMap<u64, PendingResponse>>>,
     inbound_sender: Sender<AcpInbound>,
+    stderr_tail: Arc<Mutex<String>>,
 }
 
 impl AcpClient {
@@ -190,7 +191,7 @@ impl AcpClient {
             .args(arguments)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::piped());
         for (key, value) in environment {
             process.env(key, value);
         }
@@ -207,10 +208,16 @@ impl AcpClient {
             .stdout
             .take()
             .ok_or_else(|| AcpError::Protocol("agent stdout was not piped".into()))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| AcpError::Protocol("agent stderr was not piped".into()))?;
         let pending = Arc::new(Mutex::new(HashMap::new()));
+        let stderr_tail = Arc::new(Mutex::new(String::new()));
         let (inbound_sender, inbound_receiver) = mpsc::channel();
 
         spawn_reader(stdout, Arc::clone(&pending), inbound_sender.clone());
+        spawn_stderr_reader(stderr, Arc::clone(&stderr_tail));
 
         Ok((
             Self {
@@ -219,9 +226,18 @@ impl AcpClient {
                 next_id: AtomicU64::new(1),
                 pending,
                 inbound_sender,
+                stderr_tail,
             },
             inbound_receiver,
         ))
+    }
+
+    /// Last stderr bytes from the adapter (bounded). Useful when the process exits.
+    pub fn stderr_tail(&self) -> String {
+        self.stderr_tail
+            .lock()
+            .map(|tail| tail.clone())
+            .unwrap_or_default()
     }
 
     /// Sends a JSON-RPC request and waits for its result. Incoming notifications
@@ -348,6 +364,38 @@ impl Drop for AcpClient {
             let _ = child.wait();
         }
     }
+}
+
+const STDERR_TAIL_LIMIT: usize = 8 * 1024;
+
+fn spawn_stderr_reader(
+    stderr: impl std::io::Read + Send + 'static,
+    stderr_tail: Arc<Mutex<String>>,
+) {
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let trimmed = line.trim_end_matches(['\r', '\n']);
+                    if !trimmed.is_empty() {
+                        tracing::debug!(target: "amarcode_daemon::acp", stderr = %trimmed, "agent stderr");
+                    }
+                    if let Ok(mut tail) = stderr_tail.lock() {
+                        tail.push_str(&line);
+                        if tail.len() > STDERR_TAIL_LIMIT {
+                            let keep = tail.len() - STDERR_TAIL_LIMIT;
+                            tail.drain(..keep);
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
 }
 
 fn spawn_reader(

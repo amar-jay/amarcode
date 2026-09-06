@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::{MessagePartKind, MessageStatus, RunStatus, TurnStatus};
+use crate::{AgentFailureKind, MessagePartKind, MessageStatus, RunStatus, TurnStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventLine {
@@ -20,6 +20,8 @@ pub enum EditorEvent {
         run_id: String,
         status: RunStatus,
         error_message: Option<String>,
+        #[serde(default)]
+        error_kind: Option<AgentFailureKind>,
     },
     TurnUpdated {
         chat_id: String,
@@ -30,6 +32,8 @@ pub enum EditorEvent {
         stop_reason: Option<String>,
         #[serde(default)]
         error_message: Option<String>,
+        #[serde(default)]
+        error_kind: Option<AgentFailureKind>,
     },
     ContextRestoration {
         chat_id: String,
@@ -64,5 +68,13 @@ pub enum EditorEvent {
         agent_id: String,
         connected: bool,
         error_message: Option<String>,
+        #[serde(default)]
+        error_kind: Option<AgentFailureKind>,
+    },
+    AgentAuthRequired {
+        agent_id: String,
+        #[serde(default)]
+        run_id: Option<String>,
+        methods: Value,
     },
 }

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::{AgentInfo, Chat};
+use crate::{AgentInfo, AgentRuntimeStatus, Chat};
 
 pub mod methods {
     pub const HEALTH: &str = "health";
@@ -10,6 +10,7 @@ pub mod methods {
     pub const SUBSCRIBE_EVENTS: &str = "subscribe_events";
     pub const LIST_AGENTS: &str = "list_agents";
     pub const INSTALL_AGENT: &str = "install_agent";
+    pub const AUTHENTICATE_AGENT: &str = "authenticate_agent";
     pub const CREATE_CHAT: &str = "create_chat";
     pub const LIST_CHATS: &str = "list_chats";
     pub const GET_CHAT: &str = "get_chat";
@@ -95,6 +96,21 @@ pub struct InstallAgentParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallAgentResult {
     pub agent: AgentInfo,
+    pub runtime_status: AgentRuntimeStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AuthenticateAgentParams {
+    pub agent_id: String,
+    #[serde(default)]
+    pub method_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AuthenticateAgentResult {
+    pub ok: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -172,7 +172,12 @@ fn failed_prompt_interrupts_partial_messages() {
     );
 
     manager
-        .terminate_failed_prompt("chat-1", "run-1", "user-message", "ACP request timed out")
+        .terminate_failed_prompt(
+            "chat-1",
+            "run-1",
+            "user-message",
+            &crate::service::session::classify_message("ACP request timed out"),
+        )
         .expect("terminate failed prompt");
 
     assert!(manager

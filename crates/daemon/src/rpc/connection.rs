@@ -224,7 +224,9 @@ fn event_matches(
                 session_id: None,
             }
         }
-        EditorEvent::WorkspaceFilesChanged { .. } | EditorEvent::AgentConnectionChanged { .. } => {
+        EditorEvent::WorkspaceFilesChanged { .. }
+        | EditorEvent::AgentConnectionChanged { .. }
+        | EditorEvent::AgentAuthRequired { .. } => {
             return Ok(false)
         }
     };
@@ -315,6 +317,7 @@ mod tests {
             status: TurnStatus::Started,
             stop_reason: None,
             error_message: None,
+            error_kind: None,
         };
 
         assert!(event_matches(
@@ -390,6 +393,7 @@ mod tests {
             run_id: "run-1".into(),
             status: RunStatus::Running,
             error_message: None,
+            error_kind: None,
         };
         let message_event = EditorEvent::MessageUpdated {
             message_id: "message-1".into(),

@@ -3,6 +3,69 @@
 use super::*;
 
 impl SessionManager {
+    /// Run ACP `authenticate` for an agent (live session if present, else a short probe).
+    pub fn authenticate_agent(&self, agent_id: &str, method_id: Option<&str>) -> Result<()> {
+        let method_id = method_id.unwrap_or("agent");
+        let params = json!({ "methodId": method_id });
+
+        if let Some((run_id, client)) = self.live_client_for_agent(agent_id)? {
+            self.acp_request(&run_id, &client, AgentRpcMethod::Authenticate, params)
+                .map_err(Error::from)?;
+            return Ok(());
+        }
+
+        let resolved = self.agents.resolve(agent_id)?;
+        let (client, _inbound) = AcpClient::spawn(
+            &resolved.command.to_string_lossy(),
+            &resolved.arguments,
+            &resolved.environment,
+            None,
+        )?;
+        let initialize = client.request(
+            AgentRpcMethod::Initialize,
+            json!({
+                "protocolVersion": 1,
+                "clientCapabilities": {},
+                "clientInfo": {
+                    "name": "amarcode-daemon",
+                    "title": "Amarcode Daemon",
+                    "version": env!("CARGO_PKG_VERSION"),
+                }
+            }),
+            ACP_REQUEST_TIMEOUT,
+        );
+        if let Err(error) = initialize {
+            let failure = self.classify_client_failure(&client, &error);
+            let _ = client.kill();
+            return Err(failure.into());
+        }
+        let auth = client.request(AgentRpcMethod::Authenticate, params, ACP_REQUEST_TIMEOUT);
+        let failure = auth
+            .as_ref()
+            .err()
+            .map(|error| self.classify_client_failure(&client, error));
+        let _ = client.kill();
+        match failure {
+            Some(failure) => Err(failure.into()),
+            None => Ok(()),
+        }
+    }
+
+    fn live_client_for_agent(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<(String, Arc<AcpClient>)>> {
+        let guard = self
+            .inner
+            .by_chat
+            .lock()
+            .map_err(|_| Error::msg("session lock poisoned"))?;
+        Ok(guard.values().find_map(|live| {
+            (live.agent_id == agent_id)
+                .then(|| (live.run_id.clone(), Arc::clone(&live.client)))
+        }))
+    }
+
     /// Answer an agent-initiated request (`ApprovalRequired` / `QuestionRequired`).
     pub fn respond_to_agent(&self, request_id: &str, result: Value) -> Result<()> {
         let pending = {

@@ -25,4 +25,4 @@ pub mod session;
 
 pub use agent_manager::{AgentManager, ResolvedAgent};
 pub use chat_manager::{ChatDetail, ChatManager, MessageDetail};
-pub use session::{PendingAgentRequest, PromptResult, SessionManager};
+pub use session::{ClassifiedFailure, PendingAgentRequest, PromptResult, SessionManager};

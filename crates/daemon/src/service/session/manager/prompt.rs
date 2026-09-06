@@ -164,6 +164,7 @@ impl SessionManager {
             status: TurnStatus::Started,
             stop_reason: None,
             error_message: None,
+            error_kind: None,
         });
 
         // ACP session/prompt: prompt is an array of content blocks.
@@ -211,33 +212,30 @@ impl SessionManager {
                 .expect("params object")
                 .insert("sessionId".into(), json!(sid));
         } else {
-            let error = Error::msg("live session missing acp_session_id");
+            let failure = classify_message("live session missing acp_session_id");
             if let Err(cleanup_error) =
-                self.terminate_failed_prompt(chat_id, &run_id, &user_message.id, &error.to_string())
+                self.terminate_failed_prompt(chat_id, &run_id, &user_message.id, &failure)
             {
                 warn!(%run_id, error = %cleanup_error, "failed cleaning up broken prompt run");
             }
-            return Err(error);
+            return Err(failure.into());
         }
 
         let prompt_result = match self.acp_prompt_request(&run_id, &client, params) {
             Ok(value) => value,
-            Err(err) => {
+            Err(failure) => {
                 warn!(
                     %run_id,
                     %chat_id,
-                    error = %err,
+                    error = %failure,
                     "ACP prompt failed before the agent returned a result"
                 );
-                if let Err(cleanup_error) = self.terminate_failed_prompt(
-                    chat_id,
-                    &run_id,
-                    &user_message.id,
-                    &err.to_string(),
-                ) {
+                if let Err(cleanup_error) =
+                    self.terminate_failed_prompt(chat_id, &run_id, &user_message.id, &failure)
+                {
                     warn!(%run_id, error = %cleanup_error, "failed cleaning up rejected prompt run");
                 }
-                return Err(err);
+                return Err(failure.into());
             }
         };
 
@@ -245,12 +243,14 @@ impl SessionManager {
         // persists notifications on a separate worker. Wait for that worker
         // before finalizing the messages from this turn.
         if let Err(err) = client.sync_inbound(ACP_REQUEST_TIMEOUT) {
+            let failure =
+                with_stderr_detail(classify_acp_failure(&err), &client.stderr_tail());
             if let Err(cleanup_error) =
-                self.terminate_failed_prompt(chat_id, &run_id, &user_message.id, &err.to_string())
+                self.terminate_failed_prompt(chat_id, &run_id, &user_message.id, &failure)
             {
                 warn!(%run_id, error = %cleanup_error, "failed cleaning up stalled inbound run");
             }
-            return Err(Error::msg(err.to_string()));
+            return Err(failure.into());
         }
 
         // Turn finished (stopReason typically end_turn). Finalize any streaming
@@ -281,6 +281,7 @@ impl SessionManager {
             &user_message.id,
             TurnStatus::Completed,
             stop_reason,
+            None,
             None,
         );
 
@@ -339,6 +340,7 @@ impl SessionManager {
                     AgentRpcMethod::Other(method.to_owned()),
                     params,
                 )
+                .map_err(Error::from)
             })?;
         if !applied {
             return Err(Error::msg(

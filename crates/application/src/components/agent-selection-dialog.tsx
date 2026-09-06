@@ -43,10 +43,23 @@ export function AgentSelectionDialog({
     if (installingId) return;
     setInstallingId(agent.id);
     try {
-      const installed = await installAgent(agent.id);
-      setSelectedAgent(installed.id);
+      const result = await installAgent(agent.id);
+      setSelectedAgent(result.agent.id);
       setOpen(false);
-      notify(`${stripAcpSuffix(installed.name)} installed`, "success");
+      if (result.runtime_status === "ready") {
+        notify(`${stripAcpSuffix(result.agent.name)} installed`, "success");
+      } else if (result.runtime_status === "auth_required") {
+        notify(
+          `${stripAcpSuffix(result.agent.name)} installed — sign in required`,
+          "info",
+        );
+      } else {
+        notify(
+          result.runtime_message ??
+            `${stripAcpSuffix(result.agent.name)} installed but is not ready`,
+          "error",
+        );
+      }
     } catch (error) {
       console.error("Failed to install agent:", error);
       notify(

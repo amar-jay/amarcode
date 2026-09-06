@@ -6,12 +6,13 @@ pub mod types;
 
 pub use events::{EditorEvent, EventLine};
 pub use types::{
-    AgentDefinition, AgentInfo, Chat, ChatDetail, GetChatResult, Message, MessageDetail,
-    MessagePart, MessagePartKind, MessageRole, MessageStatus, RunStatus, TurnStatus,
+    AgentDefinition, AgentFailureKind, AgentInfo, AgentRuntimeStatus, Chat, ChatDetail,
+    GetChatResult, Message, MessageDetail, MessagePart, MessagePartKind, MessageRole,
+    MessageStatus, RunStatus, TurnStatus,
 };
 
 /// Increment when a wire change is not backward compatible.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Deterministic checked-in TypeScript contract consumed by the React app.
 pub fn typescript_bindings() -> String {
@@ -24,6 +25,8 @@ pub fn typescript_bindings() -> String {
         MessageRole::decl(&config),
         MessageStatus::decl(&config),
         MessagePartKind::decl(&config),
+        AgentFailureKind::decl(&config),
+        AgentRuntimeStatus::decl(&config),
         AgentDefinition::decl(&config),
         AgentInfo::decl(&config),
         Chat::decl(&config),
@@ -36,6 +39,8 @@ pub fn typescript_bindings() -> String {
         rpc::VersionResult::decl(&config),
         rpc::SubscribeEventsParams::decl(&config),
         rpc::InstallAgentParams::decl(&config),
+        rpc::AuthenticateAgentParams::decl(&config),
+        rpc::AuthenticateAgentResult::decl(&config),
         rpc::CreateChatParams::decl(&config),
         rpc::ListChatsParams::decl(&config),
         rpc::GetChatParams::decl(&config),
@@ -91,6 +96,7 @@ mod tests {
             status: super::TurnStatus::Completed,
             stop_reason: Some("end_turn".into()),
             error_message: None,
+            error_kind: None,
         };
 
         assert_eq!(
@@ -103,7 +109,8 @@ mod tests {
                     "user_message_id": "message-1",
                     "status": "completed",
                     "stop_reason": "end_turn",
-                    "error_message": null
+                    "error_message": null,
+                    "error_kind": null
                 }
             })
         );

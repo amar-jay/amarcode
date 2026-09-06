@@ -20,6 +20,7 @@
 //! - [`types`] — shared live-run state and public result types
 //! - [`util`] — pure helpers (timestamps, payload extraction, emit)
 
+mod failures;
 mod inbound;
 mod manager;
 mod messages;
@@ -27,6 +28,9 @@ mod session_config;
 mod terminal;
 mod types;
 mod util;
+
+pub(crate) use failures::{classify_acp_failure, classify_message, with_stderr_detail};
+pub use failures::ClassifiedFailure;
 
 pub use manager::SessionManager;
 pub use types::{PendingAgentRequest, PromptResult};

@@ -28,6 +28,7 @@ use crate::{
 };
 
 use super::{
+    classify_acp_failure, classify_message, with_stderr_detail, ClassifiedFailure,
     inbound::spawn_inbound_worker,
     messages::{
         finalize_message, remove_pending_requests_for_run, take_streaming_messages_from_live,
@@ -121,6 +122,7 @@ impl SessionManager {
             run_id: run.id.clone(),
             status: RunStatus::Starting,
             error_message: None,
+            error_kind: None,
         });
 
         let has_persisted_history = self
@@ -140,8 +142,9 @@ impl SessionManager {
         ) {
             Ok(pair) => pair,
             Err(err) => {
-                let _ = self.fail_run(&run.id, &err.to_string());
-                return Err(err.into());
+                let failure = classify_acp_failure(&err);
+                let _ = self.fail_run(&run.id, &failure);
+                return Err(failure.into());
             }
         };
 
@@ -205,11 +208,12 @@ impl SessionManager {
             }),
         ) {
             Ok(value) => value,
-            Err(err) => {
+            Err(failure) => {
                 self.remove_live_run(chat_id, &run.id);
                 let _ = client.kill();
-                let _ = self.fail_run(&run.id, &err.to_string());
-                return Err(err);
+                self.maybe_emit_auth_required(agent_id, Some(&run.id), &failure);
+                let _ = self.fail_run(&run.id, &failure);
+                return Err(failure.into());
             }
         };
         let supports_images = initialize_response
@@ -233,7 +237,10 @@ impl SessionManager {
             .into_iter()
             .filter(|previous| previous.id != run.id && previous.agent_id == agent_id)
             .find_map(|previous| previous.acp_session_id);
-        let session_setup = (|| -> Result<(Option<String>, bool, SessionConfiguration)> {
+        let session_setup = (|| -> std::result::Result<
+            (Option<String>, bool, SessionConfiguration),
+            ClassifiedFailure,
+        > {
             if let Some(session_id) = previous_session_id {
                 self.emit(EditorEvent::ContextRestoration {
                     chat_id: chat_id.to_owned(),
@@ -295,11 +302,12 @@ impl SessionManager {
         let (acp_session_id, needs_history_hydration, mut session_configuration) =
             match session_setup {
                 Ok(value) => value,
-                Err(err) => {
+                Err(failure) => {
                     self.remove_live_run(chat_id, &run.id);
                     let _ = client.kill();
-                    let _ = self.fail_run(&run.id, &err.to_string());
-                    return Err(err);
+                    self.maybe_emit_auth_required(agent_id, Some(&run.id), &failure);
+                    let _ = self.fail_run(&run.id, &failure);
+                    return Err(failure.into());
                 }
             };
 
@@ -315,6 +323,7 @@ impl SessionManager {
                         AgentRpcMethod::Other(method.to_owned()),
                         params,
                     )
+                    .map_err(Error::from)
                 },
             ) {
                 Ok(true) => {}
@@ -322,10 +331,11 @@ impl SessionManager {
                     debug!(%agent_id, %mode, "agent does not advertise a compatible session mode; retaining its default");
                 }
                 Err(err) => {
+                    let failure = classify_message(&err.to_string());
                     self.remove_live_run(chat_id, &run.id);
                     let _ = client.kill();
-                    let _ = self.fail_run(&run.id, &err.to_string());
-                    return Err(err);
+                    let _ = self.fail_run(&run.id, &failure);
+                    return Err(failure.into());
                 }
             }
         }
@@ -340,11 +350,13 @@ impl SessionManager {
             run_id: run.id.clone(),
             status: RunStatus::Running,
             error_message: None,
+            error_kind: None,
         });
         self.emit(EditorEvent::AgentConnectionChanged {
             agent_id: agent_id.to_owned(),
             connected: true,
             error_message: None,
+            error_kind: None,
         });
 
         let mut live_runs = self

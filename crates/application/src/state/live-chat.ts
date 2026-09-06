@@ -1,6 +1,7 @@
 import { atom } from "jotai";
 import { daemonApi } from "@/api";
 import type {
+  AgentFailureKind,
   Chat,
   ChatDetail,
   JsonValue,
@@ -35,6 +36,12 @@ export type LiveChatState = {
   sessionMode: SessionMode;
   loading: boolean;
   error: string | null;
+  errorKind: AgentFailureKind | null;
+  authRequired: {
+    agentId: string;
+    runId: string | null;
+    methods: JsonValue;
+  } | null;
 };
 
 const emptyLiveChat = (
@@ -51,6 +58,8 @@ const emptyLiveChat = (
   sessionMode: "build",
   loading: true,
   error: null,
+  errorKind: null,
+  authRequired: null,
   ...seed,
 });
 
@@ -114,6 +123,18 @@ export const clearLiveChatAtom = atom(null, (_get, set) => {
   set(liveChatAtom, null);
 });
 
+/** Clear the live-chat failure banner after the user recovers (e.g. sign-in). */
+export const clearLiveChatFailureAtom = atom(null, (get, set) => {
+  const live = get(liveChatAtom);
+  if (!live) return;
+  set(liveChatAtom, {
+    ...live,
+    error: null,
+    errorKind: null,
+    authRequired: null,
+  });
+});
+
 /** End the optimistic working state when a home-composer prompt fails. */
 export const failStartedPromptAtom = atom(
   null,
@@ -137,6 +158,7 @@ export const failStartedPromptAtom = atom(
         turnStatus: "failed",
         pendingRequest: null,
         error: input.error,
+        errorKind: "error",
       });
     }
   },
@@ -235,10 +257,32 @@ export const applyLiveChatEventAtom = atom(
         error:
           event.payload.status === "failed" && event.payload.error_message
             ? event.payload.error_message
-            : live.error,
+            : event.payload.status === "started"
+              ? null
+              : live.error,
+        errorKind:
+          event.payload.status === "failed"
+            ? (event.payload.error_kind ?? "error")
+            : event.payload.status === "started"
+              ? null
+              : live.errorKind,
       };
       set(liveChatAtom, next);
       void set(scheduleLiveChatRefreshAtom);
+      return;
+    }
+
+    if (event.type === "agentAuthRequired") {
+      set(liveChatAtom, {
+        ...live,
+        authRequired: {
+          agentId: event.payload.agent_id,
+          runId: event.payload.run_id,
+          methods: event.payload.methods,
+        },
+        errorKind: "auth_required",
+        error: live.error ?? "Sign in required before this agent can run",
+      });
       return;
     }
 
@@ -258,14 +302,24 @@ export const applyLiveChatEventAtom = atom(
       const ended = ["completed", "stopped", "failed"].includes(
         event.payload.status,
       );
+      const failed = event.payload.status === "failed";
       set(liveChatAtom, {
         ...live,
         runStatus: event.payload.status,
         turnStatus:
-          ended && live.turnStatus === "started"
-            ? "cancelled"
-            : live.turnStatus,
+          failed && live.turnStatus === "started"
+            ? "failed"
+            : ended && live.turnStatus === "started"
+              ? "cancelled"
+              : live.turnStatus,
         pendingRequest: ended ? null : live.pendingRequest,
+        error:
+          failed && event.payload.error_message
+            ? event.payload.error_message
+            : live.error,
+        errorKind: failed
+          ? (event.payload.error_kind ?? live.errorKind ?? "error")
+          : live.errorKind,
       });
       void set(scheduleLiveChatRefreshAtom);
       return;

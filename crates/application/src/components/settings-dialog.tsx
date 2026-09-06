@@ -283,13 +283,20 @@ function AgentDefaultsPanel({
     if (installingId) return;
     setInstallingId(agent.id);
     try {
-      const installed = await installAgent(agent.id);
-      onDefaultAgentChange(installed.id);
+      const result = await installAgent(agent.id);
+      onDefaultAgentChange(result.agent.id);
       setAgentPickerOpen(false);
-      notify(
-        `${installed.name.replace(/\s*\bACP\s*$/i, "")} installed`,
-        "success",
-      );
+      const name = result.agent.name.replace(/\s*\bACP\s*$/i, "");
+      if (result.runtime_status === "ready") {
+        notify(`${name} installed`, "success");
+      } else if (result.runtime_status === "auth_required") {
+        notify(`${name} installed — sign in required`, "info");
+      } else {
+        notify(
+          result.runtime_message ?? `${name} installed but is not ready`,
+          "error",
+        );
+      }
     } catch (error) {
       console.error("Failed to install agent:", error);
       notify(

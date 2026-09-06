@@ -76,6 +76,7 @@ pub(super) fn complete_run(
         } else {
             TurnStatus::Completed
         };
+        let failure = error.map(crate::service::session::classify_message);
         emit(
             inner,
             EditorEvent::TurnUpdated {
@@ -84,17 +85,25 @@ pub(super) fn complete_run(
                 user_message_id,
                 status: turn_status,
                 stop_reason: None,
-                error_message: error.map(str::to_owned),
+                error_message: failure.as_ref().map(|item| item.message.clone()),
+                error_kind: failure.as_ref().map(|item| item.kind),
             },
         );
     }
-    inner.store.update_run(run_id, status, None, error)?;
+    let failure = error.map(crate::service::session::classify_message);
+    inner.store.update_run(
+        run_id,
+        status,
+        None,
+        failure.as_ref().map(|item| item.message.as_str()),
+    )?;
     emit(
         inner,
         EditorEvent::RunUpdated {
             run_id: run_id.to_owned(),
             status,
-            error_message: error.map(str::to_owned),
+            error_message: failure.as_ref().map(|item| item.message.clone()),
+            error_kind: failure.as_ref().map(|item| item.kind),
         },
     );
     remove_pending_requests_for_run(inner, run_id);
@@ -103,7 +112,8 @@ pub(super) fn complete_run(
         EditorEvent::AgentConnectionChanged {
             agent_id: live.agent_id,
             connected: false,
-            error_message: error.map(str::to_owned),
+            error_message: failure.as_ref().map(|item| item.message.clone()),
+            error_kind: failure.as_ref().map(|item| item.kind),
         },
     );
     Ok(())

@@ -9,17 +9,20 @@ impl SessionManager {
         client: &AcpClient,
         method: AgentRpcMethod,
         params: Value,
-    ) -> Result<Value> {
+    ) -> std::result::Result<Value, ClassifiedFailure> {
         let envelope = RpcEnvelope {
             direction: RpcDirection::Sent,
             method: method.as_str().to_owned(),
             payload: params.clone(),
         };
-        self.inner.store.save_acp_envelope(run_id, &envelope)?;
+        self.inner
+            .store
+            .save_acp_envelope(run_id, &envelope)
+            .map_err(|error| classify_message(&error.to_string()))?;
 
         let result = client
             .request(method, params, ACP_REQUEST_TIMEOUT)
-            .map_err(Error::from)?;
+            .map_err(|error| self.classify_client_failure(client, &error))?;
 
         let response_envelope = RpcEnvelope {
             direction: RpcDirection::Received,
@@ -28,7 +31,8 @@ impl SessionManager {
         };
         self.inner
             .store
-            .save_acp_envelope(run_id, &response_envelope)?;
+            .save_acp_envelope(run_id, &response_envelope)
+            .map_err(|error| classify_message(&error.to_string()))?;
         Ok(result)
     }
 
@@ -37,14 +41,17 @@ impl SessionManager {
         run_id: &str,
         client: &AcpClient,
         params: Value,
-    ) -> Result<Value> {
+    ) -> std::result::Result<Value, ClassifiedFailure> {
         let method = AgentRpcMethod::Prompt;
         let envelope = RpcEnvelope {
             direction: RpcDirection::Sent,
             method: method.as_str().to_owned(),
             payload: params.clone(),
         };
-        self.inner.store.save_acp_envelope(run_id, &envelope)?;
+        self.inner
+            .store
+            .save_acp_envelope(run_id, &envelope)
+            .map_err(|error| classify_message(&error.to_string()))?;
 
         let result = client
             .request_with_activity_timeout(
@@ -53,16 +60,19 @@ impl SessionManager {
                 ACP_PROMPT_IDLE_TIMEOUT,
                 ACP_PROMPT_TOTAL_TIMEOUT,
             )
-            .map_err(Error::from)?;
+            .map_err(|error| self.classify_client_failure(client, &error))?;
 
-        self.inner.store.save_acp_envelope(
-            run_id,
-            &RpcEnvelope {
-                direction: RpcDirection::Received,
-                method: "rpc.result".into(),
-                payload: result.clone(),
-            },
-        )?;
+        self.inner
+            .store
+            .save_acp_envelope(
+                run_id,
+                &RpcEnvelope {
+                    direction: RpcDirection::Received,
+                    method: "rpc.result".into(),
+                    payload: result.clone(),
+                },
+            )
+            .map_err(|error| classify_message(&error.to_string()))?;
         Ok(result)
     }
 

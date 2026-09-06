@@ -11,9 +11,10 @@ use crate::{
     daemon::{DaemonBridge, EventSubscription},
     protocol::{
         rpc::{
-            methods, CancelResult, DeleteChatResult, GetAttachmentResult, HealthResult,
-            InstallAgentResult, ListAgentsResult, ListChatsResult, PromptAttachment,
-            PromptResultDto, RespondAgentParams, RespondAgentResult, VersionResult,
+            methods, AuthenticateAgentResult, CancelResult, DeleteChatResult,
+            GetAttachmentResult, HealthResult, InstallAgentResult, ListAgentsResult,
+            ListChatsResult, PromptAttachment, PromptResultDto, RespondAgentParams,
+            RespondAgentResult, VersionResult,
         },
         AgentInfo, Chat, GetChatResult,
     },
@@ -45,11 +46,21 @@ impl AppState {
             .agents)
     }
 
-    pub async fn install_agent(&self, agent_id: String) -> Result<AgentInfo, String> {
-        Ok(self
-            .call::<InstallAgentResult>(methods::INSTALL_AGENT, json!({ "agent_id": agent_id }))
-            .await?
-            .agent)
+    pub async fn install_agent(&self, agent_id: String) -> Result<InstallAgentResult, String> {
+        self.call(methods::INSTALL_AGENT, json!({ "agent_id": agent_id }))
+            .await
+    }
+
+    pub async fn authenticate_agent(
+        &self,
+        agent_id: String,
+        method_id: Option<String>,
+    ) -> Result<AuthenticateAgentResult, String> {
+        self.call(
+            methods::AUTHENTICATE_AGENT,
+            json!({ "agent_id": agent_id, "method_id": method_id }),
+        )
+        .await
     }
 
     pub async fn create_chat(

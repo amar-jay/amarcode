@@ -48,6 +48,7 @@ impl SessionManager {
                 status: TurnStatus::Cancelled,
                 stop_reason: Some("cancelled".into()),
                 error_message: None,
+                error_kind: None,
             });
         }
 
@@ -58,11 +59,13 @@ impl SessionManager {
             run_id,
             status: RunStatus::Stopped,
             error_message: None,
+            error_kind: None,
         });
         self.emit(EditorEvent::AgentConnectionChanged {
             agent_id: live.agent_id,
             connected: false,
             error_message: None,
+            error_kind: None,
         });
         Ok(())
     }
@@ -114,37 +117,40 @@ impl SessionManager {
             .contains_key(chat_id))
     }
 
-    pub(super) fn fail_run(&self, run_id: &str, error: &str) -> Result<()> {
+    pub(super) fn fail_run(&self, run_id: &str, failure: &ClassifiedFailure) -> Result<()> {
         // If a prompt turn is open on this run, close it as failed first.
         if let Ok(mut guard) = self.inner.by_chat.lock() {
             let hit = guard.iter_mut().find_map(|(chat_id, live)| {
                 if live.run_id == run_id {
                     live.active_user_message_id
                         .take()
-                        .map(|user_message_id| (chat_id.clone(), user_message_id))
+                        .map(|user_message_id| (chat_id.clone(), user_message_id, live.agent_id.clone()))
                 } else {
                     None
                 }
             });
-            if let Some((chat_id, user_message_id)) = hit {
+            if let Some((chat_id, user_message_id, agent_id)) = hit {
                 drop(guard);
+                self.maybe_emit_auth_required(&agent_id, Some(run_id), failure);
                 self.emit(EditorEvent::TurnUpdated {
                     chat_id,
                     run_id: run_id.to_owned(),
                     user_message_id,
                     status: TurnStatus::Failed,
                     stop_reason: None,
-                    error_message: Some(error.to_owned()),
+                    error_message: Some(failure.message.clone()),
+                    error_kind: Some(failure.kind),
                 });
             }
         }
         self.inner
             .store
-            .update_run(run_id, RunStatus::Failed, None, Some(error))?;
+            .update_run(run_id, RunStatus::Failed, None, Some(failure.message.as_str()))?;
         self.emit(EditorEvent::RunUpdated {
             run_id: run_id.to_owned(),
             status: RunStatus::Failed,
-            error_message: Some(error.to_owned()),
+            error_message: Some(failure.message.clone()),
+            error_kind: Some(failure.kind),
         });
         Ok(())
     }
@@ -158,6 +164,7 @@ impl SessionManager {
         status: TurnStatus,
         stop_reason: Option<String>,
         error_message: Option<&str>,
+        error_kind: Option<crate::protocol::AgentFailureKind>,
     ) {
         if let Ok(mut guard) = self.inner.by_chat.lock() {
             if let Some(live) = guard.get_mut(chat_id) {
@@ -175,7 +182,35 @@ impl SessionManager {
             status,
             stop_reason,
             error_message: error_message.map(str::to_owned),
+            error_kind,
         });
+    }
+
+    pub(super) fn maybe_emit_auth_required(
+        &self,
+        agent_id: &str,
+        run_id: Option<&str>,
+        failure: &ClassifiedFailure,
+    ) {
+        if failure.kind != crate::protocol::AgentFailureKind::AuthRequired {
+            return;
+        }
+        self.emit(EditorEvent::AgentAuthRequired {
+            agent_id: agent_id.to_owned(),
+            run_id: run_id.map(str::to_owned),
+            methods: failure
+                .auth_methods
+                .clone()
+                .unwrap_or(serde_json::json!([])),
+        });
+    }
+
+    pub(super) fn classify_client_failure(
+        &self,
+        client: &AcpClient,
+        error: &crate::acp::AcpError,
+    ) -> ClassifiedFailure {
+        with_stderr_detail(classify_acp_failure(error), &client.stderr_tail())
     }
 
     /// A prompt transport failure leaves the ACP process's state ambiguous.
@@ -187,7 +222,7 @@ impl SessionManager {
         chat_id: &str,
         run_id: &str,
         user_message_id: &str,
-        error: &str,
+        failure: &ClassifiedFailure,
     ) -> Result<()> {
         let mut live = {
             let mut live_runs = self
@@ -225,13 +260,18 @@ impl SessionManager {
             }
         }
 
-        self.inner
-            .store
-            .update_run(run_id, RunStatus::Failed, None, Some(error))?;
+        self.maybe_emit_auth_required(&live.agent_id, Some(run_id), failure);
+        self.inner.store.update_run(
+            run_id,
+            RunStatus::Failed,
+            None,
+            Some(failure.message.as_str()),
+        )?;
         self.emit(EditorEvent::RunUpdated {
             run_id: run_id.to_owned(),
             status: RunStatus::Failed,
-            error_message: Some(error.to_owned()),
+            error_message: Some(failure.message.clone()),
+            error_kind: Some(failure.kind),
         });
         self.emit(EditorEvent::TurnUpdated {
             chat_id: chat_id.to_owned(),
@@ -239,12 +279,14 @@ impl SessionManager {
             user_message_id: user_message_id.to_owned(),
             status: TurnStatus::Failed,
             stop_reason: None,
-            error_message: Some(error.to_owned()),
+            error_message: Some(failure.message.clone()),
+            error_kind: Some(failure.kind),
         });
         self.emit(EditorEvent::AgentConnectionChanged {
             agent_id: live.agent_id,
             connected: false,
-            error_message: Some(error.to_owned()),
+            error_message: Some(failure.message.clone()),
+            error_kind: Some(failure.kind),
         });
 
         if let Some(message_error) = first_message_error {
@@ -272,6 +314,7 @@ impl SessionManager {
                     status: TurnStatus::Cancelled,
                     stop_reason: Some("replaced".into()),
                     error_message: Some("replaced by new run".into()),
+                    error_kind: None,
                 });
             }
             let _ = self.inner.store.update_run(
@@ -284,6 +327,7 @@ impl SessionManager {
                 run_id: live.run_id,
                 status: RunStatus::Stopped,
                 error_message: Some("replaced by new run".into()),
+                error_kind: None,
             });
         }
     }

@@ -1,0 +1,54 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "hey!"
+        }
+      ],
+      "is_template": false,
+      "timestamp": "2026-09-06T22:25:38.685391Z"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Hey! How can I help?"
+        }
+      ],
+      "channels": {
+        "openai-assistant-message-items": [
+          {
+            "type": "text",
+            "text": "{\"id\": \"msg_0b557c97f1f81663016a9de864d81487d2aaffd6e12431dcb9\", \"type\": \"message\", \"status\": \"completed\", \"content\": [{\"type\": \"output_text\", \"annotations\": [], \"logprobs\": [], \"text\": \"Hey! How can I help?\"}], \"phase\": \"final_answer\", \"role\": \"assistant\"}"
+          }
+        ],
+        "fast-agent-provider-diagnostics": [
+          {
+            "type": "text",
+            "text": "{\"transport\": \"websocket\", \"stream_timing\": {\"events_received\": 18, \"first_event_wait_ms\": 408.63, \"max_inter_event_wait_ms\": 1071.48, \"inter_event_waits_over_10s\": 0, \"timed_out\": false}, \"websocket_request_type\": \"response.create\", \"websocket_request_mode\": \"create\", \"websocket_turn_outcome\": \"fresh\", \"websocket_turn_metrics\": {\"total\": 1, \"fresh\": 1, \"reused\": 0, \"reconnected\": 0}, \"websocket_phase_ms\": {\"normalize_input\": 0.01, \"build_args\": 1.47, \"acquire_connection\": 676.71, \"plan_request\": 0.12, \"send_request\": 0.31, \"stream_total\": 1845.72, \"first_event\": 1092.51, \"total\": 2529.83}}"
+          }
+        ],
+        "fast-agent-timing": [
+          {
+            "type": "text",
+            "text": "{\"start_time\": 116938.133129299, \"end_time\": 116940.664109941, \"duration_ms\": 2530.98, \"ttft_ms\": 2219.17, \"time_to_response_ms\": 2219.17}"
+          }
+        ],
+        "fast-agent-usage": [
+          {
+            "type": "text",
+            "text": "{\"schema\": \"fast-agent.usage/v2\", \"provider_attempts\": [{\"provider\": \"codexresponses\", \"upstream_provider\": null, \"usage_schema\": \"openai-responses\", \"model\": \"gpt-5.6-sol\", \"prompt\": {\"total\": 837, \"uncached\": null, \"cache_read\": 0, \"cache_write\": 0, \"tool_use\": null}, \"completion\": {\"total\": 11, \"reasoning\": 0}, \"tool_calls\": 0, \"reasoning_effort\": \"high\", \"requested_service_tier\": null, \"service_tier\": null, \"cost_usd\": null, \"timestamp\": 1788733541.2160354, \"raw_usage\": {\"attribution\": {\"items\": {\"msg_0b557c97f1f81663016a9de863b17c87d2b5d3f6c1035b3afd\": {\"cache_write_tokens\": 0, \"cached_tokens\": 0, \"content\": [{\"cache_write_tokens\": 0, \"cached_tokens\": 0, \"input_tokens\": 6, \"output_tokens\": 0}], \"input_tokens\": 6, \"output_tokens\": 0}, \"msg_0b557c97f1f81663016a9de864d81487d2aaffd6e12431dcb9\": {\"cache_write_tokens\": 0, \"cached_tokens\": 0, \"content\": [{\"cache_write_tokens\": 0, \"cached_tokens\": 0, \"input_tokens\": 2, \"output_tokens\": 11}], \"input_tokens\": 2, \"output_tokens\": 11}}, \"request_fields\": {\"tools\": {\"cache_write_tokens\": 0, \"cached_tokens\": 0, \"input_tokens\": 691, \"output_tokens\": 0}, \"instructions\": {\"cache_write_tokens\": 0, \"cached_tokens\": 0, \"input_tokens\": 138, \"output_tokens\": 0}}}, \"input_tokens\": 837, \"input_tokens_details\": {\"cache_write_tokens\": 0, \"cached_tokens\": 0}, \"output_tokens\": 11, \"output_tokens_details\": {\"reasoning_tokens\": 0}, \"total_tokens\": 848}, \"total\": 848}]}"
+          }
+        ]
+      },
+      "stop_reason": "endTurn",
+      "phase": "final_answer",
+      "is_template": false,
+      "timestamp": "2026-09-06T22:25:41.217130Z"
+    }
+  ]
+}

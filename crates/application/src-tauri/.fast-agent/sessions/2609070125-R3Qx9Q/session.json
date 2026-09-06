@@ -1,0 +1,67 @@
+{
+  "schema_version": 4,
+  "session_id": "2609070125-R3Qx9Q",
+  "created_at": "2026-09-07T01:25:41.218091",
+  "last_activity": "2026-09-07T01:25:41.227197",
+  "metadata": {
+    "title": null,
+    "label": null,
+    "first_user_preview": "hey!",
+    "pinned": false,
+    "extras": {}
+  },
+  "continuation": {
+    "active_agent": "agent",
+    "cwd": "/home/manan/Desktop/code/amarcode/crates/application/src-tauri",
+    "git": null,
+    "lineage": {
+      "forked_from": null,
+      "acp_session_id": "2609070125-R3Qx9Q"
+    },
+    "agents": {
+      "agent": {
+        "history_file": "history_agent.json",
+        "resolved_prompt": "You are a helpful AI Agent.\n\n\n\n\nEnvironment:\n- Workspace root: /home/manan/Desktop/code/amarcode/crates/application/src-tauri\n- Client: fast-agent 0.10.1 via Amarcode Daemon 0.5.0\n- Fast-agent runtime: CPython 3.12.14\n- Host platform: Linux-7.0.0-30-generic-x86_64-with-glibc2.43\n\nMermaid diagrams between code fences are supported.\n\nBefore making tool calls, send a brief preamble to the user explaining what you\u2019re about to do.\n\nThe current date is 07 September 2026.",
+        "model": "gpt-5.6-sol",
+        "model_spec": "codexplan",
+        "provider": "codexresponses",
+        "request_settings": {
+          "max_tokens": 128000,
+          "temperature": null,
+          "top_p": null,
+          "top_k": null,
+          "min_p": null,
+          "presence_penalty": null,
+          "frequency_penalty": null,
+          "repetition_penalty": null,
+          "use_history": true,
+          "parallel_tool_calls": true,
+          "max_iterations": 9999,
+          "tool_result_mode": "postprocess",
+          "streaming_timeout": 120.0,
+          "service_tier": null
+        },
+        "card_provenance": [],
+        "attachment_refs": [],
+        "model_overlay_refs": []
+      }
+    }
+  },
+  "analysis": {
+    "usage_summary": {
+      "prompt_tokens": 837,
+      "completion_tokens": 11,
+      "total_tokens": 848
+    },
+    "timing_summary": null,
+    "provider_diagnostics": [],
+    "transport_diagnostics": []
+  },
+  "execution": {
+    "resumable": true,
+    "child_link": null,
+    "status": "completed",
+    "started_at": null,
+    "completed_at": null
+  }
+}

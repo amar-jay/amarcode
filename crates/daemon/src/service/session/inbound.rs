@@ -170,6 +170,7 @@ fn handle_inbound(
                         },
                     );
                 }
+                let failure = crate::service::session::classify_message("agent disconnected");
                 if let Some(user_message_id) = active_user_message_id {
                     emit(
                         inner,
@@ -179,7 +180,8 @@ fn handle_inbound(
                             user_message_id,
                             status: TurnStatus::Failed,
                             stop_reason: None,
-                            error_message: Some("agent disconnected".into()),
+                            error_message: Some(failure.message.clone()),
+                            error_kind: Some(failure.kind),
                         },
                     );
                 }
@@ -187,14 +189,15 @@ fn handle_inbound(
                     run_id,
                     RunStatus::Stopped,
                     None,
-                    Some("agent disconnected"),
+                    Some(failure.message.as_str()),
                 )?;
                 emit(
                     inner,
                     EditorEvent::RunUpdated {
                         run_id: run_id.to_owned(),
                         status: RunStatus::Stopped,
-                        error_message: Some("agent disconnected".into()),
+                        error_message: Some(failure.message.clone()),
+                        error_kind: Some(failure.kind),
                     },
                 );
                 if !agent_id.is_empty() {
@@ -203,7 +206,8 @@ fn handle_inbound(
                         EditorEvent::AgentConnectionChanged {
                             agent_id,
                             connected: false,
-                            error_message: Some("agent disconnected".into()),
+                            error_message: Some(failure.message),
+                            error_kind: Some(failure.kind),
                         },
                     );
                 }
@@ -317,12 +321,16 @@ fn apply_notification(
                 inner
                     .store
                     .update_run(run_id, status, None, error.as_deref())?;
+                let failure = error
+                    .as_deref()
+                    .map(crate::service::session::classify_message);
                 emit(
                     inner,
                     EditorEvent::RunUpdated {
                         run_id: run_id.to_owned(),
                         status,
-                        error_message: error,
+                        error_message: failure.as_ref().map(|item| item.message.clone()),
+                        error_kind: failure.as_ref().map(|item| item.kind),
                     },
                 );
             }

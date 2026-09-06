@@ -221,7 +221,8 @@ One JSON object per line. No HTTP, no length prefixes.
 | `version`            | —        | daemon version and protocol version                                                |
 | `subscribe_events`   | —        | ack, then stream `EditorEvent` lines (`chat_id` / `run_id` / `session_id` filters) |
 | `list_agents`        | agents   | registry agent definitions + host availability                                     |
-| `install_agent`      | agents   | install from registry distribution (`npx`/`uvx`/`binary`), then mark available     |
+| `install_agent`      | agents   | install from registry distribution (`npx`/`uvx`/`binary`), probe runtime, mark available |
+| `authenticate_agent` | sessions | ACP `authenticate` for auth-required agents (live session or short-lived probe)    |
 | `create_chat`        | chats    | `{ workspace_path, title? }` → chat row + `ChatUpdated`                            |
 | `list_chats`         | chats    | optional `workspace_path` filter                                                   |
 | `get_chat`           | chats    | `{ chat_id, include_messages? }` (messages+parts by default)                       |

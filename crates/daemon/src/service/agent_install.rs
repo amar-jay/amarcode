@@ -13,53 +13,52 @@ use std::{
 };
 
 use crate::{
-    protocol::AgentInfo,
+    acp::AcpClient,
+    protocol::{
+        rpc::InstallAgentResult, AgentRpcMethod, AgentRuntimeStatus,
+    },
     registry::{self, BinaryDistribution, PackageDistribution, RegistryAgent},
+    service::session::{classify_acp_failure, with_stderr_detail},
     Error, Result,
 };
 
 use super::agent_manager::AgentManager;
 
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const RUNTIME_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl AgentManager {
-    /// Materialize a registry agent so it becomes `available`.
-    pub fn install(&self, agent_id: &str) -> Result<AgentInfo> {
+    /// Materialize a registry agent so it becomes `available`, then probe ACP.
+    pub fn install(&self, agent_id: &str) -> Result<InstallAgentResult> {
         let agent = self
             .get(agent_id)?
             .ok_or_else(|| Error::msg(format!("agent not found: {agent_id}")))?;
 
-        if self.is_available(&agent) {
-            self.refresh_availability()?;
-            let agent = self.get(agent_id)?.ok_or_else(|| {
-                Error::msg(format!("agent missing after refresh: {agent_id}"))
-            })?;
-            return Ok(self.agent_info(&agent));
-        }
-
-        let manifest = registry::load_agent_manifest(self.registry_dir(), agent_id)?;
-        match install_kind(&manifest)? {
-            InstallKind::Npx(package) => {
-                ensure_runner("bun", &["bun", "bunx"])?;
-                prefetch_bun_package(&package.package)?;
-            }
-            InstallKind::Uvx(package) => {
-                ensure_runner("uv", &["uv", "uvx"])?;
-                prefetch_uv_package(&package.package)?;
-            }
-            InstallKind::Binary(binary) => {
-                let executable = install_binary_distribution(
-                    self.tools_dir(),
-                    agent_id,
-                    &manifest.version,
-                    &binary,
-                )?;
-                let mut updated = agent.clone();
-                updated.command = executable.to_string_lossy().into_owned();
-                updated.arguments = binary.args;
-                updated.environment = binary.env.into_iter().collect();
-                updated.available = false;
-                self.save(&updated)?;
+        if !self.is_available(&agent) {
+            let manifest = registry::load_agent_manifest(self.registry_dir(), agent_id)?;
+            match install_kind(&manifest)? {
+                InstallKind::Npx(package) => {
+                    ensure_runner("bun", &["bun", "bunx"])?;
+                    prefetch_bun_package(&package.package)?;
+                }
+                InstallKind::Uvx(package) => {
+                    ensure_runner("uv", &["uv", "uvx"])?;
+                    prefetch_uv_package(&package.package)?;
+                }
+                InstallKind::Binary(binary) => {
+                    let executable = install_binary_distribution(
+                        self.tools_dir(),
+                        agent_id,
+                        &manifest.version,
+                        &binary,
+                    )?;
+                    let mut updated = agent.clone();
+                    updated.command = executable.to_string_lossy().into_owned();
+                    updated.arguments = binary.args;
+                    updated.environment = binary.env.into_iter().collect();
+                    updated.available = false;
+                    self.save(&updated)?;
+                }
             }
         }
 
@@ -73,7 +72,63 @@ impl AgentManager {
                 updated.name
             )));
         }
-        Ok(self.agent_info(&updated))
+
+        let (runtime_status, runtime_message) = self.probe_runtime(&updated.id)?;
+        Ok(InstallAgentResult {
+            agent: self.agent_info(&updated),
+            runtime_status,
+            runtime_message,
+        })
+    }
+
+    fn probe_runtime(
+        &self,
+        agent_id: &str,
+    ) -> Result<(AgentRuntimeStatus, Option<String>)> {
+        let resolved = self.resolve(agent_id)?;
+        let (client, _inbound) = AcpClient::spawn(
+            &resolved.command.to_string_lossy(),
+            &resolved.arguments,
+            &resolved.environment,
+            None,
+        )
+        .map_err(|error| {
+            let failure = classify_acp_failure(&error);
+            Error::msg(failure.message)
+        })?;
+        let result = client.request(
+            AgentRpcMethod::Initialize,
+            serde_json::json!({
+                "protocolVersion": 1,
+                "clientCapabilities": {},
+                "clientInfo": {
+                    "name": "amarcode-daemon",
+                    "title": "Amarcode Daemon",
+                    "version": env!("CARGO_PKG_VERSION"),
+                }
+            }),
+            RUNTIME_PROBE_TIMEOUT,
+        );
+        let stderr = client.stderr_tail();
+        let _ = client.kill();
+        match result {
+            Ok(_) => Ok((AgentRuntimeStatus::Ready, None)),
+            Err(error) => {
+                let failure = with_stderr_detail(classify_acp_failure(&error), &stderr);
+                let status = match failure.kind {
+                    crate::protocol::AgentFailureKind::AuthRequired => {
+                        AgentRuntimeStatus::AuthRequired
+                    }
+                    crate::protocol::AgentFailureKind::Unavailable => {
+                        AgentRuntimeStatus::Unavailable
+                    }
+                    crate::protocol::AgentFailureKind::AdapterExited
+                    | crate::protocol::AgentFailureKind::Timeout
+                    | crate::protocol::AgentFailureKind::Error => AgentRuntimeStatus::Error,
+                };
+                Ok((status, Some(failure.message)))
+            }
+        }
     }
 }
 

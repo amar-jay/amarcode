@@ -79,6 +79,21 @@ string_enum!(MessagePartKind {
     Image => "image",
 });
 
+string_enum!(AgentFailureKind {
+    AuthRequired => "auth_required",
+    AdapterExited => "adapter_exited",
+    Timeout => "timeout",
+    Unavailable => "unavailable",
+    Error => "error",
+});
+
+string_enum!(AgentRuntimeStatus {
+    Ready => "ready",
+    AuthRequired => "auth_required",
+    Unavailable => "unavailable",
+    Error => "error",
+});
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct AgentDefinition {
     pub id: String,

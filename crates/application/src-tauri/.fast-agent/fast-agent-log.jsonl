@@ -1,0 +1,1 @@
+{"level":"WARNING","timestamp":"2026-09-07T01:26:01.477705","namespace":"fast_agent.acp.server.agent_acp_server.acp_cancel_no_active","message":"No active prompt to cancel for session","data":{"session_id":"2609070125-R3Qx9Q"}}

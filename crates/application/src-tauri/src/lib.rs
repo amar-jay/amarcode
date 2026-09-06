@@ -127,8 +127,17 @@ async fn list_agents(state: State<'_, AppState>) -> Result<Vec<AgentInfo>, Strin
 async fn install_agent(
     state: State<'_, AppState>,
     agent_id: String,
-) -> Result<AgentInfo, String> {
+) -> Result<amarcode_protocol::rpc::InstallAgentResult, String> {
     state.install_agent(agent_id).await
+}
+
+#[tauri::command]
+async fn authenticate_agent(
+    state: State<'_, AppState>,
+    agent_id: String,
+    method_id: Option<String>,
+) -> Result<amarcode_protocol::rpc::AuthenticateAgentResult, String> {
+    state.authenticate_agent(agent_id, method_id).await
 }
 
 #[tauri::command]
@@ -629,6 +638,7 @@ pub fn run() {
             daemon_version,
             list_agents,
             install_agent,
+            authenticate_agent,
             create_chat,
             list_chats,
             get_chat,

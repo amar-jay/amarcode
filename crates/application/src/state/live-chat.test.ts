@@ -58,6 +58,8 @@ describe("failed home-composer prompts", () => {
       sessionMode: "build",
       loading: true,
       error: null,
+      errorKind: null,
+      authRequired: null,
     };
     store.set(liveChatAtom, live);
 
