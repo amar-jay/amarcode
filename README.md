@@ -9,8 +9,7 @@ understand and improve your code.
 <img
   src="./assets/amarcode-theme-split.png"
   alt="Amarcode shown in dark and light themes"
-  width="100%"
->
+  width="100%"/>
 
 <p align="center">
   <sub>Designed to stay out of the way while you and your agent get things done.</sub>
