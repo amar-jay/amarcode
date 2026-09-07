@@ -31,10 +31,6 @@ Amarcode farklı sorumluluklar için birden fazla teknoloji kullanan monorepo ya
 
 Projenin başlangıcında en önemli kararlardan biri kullanıcı arayüzü ile uzun süre çalışan ajan görevlerini birbirinden ayırmak olmuştur. Bir ajan görevi uzun sürebildiği için bütün işlem durumunun React uygulamasında tutulması güvenilir değildir. Masaüstü penceresinin kapanması, bağlantının kesilmesi veya uygulamanın yeniden açılması durumunda görev ve sohbet bilgilerinin kaybolmaması gerekmektedir. Bu nedenle bağımsız çalışan bir **Amarcode daemon** geliştirilmiştir.
 
-![Amarcode sistem mimarisi](https://raw.githubusercontent.com/amar-jay/amarcode/main/assets/diagrams/system-architecture.svg)
-
-*Şekil 1 — Amarcode masaüstü uygulaması, daemon, SQLite, ACP ajanı, kayıt sistemi ve çalışma alanı arasındaki temel ilişkiler.*
-
 React arayüzü kullanıcı etkileşiminden ve bilgilerin görüntülenmesinden sorumludur. Tauri katmanı, ön yüz ile işletim sistemi ve daemon arasında güvenli bir köprü oluşturur. Daemon ise sohbetlerin, mesajların, ajan çalışmalarının ve canlı olayların gerçek sahibidir. Daemon içindeki RPC katmanı TCP üzerinden gelen istekleri alır; servis katmanı iş akışlarını yürütür; saklama katmanı SQLite işlemlerini gerçekleştirir; ACP katmanı ise haricî ajan süreçleriyle standart giriş ve çıkış üzerinden iletişim kurar.
 
 Mimari katmanlar arasında yönlü bağımlılık uygulanmıştır. Saklama katmanı ACP veya TCP ayrıntılarını bilmez, ACP katmanı da sohbet veritabanına doğrudan erişmez. Bu iki alanı birleştiren tek yer servis katmanıdır. Böylece iletişim protokolü, veritabanı şeması veya ajan uygulaması değiştiğinde değişikliğin etkisi daha sınırlı kalmaktadır.
@@ -47,7 +43,7 @@ Uygulama arayüzü; sohbetlerin bulunduğu sol kenar çubuğu, aktif konuşmanı
 
 ![Amarcode açık ve koyu tema](https://raw.githubusercontent.com/amar-jay/amarcode/main/assets/amarcode-theme-split.png)
 
-*Şekil 2 — Amarcode masaüstü uygulamasının açık ve koyu tema görünümü.*
+*Şekil 1 — Amarcode masaüstü uygulamasının açık ve koyu tema görünümü.*
 
 Ajan cevaplarının yalnızca düz metin olmadığı dikkate alınarak mesajlar yapılandırılmış parçalara ayrılmıştır. Normal metin, kod blokları, düşünme içeriği, araç çağrıları, test sonuçları ve dosya değişiklikleri farklı bileşenlerle gösterilmektedir. Akış devam ederken yalnızca ilgili mesaj güncellenmekte ve aktif cevap hareketli bir imleçle belirtilmektedir. Kullanıcı önceki bir mesajı incelerken sayfanın zorla en alta kaydırılmaması için kaydırma davranışı da kontrol edilmiştir.
 
@@ -56,10 +52,6 @@ Ajan cevaplarının yalnızca düz metin olmadığı dikkate alınarak mesajlar 
 ## İstem, Sohbet ve Canlı Olay Akışı
 
 Kullanıcı istemi gönderdiğinde arayüzde gecikme hissini azaltmak için iyimser güncelleme yaklaşımı uygulanmıştır. Kullanıcı mesajı geçici olarak hemen gösterilmekte, daemon kalıcı kaydı oluşturduktan sonra geçici kimlik gerçek mesaj kimliğiyle eşleştirilmektedir. İstek başarısız olursa kullanıcının yazdığı metnin kaybolmamasına dikkat edilmiştir.
-
-![Kullanıcı isteminin yaşam döngüsü](https://raw.githubusercontent.com/amar-jay/amarcode/main/assets/diagrams/prompt-lifecycle-sequence.svg)
-
-*Şekil 3 — Kullanıcı isteminin arayüz, Tauri, daemon, SQLite ve ACP ajanı arasındaki yaşam döngüsü.*
 
 Daemon ile masaüstü uygulaması arasında iki farklı iletişim biçimi kullanılmıştır. Kısa işlemler TCP JSON-line RPC istek ve yanıtlarıyla yürütülürken, uzun süren görevlerin mesaj ve durum güncellemeleri ayrı bir canlı olay aboneliği üzerinden iletilmektedir. İstemci `subscribe_events` yöntemiyle sohbet, çalışma veya oturum filtresi kullanarak olaylara abone olabilmektedir.
 
@@ -72,10 +64,6 @@ Aynı sohbet üzerinde birden fazla istemin eş zamanlı başlatılması oturum 
 Bekleyen izin ve kullanıcı girişi istekleri de çalışma kimliğiyle ilişkilendirilmiştir. Bir çalışma bittiğinde ona bağlı bekleyen istekler temizlenir. Yanıt, doğru istek kimliğine sahip olsa bile başka bir çalışmaya aitse kabul edilmez. Bu kontroller özellikle iptal, bağlantı kesilmesi ve hızlı sohbet değişimi durumlarında veri bütünlüğünü korumaktadır.
 
 Kalıcı veri akışında **“önce kaydet, sonra bildir”** ilkesi uygulanmıştır. Ajan tarafından gelen anlamlı bir mesaj veya durum güncellemesi önce SQLite’a yazılır. İşlem başarıyla commit edildikten sonra arayüze `EditorEvent` gönderilir. Veritabanı yazımı başarısız olursa kalıcı olmayan durum kullanıcıya başarılı olarak gösterilmez.
-
-![Önce kaydet olay akışı](https://raw.githubusercontent.com/amar-jay/amarcode/main/assets/diagrams/store-first-event-flow.svg)
-
-*Şekil 4 — Sahiplik doğrulaması, SQLite işlemi ve canlı olay yayını arasındaki veri tutarlılığı akışı.*
 
 SQLite üzerinde sohbet, mesaj, mesaj parçası, çalışma, ajan ve ham ACP olayları saklanmaktadır. Yabancı anahtar kontrolleri ve WAL modu kullanılmış, şema değişiklikleri numaralı migration dosyalarıyla yönetilmiştir. Daemon beklenmedik biçimde kapanırsa bir sonraki başlangıçta yarım kalmış çalışmalar tespit edilerek gerçeğe uygun duruma geçirilir.
 
@@ -90,10 +78,6 @@ Protokole açık bir sürüm numarası eklenmiştir. Uygulama daemon’a bağlan
 Daemon başlangıçta geliştirme ortamında elle çalıştırılan bir süreçken, staj sürecinde kullanıcı hesabına bağlı bağımsız bir servis hâline getirilmiştir. Kurma, başlatma, durdurma, yeniden başlatma, durum sorgulama ve kaldırma komutları geliştirilmiştir. Tek örnek kilidi sayesinde aynı uygulama dizini ve veritabanı için iki daemon sürecinin eş zamanlı çalışması engellenmektedir.
 
 Masaüstü uygulaması açıldığında daemon’ın kurulu ve çalışır durumda olup olmadığını otomatik olarak denetler. Gerekli sürüm bulunmuyorsa platforma uygun paket kayıt servisinden alınır. Paket geçici konuma indirilir, bütünlük ve sürüm bilgisi doğrulanır, mevcut servis kontrollü biçimde durdurulur ve yeni sürüm atomik olarak yerleştirilir. Yeni daemon sağlık ve protokol kontrolünü geçemezse önceki sürüm geri yüklenir.
-
-![Daemon güncelleme ve geri alma akışı](https://raw.githubusercontent.com/amar-jay/amarcode/main/assets/diagrams/daemon-update-rollback-sequence.svg)
-
-*Şekil 5 — Daemon paketinin alınması, doğrulanması, değiştirilmesi ve hata hâlinde geri yüklenmesi.*
 
 Windows paketleme ve NSIS kaldırıcı kancaları üzerinde de çalışılmıştır. Tam kaldırma sırasında servis kaydı, daemon ikili dosyası ve kullanıcının seçimine bağlı uygulama verileri kontrollü biçimde temizlenmektedir. Linux ve Windows dosya yolları arasındaki farklılıklar ile yüksek DPI pencere boyutlandırması gibi platforma özgü konular da ele alınmıştır.
 
@@ -113,19 +97,11 @@ ACP adaptörüne `read_file`, `list_directory`, `search_text`, `write_file` ve `
 
 Komut çalıştırmada çalıştırılabilir dosya ve argümanlar ayrı tutulduğu için örtük kabuk değerlendirmesi yapılmaz. ACP terminal yaşam döngüsü kullanılarak terminal oluşturma, bitişi bekleme, çıktı alma, iptal etme ve kaynağı serbest bırakma adımları uygulanmıştır. Çıktı boyutu sınırlandırılmış ve UTF-8 karakterlerinin ortasında kesilmemesine dikkat edilmiştir. Kullanıcı iptal ettiğinde Unix sistemlerinde alt süreçlerin de sona ermesi için süreç grubu temizliği uygulanmıştır.
 
-![ACP araç izni ve terminal akışı](https://raw.githubusercontent.com/amar-jay/amarcode/main/assets/diagrams/acp-tool-permission-sequence.svg)
-
-*Şekil 6 — Model araç çağrısından kullanıcı iznine ve terminal sonucuna uzanan güvenli işlem sırası.*
-
 ## Ajan Registry ve Kurulum Sistemi
 
 Desteklenen ajanların uygulama içinde sabit olarak tanımlanması yerine manifest tabanlı bir ajan registry sistemi entegre edilmiştir. Daemon ilk başlangıçta registry deposunu sığ Git checkout olarak klonlar, sonraki başlangıçlarda `origin/main` dalına hızlı ileri güncelleme uygular. Ağ kullanılamıyorsa son başarılı checkout ile çalışmaya devam edilir.
 
 `agent.json` manifestlerinden ajan kimliği, adı, sürümü ve dağıtım bilgileri okunmaktadır. NPM tabanlı ajanlar `bunx`, Python tabanlı ajanlar `uvx`, ikili dağıtımlar ise işletim sistemi ve mimariye uygun komut ile çalıştırılmaktadır. Bir ajanın katalogda bulunması ve yerel sistemde kullanılabilir olması ayrı durumlar olarak saklanmaktadır. Kurulumdan sonra çalışma zamanı yeniden denetlenerek işlemin gerçekten başarılı olduğu doğrulanmaktadır.
-
-![Ajan registry ve kurulum akışı](https://raw.githubusercontent.com/amar-jay/amarcode/main/assets/diagrams/agent-registry-install-flow.svg)
-
-*Şekil 7 — Registry eşitleme, manifest işleme, kullanılabilirlik denetimi ve ajan kurulum adımları.*
 
 Kimlik doğrulaması gerektiren ajanlar bu gereksinimi yetenekleriyle bildirmektedir. Daemon aktif oturum veya kısa ömürlü deneme süreci üzerinden ACP kimlik doğrulama yöntemini başlatır. Gerçek erişim bilgileri sohbet kayıtlarına ya da kullanıcı arayüzünün genel durumuna yazılmaz.
 
@@ -155,4 +131,3 @@ Bu çalışmalar sırasında masaüstü uygulama geliştirme, Rust eş zamanlıl
 - [Toplu kaynakça](https://github.com/amar-jay/amarcode/blob/main/reports/KAYNAKCA.md)
 - [Ekler](https://github.com/amar-jay/amarcode/blob/main/reports/EKLER.md)
 - [Agent Client Protocol](https://agentclientprotocol.com/)
-
