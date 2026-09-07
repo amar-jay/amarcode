@@ -57,6 +57,10 @@ impl App {
         if stopped > 0 {
             info!(count = stopped, "marked interrupted agent runs as stopped");
         }
+        let deleted = store.delete_empty_chats()?;
+        if deleted > 0 {
+            info!(count = deleted, "removed chats with no messages");
+        }
 
         let registry_path = crate::registry::checkout_path(&config.app_dir);
         if let Some(source) = config.acp_registry_source.as_deref() {

@@ -108,6 +108,33 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Delete a chat abandoned before its first message was persisted.
+    /// Returns false when the chat is missing or already contains a message.
+    pub fn delete_chat_if_empty(&self, chat_id: &str) -> Result<bool> {
+        let prompt_lock = self.prompt_lock(chat_id)?;
+        let _prompt_guard = prompt_lock
+            .lock()
+            .map_err(|_| Error::msg("prompt lock poisoned"))?;
+
+        if self.has_live_run(chat_id)? {
+            self.cancel(chat_id)?;
+        }
+        if !self.inner.store.delete_chat_if_empty(chat_id)? {
+            return Ok(false);
+        }
+        if let Err(error) = self.attachments.delete_chat(chat_id) {
+            warn!(%chat_id, %error, "empty chat deleted but its attachment files could not be removed");
+        }
+        drop(_prompt_guard);
+        if let Ok(mut locks) = self.inner.prompt_locks.lock() {
+            locks.remove(chat_id);
+        }
+        self.emit(EditorEvent::ChatUpdated {
+            chat_id: chat_id.to_owned(),
+        });
+        Ok(true)
+    }
+
     fn has_live_run(&self, chat_id: &str) -> Result<bool> {
         Ok(self
             .inner

@@ -122,6 +122,8 @@ export default function App() {
                 }}
                 onStartedPromptFailed={(chatId, error) => {
                   failStartedPrompt({ chatId, error });
+                  startNewChat();
+                  void refreshChats();
                 }}
               />
             </div>

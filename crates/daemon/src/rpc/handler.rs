@@ -203,7 +203,18 @@ async fn prompt(app: &App, params: Value) -> Result<Value> {
     let result = tokio::task::block_in_place(|| {
         app.sessions
             .prompt(&chat_id, &agent_id, text, attachments, config_values)
-    })?;
+    });
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            if let Err(cleanup_error) =
+                tokio::task::block_in_place(|| app.sessions.delete_chat_if_empty(&chat_id))
+            {
+                tracing::warn!(%chat_id, %cleanup_error, "failed cleaning up empty chat after prompt error");
+            }
+            return Err(error);
+        }
+    };
     to_value(prompt_dto(result))
 }
 

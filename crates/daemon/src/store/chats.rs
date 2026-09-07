@@ -120,11 +120,41 @@ impl Store {
             .map_err(to_error)?;
         Ok(deleted > 0)
     }
+
+    /// Delete one chat only when it still has no persisted messages.
+    ///
+    /// The condition lives in the DELETE statement so a concurrent message
+    /// insert can never be erased by a stale message-count check.
+    pub fn delete_chat_if_empty(&self, id: &str) -> Result<bool> {
+        let deleted = self
+            .connection()?
+            .execute(
+                "DELETE FROM chats
+                 WHERE id=?1
+                   AND NOT EXISTS (SELECT 1 FROM messages WHERE chat_id=?1)",
+                params![id],
+            )
+            .map_err(to_error)?;
+        Ok(deleted > 0)
+    }
+
+    /// Remove chats left without messages by an interrupted application
+    /// startup or a process exit between chat creation and the first prompt.
+    pub fn delete_empty_chats(&self) -> Result<usize> {
+        self.connection()?
+            .execute(
+                "DELETE FROM chats
+                 WHERE NOT EXISTS (SELECT 1 FROM messages WHERE chat_id=chats.id)",
+                [],
+            )
+            .map_err(to_error)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::{MessageRole, MessageStatus};
 
     #[test]
     fn delete_chat_removes_the_row_and_reports_missing_chats() {
@@ -150,5 +180,49 @@ mod tests {
 
         drop(store);
         std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    fn empty_chat_cleanup_preserves_chats_with_messages() {
+        let store = Store::open(std::path::Path::new(":memory:")).expect("open store");
+        let make_chat = |id: &str| Chat {
+            id: id.into(),
+            workspace_path: "/tmp/workspace".into(),
+            title: id.into(),
+            created_at: super::super::now(),
+            updated_at: super::super::now(),
+            archived_at: None,
+        };
+        store
+            .create_chat(&make_chat("empty-chat"))
+            .expect("create empty chat");
+        store
+            .create_chat(&make_chat("chat-with-message"))
+            .expect("create populated chat");
+        store
+            .create_message(&crate::store::Message {
+                id: "message-1".into(),
+                chat_id: "chat-with-message".into(),
+                agent_run_id: None,
+                role: MessageRole::User,
+                content: "hello".into(),
+                status: MessageStatus::Complete,
+                created_at: super::super::now(),
+                updated_at: super::super::now(),
+            })
+            .expect("create message");
+
+        assert!(!store
+            .delete_chat_if_empty("chat-with-message")
+            .expect("conditionally preserve populated chat"));
+        assert_eq!(store.delete_empty_chats().expect("delete empty chats"), 1);
+        assert!(store
+            .get_chat("empty-chat")
+            .expect("read empty chat")
+            .is_none());
+        assert!(store
+            .get_chat("chat-with-message")
+            .expect("read populated chat")
+            .is_some());
     }
 }
