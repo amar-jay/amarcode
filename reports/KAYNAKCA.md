@@ -114,3 +114,9 @@ Bu kaynakça, 18 günlük staj raporunda başvurulan proje dosyalarını, oluşt
 81. Mermaid Project. (2026). *Mermaid documentation*. https://mermaid.js.org/
 82. Mermaid Project. (2026). *Mermaid CLI*. GitHub. https://github.com/mermaid-js/mermaid-cli
 
+## 11. Staj Kurumu Kaynakları
+
+83. IQVizyon Dijital Dönüşüm A.Ş. (2026). *IQVizyon endüstriyel zekâ ve dijital dönüşüm platformu*. https://iqvizyon.com/
+84. IQVizyon Dijital Dönüşüm A.Ş. (2026). *IQVizyon şirket profili*. LinkedIn. https://tr.linkedin.com/company/i%CC%87qvizyon
+85. OSTİM Savunma ve Havacılık Kümelenmesi. (2026). *IQVizyon Dijital Dönüşüm A.Ş. firma profili*. https://www.ostimsavunma.org/firmalar/iqvizyon-dijital-donusum-as
+86. IQVizyon Dijital Dönüşüm A.Ş. (2026). *Ürünler, hizmet alanları ve kurumsal bilgiler: Sıkça sorulan sorular*. https://www.iqvizyon.com/22-sss

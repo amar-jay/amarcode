@@ -30,6 +30,8 @@
 
 ## 4. İş Yeri Tanıtımı
 
+[IQVizyon İş Yeri Tanıtımı](https://github.com/amar-jay/amarcode/blob/main/reports/%C4%B0%C5%9F%20Yeri%20Tan%C4%B1t%C4%B1m%C4%B1.md)
+
 - Kurumun adı ve genel bilgileri
 - Kurumun faaliyet alanı
 - Kurumun organizasyon yapısı
@@ -230,4 +232,3 @@ Ekler aşağıdaki materyalleri kapsamaktadır:
 - Test ve doğrulama matrisi
 - Git tabanlı geliştirme özeti
 - Bilinen sınırlamalar ve gelecek çalışmalar
-
