@@ -1,0 +1,3 @@
+- [ ] add search to session page. 
+- [ ] two modes not necessary.
+- [ ] Default workspace path in config

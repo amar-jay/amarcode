@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
   Sun,
   LoaderCircle,
+  Download,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -164,16 +165,21 @@ export function SettingsDialog({
     false,
   );
   const [verboseReasoning, setVerboseReasoning] = useAtom(verboseReasoningAtom);
+  const [dialogContentElement, setDialogContentElement] =
+    useState<HTMLDivElement | null>(null);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-125! w-200! max-w-200! overflow-hidden p-0">
+      <DialogContent
+        ref={setDialogContentElement}
+        className="h-125! w-200! max-w-200! overflow-visible p-0"
+      >
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <DialogDescription className="sr-only">
           Customize your amarcode preferences.
         </DialogDescription>
         <SidebarProvider
-          className="h-full min-h-0 items-start"
+          className="h-full min-h-0 items-start overflow-hidden rounded-xl"
           style={{ "--sidebar-width": "12.5rem" } as React.CSSProperties}
         >
           <Sidebar
@@ -233,6 +239,7 @@ export function SettingsDialog({
                   agents={agents}
                   defaultAgentId={defaultAgentId}
                   onDefaultAgentChange={onDefaultAgentChange}
+                  portalContainer={dialogContentElement}
                 />
               ) : (
                 <GeneralPanel
@@ -256,10 +263,12 @@ function AgentDefaultsPanel({
   agents,
   defaultAgentId,
   onDefaultAgentChange,
+  portalContainer,
 }: {
   agents: AgentInfo[];
   defaultAgentId: string;
   onDefaultAgentChange: (agentId: string) => void;
+  portalContainer: HTMLElement | null;
 }) {
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
@@ -303,7 +312,7 @@ function AgentDefaultsPanel({
     const installing = installingId === agent.id;
     return (
       <CommandItem
-        className="w-full! cursor-pointer space-x-auto rounded-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
+        className="grid w-full! cursor-pointer grid-cols-[1rem_minmax(0,1fr)_2rem] items-center gap-2 rounded-none [&>svg:last-child]:hidden data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
         disabled={installingId !== null && !installing}
         title={agent.unavailable_reason ?? undefined}
         key={agent.id}
@@ -315,13 +324,15 @@ function AgentDefaultsPanel({
         }}
       >
         <AgentLogo icon={agent.icon} />
-        <span className="mr-auto">
+        <span className="min-w-0 truncate">
           {agent.name.replace(/\s*\bACP\s*$/i, "")}
         </span>
         {!agent.available ? (
           <button
             type="button"
-            className="ml-auto rounded-md px-2 py-0.5 text-xs font-medium text-primary hover:bg-foreground/10 disabled:opacity-50"
+            className="inline-flex size-6 items-center justify-center justify-self-end rounded-md text-primary hover:bg-foreground/10 disabled:opacity-50"
+            aria-label={`Install ${agent.name.replace(/\s*\bACP\s*$/i, "")}`}
+            title={`Install ${agent.name.replace(/\s*\bACP\s*$/i, "")}`}
             disabled={installingId !== null}
             onClick={(event) => {
               event.preventDefault();
@@ -330,17 +341,14 @@ function AgentDefaultsPanel({
             }}
           >
             {installing ? (
-              <span className="inline-flex items-center gap-1">
-                <LoaderCircle className="size-3 animate-spin" />
-                Installing…
-              </span>
+              <LoaderCircle className="size-3.5 animate-spin" />
             ) : (
-              "Install"
+              <Download className="size-3.5" />
             )}
           </button>
         ) : (
           <Check
-            className={`ml-auto size-4 ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`}
+            className={`size-4 justify-self-end ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`}
           />
         )}
       </CommandItem>
@@ -384,10 +392,11 @@ function AgentDefaultsPanel({
             <PopoverContent
               align="start"
               className="w-(--radix-popover-trigger-width) p-0"
+              portalContainer={portalContainer}
             >
               <Command>
                 <CommandInput placeholder="Search ACP agents…" />
-                <CommandList>
+                <CommandList className="overscroll-contain">
                   <CommandEmpty>No matching ACP agents.</CommandEmpty>
                   {availableAgents.length > 0 && (
                     <CommandGroup heading="Available">

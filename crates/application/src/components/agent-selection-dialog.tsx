@@ -13,7 +13,7 @@ import {
 import { useState } from "react";
 import { useSetAtom } from "jotai";
 import { PromptInputButton } from "@/components/ai-elements/prompt-input";
-import { Check, LoaderCircle } from "lucide-react";
+import { Check, Download, LoaderCircle } from "lucide-react";
 import { AgentLogo } from "@/components/agent-logo";
 import { installAgentAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
@@ -96,7 +96,9 @@ export function AgentSelectionDialog({
         {!agent.available ? (
           <button
             type="button"
-            className="shrink-0 rounded-md px-2 py-0.5 text-xs font-medium text-primary hover:bg-foreground/10 disabled:opacity-50"
+            className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-primary hover:bg-foreground/10 disabled:opacity-50"
+            aria-label={`Install ${stripAcpSuffix(agent.name)}`}
+            title={`Install ${stripAcpSuffix(agent.name)}`}
             disabled={installingId !== null}
             onClick={(event) => {
               event.preventDefault();
@@ -105,12 +107,9 @@ export function AgentSelectionDialog({
             }}
           >
             {installing ? (
-              <span className="inline-flex items-center gap-1">
-                <LoaderCircle className="size-3 animate-spin" />
-                Installing…
-              </span>
+              <LoaderCircle className="size-3.5 animate-spin" />
             ) : (
-              "Install"
+              <Download className="size-3.5" />
             )}
           </button>
         ) : selectedAgent === agent.id ? (
