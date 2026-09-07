@@ -1,0 +1,32 @@
+flowchart TD
+    START([Daemon başlangıcı]) --> SOURCE{"Registry checkout var mı?"}
+    SOURCE -->|Hayır| CLONE["git clone --depth 1<br/>origin/main"]
+    SOURCE -->|Evet| PULL["git pull --ff-only --depth 1"]
+    CLONE --> VALIDATE["Şema ve checkout doğrulaması"]
+    PULL --> VALIDATE
+    CLONE -.->|Ağ hatası| LAST["Son başarılı checkout ile devam"]
+    PULL -.->|Ağ hatası| LAST
+    LAST --> PARSE
+    VALIDATE --> PARSE["agent.json manifestlerini ayrıştır"]
+    PARSE --> DIST{"Tercih edilen dağıtım"}
+    DIST -->|npm paketi| BUNX["bunx <package>"]
+    DIST -->|Python paketi| UVX["uvx <package>"]
+    DIST -->|Platform ikilisi| BINARY["OS + mimariye uygun cmd"]
+    BUNX --> CATALOG["Ajan tanımını SQLite'a yaz"]
+    UVX --> CATALOG
+    BINARY --> CATALOG
+    CATALOG --> PROBE{"Runtime mevcut mu?"}
+    PROBE -->|Evet| AVAILABLE["Kullanılabilir"]
+    PROBE -->|Hayır| INSTALLABLE["Kurulum gerekli"]
+    INSTALLABLE --> ACTION["Kullanıcı install_agent çağırır"]
+    ACTION --> INSTALL["Manifest dağıtımını kur"]
+    INSTALL --> REPROBE["Runtime'ı yeniden denetle"]
+    REPROBE -->|Başarılı| AVAILABLE
+    REPROBE -->|Başarısız| ERROR["Açıklanabilir kurulum hatası"]
+
+    classDef ok fill:#EAF7EF,stroke:#25824B,color:#153D26,stroke-width:2px;
+    classDef warn fill:#FFF8DB,stroke:#B68A00,color:#3E3200,stroke-width:2px;
+    classDef err fill:#FCEBEC,stroke:#B53A45,color:#571D23,stroke-width:2px;
+    class AVAILABLE ok;
+    class INSTALLABLE,LAST warn;
+    class ERROR err;

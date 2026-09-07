@@ -1,0 +1,20 @@
+flowchart TD
+    SIGNAL["ACP sinyali veya istemci RPC isteği"] --> VALIDATE{"Run / chat sahipliği geçerli mi?"}
+    VALIDATE -->|"Hayır: eski ya da ilgisiz olay"| IGNORE["Olayı reddet ve günlüğe yaz"]
+    VALIDATE -->|Evet| MAP["Ürün durumuna dönüştür<br/>mesaj, parça, run veya izin"]
+    MAP --> TX["SQLite işlemini başlat"]
+    TX --> WRITE["Kalıcı kayıtları yaz"]
+    WRITE --> COMMIT{"Commit başarılı mı?"}
+    COMMIT -->|Hayır| ROLLBACK["Rollback + hata sınıflandırma"]
+    ROLLBACK --> SURFACE["Hata döndür; kullanıcıya kalıcı olmayan durum gösterme"]
+    COMMIT -->|Evet| EVENT["EditorEvent yayımla"]
+    EVENT --> SUBS["Filtrelenmiş abonelere fan-out"]
+    SUBS --> UI["React durumunu güncelle"]
+    UI --> RECOVER["Yenileme / yeniden bağlantı sonucu aynı veriyi üretir"]
+
+    classDef decision fill:#FFF8DB,stroke:#B68A00,color:#3E3200,stroke-width:2px;
+    classDef success fill:#EAF7EF,stroke:#25824B,color:#153D26,stroke-width:2px;
+    classDef failure fill:#FCEBEC,stroke:#B53A45,color:#571D23,stroke-width:2px;
+    class VALIDATE,COMMIT decision;
+    class EVENT,SUBS,UI,RECOVER success;
+    class IGNORE,ROLLBACK,SURFACE failure;

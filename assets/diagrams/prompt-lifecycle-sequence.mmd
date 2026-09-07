@@ -1,0 +1,37 @@
+sequenceDiagram
+    autonumber
+    actor K as Kullanıcı
+    participant UI as React Arayüzü
+    participant T as Tauri Köprüsü
+    participant D as Daemon Servisi
+    participant DB as SQLite
+    participant A as ACP Ajanı
+
+    K->>UI: İstemi gönderir
+    UI->>UI: İyimser kullanıcı mesajı
+    UI->>T: prompt(chat_id, agent_id, text)
+    T->>D: TCP JSON-line RPC
+    D->>DB: Run ve kullanıcı mesajını kaydet
+    DB-->>D: Commit başarılı
+    D->>A: session/new veya session/resume
+    A-->>D: session_id
+    D->>DB: ACP oturumunu kaydet
+    DB-->>D: Commit başarılı
+    D-->>T: run_id + message_id
+    T-->>UI: İyimser kaydı gerçek kimlikle eşleştir
+
+    loop Akışlı ajan çıktısı
+        A-->>D: session/update
+        D->>DB: Mesaj parçasını kaydet
+        DB-->>D: Commit başarılı
+        D-->>UI: messagePartAdded olayı
+        UI->>UI: Yalnızca ilgili mesajı güncelle
+    end
+
+    A-->>D: Turn tamamlandı
+    D->>DB: Mesaj ve turn durumunu tamamla
+    DB-->>D: Commit başarılı
+    D-->>UI: turnUpdated(completed)
+    UI-->>K: Tamamlanmış yanıtı gösterir
+
+    Note over D,DB: Kalıcı yazım başarısızsa olay yayımlanmaz.

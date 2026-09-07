@@ -1,0 +1,40 @@
+sequenceDiagram
+    autonumber
+    actor U as Kullanıcı
+    participant APP as Tauri Uygulaması
+    participant REG as Daemon Registry
+    participant FS as Yerel Dosya Sistemi
+    participant SVC as Kullanıcı Servisi
+    participant D as Yeni Daemon
+
+    APP->>SVC: status --json
+    SVC-->>APP: Kurulu sürüm + çalışma durumu
+    APP->>REG: Platform için sürüm manifesti
+    REG-->>APP: İndirme URL + sürüm + bütünlük
+    APP-->>U: Güncelleme bulundu
+    U->>APP: Güncellemeyi başlat
+    APP->>FS: Geçici dosyaya indir
+    APP->>FS: Bütünlük ve sürümü doğrula
+
+    alt Doğrulama başarısız
+        FS-->>APP: Geçersiz paket
+        APP->>FS: Geçici dosyayı temizle
+        APP-->>U: Kurulum yapılmadan hata göster
+    else Paket geçerli
+        APP->>SVC: Mevcut daemon'ı durdur
+        APP->>FS: Eski ikiliyi yedekle
+        APP->>FS: Yeni ikiliyi atomik olarak yerleştir
+        APP->>SVC: Servisi başlat
+        APP->>D: health + protocol_version
+
+        alt Sağlık kontrolü başarılı
+            D-->>APP: Uyumlu ve hazır
+            APP->>FS: Yedeği temizle
+            APP-->>U: Güncelleme tamamlandı
+        else Başlatma veya uyumluluk hatası
+            APP->>SVC: Yeni daemon'ı durdur
+            APP->>FS: Önceki ikiliyi geri yükle
+            APP->>SVC: Önceki sürümü başlat
+            APP-->>U: Geri alma sonucunu bildir
+        end
+    end

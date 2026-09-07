@@ -1,0 +1,35 @@
+flowchart LR
+    subgraph Agent["ACP Ajanı"]
+        DECLARE["initialize yanıtı<br/>configOptions"]
+        APPLY["session/set_config_option"]
+        INBOUND["config_option_update"]
+    end
+
+    subgraph Daemon["Amarcode Daemon"]
+        NORMALIZE["Desteklenen türleri normalleştir<br/>select + boolean"]
+        SNAPSHOT[("SQLite<br/>tam config snapshot")]
+        OWNER{"Aktif run sahipliği<br/>geçerli mi?"}
+        EVENT["SessionConfigUpdated"]
+    end
+
+    subgraph Client["React / Jotai"]
+        CONTROLS["Dinamik kontroller"]
+        PENDING["İlk istem öncesi<br/>bekleyen değerler"]
+        MEMORY["Ajan bazlı<br/>hatırlanan tercih"]
+    end
+
+    DECLARE --> NORMALIZE --> SNAPSHOT --> EVENT --> CONTROLS
+    CONTROLS --> MEMORY
+    CONTROLS -->|"Aktif oturum yok"| PENDING
+    PENDING -->|"prompt config_values"| SNAPSHOT
+    CONTROLS -->|"Aktif oturum var"| APPLY
+    APPLY --> SNAPSHOT
+    INBOUND --> OWNER
+    OWNER -->|Evet| SNAPSHOT
+    OWNER -->|"Hayır: eski run"| DROP["Güncellemeyi yok say"]
+    SNAPSHOT -.->|"Boş liste de tam snapshot"| EVENT
+
+    classDef decision fill:#FFF8DB,stroke:#B68A00,color:#3E3200,stroke-width:2px;
+    classDef data fill:#EEF6F3,stroke:#187A67,color:#183A34,stroke-width:2px;
+    class OWNER decision;
+    class SNAPSHOT,EVENT data;

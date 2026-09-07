@@ -1,0 +1,38 @@
+flowchart LR
+    U([Kullanıcı])
+
+    subgraph Desktop["Amarcode Masaüstü Uygulaması"]
+        UI["React + TypeScript<br/>Sohbet, dosya ağacı, diff, ayarlar"]
+        TAURI["Tauri / Rust Köprüsü<br/>Pencere, süreç ve yerel erişim"]
+        UI <-->|"typed komutlar ve olaylar"| TAURI
+    end
+
+    subgraph Background["Bağımsız Arka Plan Servisi"]
+        RPC["TCP JSON-line RPC<br/>istekler + canlı abonelik"]
+        SERVICE["Servis Katmanı<br/>iş akışları ve sahiplik"]
+        STORE[("SQLite<br/>sohbet, mesaj, run, ajan")]
+        ACP["ACP İstemcisi<br/>stdio JSON-RPC"]
+        RPC <--> SERVICE
+        SERVICE -->|"önce kalıcı yazım"| STORE
+        SERVICE <--> ACP
+    end
+
+    subgraph External["Haricî Bileşenler"]
+        AGENT["ACP Uyumlu Ajan<br/>Codex, Claude, Copilot, Grok…"]
+        REGISTRY["ACP Registry<br/>agent.json manifestleri"]
+        WORKSPACE[("Kullanıcı Çalışma Alanı")]
+    end
+
+    U <--> UI
+    TAURI <-->|"127.0.0.1:43821"| RPC
+    ACP <-->|"spawn + stdin/stdout"| AGENT
+    SERVICE <-->|"katalog eşitleme"| REGISTRY
+    AGENT <-->|"izinli araçlar"| WORKSPACE
+    UI -.->|"dosya inceleme"| WORKSPACE
+
+    classDef ui fill:#FFF4E8,stroke:#D97706,color:#27221F,stroke-width:2px;
+    classDef core fill:#EEF6F3,stroke:#187A67,color:#183A34,stroke-width:2px;
+    classDef ext fill:#F2F0FA,stroke:#6D5BA6,color:#30294C,stroke-width:2px;
+    class UI,TAURI ui;
+    class RPC,SERVICE,STORE,ACP core;
+    class AGENT,REGISTRY,WORKSPACE ext;

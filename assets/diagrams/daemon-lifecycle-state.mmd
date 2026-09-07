@@ -1,0 +1,27 @@
+stateDiagram-v2
+    [*] --> KontrolEdiliyor: Masaüstü uygulaması açılır
+    KontrolEdiliyor --> Hazır: Kurulu + çalışan + uyumlu
+    KontrolEdiliyor --> İndiriliyor: Daemon bulunamadı
+    KontrolEdiliyor --> Güncelleniyor: Protokol / sürüm uyumsuz
+    KontrolEdiliyor --> Başlatılıyor: Kurulu fakat durmuş
+
+    İndiriliyor --> Doğrulanıyor: İndirme tamamlandı
+    Doğrulanıyor --> Kuruluyor: Bütünlük ve sürüm geçerli
+    Doğrulanıyor --> Hata: Doğrulama başarısız
+    Kuruluyor --> Başlatılıyor: Kullanıcı servisi kaydedildi
+    Başlatılıyor --> Hazır: Health + protokol kontrolü başarılı
+    Başlatılıyor --> Hata: Servis başlamadı
+
+    Güncelleniyor --> Durduruluyor: Mevcut daemon aktif
+    Durduruluyor --> Yedekleniyor
+    Yedekleniyor --> Değiştiriliyor
+    Değiştiriliyor --> Başlatılıyor
+    Başlatılıyor --> GeriAlınıyor: Yeni sürüm sağlık kontrolünden geçmedi
+    GeriAlınıyor --> Hazır: Önceki sürüm geri yüklendi
+    GeriAlınıyor --> Hata: Geri alma başarısız
+
+    Hazır --> ArkaPlandaÇalışıyor: Pencere kapandı
+    ArkaPlandaÇalışıyor --> Hazır: Uygulama yeniden bağlandı
+    Hazır --> Kaldırılıyor: Kullanıcı kaldırmayı seçti
+    Kaldırılıyor --> [*]: Servis ve seçilen veriler temizlendi
+    Hata --> KontrolEdiliyor: Yeniden dene

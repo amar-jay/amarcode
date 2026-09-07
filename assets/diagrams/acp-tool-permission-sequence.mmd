@@ -1,0 +1,40 @@
+sequenceDiagram
+    autonumber
+    participant M as Model
+    participant A as amarcode-acp
+    participant D as Amarcode Daemon
+    actor U as Kullanıcı
+    participant T as ACP Terminali
+    participant W as Çalışma Alanı
+
+    M->>A: run_command(executable, args, cwd)
+    A->>A: Yol, kapsam ve argümanları doğrula
+    A->>D: session/request_permission
+    D-->>U: Tam komut + argümanlar + dizin
+
+    alt Kullanıcı reddeder
+        U-->>D: reject_once / reject_always
+        D-->>A: İzin reddedildi
+        A-->>M: Yapılandırılmış araç hatası
+    else Kullanıcı izin verir
+        U-->>D: allow_once / allow_always
+        D-->>A: İzin verildi
+        A->>T: terminal/create
+        T-->>A: terminal_id
+        A-->>D: tool_call_update(terminal)
+        T->>W: Komutu kabuksuz çalıştır
+        A->>T: terminal/wait_for_exit
+
+        opt Kullanıcı görevi iptal eder
+            U->>D: cancel(chat_id)
+            D->>A: session/cancel
+            A->>T: terminal/kill
+        end
+
+        A->>T: terminal/output
+        T-->>A: Sınırlı UTF-8 çıktı + exit status
+        A->>T: terminal/release
+        A-->>M: Yapılandırılmış araç sonucu
+    end
+
+    Note over A,W: Çalışma dizini kanonikleştirilir ve workspace dışı yollar reddedilir.
