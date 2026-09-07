@@ -481,8 +481,10 @@ fn apply_session_update(
                 },
             );
         }
+        "session_info_update" => {
+            apply_session_title(inner, chat_id, update)?;
+        }
         "available_commands_update"
-        | "session_info_update"
         | "usage_update"
         | "session_summary_generated"
         | "response_completed"
@@ -499,6 +501,38 @@ fn apply_session_update(
             debug!(%kind, "unhandled sessionUpdate kind");
         }
     }
+    Ok(())
+}
+
+/// Adopt a human-readable title supplied in ACP session metadata.
+/// Missing, null, and blank titles leave the existing fallback untouched.
+pub(super) fn apply_session_title(
+    inner: &SessionInner,
+    chat_id: &str,
+    session_info: &Value,
+) -> Result<()> {
+    let Some(title) = session_info
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+    else {
+        return Ok(());
+    };
+    let Some(chat) = inner.store.get_chat(chat_id)? else {
+        return Ok(());
+    };
+    if chat.title == title {
+        return Ok(());
+    }
+
+    inner.store.update_title(chat_id, title)?;
+    emit(
+        inner,
+        EditorEvent::ChatUpdated {
+            chat_id: chat_id.to_owned(),
+        },
+    );
     Ok(())
 }
 
@@ -529,9 +563,65 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        is_reasoning_message_chunk, looks_like_session_update, new_pending_request_id,
-        session_update_kind,
+        apply_session_title, apply_session_update, is_reasoning_message_chunk,
+        looks_like_session_update, new_pending_request_id, session_update_kind, SessionInner,
     };
+
+    #[test]
+    fn session_info_title_replaces_fallback_and_emits_chat_update() {
+        let store = std::sync::Arc::new(
+            crate::store::Store::open(std::path::Path::new(":memory:")).expect("store"),
+        );
+        store
+            .create_chat(&crate::store::Chat {
+                id: "chat-1".into(),
+                workspace_path: "/tmp/workspace".into(),
+                title: "first prompt fallback".into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+                archived_at: None,
+            })
+            .expect("create chat");
+        let (events, mut receiver) = tokio::sync::broadcast::channel(4);
+        let inner = SessionInner {
+            store: std::sync::Arc::clone(&store),
+            events,
+            prompt_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
+            by_chat: std::sync::Mutex::new(std::collections::HashMap::new()),
+            pending: std::sync::Mutex::new(std::collections::HashMap::new()),
+            terminals: Default::default(),
+        };
+
+        apply_session_update(
+            &inner,
+            "run-1",
+            "chat-1",
+            &json!({
+                "sessionId": "session-1",
+                "update": {
+                    "sessionUpdate": "session_info_update",
+                    "title": "  Agent-generated title  "
+                }
+            }),
+        )
+        .expect("apply title");
+
+        assert_eq!(
+            store.get_chat("chat-1").expect("read chat").unwrap().title,
+            "Agent-generated title"
+        );
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(crate::protocol::EditorEvent::ChatUpdated { chat_id }) if chat_id == "chat-1"
+        ));
+
+        apply_session_title(&inner, "chat-1", &json!({ "title": "  " }))
+            .expect("ignore blank title");
+        assert_eq!(
+            store.get_chat("chat-1").expect("read chat").unwrap().title,
+            "Agent-generated title"
+        );
+    }
 
     #[test]
     fn daemon_request_ids_do_not_share_the_acp_id_namespace() {
