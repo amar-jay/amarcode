@@ -1,0 +1,605 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\PassOptionsToPackage{dvipsnames,svgnames,x11names}{xcolor}
+\documentclass[
+  turkish,
+  10pt,
+  a4paper,
+]{article}
+\usepackage{xcolor}
+\usepackage[margin=20mm]{geometry}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{5}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+  \setmainfont[]{DejaVu Sans}
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\newenvironment{Shaded}{}{}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.49,0.56,0.16}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\BuiltInTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{#1}}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textit{#1}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.53,0.00,0.00}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.56,0.13,0.00}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.73,0.13,0.13}{\textit{#1}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.02,0.16,0.49}{#1}}
+\newcommand{\ImportTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{\textbf{#1}}}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.40,0.40,0.40}{#1}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.74,0.48,0.00}{#1}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.73,0.40,0.53}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.10,0.09,0.49}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\usepackage{longtable,booktabs,array}
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+% Allow footnotes in longtable head/foot
+\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
+\makesavenoteenv{longtable}
+\usepackage{graphicx}
+\makeatletter
+\newsavebox\pandoc@box
+\newcommand*\pandocbounded[1]{% scales image to fit in text height/width
+  \sbox\pandoc@box{#1}%
+  \Gscale@div\@tempa{\textheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
+  \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
+  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi% select the smaller of both
+  \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
+  \else\usebox{\pandoc@box}%
+  \fi%
+}
+% Set default figure placement to htbp
+\def\fps@figure{htbp}
+\makeatother
+\ifLuaTeX
+\usepackage[bidi=basic,shorthands=off,]{babel}
+\else
+\usepackage[bidi=default,shorthands=off,]{babel}
+\fi
+\ifPDFTeX
+\else
+\babelfont{rm}[]{DejaVu Sans}
+\fi
+\ifLuaTeX
+  \usepackage{selnolig} % disable illegal ligatures
+\fi
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+\hypersetup{
+  pdftitle={Amarcode Staj Raporu - Ekler},
+  pdflang={tr-TR},
+  colorlinks=true,
+  linkcolor={blue},
+  filecolor={Maroon},
+  citecolor={Blue},
+  urlcolor={blue},
+  pdfcreator={LaTeX via pandoc}}
+
+\title{Amarcode Staj Raporu - Ekler}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\renewcommand*\contentsname{İçindekiler}
+{
+\hypersetup{linkcolor=}
+\setcounter{tocdepth}{3}
+\tableofcontents
+}
+\section{Amarcode Staj Raporu ---
+Ekler}\label{amarcode-staj-raporu--ekler}
+
+Bu bölüm, 18 günlük staj raporunda açıklanan çalışmaları destekleyen
+teknik materyalleri bir araya getirmektedir. Eklerde yer alan mimari
+açıklamalar, tablolar ve görseller Amarcode kaynak kodu, Git geçmişi,
+proje belgeleri ve uygulamanın son durumuna ait ekran görüntüleri temel
+alınarak hazırlanmıştır.
+
+\subsection{Ek A --- Proje Bileşenleri ve Depo
+Yapısı}\label{ek-a--proje-bileux15fenleri-ve-depo-yapux131sux131}
+
+Amarcode tek bir masaüstü arayüzünden oluşmamaktadır. Proje; kullanıcı
+arayüzü, yerel masaüstü katmanı, bağımsız arka plan servisi, ortak
+iletişim protokolü, ACP adaptörü ve kayıt hizmetinden meydana gelen bir
+monorepo yapısına sahiptir.
+
+\begin{longtable}[]{@{}lll@{}}
+\toprule\noalign{}
+Bileşen & Konum & Temel sorumluluk \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+React uygulaması &
+\href{https://github.com/amar-jay/amarcode/tree/main/crates/application/src}{\texttt{crates/application/src}}
+& Sohbet ekranı, istem girişi, ajan seçimi, ayarlar, dosya ağacı ve diff
+görüntüleme \\
+Tauri katmanı &
+\href{https://github.com/amar-jay/amarcode/tree/main/crates/application/src-tauri}{\texttt{crates/application/src-tauri}}
+& Masaüstü penceresi, daemon bağlantısı, yerel dosya erişimi ve süreç
+yönetimi \\
+Amarcode daemon &
+\href{https://github.com/amar-jay/amarcode/tree/main/crates/daemon}{\texttt{crates/daemon}}
+& Kalıcı durum, RPC sunucusu, ACP oturumları, ajan süreçleri ve canlı
+olaylar \\
+Ortak protokol &
+\href{https://github.com/amar-jay/amarcode/tree/main/crates/protocol}{\texttt{crates/protocol}}
+& İstemci--daemon sözleşmesi, RPC türleri, olaylar ve TypeScript bağ
+üretimi \\
+ACP adaptörü &
+\href{https://github.com/amar-jay/amarcode/tree/main/crates/amarcode-acp}{\texttt{crates/amarcode-acp}}
+& OpenAI uyumlu sağlayıcıları ACP standardına bağlama ve çalışma alanı
+araçları \\
+Daemon registry &
+\href{https://github.com/amar-jay/amarcode/tree/main/crates/daemon-registry}{\texttt{crates/daemon-registry}}
+& Platforma uygun daemon sürümlerinin ve indirme bilgilerinin
+yayımlanması \\
+SQLite migration'ları &
+\href{https://github.com/amar-jay/amarcode/tree/main/crates/daemon/migrations}{\texttt{crates/daemon/migrations}}
+& Kalıcı veri şemasının sürümlü olarak oluşturulması ve güncellenmesi \\
+Rapor görselleri &
+\href{https://github.com/amar-jay/amarcode/tree/main/assets/diagrams}{\texttt{assets/diagrams}}
+& Düzenlenebilir Mermaid kaynakları ile SVG ve PNG çıktıları \\
+\end{longtable}
+
+Rust çalışma alanının ana bileşenleri kök
+\href{https://github.com/amar-jay/amarcode/blob/main/Cargo.toml}{\texttt{Cargo.toml}}
+dosyasında, JavaScript çalışma alanı ve ortak komutlar ise kök
+\href{https://github.com/amar-jay/amarcode/blob/main/package.json}{\texttt{package.json}}
+dosyasında tanımlanmıştır.
+
+\subsection{Ek B --- Genel Sistem
+Mimarisi}\label{ek-b--genel-sistem-mimarisi}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Amarcode genel sistem mimarisi}]{/home/manan/Desktop/code/amarcode/assets/diagrams/system-architecture.png}}
+
+\emph{Ek Şekil B.1 --- Kullanıcı, React/Tauri masaüstü uygulaması,
+bağımsız daemon, SQLite, ACP ajanı, ajan kayıt sistemi ve çalışma alanı
+arasındaki ilişkiler.}
+
+Mimaride masaüstü arayüzü kalıcı verinin sahibi değildir. Kullanıcı
+komutları Tauri köprüsü üzerinden yerel TCP JSON-line RPC bağlantısına
+aktarılır. Daemon'ın servis katmanı iş akışlarını yönetir, kalıcı
+kayıtları SQLite'a yazar ve yalnızca başarılı kayıttan sonra istemcilere
+olay gönderir. ACP istemcisi kodlama ajanını ayrı bir süreç olarak
+başlatır ve standart giriş/çıkış üzerinden JSON-RPC iletişimi kurar. Bu
+ayrım, masaüstü penceresi kapansa bile görevlerin arka planda
+sürdürülebilmesini sağlar.
+
+Diyagramın düzenlenebilir kaynağı:
+\href{https://github.com/amar-jay/amarcode/blob/main/assets/diagrams/system-architecture.mmd}{\texttt{system-architecture.mmd}}
+
+\subsection{Ek C --- Temel Çalışma
+Akışları}\label{ek-c--temel-uxe7alux131ux15fma-akux131ux15flarux131}
+
+\subsubsection{Ek C.1 --- Kullanıcı isteminin yaşam
+döngüsü}\label{ek-c1--kullanux131cux131-isteminin-yaux15fam-duxf6nguxfcsuxfc}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Kullanıcı istemi yaşam döngüsü}]{/home/manan/Desktop/code/amarcode/assets/diagrams/prompt-lifecycle-sequence.png}}
+
+\emph{Ek Şekil C.1 --- Kullanıcı isteminin React arayüzünden daemon'a ve
+ACP ajanına ulaşması ile akışlı cevabın arayüze geri dönmesi.}
+
+Bu akışta kullanıcı mesajı arayüzde iyimser olarak gösterilir. Daemon
+önce çalışma ve kullanıcı mesajı kayıtlarını oluşturur, ardından ACP
+oturumunu başlatır veya sürdürür. Ajan tarafından üretilen her mesaj
+parçası kalıcı depoya yazıldıktan sonra \texttt{messagePartAdded}
+olayıyla arayüze bildirilir. Dönüş tamamlandığında mesaj ve çalışma
+durumu güncellenerek \texttt{turnUpdated} olayı yayımlanır.
+
+\subsubsection{Ek C.2 --- Önce kaydet, sonra bildir
+ilkesi}\label{ek-c2--uxf6nce-kaydet-sonra-bildir-ilkesi}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Önce kaydet olay akışı}]{/home/manan/Desktop/code/amarcode/assets/diagrams/store-first-event-flow.png}}
+
+\emph{Ek Şekil C.2 --- Bir ACP sinyalinin sahiplik kontrolünden, SQLite
+işleminden ve olay yayınından geçişi.}
+
+Bu ilke, arayüzün veritabanında bulunmayan bir durumu görmesini
+engeller. Kalıcı yazım başarısız olursa işlem geri alınır ve başarılı
+bir ürün olayı yayımlanmaz. Uygulama yenilendiğinde veya bağlantı tekrar
+kurulduğunda arayüz aynı kalıcı kayıtlardan yeniden oluşturulabilir.
+
+\subsubsection{Ek C.3 --- ACP araç izni ve terminal
+yönetimi}\label{ek-c3--acp-arauxe7-izni-ve-terminal-yuxf6netimi}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={ACP araç izni ve terminal sıralaması}]{/home/manan/Desktop/code/amarcode/assets/diagrams/acp-tool-permission-sequence.png}}
+
+\emph{Ek Şekil C.3 --- Modelin komut çağrısı, kullanıcı izni, terminal
+oluşturma, çıktı alma, iptal ve kaynak temizleme sırası.}
+
+Komutlar örtük bir kabuk üzerinden yorumlanmaz; çalıştırılabilir dosya
+ve argümanlar ayrı tutulur. Çalışma dizini aktif proje klasörüyle
+sınırlandırılır. Kullanıcı tarafından verilen izin tam komut, argüman
+listesi ve çalışma dizini için geçerlidir. İşlem başarıyla tamamlansa,
+hata verse veya iptal edilse bile terminal kaynağı serbest bırakılır.
+
+\subsection{Ek D --- Daemon ve Registry Yaşam
+Döngüleri}\label{ek-d--daemon-ve-registry-yaux15fam-duxf6nguxfcleri}
+
+\subsubsection{Ek D.1 --- Daemon
+durumları}\label{ek-d1--daemon-durumlarux131}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Daemon yaşam döngüsü}]{/home/manan/Desktop/code/amarcode/assets/diagrams/daemon-lifecycle-state.png}}
+
+\emph{Ek Şekil D.1 --- Daemon kontrolü, indirme, doğrulama, kurulum,
+başlatma, güncelleme, geri alma ve kaldırma durumları.}
+
+\subsubsection{Ek D.2 --- Güncelleme ve geri
+alma}\label{ek-d2--guxfcncelleme-ve-geri-alma}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Daemon güncelleme sıralaması}]{/home/manan/Desktop/code/amarcode/assets/diagrams/daemon-update-rollback-sequence.png}}
+
+\emph{Ek Şekil D.2 --- Yeni daemon sürümünün geçici dosyaya indirilmesi,
+doğrulanması, yerleştirilmesi ve sağlık kontrolü başarısızsa önceki
+sürümün geri yüklenmesi.}
+
+\subsubsection{Ek D.3 --- Ajan registry ve kurulum
+akışı}\label{ek-d3--ajan-registry-ve-kurulum-akux131ux15fux131}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Ajan registry ve kurulum akışı}]{/home/manan/Desktop/code/amarcode/assets/diagrams/agent-registry-install-flow.png}}
+
+\emph{Ek Şekil D.3 --- Ajan manifestlerinin eşitlenmesi, dağıtım
+türlerinin işlenmesi, çalışma zamanı denetimi ve kurulum süreci.}
+
+Registry eşitlemesi en iyi çaba yaklaşımıyla uygulanır. Ağ bağlantısı
+yoksa daemon son başarılı checkout üzerinden çalışmaya devam eder.
+Manifestler \texttt{bunx}, \texttt{uvx} veya platforma özgü ikili
+dağıtımlara dönüştürülür. Bir ajanın katalogda bulunması ile yerel
+makinede kullanılabilir olması ayrı durumlar olarak değerlendirilir.
+
+\subsection{Ek E --- Oturum Yapılandırmasının
+Eşitlenmesi}\label{ek-e--oturum-yapux131landux131rmasux131nux131n-eux15fitlenmesi}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Oturum yapılandırma eşitleme akışı}]{/home/manan/Desktop/code/amarcode/assets/diagrams/session-config-sync.png}}
+
+\emph{Ek Şekil E.1 --- ACP ajanının bildirdiği yapılandırma seçenekleri
+ile daemon, SQLite ve React/Jotai durumu arasındaki çift yönlü veri
+akışı.}
+
+Ajanın bildirdiği seçim ve boolean seçenekleri genel arayüz
+kontrollerine dönüştürülür. İlk istemden önce seçilen değerler
+bekletilerek \texttt{prompt} isteğiyle gönderilir. Aktif oturum
+sırasında değiştirilen değerler \texttt{session/set\_config\_option}
+üzerinden ajana aktarılır. Yapılandırmanın tam anlık görüntüsü SQLite'ta
+saklanır; boş liste de önceki değerleri temizleyen geçerli bir anlık
+görüntü olarak kabul edilir. Ajan tarafından gönderilen güncellemeler
+yalnızca aktif çalışma sahipliği doğrulandıktan sonra arayüze uygulanır.
+
+\subsection{Ek F --- Seçilmiş Uygulama
+Ekranları}\label{ek-f--seuxe7ilmiux15f-uygulama-ekranlarux131}
+
+Bu bölümdeki ekran görüntüleri uygulamanın 7 Eylül 2026 tarihindeki son
+durumunu göstermektedir. Görseller, ilgili özelliklerin rapor boyunca
+açıklanan geliştirme çalışmalarının sonucunu göstermesi amacıyla
+eklenmiştir; ekran görüntüsünün çekildiği tarih, özelliğin
+geliştirildiği staj günü olarak yorumlanmamalıdır.
+
+\subsubsection{Ek F.1 --- Açık ve koyu
+tema}\label{ek-f1--auxe7ux131k-ve-koyu-tema}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Amarcode açık ve koyu tema}]{/home/manan/Desktop/code/amarcode/assets/amarcode-theme-split.png}}
+
+\emph{Ek Şekil F.1 --- Amarcode'un açık ve koyu temalarının
+karşılaştırmalı görünümü.}
+
+\subsubsection{Ek F.2 --- Yeni sohbet
+ekranı}\label{ek-f2--yeni-sohbet-ekranux131}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Amarcode yeni sohbet ekranı}]{/home/manan/Desktop/code/amarcode/assets/screenshots/Screenshot From 2026-09-07 13-20-36.png}}
+
+\emph{Ek Şekil F.2 --- Çalışma alanı, ajan ve yapılandırma seçiminin
+ardından yeni görev başlatılan sade başlangıç ekranı.}
+
+\subsubsection{Ek F.3 --- Dosya ağacı ve kaynak
+görüntüleyici}\label{ek-f3--dosya-aux11facux131-ve-kaynak-guxf6ruxfcntuxfcleyici}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Dosya ağacı ve kaynak görüntüleyici}]{/home/manan/Desktop/code/amarcode/assets/screenshots/Screenshot From 2026-09-07 13-18-38.png}}
+
+\emph{Ek Şekil F.3 --- Aktif sohbetin yanında açılan çalışma alanı dosya
+ağacı ve kaynak kodu görünümü.}
+
+\subsubsection{Ek F.4 --- Diff inceleme}\label{ek-f4--diff-inceleme}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Amarcode diff inceleme ekranı}]{/home/manan/Desktop/code/amarcode/assets/screenshots/Screenshot From 2026-09-07 13-24-09.png}}
+
+\emph{Ek Şekil F.4 --- Ajan tarafından oluşturulan değişikliklerin
+eklenen ve silinen satırlar hâlinde incelenmesi.}
+
+\subsubsection{Ek F.5 --- Ajan seçimi}\label{ek-f5--ajan-seuxe7imi}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Amarcode ajan seçimi}]{/home/manan/Desktop/code/amarcode/assets/screenshots/Screenshot From 2026-09-07 11-21-40.png}}
+
+\emph{Ek Şekil F.5 --- Registry tarafından sağlanan ajanlar ile
+kullanılabilirlik ve kurulum durumları.}
+
+\subsubsection{Ek F.6 --- Model ve yapılandırma
+seçenekleri}\label{ek-f6--model-ve-yapux131landux131rma-seuxe7enekleri}
+
+\pandocbounded{\includegraphics[keepaspectratio,alt={Ajan yapılandırma seçenekleri}]{/home/manan/Desktop/code/amarcode/assets/screenshots/Screenshot From 2026-09-07 11-21-49.png}}
+
+\emph{Ek Şekil F.6 --- Seçilen ACP ajanının bildirdiği model ve oturum
+yapılandırma kontrolleri.}
+
+\subsection{Ek G --- İstemci--Daemon RPC
+Özeti}\label{ek-g--iux307stemcidaemon-rpc-uxf6zeti}
+
+\begin{longtable}[]{@{}ll@{}}
+\toprule\noalign{}
+RPC yöntemi & Amaç \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{health} & Daemon durumu, sürümü, protokol sürümü ve dinleme
+adresini döndürür \\
+\texttt{version} & Daemon ve ortak protokol sürümünü bildirir \\
+\texttt{subscribe\_events} & Sohbet, çalışma veya oturum filtresiyle
+canlı olay akışına abone olur \\
+\texttt{list\_agents} & Registry'den elde edilen ajanları ve yerel
+kullanılabilirliklerini listeler \\
+\texttt{install\_agent} & Manifestte belirtilen dağıtım yöntemini
+kullanarak ajanı kurar \\
+\texttt{authenticate\_agent} & Kimlik doğrulaması gerektiren ajan için
+ACP doğrulama akışını başlatır \\
+\texttt{create\_chat} & Çalışma alanına bağlı kalıcı sohbet oluşturur \\
+\texttt{list\_chats} & İsteğe bağlı çalışma alanı filtresiyle sohbetleri
+getirir \\
+\texttt{get\_chat} & Sohbeti, mesajları ve mesaj parçalarını getirir \\
+\texttt{delete\_chat} & Sohbet ve ilişkili kalıcı kayıtları temizler \\
+\texttt{prompt} & Kullanıcı istemini, ekleri ve başlangıç
+yapılandırmasını ajan çalışmasına aktarır \\
+\texttt{set\_session\_config\_option} & Aktif ACP oturumundaki bir
+yapılandırma değerini değiştirir \\
+\texttt{cancel} & Sohbetteki aktif ajan dönüşünü iptal eder \\
+\texttt{respond\_permission} & Ajanın bekleyen izin isteğine cevap
+verir \\
+\texttt{respond\_input} & Ajanın kullanıcıdan istediği ek bilgiye cevap
+verir \\
+\end{longtable}
+
+RPC türlerinin güncel tanımları
+\href{https://github.com/amar-jay/amarcode/blob/main/crates/protocol/src/rpc.rs}{\texttt{crates/protocol/src/rpc.rs}}
+dosyasında bulunmaktadır.
+
+\subsection{Ek H --- Canlı Olay
+Türleri}\label{ek-h--canlux131-olay-tuxfcrleri}
+
+\begin{longtable}[]{@{}ll@{}}
+\toprule\noalign{}
+Olay & Arayüzdeki anlamı \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{chatUpdated} & Sohbet başlığı veya sohbet listesi değişmiştir \\
+\texttt{runUpdated} & Ajan çalışmasının başlangıç, çalışma, bitiş veya
+hata durumu değişmiştir \\
+\texttt{turnUpdated} & Belirli kullanıcı isteminin dönüş durumu
+değişmiştir \\
+\texttt{contextRestoration} & Önceki ACP oturumu veya kalıcı konuşma
+geçmişi geri yüklenmektedir \\
+\texttt{messageUpdated} & Bir mesajın akış veya tamamlanma durumu
+değişmiştir \\
+\texttt{messagePartAdded} & Metin, düşünme, araç veya diğer
+yapılandırılmış mesaj parçası eklenmiştir \\
+\texttt{approvalRequired} & Ajan bir işlem için kullanıcı izni
+beklemektedir \\
+\texttt{questionRequired} & Ajan görev için kullanıcıdan ek bilgi
+istemektedir \\
+\texttt{workspaceFilesChanged} & Çalışma alanındaki bir veya daha fazla
+dosya değişmiştir \\
+\texttt{agentConnectionChanged} & Ajan bağlantısı kurulmuş, kesilmiş
+veya hata vermiştir \\
+\texttt{agentAuthRequired} & Seçilen ajan kimlik doğrulaması
+gerektirmektedir \\
+\texttt{sessionConfigUpdated} & Oturuma ait yapılandırma seçenekleri
+güncellenmiştir \\
+\end{longtable}
+
+Olay türlerinin güncel tanımları
+\href{https://github.com/amar-jay/amarcode/blob/main/crates/protocol/src/events.rs}{\texttt{crates/protocol/src/events.rs}}
+dosyasında bulunmaktadır.
+
+\subsection{Ek I --- Test ve Doğrulama
+Matrisi}\label{ek-i--test-ve-doux11frulama-matrisi}
+
+\begin{longtable}[]{@{}lll@{}}
+\toprule\noalign{}
+Alan & Doğrulama yaklaşımı & İlgili kaynak \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Ön yüz canlı durumu & Mesaj parçaları, eski çalışma olayları ve sohbet
+geçişleri için durum testleri &
+\href{https://github.com/amar-jay/amarcode/blob/main/crates/application/src/state/daemon-events.test.ts}{\texttt{daemon-events.test.ts}} \\
+Oturum yapılandırması & Tam ve boş anlık görüntü, ajan değişimi ve
+bekleyen ilk istem değerleri &
+\href{https://github.com/amar-jay/amarcode/blob/main/crates/application/src/state/session-config.test.ts}{\texttt{session-config.test.ts}} \\
+Canlı sohbet & İyimser mesaj, akışlı içerik ve tamamlanma davranışları &
+\href{https://github.com/amar-jay/amarcode/blob/main/crates/application/src/state/live-chat.test.ts}{\texttt{live-chat.test.ts}} \\
+İzin modu & İzin düzeyleri ve kullanıcı tercihleri &
+\href{https://github.com/amar-jay/amarcode/blob/main/crates/application/src/state/permission-mode.test.ts}{\texttt{permission-mode.test.ts}} \\
+ACP protokolü & Oturum, mesaj kimliği, iptal, araç ve terminal mesaj
+sıraları &
+\href{https://github.com/amar-jay/amarcode/blob/main/crates/amarcode-acp/tests/protocol_transcript.rs}{\texttt{protocol\_transcript.rs}} \\
+Daemon dikey dilimi & İstemden veritabanına, ACP'ye ve canlı olaya kadar
+uçtan uca akış &
+\href{https://github.com/amar-jay/amarcode/blob/main/crates/daemon/tests/vertical_slice.rs}{\texttt{vertical\_slice.rs}} \\
+Ortak protokol & Üretilmiş TypeScript bağlarının Rust tanımlarıyla
+güncel kalması &
+\href{https://github.com/amar-jay/amarcode/blob/main/crates/protocol/src/bin/generate-types.rs}{\texttt{generate-types.rs}} \\
+Registry Worker & Kayıt API davranışı ve sürüm verisi &
+\href{https://github.com/amar-jay/amarcode/tree/main/crates/daemon-registry}{\texttt{daemon-registry}} \\
+Masaüstü dağıtımı & GitHub Actions üzerinde platform derleme ve
+paketleme &
+\href{https://github.com/amar-jay/amarcode/tree/main/.github/workflows}{\texttt{.github/workflows}} \\
+\end{longtable}
+
+Projede tanımlanan temel doğrulama komutları şunlardır:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{bun}\NormalTok{ run app:test}
+\ExtensionTok{bun}\NormalTok{ run app:lint}
+\ExtensionTok{bun}\NormalTok{ run tsc}
+\ExtensionTok{bun}\NormalTok{ run worker:test}
+\ExtensionTok{cargo}\NormalTok{ test }\AttributeTok{{-}{-}workspace}
+\ExtensionTok{cargo}\NormalTok{ clippy }\AttributeTok{{-}{-}workspace} \AttributeTok{{-}{-}all{-}targets} \AttributeTok{{-}{-}all{-}features} \AttributeTok{{-}{-}} \AttributeTok{{-}D}\NormalTok{ warnings}
+\ExtensionTok{cargo}\NormalTok{ fmt }\AttributeTok{{-}{-}all} \AttributeTok{{-}{-}check}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Ek J --- Git Tabanlı Geliştirme
+Özeti}\label{ek-j--git-tabanlux131-geliux15ftirme-uxf6zeti}
+
+İncelenen Git geçmişi 7 Ağustos 2026 ile 7 Eylül 2026 arasındaki
+\textbf{114 commit} üzerinden değerlendirilmiştir. Commit tarihleri
+günlük rapor başlıklarıyla bire bir eşleştirilmemiş, proje gelişiminin
+teknik sırası korunarak 18 staj gününe dağıtılmıştır.
+
+\begin{longtable}[]{@{}ll@{}}
+\toprule\noalign{}
+Geliştirme dönemi & Öne çıkan çalışmalar \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+İlk prototip & İstem girişi, çalışma ekranı, TCP daemon ve test
+istemcisi \\
+Arayüz--daemon birleşimi & RPC, iyimser mesajlar, olay tabanlı yükleme
+ve Jotai durum yönetimi \\
+Güvenilirlik & Eş zamanlı istem kilitleri, eski olay koruması, abonelik
+ve yeniden bağlantı \\
+Ortak protokol & Rust türlerinin merkezîleştirilmesi, TypeScript üretimi
+ve sürüm el sıkışması \\
+Daemon dağıtımı & Kullanıcı servisi, tek örnek kilidi, indirme,
+güncelleme, geri alma ve kaldırma \\
+Çalışma alanı deneyimi & Dosya ağacı, arama, ekler, diff görüntüleyici
+ve dosya bağlantıları \\
+ACP uyumluluğu & Typed ACP, iptal, araç çağrıları, terminal ve izin
+yönetimi \\
+Registry sistemi & Ajan keşfi, manifest ayrıştırma, kullanılabilirlik ve
+uçtan uca kurulum \\
+Son entegrasyon & Dinamik oturum seçenekleri, kimlik doğrulama, testler
+ve arayüz düzenlemeleri \\
+\end{longtable}
+
+Git geçmişi:
+\href{https://github.com/amar-jay/amarcode/commits/main/}{Amarcode
+commit listesi}
+
+\subsection{Ek K --- Bilinen Sınırlamalar ve Gelecek
+Çalışmalar}\label{ek-k--bilinen-sux131nux131rlamalar-ve-gelecek-uxe7alux131ux15fmalar}
+
+\begin{itemize}
+\tightlist
+\item
+  ACP adaptöründe oturum listeleme, silme ve tam kalıcı devam ettirme
+  yetenekleri genişletilebilir.
+\item
+  Görsel, ses ve ek MCP özellikleri desteklenen ajan yeteneklerine göre
+  eklenebilir.
+\item
+  Erişilebilirlik kontrolleri ve klavye ile tam gezinme için daha
+  kapsamlı testler uygulanabilir.
+\item
+  Windows, Linux ve macOS paketleri için daha geniş otomatik uçtan uca
+  test matrisi hazırlanabilir.
+\item
+  Daemon güncelleme ve bağlantı hataları için kullanıcıya sunulan
+  tanılama bilgileri geliştirilebilir.
+\item
+  Çok büyük çalışma alanlarında dosya ağacı, arama ve diff görünümü için
+  performans ölçümleri yapılabilir.
+\item
+  Wayland gibi platforma özgü pencere efektleri kontrollü özellik
+  algılama ile ele alınabilir.
+\item
+  Registry manifestleri için imza doğrulama ve daha ayrıntılı güven
+  zinciri değerlendirilebilir.
+\end{itemize}
+
+\subsection{Ek L --- İlgili Belgeler}\label{ek-l--iux307lgili-belgeler}
+
+\begin{itemize}
+\tightlist
+\item
+  \href{https://github.com/amar-jay/amarcode/tree/main/reports}{18
+  günlük raporların bulunduğu klasör}
+\item
+  \href{https://github.com/amar-jay/amarcode/blob/main/reports/KAYNAKCA.md}{Toplu
+  kaynakça}
+\item
+  \href{https://github.com/amar-jay/amarcode/blob/main/README.md}{Amarcode
+  README}
+\item
+  \href{https://github.com/amar-jay/amarcode/blob/main/crates/daemon/README.md}{Daemon
+  teknik belgesi}
+\item
+  \href{https://github.com/amar-jay/amarcode/blob/main/crates/amarcode-acp/README.md}{ACP
+  adaptörü teknik belgesi}
+\end{itemize}
+
+\end{document}
