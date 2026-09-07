@@ -1,7 +1,5 @@
 # Amarcode
 
-> A calm, focused home for your AI coding agents.
-
 Amarcode is a desktop app that lets you work with AI coding agents in one
 place. Open a project, choose an agent, and chat with it while it helps you
 understand and improve your code.
