@@ -17,6 +17,7 @@ credentials/
 # os files
 .ds_store
 
+scripts/
 target
 
 target
