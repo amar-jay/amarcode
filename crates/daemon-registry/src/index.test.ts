@@ -58,7 +58,18 @@ function environment(entries: Record<string, string>): Env {
         const value = entries[key];
         return value === undefined ? null : fakeObject(key, value);
       },
-    } as R2Bucket,
+      async list() {
+        return {
+          objects: [],
+          truncated: false,
+          delimitedPrefixes: Object.keys(entries)
+            .filter((key) => key.startsWith("daemon/"))
+            .map((key) => key.slice(0, key.indexOf("/", "daemon/".length) + 1))
+            .filter((prefix) => prefix !== "daemon/")
+            .filter((prefix, index, prefixes) => prefixes.indexOf(prefix) === index),
+        };
+      },
+    } as unknown as R2Bucket,
   };
 }
 
@@ -93,6 +104,35 @@ describe("resolveArtifactRoute", () => {
 });
 
 describe("handleRequest", () => {
+  test("lists published daemon versions", async () => {
+    const response = await handleRequest(
+      new Request("https://downloads.example/v1/daemon/versions.json"),
+      environment({
+        "daemon/0.2.0/manifest.json": "manifest",
+        "daemon/0.1.0/manifest.json": "manifest",
+        "daemon/latest.json": "manifest",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toContain("max-age=60");
+    expect(
+      (await response.json()) as { versions: string[] },
+    ).toEqual({ versions: ["0.1.0", "0.2.0"] });
+  });
+
+  test("supports HEAD for the versions route", async () => {
+    const response = await handleRequest(
+      new Request("https://downloads.example/v1/daemon/versions.json", {
+        method: "HEAD",
+      }),
+      environment({}),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("");
+  });
+
   test("serves a binary with immutable download headers", async () => {
     const env = environment({
       "daemon/0.1.0/x86_64-unknown-linux-gnu/amarcode-daemon": "binary",

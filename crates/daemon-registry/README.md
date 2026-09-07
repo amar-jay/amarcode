@@ -7,6 +7,7 @@ publishing happens through Wrangler, never through a public HTTP route.
 ## Routes
 
 - `GET /health`
+- `GET /v1/daemon/versions.json`
 - `GET /v1/daemon/latest.json`
 - `GET /v1/daemon/latest.json.sig`
 - `GET /v1/daemon/:version/manifest.json`

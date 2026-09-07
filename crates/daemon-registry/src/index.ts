@@ -11,6 +11,7 @@ type ArtifactRoute = {
 const JSON_CACHE_CONTROL = "public, max-age=60, must-revalidate";
 const BINARY_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
+const VERSIONS_PATH = "/v1/daemon/versions.json";
 
 function json(
   value: unknown,
@@ -161,6 +162,28 @@ async function serveArtifact(
   return new Response(object.body, { status, headers });
 }
 
+async function listVersions(env: Env): Promise<string[]> {
+  const versions = new Set<string>();
+  let cursor: string | undefined;
+
+  do {
+    const page = await env.DAEMON_ARTIFACTS.list({
+      prefix: "daemon/",
+      delimiter: "/",
+      ...(cursor ? { cursor } : {}),
+    });
+
+    for (const prefix of page.delimitedPrefixes) {
+      const version = prefix.slice("daemon/".length, -1);
+      if (safeSegment(version)) versions.add(version);
+    }
+
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  return [...versions].sort();
+}
+
 export async function handleRequest(
   request: Request,
   env: Env,
@@ -178,6 +201,15 @@ export async function handleRequest(
 
   if (request.method !== "GET" && request.method !== "HEAD") {
     return json({ error: "method not allowed" }, 405, { allow: "GET, HEAD" });
+  }
+
+  if (url.pathname === VERSIONS_PATH) {
+    const headers = new Headers({
+      "cache-control": JSON_CACHE_CONTROL,
+      "x-content-type-options": "nosniff",
+    });
+    if (request.method === "HEAD") return new Response(null, { headers });
+    return json({ versions: await listVersions(env) }, 200, headers);
   }
 
   const route = resolveArtifactRoute(url.pathname);
