@@ -10,7 +10,10 @@
 //!
 //! Keep parsing and defaults here; do not open the database or bind sockets.
 
-use std::{env, path::PathBuf};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use crate::{Error, Result};
 
@@ -24,6 +27,11 @@ pub const DEFAULT_DB_NAME: &str = "workspace.sqlite3";
 pub const DEFAULT_ACP_REGISTRY_SOURCE: &str = "https://github.com/amar-jay/acp-registry.git";
 
 pub const LOCK_FILE_SUFFIX: &str = ".amarcode.lock";
+
+/// Must match the Tauri bundle identifier so desktop and daemon data share one
+/// platform-owned application directory.
+const APP_IDENTIFIER: &str = "com.amarcode.desktop";
+const DAEMON_DATA_DIRECTORY: &str = "data";
 
 /// Daemon configuration.
 #[derive(Debug, Clone)]
@@ -40,6 +48,12 @@ impl Config {
     /// Load config from environment variables and platform defaults.
     pub fn from_env() -> Result<Self> {
         let app_dir = resolve()?;
+        if env::var_os("AMARCODE_APPDIR")
+            .filter(|value| !value.is_empty())
+            .is_none()
+        {
+            migrate_legacy_default(&app_dir)?;
+        }
         let daemon_addr = std::env::var("AMARCODE_DAEMON_ADDR")
             .unwrap_or_else(|_| DEFAULT_DAEMON_ADDR.to_string());
         let db_path = std::env::var("AMARCODE_STORE_PATH")
@@ -78,31 +92,78 @@ pub fn resolve() -> Result<PathBuf> {
 /// environment variable can never turn `purge` into an arbitrary directory
 /// deletion primitive.
 pub fn resolve_default() -> Result<PathBuf> {
+    dirs::data_local_dir()
+        .map(|root| root.join(APP_IDENTIFIER).join(DAEMON_DATA_DIRECTORY))
+        .ok_or_else(|| Error::msg("platform local data directory is unavailable"))
+}
+
+fn legacy_default() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
-    {
-        let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;
-        Ok(PathBuf::from(home).join(".amarcode"))
-    }
-
+    let path = dirs::home_dir().map(|home| home.join(".amarcode"));
     #[cfg(target_os = "windows")]
-    {
-        let local =
-            env::var_os("LOCALAPPDATA").ok_or_else(|| Error::msg("LOCALAPPDATA is not set"))?;
-        Ok(PathBuf::from(local).join("amarcode"))
-    }
-
+    let path = env::var_os("LOCALAPPDATA").map(|root| PathBuf::from(root).join("amarcode"));
     #[cfg(target_os = "macos")]
-    {
-        let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;
-        Ok(PathBuf::from(home)
-            .join("Library")
-            .join("Application Support")
-            .join("amarcode"))
-    }
-
+    let path = dirs::home_dir().map(|home| home.join("Library/Application Support/amarcode"));
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-    {
-        let home = env::var_os("HOME").ok_or_else(|| Error::msg("HOME is not set"))?;
-        Ok(PathBuf::from(home).join(".amarcode"))
+    let path = dirs::home_dir().map(|home| home.join(".amarcode"));
+
+    path
+}
+
+fn migrate_legacy_default(destination: &Path) -> Result<()> {
+    let Some(source) = legacy_default() else {
+        return Ok(());
+    };
+    migrate_directory(&source, destination)
+}
+
+fn migrate_directory(source: &Path, destination: &Path) -> Result<()> {
+    if destination.exists() || !source.exists() {
+        return Ok(());
+    }
+    let parent = destination.parent().ok_or_else(|| {
+        Error::msg(format!(
+            "application data directory has no parent: {}",
+            destination.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        Error::msg(format!(
+            "failed to create application data directory {}: {error}",
+            parent.display()
+        ))
+    })?;
+    fs::rename(&source, destination).map_err(|error| {
+        Error::msg(format!(
+            "failed to migrate Amarcode data from {} to {}: {error}",
+            source.display(),
+            destination.display()
+        ))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::migrate_directory;
+
+    #[test]
+    fn migrates_legacy_data_into_shared_app_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "amarcode-config-migration-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let source = root.join("legacy");
+        let destination = root.join("com.amarcode.desktop/data");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("workspace.sqlite3"), b"existing data").unwrap();
+
+        migrate_directory(&source, &destination).unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(
+            std::fs::read(destination.join("workspace.sqlite3")).unwrap(),
+            b"existing data"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

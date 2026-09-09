@@ -189,7 +189,7 @@ had.
 ## Runtime lifecycle
 
 1. **Config** (`config` + `app_dir`)
-   - `AMARCODE_APPDIR` / platform default (`~/.amarcode` on Linux)
+   - `AMARCODE_APPDIR` / platform default (Tauri local app-data directory's `data` child)
    - `AMARCODE_DAEMON_ADDR` (default `127.0.0.1:43821`)
    - `AMARCODE_STORE_PATH` (default `{app_dir}/workspace.sqlite3`)
    - Logging filter: `AMARCODE_LOG` → `RUST_LOG` → `amarcode_daemon=info`
@@ -379,7 +379,7 @@ cargo run -p amarcode-daemon -- run
 
 # optional
 export AMARCODE_DAEMON_ADDR=127.0.0.1:43821
-export AMARCODE_APPDIR=~/.amarcode
+export AMARCODE_APPDIR=/custom/path/amarcode-data
 export AMARCODE_LOG=amarcode_daemon=debug
 ```
 
