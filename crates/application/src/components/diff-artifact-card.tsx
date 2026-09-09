@@ -1,6 +1,9 @@
 import { useState } from "react";
+import { useAtomValue } from "jotai";
 import { ChevronRight } from "lucide-react";
 import type { MessagePart } from "@/types";
+import { workspacePathAtom } from "@/state";
+import { workspaceFileTarget } from "@/lib/workspace-link";
 
 type DiffChange = {
   operation: "create" | "modify" | "delete";
@@ -248,6 +251,7 @@ export function diffArtifacts(parts: MessagePart[]): DiffArtifact[] {
 
 export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
   const [expanded, setExpanded] = useState(false);
+  const workspacePath = useAtomValue(workspacePathAtom);
   const changedFiles = artifact.changes.length;
   const additionCount =
     artifact.patch
@@ -259,18 +263,24 @@ export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
       ?.split("\n")
       .filter((line) => line.startsWith("-") && !line.startsWith("---"))
       .length ?? 0;
+  const singleFilePath =
+    changedFiles === 1
+      ? (workspaceFileTarget(artifact.changes[0].path, workspacePath)?.path ??
+        artifact.changes[0].path)
+      : null;
   const summary =
-    changedFiles > 0
-      ? `${changedFiles} ${changedFiles === 1 ? "file" : "files"} changed`
+    singleFilePath ??
+    (changedFiles > 0
+      ? `${changedFiles} files changed`
       : artifact.patch
         ? "Patch preview"
-        : "File changes";
+        : "File changes");
 
   return (
     <section className="mt-3 overflow-hidden rounded-lg border border-border/80 bg-muted/25">
       <button
         type="button"
-        className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-left text-xs transition-colors hover:bg-muted/50"
+        className="flex w-full min-w-0 items-center gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-muted/50"
         aria-expanded={expanded}
         aria-label={`${expanded ? "Collapse" : "Expand"} ${artifact.title.toLowerCase()}`}
         onClick={() => setExpanded((value) => !value)}
@@ -279,10 +289,15 @@ export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
           className={`size-3.5 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
           aria-hidden
         />
-        <span className="font-medium">{artifact.title}</span>
-        <span className="text-muted-foreground">{summary}</span>
+        <span className="shrink-0 font-medium">{artifact.title}</span>
+        <span
+          className={`min-w-0 flex-1 truncate text-muted-foreground ${singleFilePath ? "font-mono [direction:rtl] text-left" : ""}`}
+          title={singleFilePath ?? undefined}
+        >
+          {summary}
+        </span>
         {artifact.patch && (
-          <span className="font-mono text-muted-foreground">
+          <span className="shrink-0 font-mono text-muted-foreground">
             <span className="text-emerald-600 dark:text-emerald-400">
               +{additionCount}
             </span>{" "}
