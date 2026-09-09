@@ -1,3 +1,7 @@
 - [ ] add search to session page. 
 - [ ] two modes not necessary.
 - [ ] Default workspace path in config
+- [ ] remove download button in markdown rendered code component
+- [ ] inspect if current implementation affects token usage
+- [ ] in editor pane section and basically entire app, git branch doesnt change even on sync
+- [ ] NO need for seperate .amarcode and ~/.local/com.amarcode.app

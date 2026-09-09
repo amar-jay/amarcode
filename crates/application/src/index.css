@@ -295,13 +295,13 @@
   opacity: 0.95;
 }
 
-/* Language label row — reserve right side for copy/download */
+/* Language label row — reserve right side for copy */
 [data-streamdown="code-block-header"] {
   display: flex;
   align-items: center;
   min-height: 2rem;
   height: 2rem;
-  padding: 0 2.75rem 0 0.65rem;
+  padding: 0 2.25rem 0 0.65rem;
   border-bottom: 1px solid var(--border);
   background: color-mix(in oklab, var(--muted) 65%, var(--card));
   color: var(--muted-foreground);

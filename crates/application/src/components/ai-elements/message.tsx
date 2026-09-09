@@ -389,6 +389,7 @@ export const MessageResponse = memo(
       plugins={streamdownPlugins}
       linkSafety={tauriLinkSafety}
       controls={{
+        code: { copy: true, download: false },
         table: { copy: true, download: false, fullscreen: false },
       }}
       // Dual theme so shiki tokens track light/dark app chrome.
