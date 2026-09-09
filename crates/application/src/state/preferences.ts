@@ -44,6 +44,14 @@ export const defaultAgentIdAtom = atomWithStorage<string>(
   { getOnInit: true },
 );
 
+/** Default project folder for new chats / home composer. */
+export const defaultWorkspacePathAtom = atomWithStorage<string>(
+  "amarcode-default-workspace",
+  "",
+  undefined,
+  { getOnInit: true },
+);
+
 /** How aggressively agent actions are approved from the prompt composer. */
 export const permissionModeAtom = atomWithStorage<PermissionMode>(
   "amarcode-permission-mode",

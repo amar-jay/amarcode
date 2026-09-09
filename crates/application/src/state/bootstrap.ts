@@ -16,8 +16,14 @@ import {
   ensureDaemonEventStream,
   subscribeDaemonEvents,
 } from "./daemon-events";
-import { defaultAgentIdAtom, paletteAtom, themeAtom } from "./preferences";
+import {
+  defaultAgentIdAtom,
+  defaultWorkspacePathAtom,
+  paletteAtom,
+  themeAtom,
+} from "./preferences";
 import { liveChatAtom, loadLiveChatAtom } from "./live-chat";
+import { workspacePathAtom } from "./workspace";
 
 /**
  * One-time app shell effects: theme DOM sync, catalogs, event stream, defaults.
@@ -38,6 +44,7 @@ export function useAppBootstrap() {
   const theme = useAtomValue(themeAtom);
   const palette = useAtomValue(paletteAtom);
   const defaultAgentId = useAtomValue(defaultAgentIdAtom);
+  const defaultWorkspacePath = useAtomValue(defaultWorkspacePathAtom);
   const selectedAgent = useAtomValue(selectedAgentAtom);
   const selectedAgentId = useAtomValue(selectedAgentIdAtom);
 
@@ -45,6 +52,7 @@ export function useAppBootstrap() {
   const refreshChats = useSetAtom(refreshChatsAtom);
   const loadLiveChat = useSetAtom(loadLiveChatAtom);
   const setSelectedAgentId = useSetAtom(selectedAgentIdAtom);
+  const setWorkspacePath = useSetAtom(workspacePathAtom);
   const retryDaemon = useCallback(
     () => setDaemonAttempt((attempt) => attempt + 1),
     [],
@@ -187,6 +195,14 @@ export function useAppBootstrap() {
   useEffect(() => {
     if (!selectedAgentId) setSelectedAgentId(defaultAgentId);
   }, [defaultAgentId, selectedAgentId, setSelectedAgentId]);
+
+  // Seed the home composer without replacing a workspace already selected in
+  // this app session or one loaded from an existing chat.
+  useEffect(() => {
+    if (!store.get(workspacePathAtom) && defaultWorkspacePath) {
+      setWorkspacePath(defaultWorkspacePath);
+    }
+  }, [defaultWorkspacePath, setWorkspacePath, store]);
 
   return {
     daemonConnection,

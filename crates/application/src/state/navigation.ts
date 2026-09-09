@@ -2,6 +2,7 @@ import { atom } from "jotai";
 import type { AgentInfo, Chat } from "@/types";
 import { chatsAtom } from "./chats";
 import { selectedAgentAtom, selectAgentAtom } from "./agents";
+import { defaultWorkspacePathAtom } from "./preferences";
 import { workspacePathAtom } from "./workspace";
 
 /**
@@ -33,8 +34,9 @@ export const selectChatAtom = atom(null, (get, set, chatId: string) => {
 });
 
 /** Return to the home composer. */
-export const startNewChatAtom = atom(null, (_get, set) => {
+export const startNewChatAtom = atom(null, (get, set) => {
   set(activeSessionAtom, null);
+  set(workspacePathAtom, get(defaultWorkspacePathAtom));
 });
 
 /** After home composer creates a chat + fires a prompt. */

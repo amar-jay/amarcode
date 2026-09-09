@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Check,
   Bot,
@@ -13,6 +14,7 @@ import {
   Sun,
   LoaderCircle,
   Download,
+  FolderOpen,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -144,6 +146,8 @@ export function SettingsDialog({
   agents,
   defaultAgentId,
   onDefaultAgentChange,
+  defaultWorkspacePath,
+  onDefaultWorkspacePathChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -154,6 +158,8 @@ export function SettingsDialog({
   agents: AgentInfo[];
   defaultAgentId: string;
   onDefaultAgentChange: (agentId: string) => void;
+  defaultWorkspacePath: string;
+  onDefaultWorkspacePathChange: (path: string) => void;
 }) {
   const [page, setPage] = useState<SettingsPage>("appearance");
   const [restoreWorkspace, setRestoreWorkspace] = usePreference(
@@ -239,6 +245,8 @@ export function SettingsDialog({
                   agents={agents}
                   defaultAgentId={defaultAgentId}
                   onDefaultAgentChange={onDefaultAgentChange}
+                  defaultWorkspacePath={defaultWorkspacePath}
+                  onDefaultWorkspacePathChange={onDefaultWorkspacePathChange}
                   portalContainer={dialogContentElement}
                 />
               ) : (
@@ -263,11 +271,15 @@ function AgentDefaultsPanel({
   agents,
   defaultAgentId,
   onDefaultAgentChange,
+  defaultWorkspacePath,
+  onDefaultWorkspacePathChange,
   portalContainer,
 }: {
   agents: AgentInfo[];
   defaultAgentId: string;
   onDefaultAgentChange: (agentId: string) => void;
+  defaultWorkspacePath: string;
+  onDefaultWorkspacePathChange: (path: string) => void;
   portalContainer: HTMLElement | null;
 }) {
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
@@ -276,6 +288,21 @@ function AgentDefaultsPanel({
   const selectedAgent = agents.find((agent) => agent.id === defaultAgentId);
   const availableAgents = agents.filter((agent) => agent.available);
   const installableAgents = agents.filter((agent) => !agent.available);
+
+  const chooseDefaultWorkspace = async () => {
+    try {
+      const path = await open({
+        directory: true,
+        multiple: false,
+        title: "Choose the default workspace",
+        defaultPath: defaultWorkspacePath || undefined,
+      });
+      if (typeof path === "string") onDefaultWorkspacePathChange(path);
+    } catch (error) {
+      console.error("Error choosing default workspace:", error);
+      notify("Unable to open the directory picker.", "error");
+    }
+  };
 
   const handleInstall = async (agent: AgentInfo) => {
     if (installingId) return;
@@ -412,6 +439,39 @@ function AgentDefaultsPanel({
               </Command>
             </PopoverContent>
           </Popover>
+        </Field>
+        <Field>
+          <FieldContent>
+            <FieldLabel htmlFor="default-workspace">Default workspace</FieldLabel>
+            <FieldDescription>
+              Project folder preselected when starting a new chat.
+            </FieldDescription>
+          </FieldContent>
+          <div className="flex min-w-0 gap-2">
+            <Button
+              id="default-workspace"
+              type="button"
+              variant="outline"
+              className="min-w-0 flex-1 justify-start font-normal"
+              title={defaultWorkspacePath || "Choose a workspace"}
+              onClick={() => void chooseDefaultWorkspace()}
+            >
+              <FolderOpen className="size-4 shrink-0" />
+              <span className="truncate">
+                {defaultWorkspacePath || "Choose a workspace"}
+              </span>
+            </Button>
+            {defaultWorkspacePath && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onDefaultWorkspacePathChange("")}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
         </Field>
       </FieldSet>
     </div>

@@ -15,6 +15,7 @@ import {
   agentsAtom,
   chatsAtom,
   defaultAgentIdAtom,
+  defaultWorkspacePathAtom,
   latestTurnByChatAtom,
   liveChatIsWorkingAtom,
   openStartedChatAtom,
@@ -57,6 +58,9 @@ export default function App() {
   const selectedAgent = useAtomValue(selectedAgentAtom);
   const failStartedPrompt = useSetAtom(failStartedPromptAtom);
   const [defaultAgentId, setDefaultAgentId] = useAtom(defaultAgentIdAtom);
+  const [defaultWorkspacePath, setDefaultWorkspacePath] = useAtom(
+    defaultWorkspacePathAtom,
+  );
   const chats = useAtomValue(chatsAtom);
   const activeSession = useAtomValue(activeSessionAtom);
   const latestTurns = useAtomValue(latestTurnByChatAtom);
@@ -145,6 +149,8 @@ export default function App() {
         onPaletteChange={setPalette}
         agents={agents}
         defaultAgentId={defaultAgentId}
+        defaultWorkspacePath={defaultWorkspacePath}
+        onDefaultWorkspacePathChange={setDefaultWorkspacePath}
         onDefaultAgentChange={(agentId) => {
           setDefaultAgentId(agentId);
           selectAgentById(agentId);
