@@ -3,6 +3,7 @@ import type { SessionConfigOption } from "@/types";
 import {
   applyAssignments,
   assignmentsFromOptions,
+  hasAcpSessionMode,
   isRenderableConfigOption,
 } from "./session-config";
 
@@ -61,5 +62,13 @@ describe("ACP session config state", () => {
       true,
       0.2,
     ]);
+  });
+
+  it("detects when ACP provides the session mode control", () => {
+    expect(hasAcpSessionMode(options)).toBe(true);
+    expect(
+      hasAcpSessionMode([{ ...options[0], id: "custom", category: "mode" }]),
+    ).toBe(true);
+    expect(hasAcpSessionMode(options.slice(1))).toBe(false);
   });
 });

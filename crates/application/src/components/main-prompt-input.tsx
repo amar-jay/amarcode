@@ -54,6 +54,7 @@ import type {
 import { permissionModeAtom, type PermissionMode } from "@/state";
 import {
   assignmentsFromOptions,
+  hasAcpSessionMode,
   loadLastSessionConfig,
   rememberSessionConfig,
 } from "@/state/session-config";
@@ -81,11 +82,13 @@ const permissionModes: Array<{
 function NewChatOptionsMenu({
   options,
   permissionMode,
+  showPermissionFallback,
   onPermissionModeChange,
   onConfigChange,
 }: {
   options: SessionConfigOption[];
   permissionMode: PermissionMode;
+  showPermissionFallback: boolean;
   onPermissionModeChange: (mode: PermissionMode) => void;
   onConfigChange: (configId: string, value: SessionConfigValue) => void;
 }) {
@@ -102,34 +105,38 @@ function NewChatOptionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuLabel>New chat options</DropdownMenuLabel>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            {permissionMode === "confirm" ? (
-              <ShieldQuestion />
-            ) : (
-              <ShieldCheck />
-            )}
-            <span>Permissions</span>
-            <span className="ml-auto text-[10px] text-muted-foreground">
-              {
-                permissionModes.find((item) => item.value === permissionMode)
-                  ?.label
-              }
-            </span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="min-w-32">
-            {permissionModes.map((item) => (
-              <DropdownMenuItem
-                key={item.value}
-                onSelect={() => onPermissionModeChange(item.value)}
-              >
-                <span className="min-w-0 flex-1">{item.label}</span>
-                {permissionMode === item.value && <Check />}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        {visibleOptions.length > 0 && <DropdownMenuSeparator />}
+        {showPermissionFallback && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              {permissionMode === "confirm" ? (
+                <ShieldQuestion />
+              ) : (
+                <ShieldCheck />
+              )}
+              <span>Permissions</span>
+              <span className="ml-auto text-[10px] text-muted-foreground">
+                {
+                  permissionModes.find((item) => item.value === permissionMode)
+                    ?.label
+                }
+              </span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="min-w-32">
+              {permissionModes.map((item) => (
+                <DropdownMenuItem
+                  key={item.value}
+                  onSelect={() => onPermissionModeChange(item.value)}
+                >
+                  <span className="min-w-0 flex-1">{item.label}</span>
+                  {permissionMode === item.value && <Check />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
+        {showPermissionFallback && visibleOptions.length > 0 && (
+          <DropdownMenuSeparator />
+        )}
         {visibleOptions.map((option) =>
           option.type === "boolean" ? (
             <DropdownMenuCheckboxItem
@@ -268,6 +275,7 @@ function AppPromptInput({
       : pendingOptions.length
         ? pendingOptions
         : lastKnown;
+  const showPermissionFallback = !hasAcpSessionMode(options);
 
   const openDirectory = async () => {
     try {
@@ -393,43 +401,47 @@ function AppPromptInput({
                   void selectConfig(configId, value)
                 }
               />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <PromptInputButton
-                    size="sm"
-                    className={cn(
-                      "hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
-                    )}
-                  >
-                    {permissionMode === "confirm" ? (
-                      <ShieldQuestion className="size-4" />
-                    ) : (
-                      <ShieldCheck className="size-4" />
-                    )}
-                    <span>
-                      {permissionModes.find(
-                        (item) => item.value === permissionMode,
-                      )?.label ?? "Confirm actions"}
-                    </span>
-                  </PromptInputButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="center" className="w-24">
-                  {permissionModes.map((item) => (
-                    <DropdownMenuItem
-                      key={item.value}
-                      onSelect={() => setPermissionMode(item.value)}
-                      className="min-h-0 items-center py-1 text-foreground opacity-100 hover:text-foreground!"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="block py-0 text-xs">{item.label}</span>
-                      </span>
-                      {permissionMode === item.value && (
-                        <Check className="size-3.5 shrink-0" />
+              {showPermissionFallback && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <PromptInputButton
+                      size="sm"
+                      className={cn(
+                        "hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
                       )}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    >
+                      {permissionMode === "confirm" ? (
+                        <ShieldQuestion className="size-4" />
+                      ) : (
+                        <ShieldCheck className="size-4" />
+                      )}
+                      <span>
+                        {permissionModes.find(
+                          (item) => item.value === permissionMode,
+                        )?.label ?? "Confirm actions"}
+                      </span>
+                    </PromptInputButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="center" className="w-24">
+                    {permissionModes.map((item) => (
+                      <DropdownMenuItem
+                        key={item.value}
+                        onSelect={() => setPermissionMode(item.value)}
+                        className="min-h-0 items-center py-1 text-foreground opacity-100 hover:text-foreground!"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block py-0 text-xs">
+                            {item.label}
+                          </span>
+                        </span>
+                        {permissionMode === item.value && (
+                          <Check className="size-3.5 shrink-0" />
+                        )}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </>
           )}
           {onAgentSelected && (
@@ -457,6 +469,7 @@ function AppPromptInput({
             <NewChatOptionsMenu
               options={options}
               permissionMode={permissionMode}
+              showPermissionFallback={showPermissionFallback}
               onPermissionModeChange={setPermissionMode}
               onConfigChange={(configId, value) =>
                 void selectConfig(configId, value)

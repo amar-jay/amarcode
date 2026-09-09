@@ -69,3 +69,10 @@ export function applyAssignments(
 export function isRenderableConfigOption(option: SessionConfigOption): boolean {
   return option.type === "select" || option.type === "boolean";
 }
+
+/** Whether the agent owns session-mode / approval behavior through ACP. */
+export function hasAcpSessionMode(options: SessionConfigOption[]): boolean {
+  return options.some(
+    (option) => option.category === "mode" || option.id === "mode",
+  );
+}

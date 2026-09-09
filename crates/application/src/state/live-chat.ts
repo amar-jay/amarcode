@@ -18,7 +18,7 @@ import { permissionModeAtom } from "./preferences";
 import { getLatestTurnForChat } from "./daemon-events";
 import { refreshChatsAtom } from "./chats";
 import { activeSessionAtom } from "./navigation";
-import { rememberSessionConfig } from "./session-config";
+import { hasAcpSessionMode, rememberSessionConfig } from "./session-config";
 
 function isChatDetail(value: Chat | ChatDetail): value is ChatDetail {
   return "messages" in value;
@@ -344,6 +344,7 @@ export const applyLiveChatEventAtom = atom(
     ) {
       if (
         event.type === "approvalRequired" &&
+        !hasAcpSessionMode(live.sessionConfig) &&
         shouldAutoApprove(get(permissionModeAtom), event.payload.details)
       ) {
         void daemonApi
