@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   CircleAlert,
+  ChevronDown,
+  ChevronUp,
   KeyRound,
   LoaderCircle,
+  Search,
   Timer,
   Unplug,
+  X,
 } from "lucide-react";
 import {
   Conversation,
@@ -25,6 +29,7 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import AppPromptInput from "./main-prompt-input";
 import { PendingAgentRequestCard } from "./pending-agent-request";
 import {
@@ -47,8 +52,20 @@ import {
   subscribeDaemonEvents,
   verboseReasoningAtom,
 } from "@/state";
-import { groupChatBlocks } from "@/lib/message-parsing";
+import { groupChatBlocks, type ChatBlock } from "@/lib/message-parsing";
 import { UserMessage } from "./user-message";
+
+function searchableBlockText(block: ChatBlock): string {
+  if (block.kind === "user") return block.item.message.content;
+  return [
+    block.content,
+    ...block.timeline.flatMap((step) => [step.label, step.description ?? ""]),
+    ...block.diffs.flatMap((artifact) => [
+      artifact.title,
+      ...artifact.changes.map((change) => change.path),
+    ]),
+  ].join("\n");
+}
 
 function TurnLoadingIndicator({ label = "Thinking" }: { label?: string }) {
   return (
@@ -209,6 +226,11 @@ function LiveChatFailureBanner({
  * agent atoms); this component is render + wire-up only.
  */
 export function LiveChatScreen() {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchChatId, setSearchChatId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const session = useAtomValue(activeSessionAtom);
   const live = useAtomValue(liveChatAtom);
   const isWorking = useAtomValue(liveChatIsWorkingAtom);
@@ -232,6 +254,7 @@ export function LiveChatScreen() {
   // Open only when chat identity changes. Seed (turn-active, mode) is read
   // from activeSessionAtom inside the write atom — don't re-open on those.
   const chatId = session?.chat.id;
+  const showSearch = searchOpen && searchChatId === chatId;
 
   useEffect(() => {
     if (!chatId) return;
@@ -251,15 +274,98 @@ export function LiveChatScreen() {
     });
   }, [applyEvent]);
 
-  const messages = live?.detail?.messages ?? [];
+  const messages = useMemo(
+    () => live?.detail?.messages ?? [],
+    [live?.detail?.messages],
+  );
   const blocks = useMemo(
     () => groupChatBlocks(messages, isWorking, verboseReasoning),
     [messages, isWorking, verboseReasoning],
   );
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
+  const matchingBlockKeys = useMemo(
+    () =>
+      normalizedSearchQuery
+        ? blocks
+            .filter((block) =>
+              searchableBlockText(block)
+                .toLocaleLowerCase()
+                .includes(normalizedSearchQuery),
+            )
+            .map((block) => block.key)
+        : [],
+    [blocks, normalizedSearchQuery],
+  );
+  const matchingBlockKeySet = useMemo(
+    () => new Set(matchingBlockKeys),
+    [matchingBlockKeys],
+  );
+  const safeActiveMatchIndex = Math.min(
+    activeMatchIndex,
+    Math.max(0, matchingBlockKeys.length - 1),
+  );
+  const activeMatchKey = matchingBlockKeys[safeActiveMatchIndex] ?? null;
   const agentNames = useMemo(
     () => new Map(agents.map((candidate) => [candidate.id, candidate.name])),
     [agents],
   );
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setActiveMatchIndex(0);
+  }, []);
+
+  const openSearch = useCallback(() => {
+    if (searchOpen && searchChatId === chatId) {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+      return;
+    }
+    setSearchChatId(chatId ?? null);
+    setSearchQuery("");
+    setActiveMatchIndex(0);
+    setSearchOpen(true);
+  }, [chatId, searchChatId, searchOpen]);
+
+  const moveSearchResult = useCallback(
+    (direction: 1 | -1) => {
+      if (!matchingBlockKeys.length) return;
+      setActiveMatchIndex(
+        (current) =>
+          (Math.min(current, matchingBlockKeys.length - 1) +
+            direction +
+            matchingBlockKeys.length) %
+          matchingBlockKeys.length,
+      );
+    },
+    [matchingBlockKeys.length],
+  );
+
+  useEffect(() => {
+    if (!showSearch) return;
+    searchInputRef.current?.focus();
+  }, [showSearch]);
+
+  useEffect(() => {
+    if (!activeMatchKey) return;
+    document
+      .querySelector<HTMLElement>(
+        `[data-chat-search-key="${CSS.escape(activeMatchKey)}"]`,
+      )
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeMatchKey]);
+
+  useEffect(() => {
+    const handleFindShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        openSearch();
+      }
+    };
+    window.addEventListener("keydown", handleFindShortcut);
+    return () => window.removeEventListener("keydown", handleFindShortcut);
+  }, [openSearch]);
 
   if (!session || !live || live.chatId !== session.chat.id) {
     return (
@@ -294,38 +400,132 @@ export function LiveChatScreen() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col">
-      <header className="mr-2 flex items-center border-b px-6 py-1">
-        <h1 className="truncate text-sm font-medium">
-          {live.detail?.chat.title ?? session.chat.title ?? "Loading chat"}
-        </h1>
-        {live.loading && (
-          <LoaderCircle className="ml-2 size-4 animate-spin text-muted-foreground" />
-        )}
-        {isWorking && (
-          <span className="ml-3 text-xs text-muted-foreground">Working…</span>
-        )}
-        {live.contextRestoration && (
-          <span className="ml-3 text-xs text-muted-foreground">
-            {live.contextRestoration}…
-          </span>
-        )}
-        {!isWorking && live.runStatus && live.runStatus !== "running" && (
-          <span className="ml-3 text-xs text-muted-foreground">
-            {live.runStatus}
-          </span>
+      <header className="mr-2 flex min-h-9 items-center border-b px-6 py-1">
+        {showSearch ? (
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+            <div className="relative w-full max-w-sm">
+              <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                ref={searchInputRef}
+                type="search"
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  setActiveMatchIndex(0);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") closeSearch();
+                  if (event.key === "Enter")
+                    moveSearchResult(event.shiftKey ? -1 : 1);
+                }}
+                placeholder="Find in chat"
+                aria-label="Find in chat"
+                className="pr-16 pl-7 [&::-webkit-search-cancel-button]:hidden"
+              />
+              <span className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-[10px] tabular-nums text-muted-foreground">
+                {normalizedSearchQuery
+                  ? matchingBlockKeys.length
+                    ? `${safeActiveMatchIndex + 1} / ${matchingBlockKeys.length}`
+                    : "No results"
+                  : ""}
+              </span>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled={!matchingBlockKeys.length}
+              aria-label="Previous result"
+              title="Previous result (Shift+Enter)"
+              onClick={() => moveSearchResult(-1)}
+            >
+              <ChevronUp className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled={!matchingBlockKeys.length}
+              aria-label="Next result"
+              title="Next result (Enter)"
+              onClick={() => moveSearchResult(1)}
+            >
+              <ChevronDown className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Close chat search"
+              title="Close chat search (Escape)"
+              onClick={closeSearch}
+            >
+              <X className="size-4"/>
+            </Button>
+          </div>
+        ) : (
+          <>
+            <h1 className="min-w-0 truncate text-sm font-medium">
+              {live.detail?.chat.title ?? session.chat.title ?? "Loading chat"}
+            </h1>
+            {live.loading && (
+              <LoaderCircle className="ml-2 size-4 animate-spin text-muted-foreground" />
+            )}
+            {isWorking && (
+              <span className="ml-3 text-xs text-muted-foreground">
+                Working…
+              </span>
+            )}
+            {live.contextRestoration && (
+              <span className="ml-3 text-xs text-muted-foreground">
+                {live.contextRestoration}…
+              </span>
+            )}
+            {!isWorking && live.runStatus && live.runStatus !== "running" && (
+              <span className="ml-3 text-xs text-muted-foreground">
+                {live.runStatus}
+              </span>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="ml-auto"
+              aria-label="Find in chat"
+              title="Find in chat (Ctrl+F)"
+              onClick={openSearch}
+            >
+              <Search className="size-4" />
+            </Button>
+          </>
         )}
       </header>
       <Conversation>
         <ConversationContent className="mx-auto w-full max-w-3xl gap-2 py-8">
-          {blocks.map((block) => (
-            <UserMessage
-              key={block.key}
-              block={block}
-              verboseReasoning={verboseReasoning}
-              waitingLabel={waitingLabel}
-              agentNames={agentNames}
-            />
-          ))}
+          {blocks.map((block) => {
+            const matches = matchingBlockKeySet.has(block.key);
+            const active = block.key === activeMatchKey;
+            return (
+              <div
+                key={block.key}
+                data-chat-search-key={block.key}
+                className={`rounded-lg transition-[background-color,box-shadow] motion-reduce:scroll-auto ${
+                  active
+                    ? "bg-primary/8 ring-2 ring-primary/35"
+                    : matches
+                      ? "bg-primary/4 ring-1 ring-primary/15"
+                      : ""
+                }`}
+              >
+                <UserMessage
+                  block={block}
+                  verboseReasoning={verboseReasoning}
+                  waitingLabel={waitingLabel}
+                  agentNames={agentNames}
+                />
+              </div>
+            );
+          })}
           {showTurnPlaceholder && <TurnLoadingIndicator label={waitingLabel} />}
           {!live.loading && !messages.length && !isWorking && (
             <ConversationEmptyState
