@@ -14,9 +14,7 @@ use std::{
 
 use crate::{
     acp::AcpClient,
-    protocol::{
-        rpc::InstallAgentResult, AgentRpcMethod, AgentRuntimeStatus,
-    },
+    protocol::{rpc::InstallAgentResult, AgentRpcMethod, AgentRuntimeStatus},
     registry::{self, BinaryDistribution, PackageDistribution, RegistryAgent},
     service::session::{classify_acp_failure, with_stderr_detail},
     Error, Result,
@@ -81,10 +79,7 @@ impl AgentManager {
         })
     }
 
-    fn probe_runtime(
-        &self,
-        agent_id: &str,
-    ) -> Result<(AgentRuntimeStatus, Option<String>)> {
+    fn probe_runtime(&self, agent_id: &str) -> Result<(AgentRuntimeStatus, Option<String>)> {
         let resolved = self.resolve(agent_id)?;
         let (client, _inbound) = AcpClient::spawn(
             &resolved.command.to_string_lossy(),
@@ -146,9 +141,8 @@ fn install_kind(manifest: &RegistryAgent) -> Result<InstallKind> {
     if let Some(package) = manifest.distribution.uvx.clone() {
         return Ok(InstallKind::Uvx(package));
     }
-    let target = registry::current_binary_target().ok_or_else(|| {
-        Error::msg("no binary distribution is defined for this platform")
-    })?;
+    let target = registry::current_binary_target()
+        .ok_or_else(|| Error::msg("no binary distribution is defined for this platform"))?;
     let binary = manifest
         .distribution
         .binary
@@ -440,10 +434,7 @@ fn write_minimal_package_json(directory: &Path) -> Result<()> {
 }
 
 fn temp_dir(prefix: &str) -> Result<PathBuf> {
-    let path = std::env::temp_dir().join(format!(
-        "amarcode-{prefix}-{}",
-        uuid::Uuid::new_v4()
-    ));
+    let path = std::env::temp_dir().join(format!("amarcode-{prefix}-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&path).map_err(|error| {
         Error::msg(format!(
             "failed to create temp directory {}: {error}",

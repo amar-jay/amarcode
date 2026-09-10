@@ -21,7 +21,7 @@ use crate::{
             CancelResult, DeleteChatResult, GetAttachmentResult, HealthResult, PromptAttachment,
             PromptResultDto, RespondAgentParams, RespondAgentResult, VersionResult,
         },
-        AgentInfo, Chat, GetChatResult,
+        AcpEvent, AgentInfo, Chat, GetChatResult,
     },
     state::AppState,
 };
@@ -164,6 +164,22 @@ async fn get_chat(
     include_messages: bool,
 ) -> Result<GetChatResult, String> {
     state.get_chat(chat_id, include_messages).await
+}
+
+#[tauri::command]
+async fn list_acp_events_for_run(
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<Vec<AcpEvent>, String> {
+    state.list_acp_events_for_run(run_id).await
+}
+
+#[tauri::command]
+async fn list_acp_events_for_chat(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> Result<Vec<AcpEvent>, String> {
+    state.list_acp_events_for_chat(chat_id).await
 }
 
 #[tauri::command]
@@ -645,6 +661,8 @@ pub fn run() {
             create_chat,
             list_chats,
             get_chat,
+            list_acp_events_for_run,
+            list_acp_events_for_chat,
             get_attachment,
             delete_chat,
             prompt,

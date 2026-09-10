@@ -19,6 +19,10 @@ export type AgentFailureKind = "auth_required" | "adapter_exited" | "timeout" | 
 
 export type AgentRuntimeStatus = "ready" | "auth_required" | "unavailable" | "error";
 
+export type AcpEventDirection = "sent" | "received";
+
+export type AcpEvent = { id: number, agentRunId: string, direction: AcpEventDirection, method: string, payload: Record<string, unknown>, createdAt: string, };
+
 export type AgentDefinition = { id: string, name: string, command: string, arguments: Array<string>, environment: Array<[string, string]>, 
 /**
  * Whether the launch command currently resolves on this host.
@@ -64,6 +68,10 @@ export type CreateChatParams = { workspace_path: string, title: string | null, }
 export type ListChatsParams = { workspace_path: string | null, };
 
 export type GetChatParams = { chat_id: string, include_messages: boolean, };
+
+export type ListAcpEventsForRunParams = { run_id: string, };
+
+export type ListAcpEventsForChatParams = { chat_id: string, };
 
 export type DeleteChatParams = { chat_id: string, };
 

@@ -12,9 +12,9 @@ use crate::{
     protocol::{
         rpc::{
             methods, AuthenticateAgentResult, CancelResult, DeleteChatResult, GetAttachmentResult,
-            HealthResult, InstallAgentResult, ListAgentsResult, ListChatsResult, PromptAttachment,
-            PromptResultDto, RespondAgentParams, RespondAgentResult, SetSessionConfigOptionResult,
-            VersionResult,
+            HealthResult, InstallAgentResult, ListAcpEventsResult, ListAgentsResult,
+            ListChatsResult, PromptAttachment, PromptResultDto, RespondAgentParams,
+            RespondAgentResult, SetSessionConfigOptionResult, VersionResult,
         },
         AgentInfo, Chat, GetChatResult, SessionConfigAssignment, SessionConfigValue,
     },
@@ -95,6 +95,32 @@ impl AppState {
             json!({ "chat_id": chat_id, "include_messages": include_messages }),
         )
         .await
+    }
+
+    pub async fn list_acp_events_for_run(
+        &self,
+        run_id: String,
+    ) -> Result<Vec<crate::protocol::AcpEvent>, String> {
+        Ok(self
+            .call::<ListAcpEventsResult>(
+                methods::LIST_ACP_EVENTS_FOR_RUN,
+                json!({ "run_id": run_id }),
+            )
+            .await?
+            .events)
+    }
+
+    pub async fn list_acp_events_for_chat(
+        &self,
+        chat_id: String,
+    ) -> Result<Vec<crate::protocol::AcpEvent>, String> {
+        Ok(self
+            .call::<ListAcpEventsResult>(
+                methods::LIST_ACP_EVENTS_FOR_CHAT,
+                json!({ "chat_id": chat_id }),
+            )
+            .await?
+            .events)
     }
 
     pub async fn delete_chat(&self, chat_id: String) -> Result<DeleteChatResult, String> {

@@ -149,9 +149,9 @@ impl SessionManager {
         if let Ok(mut guard) = self.inner.by_chat.lock() {
             let hit = guard.iter_mut().find_map(|(chat_id, live)| {
                 if live.run_id == run_id {
-                    live.active_user_message_id
-                        .take()
-                        .map(|user_message_id| (chat_id.clone(), user_message_id, live.agent_id.clone()))
+                    live.active_user_message_id.take().map(|user_message_id| {
+                        (chat_id.clone(), user_message_id, live.agent_id.clone())
+                    })
                 } else {
                     None
                 }
@@ -170,9 +170,12 @@ impl SessionManager {
                 });
             }
         }
-        self.inner
-            .store
-            .update_run(run_id, RunStatus::Failed, None, Some(failure.message.as_str()))?;
+        self.inner.store.update_run(
+            run_id,
+            RunStatus::Failed,
+            None,
+            Some(failure.message.as_str()),
+        )?;
         self.emit(EditorEvent::RunUpdated {
             run_id: run_id.to_owned(),
             status: RunStatus::Failed,

@@ -2,10 +2,7 @@
 
 use serde_json::Value;
 
-use crate::{
-    acp::AcpError,
-    protocol::AgentFailureKind,
-};
+use crate::{acp::AcpError, protocol::AgentFailureKind};
 
 #[derive(Debug, Clone)]
 pub struct ClassifiedFailure {
@@ -22,19 +19,23 @@ impl std::fmt::Display for ClassifiedFailure {
 
 pub fn classify_acp_failure(error: &AcpError) -> ClassifiedFailure {
     match error {
-        AcpError::Remote { code, message, data } => classify_remote(*code, message, data.as_ref()),
+        AcpError::Remote {
+            code,
+            message,
+            data,
+        } => classify_remote(*code, message, data.as_ref()),
         AcpError::ConnectionClosed => ClassifiedFailure {
             kind: AgentFailureKind::AdapterExited,
             message: "Agent adapter exited unexpectedly".into(),
             auth_methods: None,
         },
-        AcpError::Timeout { .. }
-        | AcpError::IdleTimeout { .. }
-        | AcpError::TotalTimeout { .. } => ClassifiedFailure {
-            kind: AgentFailureKind::Timeout,
-            message: error.to_string(),
-            auth_methods: None,
-        },
+        AcpError::Timeout { .. } | AcpError::IdleTimeout { .. } | AcpError::TotalTimeout { .. } => {
+            ClassifiedFailure {
+                kind: AgentFailureKind::Timeout,
+                message: error.to_string(),
+                auth_methods: None,
+            }
+        }
         AcpError::Io(io) if io.kind() == std::io::ErrorKind::NotFound => ClassifiedFailure {
             kind: AgentFailureKind::Unavailable,
             message: format!("Underlying agent executable was not found: {io}"),
@@ -104,7 +105,10 @@ pub fn with_stderr_detail(failure: ClassifiedFailure, stderr_tail: &str) -> Clas
         return failure;
     }
     ClassifiedFailure {
-        message: format!("{}. Last adapter output: {line}", failure.message.trim_end_matches('.')),
+        message: format!(
+            "{}. Last adapter output: {line}",
+            failure.message.trim_end_matches('.')
+        ),
         ..failure
     }
 }
@@ -142,15 +146,16 @@ fn looks_like_auth(lower: &str, data: Option<&Value>) -> bool {
         return true;
     }
     match data {
-        Some(Value::Object(map)) => map
-            .get("type")
-            .and_then(Value::as_str)
-            .is_some_and(|value| {
-                let value = value.to_ascii_lowercase();
-                value == "agent" || value == "terminal" || value.contains("auth")
-            })
-            || map.contains_key("authMethods")
-            || map.contains_key("auth_methods"),
+        Some(Value::Object(map)) => {
+            map.get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|value| {
+                    let value = value.to_ascii_lowercase();
+                    value == "agent" || value == "terminal" || value.contains("auth")
+                })
+                || map.contains_key("authMethods")
+                || map.contains_key("auth_methods")
+        }
         Some(Value::Array(items)) => items.iter().any(|item| {
             item.get("type")
                 .and_then(Value::as_str)

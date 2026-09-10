@@ -6,9 +6,9 @@ pub mod types;
 
 pub use events::{EditorEvent, EventLine};
 pub use types::{
-    AgentDefinition, AgentFailureKind, AgentInfo, AgentRuntimeStatus, Chat, ChatDetail,
-    GetChatResult, Message, MessageDetail, MessagePart, MessagePartKind, MessageRole,
-    MessageStatus, RunStatus, SessionConfigAssignment, SessionConfigOption,
+    AcpEvent, AcpEventDirection, AgentDefinition, AgentFailureKind, AgentInfo, AgentRuntimeStatus,
+    Chat, ChatDetail, GetChatResult, Message, MessageDetail, MessagePart, MessagePartKind,
+    MessageRole, MessageStatus, RunStatus, SessionConfigAssignment, SessionConfigOption,
     SessionConfigSelectChoice, SessionConfigValue, TurnStatus,
 };
 
@@ -28,6 +28,8 @@ pub fn typescript_bindings() -> String {
         MessagePartKind::decl(&config),
         AgentFailureKind::decl(&config),
         AgentRuntimeStatus::decl(&config),
+        AcpEventDirection::decl(&config),
+        AcpEvent::decl(&config),
         AgentDefinition::decl(&config),
         AgentInfo::decl(&config),
         SessionConfigSelectChoice::decl(&config),
@@ -49,6 +51,8 @@ pub fn typescript_bindings() -> String {
         rpc::CreateChatParams::decl(&config),
         rpc::ListChatsParams::decl(&config),
         rpc::GetChatParams::decl(&config),
+        rpc::ListAcpEventsForRunParams::decl(&config),
+        rpc::ListAcpEventsForChatParams::decl(&config),
         rpc::DeleteChatParams::decl(&config),
         rpc::DeleteChatResult::decl(&config),
         rpc::GetAttachmentParams::decl(&config),

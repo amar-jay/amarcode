@@ -95,6 +95,25 @@ string_enum!(AgentRuntimeStatus {
     Error => "error",
 });
 
+string_enum!(AcpEventDirection {
+    Sent => "sent",
+    Received => "received",
+});
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct AcpEvent {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub agent_run_id: String,
+    pub direction: AcpEventDirection,
+    pub method: String,
+    #[ts(type = "Record<string, unknown>")]
+    pub payload: Value,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct AgentDefinition {
     pub id: String,

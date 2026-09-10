@@ -12,10 +12,11 @@ use crate::{
     protocol::rpc::{
         methods, AuthenticateAgentParams, AuthenticateAgentResult, CancelParams, CancelResult,
         CreateChatParams, DeleteChatParams, DeleteChatResult, GetAttachmentParams,
-        GetAttachmentResult, GetChatParams, HealthResult, InstallAgentParams, ListAgentsResult,
-        ListChatsParams, ListChatsResult, PromptParams, PromptResultDto, RespondAgentParams,
-        RespondAgentResult, SetSessionConfigOptionParams, SetSessionConfigOptionResult,
-        SubscribeEventsParams, VersionResult,
+        GetAttachmentResult, GetChatParams, HealthResult, InstallAgentParams,
+        ListAcpEventsForChatParams, ListAcpEventsForRunParams, ListAcpEventsResult,
+        ListAgentsResult, ListChatsParams, ListChatsResult, PromptParams, PromptResultDto,
+        RespondAgentParams, RespondAgentResult, SetSessionConfigOptionParams,
+        SetSessionConfigOptionResult, SubscribeEventsParams, VersionResult,
     },
     service::{ChatDetail, MessageDetail, PromptResult},
     App, Error, Result,
@@ -52,6 +53,12 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::CREATE_CHAT => Ok(DispatchOutcome::Result(create_chat(app, params)?)),
         methods::LIST_CHATS => Ok(DispatchOutcome::Result(list_chats(app, params)?)),
         methods::GET_CHAT => Ok(DispatchOutcome::Result(get_chat(app, params)?)),
+        methods::LIST_ACP_EVENTS_FOR_RUN => Ok(DispatchOutcome::Result(list_acp_events_for_run(
+            app, params,
+        )?)),
+        methods::LIST_ACP_EVENTS_FOR_CHAT => Ok(DispatchOutcome::Result(list_acp_events_for_chat(
+            app, params,
+        )?)),
         methods::GET_ATTACHMENT => Ok(DispatchOutcome::Result(get_attachment(app, params)?)),
         methods::DELETE_CHAT => Ok(DispatchOutcome::Result(delete_chat(app, params).await?)),
 
@@ -145,6 +152,45 @@ fn get_chat(app: &App, params: Value) -> Result<Value> {
         let chat = app.chats.get_required(&p.chat_id)?;
         to_value(chat)
     }
+}
+
+fn list_acp_events_for_run(app: &App, params: Value) -> Result<Value> {
+    let p: ListAcpEventsForRunParams = parse_params(params)?;
+    if app.store.get_run(&p.run_id)?.is_none() {
+        return Err(Error::msg(format!("agent run not found: {}", p.run_id)));
+    }
+    let events = app
+        .store
+        .acp_events(&p.run_id)?
+        .into_iter()
+        .map(wire_acp_event)
+        .collect::<Result<Vec<_>>>()?;
+    to_value(ListAcpEventsResult { events })
+}
+
+fn list_acp_events_for_chat(app: &App, params: Value) -> Result<Value> {
+    let p: ListAcpEventsForChatParams = parse_params(params)?;
+    app.chats.get_required(&p.chat_id)?;
+    let events = app
+        .store
+        .acp_events_for_chat(&p.chat_id)?
+        .into_iter()
+        .map(wire_acp_event)
+        .collect::<Result<Vec<_>>>()?;
+    to_value(ListAcpEventsResult { events })
+}
+
+fn wire_acp_event(event: crate::store::AcpEvent) -> Result<crate::protocol::AcpEvent> {
+    let payload = event.payload_value()?;
+    Ok(crate::protocol::AcpEvent {
+        id: event.id,
+        agent_run_id: event.agent_run_id,
+        direction: crate::protocol::AcpEventDirection::parse(event.direction.as_str())
+            .map_err(Error::msg)?,
+        method: event.method,
+        payload,
+        created_at: event.created_at,
+    })
 }
 
 fn get_attachment(app: &App, params: Value) -> Result<Value> {

@@ -67,18 +67,14 @@ impl SessionManager {
         }
     }
 
-    fn live_client_for_agent(
-        &self,
-        agent_id: &str,
-    ) -> Result<Option<(String, Arc<AcpClient>)>> {
+    fn live_client_for_agent(&self, agent_id: &str) -> Result<Option<(String, Arc<AcpClient>)>> {
         let guard = self
             .inner
             .by_chat
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?;
         Ok(guard.values().find_map(|live| {
-            (live.agent_id == agent_id)
-                .then(|| (live.run_id.clone(), Arc::clone(&live.client)))
+            (live.agent_id == agent_id).then(|| (live.run_id.clone(), Arc::clone(&live.client)))
         }))
     }
 

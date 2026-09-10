@@ -3,7 +3,7 @@ use serde_json::Value;
 use ts_rs::TS;
 
 use crate::{
-    AgentInfo, AgentRuntimeStatus, Chat, SessionConfigAssignment, SessionConfigOption,
+    AcpEvent, AgentInfo, AgentRuntimeStatus, Chat, SessionConfigAssignment, SessionConfigOption,
     SessionConfigValue,
 };
 
@@ -17,6 +17,8 @@ pub mod methods {
     pub const CREATE_CHAT: &str = "create_chat";
     pub const LIST_CHATS: &str = "list_chats";
     pub const GET_CHAT: &str = "get_chat";
+    pub const LIST_ACP_EVENTS_FOR_RUN: &str = "list_acp_events_for_run";
+    pub const LIST_ACP_EVENTS_FOR_CHAT: &str = "list_acp_events_for_chat";
     pub const GET_ATTACHMENT: &str = "get_attachment";
     pub const DELETE_CHAT: &str = "delete_chat";
     pub const PROMPT: &str = "prompt";
@@ -139,6 +141,21 @@ pub struct GetChatParams {
     pub chat_id: String,
     #[serde(default = "default_true")]
     pub include_messages: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ListAcpEventsForRunParams {
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ListAcpEventsForChatParams {
+    pub chat_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListAcpEventsResult {
+    pub events: Vec<AcpEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

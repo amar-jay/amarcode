@@ -9,12 +9,13 @@ use provider::Config;
 #[tokio::main]
 async fn main() -> agent_client_protocol::Result<()> {
     let config_path = config_path();
-		if config_path.is_none() {
-			return Err(agent_client_protocol::Error::new(
-				0x14, // 0x14 = 20 = INVALID_ARGUMENT
-				"amarcode-acp: need to define --config flag with a file path".to_string()));
-		}
-		let config_path = config_path.unwrap();
+    if config_path.is_none() {
+        return Err(agent_client_protocol::Error::new(
+            0x14, // 0x14 = 20 = INVALID_ARGUMENT
+            "amarcode-acp: need to define --config flag with a file path".to_string(),
+        ));
+    }
+    let config_path = config_path.unwrap();
     let config = match Config::from_file(&config_path) {
         Ok(config) => config,
         Err(error) => {
@@ -38,5 +39,5 @@ fn config_path() -> Option<PathBuf> {
         }
     }
     eprintln!("amarcode-acp: need to define --config flag with a file path");
-		return None;
+    return None;
 }

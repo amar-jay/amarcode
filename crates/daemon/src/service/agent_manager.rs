@@ -176,8 +176,7 @@ impl AgentManager {
                 .as_ref()
                 .filter(|_| available)
                 .map(|path| path.to_string_lossy().into_owned()),
-            unavailable_reason: (!available)
-                .then(|| unavailable_reason(&self.tools_dir, agent)),
+            unavailable_reason: (!available).then(|| unavailable_reason(&self.tools_dir, agent)),
         }
     }
 
@@ -330,7 +329,10 @@ fn bun_install_cache_dir() -> Option<PathBuf> {
         }
     }
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    let path = PathBuf::from(home).join(".bun").join("install").join("cache");
+    let path = PathBuf::from(home)
+        .join(".bun")
+        .join("install")
+        .join("cache");
     path.is_dir().then_some(path)
 }
 
@@ -655,8 +657,12 @@ mod tests {
         let bin = test_directory();
         let cache = test_directory();
         create_test_command(&bin, "bunx");
-        std::fs::create_dir_all(cache.join("@agentclientprotocol").join("codex-acp@1.10.0@@@1"))
-            .expect("create cached package");
+        std::fs::create_dir_all(
+            cache
+                .join("@agentclientprotocol")
+                .join("codex-acp@1.10.0@@@1"),
+        )
+        .expect("create cached package");
         let mut definition = agent(
             "bunx",
             vec![("PATH".into(), bin.to_string_lossy().into_owned())],

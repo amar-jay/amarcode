@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   KeyRound,
+  ListTree,
   LoaderCircle,
   Search,
   Timer,
@@ -19,7 +20,7 @@ import {
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import type { AgentFailureKind, PromptAttachment } from "@/types";
+import type { AcpEvent, AgentFailureKind, PromptAttachment } from "@/types";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
 import {
@@ -30,7 +31,9 @@ import {
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Toggle } from "@/components/ui/toggle";
 import AppPromptInput from "./main-prompt-input";
+import { ActivityView } from "./activity/activity-view";
 import { PendingAgentRequestCard } from "./pending-agent-request";
 import {
   activeSessionAtom,
@@ -54,6 +57,8 @@ import {
 } from "@/state";
 import { groupChatBlocks, type ChatBlock } from "@/lib/message-parsing";
 import { UserMessage } from "./user-message";
+
+type ConversationView = "chat" | "activity";
 
 function searchableBlockText(block: ChatBlock): string {
   if (block.kind === "user") return block.item.message.content;
@@ -226,10 +231,15 @@ function LiveChatFailureBanner({
  * agent atoms); this component is render + wire-up only.
  */
 export function LiveChatScreen() {
+  const [conversationView, setConversationView] =
+    useState<ConversationView>("chat");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchChatId, setSearchChatId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const [activityEvents, setActivityEvents] = useState<AcpEvent[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const session = useAtomValue(activeSessionAtom);
   const live = useAtomValue(liveChatAtom);
@@ -254,7 +264,45 @@ export function LiveChatScreen() {
   // Open only when chat identity changes. Seed (turn-active, mode) is read
   // from activeSessionAtom inside the write atom — don't re-open on those.
   const chatId = session?.chat.id;
-  const showSearch = searchOpen && searchChatId === chatId;
+  const showSearch =
+    conversationView === "chat" && searchOpen && searchChatId === chatId;
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setConversationView("chat");
+      setSearchOpen(false);
+    });
+  }, [chatId]);
+
+  useEffect(() => {
+    if (conversationView !== "activity" || !chatId) return;
+
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setActivityEvents([]);
+      setActivityError(null);
+      setActivityLoading(true);
+    });
+    void daemonApi
+      .listAcpEventsForChat(chatId)
+      .then((events) => {
+        if (active) setActivityEvents(events);
+      })
+      .catch((cause: unknown) => {
+        if (!active) return;
+        setActivityError(
+          cause instanceof Error ? cause.message : String(cause),
+        );
+      })
+      .finally(() => {
+        if (active) setActivityLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [chatId, conversationView]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -460,7 +508,7 @@ export function LiveChatScreen() {
               title="Close chat search (Escape)"
               onClick={closeSearch}
             >
-              <X className="size-4"/>
+              <X className="size-4" />
             </Button>
           </div>
         ) : (
@@ -486,21 +534,43 @@ export function LiveChatScreen() {
                 {live.runStatus}
               </span>
             )}
+            <Toggle
+              size="sm"
+              className="ml-auto"
+              pressed={conversationView === "activity"}
+              onPressedChange={(pressed) => {
+                closeSearch();
+                setConversationView(pressed ? "activity" : "chat");
+              }}
+              aria-label={
+                conversationView === "activity"
+                  ? "Show conversation"
+                  : "Show activity"
+              }
+              title={
+                conversationView === "activity"
+                  ? "Show conversation"
+                  : "Show activity"
+              }
+            >
+              <ListTree className="size-4" />
+              <span className="hidden sm:inline">Activity</span>
+            </Toggle>
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
-              className="ml-auto"
               aria-label="Find in chat"
               title="Find in chat (Ctrl+F)"
               onClick={openSearch}
+              className={conversationView === "activity" ? "hidden" : ""}
             >
               <Search className="size-4" />
             </Button>
           </>
         )}
       </header>
-      <Conversation>
+      <Conversation className={conversationView === "activity" ? "hidden" : ""}>
         <ConversationContent className="mx-auto w-full max-w-3xl gap-2 py-8">
           {blocks.map((block) => {
             const matches = matchingBlockKeySet.has(block.key);
@@ -536,6 +606,18 @@ export function LiveChatScreen() {
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
+      <div
+        className={
+          conversationView === "activity" ? "flex min-h-0 flex-1" : "hidden"
+        }
+      >
+        <ActivityView
+          key={chatId}
+          events={activityEvents}
+          loading={activityLoading}
+          error={activityError}
+        />
+      </div>
       <div className="px-4 pb-4">
         {live.pendingRequest && (
           <PendingAgentRequestCard
