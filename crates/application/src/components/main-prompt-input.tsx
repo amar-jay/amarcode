@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useAtom } from "jotai";
 import {
   PromptInput,
   PromptInputBody,
@@ -19,29 +18,14 @@ import {
   AttachmentRemove,
   Attachments,
 } from "@/components/ai-elements/attachments";
+
+
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Check,
-  Ellipsis,
   FolderOpen,
-  ShieldCheck,
-  ShieldQuestion,
 } from "lucide-react";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
-import { cn } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   AgentInfo,
@@ -51,7 +35,6 @@ import type {
   SessionConfigOption,
   SessionConfigValue,
 } from "@/types";
-import { permissionModeAtom, type PermissionMode } from "@/state";
 import {
   assignmentsFromOptions,
   hasAcpSessionMode,
@@ -60,134 +43,7 @@ import {
 } from "@/state/session-config";
 import { AgentSelectionDialog } from "./agent-selection-dialog";
 import { SessionConfigControls } from "./session-config-controls";
-
-const permissionModes: Array<{
-  value: PermissionMode;
-  label: string;
-}> = [
-  {
-    value: "confirm",
-    label: "Confirm",
-  },
-  {
-    value: "auto-edit",
-    label: "Auto-edit",
-  },
-  {
-    value: "full-agentic",
-    label: "Agentic",
-  },
-];
-
-function NewChatOptionsMenu({
-  options,
-  permissionMode,
-  showPermissionFallback,
-  onPermissionModeChange,
-  onConfigChange,
-}: {
-  options: SessionConfigOption[];
-  permissionMode: PermissionMode;
-  showPermissionFallback: boolean;
-  onPermissionModeChange: (mode: PermissionMode) => void;
-  onConfigChange: (configId: string, value: SessionConfigValue) => void;
-}) {
-  const visibleOptions = options.filter(
-    (option) => option.type === "boolean" || option.type === "select",
-  );
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <PromptInputButton tooltip="More options" aria-label="More options">
-          <Ellipsis className="size-4" />
-        </PromptInputButton>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuLabel>New chat options</DropdownMenuLabel>
-        {showPermissionFallback && (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              {permissionMode === "confirm" ? (
-                <ShieldQuestion />
-              ) : (
-                <ShieldCheck />
-              )}
-              <span>Permissions</span>
-              <span className="ml-auto text-[10px] text-muted-foreground">
-                {
-                  permissionModes.find((item) => item.value === permissionMode)
-                    ?.label
-                }
-              </span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="min-w-32">
-              {permissionModes.map((item) => (
-                <DropdownMenuItem
-                  key={item.value}
-                  onSelect={() => onPermissionModeChange(item.value)}
-                >
-                  <span className="min-w-0 flex-1">{item.label}</span>
-                  {permissionMode === item.value && <Check />}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        )}
-        {showPermissionFallback && visibleOptions.length > 0 && (
-          <DropdownMenuSeparator />
-        )}
-        {visibleOptions.map((option) =>
-          option.type === "boolean" ? (
-            <DropdownMenuCheckboxItem
-              key={option.id}
-              checked={Boolean(option.current_value)}
-              title={option.description ?? undefined}
-              onCheckedChange={(checked) =>
-                onConfigChange(option.id, {
-                  type: "boolean",
-                  value: checked === true,
-                })
-              }
-            >
-              {option.name}
-            </DropdownMenuCheckboxItem>
-          ) : (
-            <DropdownMenuSub key={option.id}>
-              <DropdownMenuSubTrigger title={option.description ?? undefined}>
-                <span>{option.name}</span>
-                <span className="ml-auto max-w-20 truncate text-[10px] text-muted-foreground">
-                  {
-                    (option.options ?? []).find(
-                      (choice) => choice.value === option.current_value,
-                    )?.name
-                  }
-                </span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="min-w-36">
-                {(option.options ?? []).map((choice) => (
-                  <DropdownMenuItem
-                    key={choice.value}
-                    title={choice.description ?? undefined}
-                    onSelect={() =>
-                      onConfigChange(option.id, {
-                        type: "id",
-                        value: choice.value,
-                      })
-                    }
-                  >
-                    <span className="min-w-0 flex-1">{choice.name}</span>
-                    {option.current_value === choice.value && <Check />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          ),
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
+import NewChatOptionsMenu from "./new-chat-options-menu";
 
 function PromptAttachmentPreviews() {
   const attachments = usePromptInputAttachments();
@@ -260,7 +116,6 @@ function AppPromptInput({
   sessionConfig,
   onSessionConfigChange,
 }: AppPromptInputProps) {
-  const [permissionMode, setPermissionMode] = useAtom(permissionModeAtom);
   const [pendingConfig, setPendingConfig] = useState<{
     agentId: string;
     options: SessionConfigOption[];
@@ -401,47 +256,6 @@ function AppPromptInput({
                   void selectConfig(configId, value)
                 }
               />
-              {showPermissionFallback && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <PromptInputButton
-                      size="sm"
-                      className={cn(
-                        "hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
-                      )}
-                    >
-                      {permissionMode === "confirm" ? (
-                        <ShieldQuestion className="size-4" />
-                      ) : (
-                        <ShieldCheck className="size-4" />
-                      )}
-                      <span>
-                        {permissionModes.find(
-                          (item) => item.value === permissionMode,
-                        )?.label ?? "Confirm actions"}
-                      </span>
-                    </PromptInputButton>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="center" className="w-24">
-                    {permissionModes.map((item) => (
-                      <DropdownMenuItem
-                        key={item.value}
-                        onSelect={() => setPermissionMode(item.value)}
-                        className="min-h-0 items-center py-1 text-foreground opacity-100 hover:text-foreground!"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block py-0 text-xs">
-                            {item.label}
-                          </span>
-                        </span>
-                        {permissionMode === item.value && (
-                          <Check className="size-3.5 shrink-0" />
-                        )}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
             </>
           )}
           {onAgentSelected && (
@@ -468,9 +282,7 @@ function AppPromptInput({
           {!isChatComposer && (
             <NewChatOptionsMenu
               options={options}
-              permissionMode={permissionMode}
               showPermissionFallback={showPermissionFallback}
-              onPermissionModeChange={setPermissionMode}
               onConfigChange={(configId, value) =>
                 void selectConfig(configId, value)
               }

@@ -2,7 +2,7 @@ import type { JsonValue } from "@/types";
 
 export const PERMISSION_MODES = [
   "confirm",
-  "auto-edit",
+  "autoedit",
   "full-agentic",
 ] as const;
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
@@ -18,7 +18,7 @@ export function shouldAutoApprove(
   details: JsonValue,
 ): boolean {
   if (mode === "full-agentic") return true;
-  if (mode !== "auto-edit") return false;
+  if (mode !== "autoedit") return false;
   const record = asRecord(details);
   const tool = asRecord(record?.toolCall) ?? record;
   if (!tool) return false;
