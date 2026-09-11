@@ -5,12 +5,14 @@
 //!
 //! ## Store-first rule
 //!
-//! For every meaningful ACP outcome (request result or inbound notification):
+//! For every meaningful ACP outcome (request result or durable inbound notification):
 //!
-//! 1. **Persist** to `store` (run/message/parts/`acp_events`)
+//! 1. **Persist** product state and selected raw milestones to `store`
 //! 2. **Then** publish `EditorEvent` / complete the client RPC result
 //!
 //! Never fan out or return durable claims that SQLite does not yet contain.
+//! Token-level session updates are deliberately not duplicated in `acp_events`;
+//! their accumulated message/part state remains durable.
 //!
 //! ## Layout
 //!

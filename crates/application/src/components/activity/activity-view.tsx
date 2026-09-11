@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { ChevronRight, Search } from "lucide-react";
+import type { AgentRun } from "@/types";
 import type { RawActivityEvent } from "@/lib/activity-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,118 @@ const eventTimeFormatter = new Intl.DateTimeFormat(undefined, {
   second: "2-digit",
   fractionalSecondDigits: 3,
 });
+
+const runColors = [
+  "bg-emerald-500",
+  "bg-violet-400",
+  "bg-orange-400",
+  "bg-sky-500",
+  "bg-pink-400",
+] as const;
+
+function durationLabel(milliseconds: number) {
+  const seconds = milliseconds / 1_000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  const minutes = seconds / 60;
+  if (minutes < 60) return `${minutes.toFixed(minutes < 10 ? 1 : 0)}m`;
+  const hours = minutes / 60;
+  return `${hours.toFixed(hours < 10 ? 1 : 0)}h`;
+}
+
+function agentColor(agentId: string) {
+  let hash = 0;
+  for (const character of agentId)
+    hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  return runColors[Math.abs(hash) % runColors.length];
+}
+
+function AgentRunTimeline({ runs }: { runs: AgentRun[] }) {
+  const [capturedNow] = useState(() => Date.now());
+  const timeline = useMemo(() => {
+    const validRuns = runs
+      .map((run) => ({
+        run,
+        start: Date.parse(run.started_at),
+        end: run.finished_at ? Date.parse(run.finished_at) : capturedNow,
+      }))
+      .filter(
+        ({ start, end }) => Number.isFinite(start) && Number.isFinite(end),
+      )
+      .sort((left, right) => left.start - right.start);
+    if (!validRuns.length) return null;
+
+    const start = Math.min(...validRuns.map((item) => item.start));
+    const end = Math.max(
+      ...validRuns.map((item) => Math.max(item.start, item.end)),
+    );
+    const span = Math.max(end - start, 1);
+    const lanes = new Map<string, typeof validRuns>();
+    for (const item of validRuns) {
+      const lane = lanes.get(item.run.agent_id) ?? [];
+      lane.push(item);
+      lanes.set(item.run.agent_id, lane);
+    }
+    return { start, end, span, lanes: [...lanes.entries()] };
+  }, [capturedNow, runs]);
+
+  if (!timeline) return null;
+
+  return (
+    <section
+      className="shrink-0 border-b bg-muted/20"
+      aria-label="Agent run timeline"
+    >
+      <div className="flex items-center justify-between border-b px-6 py-1.5 text-[10px] text-muted-foreground">
+        <span className="font-medium uppercase tracking-wider">Agent runs</span>
+        <span className="font-mono tabular-nums">
+          {runs.length} runs · {durationLabel(timeline.span)}
+        </span>
+      </div>
+      <div className="max-h-28 overflow-y-auto px-3 py-2">
+        {timeline.lanes.map(([agentId, lane]) => (
+          <div key={agentId} className="flex h-5 items-center gap-2">
+            <div
+              className="w-28 shrink-0 truncate text-right font-mono text-[9px] text-muted-foreground"
+              title={agentId}
+            >
+              {agentId}
+            </div>
+            <div className="relative h-3 flex-1 overflow-hidden rounded-[2px] bg-muted/60">
+              {[25, 50, 75].map((position) => (
+                <span
+                  key={position}
+                  className="absolute inset-y-0 border-l border-background/70"
+                  style={{ left: `${position}%` }}
+                />
+              ))}
+              {lane.map(({ run, start, end }) => {
+                const left = ((start - timeline.start) / timeline.span) * 100;
+                const width =
+                  ((Math.max(end, start) - start) / timeline.span) * 100;
+                const stoppedAt = run.finished_at ?? "Still running";
+                const title = `${run.agent_id}\n${run.status}\n${new Date(start).toLocaleString()} → ${stoppedAt === "Still running" ? stoppedAt : new Date(end).toLocaleString()}\n${durationLabel(Math.max(end - start, 0))}`;
+                return (
+                  <span
+                    key={run.id}
+                    className={cn(
+                      "absolute inset-y-0 rounded-[2px] ring-1 ring-black/10",
+                      agentColor(run.agent_id),
+                      run.status === "failed" && "bg-red-400",
+                      run.status === "running" && "animate-pulse",
+                    )}
+                    style={{ left: `${left}%`, width: `max(3px, ${width}%)` }}
+                    title={title}
+                    aria-label={title.replaceAll("\n", ", ")}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 function ActivitySearch({ onSearch }: { onSearch: (query: string) => void }) {
   const [draftQuery, setDraftQuery] = useState("");
@@ -136,10 +249,12 @@ function JsonTreeNode({
 
 export function ActivityView({
   events,
+  runs,
   loading = false,
   error = null,
 }: {
   events: RawActivityEvent[];
+  runs: AgentRun[];
   loading?: boolean;
   error?: string | null;
 }) {
@@ -185,6 +300,8 @@ export function ActivityView({
         </span>
       </div>
 
+      <AgentRunTimeline runs={runs} />
+
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div
           ref={scrollRef}
@@ -218,9 +335,10 @@ export function ActivityView({
                         selectedEventId === event.id ? "selected" : undefined
                       }
                       tabIndex={0}
-                      className={cn("cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset text-xs",
-														// sent ? "bg-emerald-100/50 dark:bg-emerald-900" : "bg-orange-100/50 dark:bg-orange-900"
-											)}
+                      className={cn(
+                        "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset text-xs",
+                        // sent ? "bg-emerald-100/50 dark:bg-emerald-900" : "bg-orange-100/50 dark:bg-orange-900"
+                      )}
                       onClick={() => setSelectedEventId(event.id)}
                       onKeyDown={(keyboardEvent) => {
                         if (
@@ -243,10 +361,15 @@ export function ActivityView({
                           {eventTimeFormatter.format(new Date(event.createdAt))}
                         </time>
                       </TableCell>
-                      <TableCell className={cn("align-top text-center font-medium",
-												sent ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400"
-											)}>
-                          {sent ? "Sent" : "Recv"}
+                      <TableCell
+                        className={cn(
+                          "align-top text-center font-medium",
+                          sent
+                            ? "text-green-700 dark:text-green-400"
+                            : "text-red-700 dark:text-red-400",
+                        )}
+                      >
+                        {sent ? "Sent" : "Recv"}
                       </TableCell>
                       <TableCell className="overflow-hidden text-ellipsis align-top">
                         {event.method}

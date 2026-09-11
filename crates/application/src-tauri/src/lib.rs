@@ -21,7 +21,7 @@ use crate::{
             CancelResult, DeleteChatResult, GetAttachmentResult, HealthResult, PromptAttachment,
             PromptResultDto, RespondAgentParams, RespondAgentResult, VersionResult,
         },
-        AcpEvent, AgentInfo, Chat, GetChatResult,
+        AcpEvent, AgentInfo, AgentRun, Chat, GetChatResult,
     },
     state::AppState,
 };
@@ -180,6 +180,14 @@ async fn list_acp_events_for_chat(
     chat_id: String,
 ) -> Result<Vec<AcpEvent>, String> {
     state.list_acp_events_for_chat(chat_id).await
+}
+
+#[tauri::command]
+async fn list_agent_runs_for_chat(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> Result<Vec<AgentRun>, String> {
+    state.list_agent_runs_for_chat(chat_id).await
 }
 
 #[tauri::command]
@@ -663,6 +671,7 @@ pub fn run() {
             get_chat,
             list_acp_events_for_run,
             list_acp_events_for_chat,
+            list_agent_runs_for_chat,
             get_attachment,
             delete_chat,
             prompt,

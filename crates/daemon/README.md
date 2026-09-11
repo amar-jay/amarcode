@@ -263,7 +263,7 @@ SQLite file, embedded migrations under `migrations/`.
 | `agent_runs`    | One execution of an agent inside a chat              |
 | `messages`      | Chat messages                                        |
 | `message_parts` | Structured parts (text, tool call, thinking, …)      |
-| `acp_events`    | Append-only raw ACP JSON-RPC log per run             |
+| `acp_events`    | Selectively retained raw ACP milestones per run      |
 
 `Store` is a `Mutex<Connection>` with table-focused methods in
 `agents` / `chats` / `runs` / `messages` / `events`.

@@ -20,7 +20,12 @@ import {
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import type { AcpEvent, AgentFailureKind, PromptAttachment } from "@/types";
+import type {
+  AcpEvent,
+  AgentFailureKind,
+  AgentRun,
+  PromptAttachment,
+} from "@/types";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
 import {
@@ -238,6 +243,7 @@ export function LiveChatScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   const [activityEvents, setActivityEvents] = useState<AcpEvent[]>([]);
+  const [activityRuns, setActivityRuns] = useState<AgentRun[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -281,13 +287,18 @@ export function LiveChatScreen() {
     queueMicrotask(() => {
       if (!active) return;
       setActivityEvents([]);
+      setActivityRuns([]);
       setActivityError(null);
       setActivityLoading(true);
     });
-    void daemonApi
-      .listAcpEventsForChat(chatId)
-      .then((events) => {
-        if (active) setActivityEvents(events);
+    void Promise.all([
+      daemonApi.listAcpEventsForChat(chatId),
+      daemonApi.listAgentRunsForChat(chatId),
+    ])
+      .then(([events, runs]) => {
+        if (!active) return;
+        setActivityEvents(events);
+        setActivityRuns(runs);
       })
       .catch((cause: unknown) => {
         if (!active) return;
@@ -614,6 +625,7 @@ export function LiveChatScreen() {
         <ActivityView
           key={chatId}
           events={activityEvents}
+          runs={activityRuns}
           loading={activityLoading}
           error={activityError}
         />

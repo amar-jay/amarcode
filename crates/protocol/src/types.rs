@@ -115,6 +115,18 @@ pub struct AcpEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AgentRun {
+    pub id: String,
+    pub chat_id: String,
+    pub agent_id: String,
+    pub acp_session_id: Option<String>,
+    pub status: RunStatus,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct AgentDefinition {
     pub id: String,
     pub name: String,

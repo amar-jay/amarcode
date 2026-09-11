@@ -14,9 +14,10 @@ use crate::{
         CreateChatParams, DeleteChatParams, DeleteChatResult, GetAttachmentParams,
         GetAttachmentResult, GetChatParams, HealthResult, InstallAgentParams,
         ListAcpEventsForChatParams, ListAcpEventsForRunParams, ListAcpEventsResult,
-        ListAgentsResult, ListChatsParams, ListChatsResult, PromptParams, PromptResultDto,
-        RespondAgentParams, RespondAgentResult, SetSessionConfigOptionParams,
-        SetSessionConfigOptionResult, SubscribeEventsParams, VersionResult,
+        ListAgentRunsForChatParams, ListAgentRunsResult, ListAgentsResult, ListChatsParams,
+        ListChatsResult, PromptParams, PromptResultDto, RespondAgentParams, RespondAgentResult,
+        SetSessionConfigOptionParams, SetSessionConfigOptionResult, SubscribeEventsParams,
+        VersionResult,
     },
     service::{ChatDetail, MessageDetail, PromptResult},
     App, Error, Result,
@@ -57,6 +58,9 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
             app, params,
         )?)),
         methods::LIST_ACP_EVENTS_FOR_CHAT => Ok(DispatchOutcome::Result(list_acp_events_for_chat(
+            app, params,
+        )?)),
+        methods::LIST_AGENT_RUNS_FOR_CHAT => Ok(DispatchOutcome::Result(list_agent_runs_for_chat(
             app, params,
         )?)),
         methods::GET_ATTACHMENT => Ok(DispatchOutcome::Result(get_attachment(app, params)?)),
@@ -178,6 +182,13 @@ fn list_acp_events_for_chat(app: &App, params: Value) -> Result<Value> {
         .map(wire_acp_event)
         .collect::<Result<Vec<_>>>()?;
     to_value(ListAcpEventsResult { events })
+}
+
+fn list_agent_runs_for_chat(app: &App, params: Value) -> Result<Value> {
+    let p: ListAgentRunsForChatParams = parse_params(params)?;
+    app.chats.get_required(&p.chat_id)?;
+    let runs = app.store.list_runs_for_chat(&p.chat_id)?;
+    to_value(ListAgentRunsResult { runs })
 }
 
 fn wire_acp_event(event: crate::store::AcpEvent) -> Result<crate::protocol::AcpEvent> {

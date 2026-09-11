@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AgentInfo,
   AcpEvent,
+  AgentRun,
   AgentResponse,
   CancelResult,
   Chat,
@@ -179,6 +180,8 @@ export const daemonApi = {
     invoke("list_acp_events_for_run", { runId }),
   listAcpEventsForChat: (chatId: string): Promise<AcpEvent[]> =>
     invoke("list_acp_events_for_chat", { chatId }),
+  listAgentRunsForChat: (chatId: string): Promise<AgentRun[]> =>
+    invoke("list_agent_runs_for_chat", { chatId }),
   getAttachment: (
     chatId: string,
     attachmentId: string,

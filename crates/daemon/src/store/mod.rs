@@ -17,11 +17,11 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    protocol::{MessageRole, MessageStatus, RpcDirection, RpcEnvelope, RunStatus},
+    protocol::{MessageRole, MessageStatus, RpcDirection, RpcEnvelope},
     Error, Result,
 };
 
-pub use crate::protocol::{AgentDefinition, Chat, Message, MessagePart};
+pub use crate::protocol::{AgentDefinition, AgentRun, Chat, Message, MessagePart};
 
 pub mod agents;
 pub mod chats;
@@ -44,18 +44,6 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../../migrations/0003_chat_session_config.sql"),
     ),
 ];
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentRun {
-    pub id: String,
-    pub chat_id: String,
-    pub agent_id: String,
-    pub acp_session_id: Option<String>,
-    pub status: RunStatus,
-    pub started_at: String,
-    pub finished_at: Option<String>,
-    pub error_message: Option<String>,
-}
 
 /// Persisted ACP traffic row (DB form of [`RpcEnvelope`] plus run metadata).
 #[derive(Debug, Clone, Serialize, Deserialize)]

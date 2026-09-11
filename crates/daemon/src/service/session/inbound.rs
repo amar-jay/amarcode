@@ -51,8 +51,11 @@ fn handle_inbound(
 ) -> Result<()> {
     match msg {
         AcpInbound::Notification { event, envelope } => {
-            // 1. STORE raw envelope
-            inner.store.save_acp_envelope(run_id, &envelope)?;
+            // Persist durable protocol milestones, but not high-frequency
+            // streaming deltas whose product state is stored below.
+            if should_persist_notification(&envelope) {
+                inner.store.save_acp_envelope(run_id, &envelope)?;
+            }
             if !run_owns_chat(inner, run_id, chat_id)? {
                 debug!(%run_id, %chat_id, "ignoring notification from replaced ACP run");
                 return Ok(());
@@ -436,7 +439,8 @@ fn apply_session_update(
             // The submitted prompt has already been persisted as a user
             // message before `session/prompt` is sent. Some ACP agents echo
             // it back as a session update; never turn that echo into an
-            // assistant message. The raw notification remains in acp_events.
+            // assistant message. This redundant echo is not retained as raw
+            // activity either.
         }
         "agent_thought_chunk" => {
             let message_id = ensure_streaming_message(
@@ -493,7 +497,8 @@ fn apply_session_update(
         | "pending_interaction"
         | "interaction_resolved"
         | "model_changed" => {
-            // Informational ACP / Grok telemetry; already logged in acp_events.
+            // Informational ACP / Grok telemetry. Low-frequency milestones are
+            // retained in acp_events by the inbound retention policy.
             // `pending_interaction` is resolved inside Grok (yolo), not via
             // `session/request_permission`, so it must not become ApprovalRequired.
         }
@@ -545,6 +550,32 @@ fn session_update_kind(payload: &Value) -> Option<&str> {
     update.get("sessionUpdate").and_then(Value::as_str)
 }
 
+/// Raw ACP traffic is an activity/debugging aid, not the source used to
+/// restore chats. Avoid duplicating token streams and repeated snapshots that
+/// are already folded into messages, message parts, or live session state.
+fn should_persist_notification(envelope: &RpcEnvelope) -> bool {
+    let Some(kind) = session_update_kind(&envelope.payload) else {
+        return true;
+    };
+
+    match kind {
+        "agent_message_chunk" | "agent_thought_chunk" | "user_message_chunk" => false,
+        // This is commonly a complete command catalog repeated during a run.
+        // It is neither used for chat restore nor exposed as product state.
+        "available_commands_update" => false,
+        // `tool_call` retains the start. For updates, retain only terminal
+        // milestones; intermediate output remains in derived message parts.
+        "tool_call_update" | "tool_call_delta_chunk" => {
+            let update = envelope.payload.get("update").unwrap_or(&envelope.payload);
+            matches!(
+                update.get("status").and_then(Value::as_str),
+                Some("completed" | "failed" | "cancelled")
+            )
+        }
+        _ => true,
+    }
+}
+
 fn is_reasoning_message_chunk(update: &Value) -> bool {
     matches!(
         update
@@ -564,8 +595,60 @@ mod tests {
 
     use super::{
         apply_session_title, apply_session_update, is_reasoning_message_chunk,
-        looks_like_session_update, new_pending_request_id, session_update_kind, SessionInner,
+        looks_like_session_update, new_pending_request_id, session_update_kind,
+        should_persist_notification, SessionInner,
     };
+
+    fn notification(kind: &str, fields: serde_json::Value) -> crate::protocol::RpcEnvelope {
+        let mut update = serde_json::Map::new();
+        update.insert("sessionUpdate".into(), json!(kind));
+        if let Some(fields) = fields.as_object() {
+            update.extend(fields.clone());
+        }
+        crate::protocol::RpcEnvelope {
+            direction: crate::protocol::RpcDirection::Received,
+            method: "session/update".into(),
+            payload: json!({ "sessionId": "session-1", "update": update }),
+        }
+    }
+
+    #[test]
+    fn skips_redundant_session_update_streams() {
+        for kind in [
+            "agent_message_chunk",
+            "agent_thought_chunk",
+            "user_message_chunk",
+            "available_commands_update",
+        ] {
+            assert!(!should_persist_notification(&notification(kind, json!({}))));
+        }
+        assert!(!should_persist_notification(&notification(
+            "tool_call_update",
+            json!({ "status": "in_progress" })
+        )));
+        assert!(!should_persist_notification(&notification(
+            "tool_call_delta_chunk",
+            json!({ "data": "partial output" })
+        )));
+    }
+
+    #[test]
+    fn retains_meaningful_and_terminal_session_updates() {
+        for status in ["completed", "failed", "cancelled"] {
+            assert!(should_persist_notification(&notification(
+                "tool_call_update",
+                json!({ "status": status })
+            )));
+        }
+        assert!(should_persist_notification(&notification(
+            "tool_call",
+            json!({ "status": "in_progress" })
+        )));
+        assert!(should_persist_notification(&notification(
+            "plan",
+            json!({ "entries": [] })
+        )));
+    }
 
     #[test]
     fn session_info_title_replaces_fallback_and_emits_chat_update() {

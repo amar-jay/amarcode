@@ -12,9 +12,9 @@ use crate::{
     protocol::{
         rpc::{
             methods, AuthenticateAgentResult, CancelResult, DeleteChatResult, GetAttachmentResult,
-            HealthResult, InstallAgentResult, ListAcpEventsResult, ListAgentsResult,
-            ListChatsResult, PromptAttachment, PromptResultDto, RespondAgentParams,
-            RespondAgentResult, SetSessionConfigOptionResult, VersionResult,
+            HealthResult, InstallAgentResult, ListAcpEventsResult, ListAgentRunsResult,
+            ListAgentsResult, ListChatsResult, PromptAttachment, PromptResultDto,
+            RespondAgentParams, RespondAgentResult, SetSessionConfigOptionResult, VersionResult,
         },
         AgentInfo, Chat, GetChatResult, SessionConfigAssignment, SessionConfigValue,
     },
@@ -121,6 +121,19 @@ impl AppState {
             )
             .await?
             .events)
+    }
+
+    pub async fn list_agent_runs_for_chat(
+        &self,
+        chat_id: String,
+    ) -> Result<Vec<crate::protocol::AgentRun>, String> {
+        Ok(self
+            .call::<ListAgentRunsResult>(
+                methods::LIST_AGENT_RUNS_FOR_CHAT,
+                json!({ "chat_id": chat_id }),
+            )
+            .await?
+            .runs)
     }
 
     pub async fn delete_chat(&self, chat_id: String) -> Result<DeleteChatResult, String> {

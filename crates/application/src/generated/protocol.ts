@@ -23,6 +23,8 @@ export type AcpEventDirection = "sent" | "received";
 
 export type AcpEvent = { id: number, agentRunId: string, direction: AcpEventDirection, method: string, payload: Record<string, unknown>, createdAt: string, };
 
+export type AgentRun = { id: string, chat_id: string, agent_id: string, acp_session_id: string | null, status: RunStatus, started_at: string, finished_at: string | null, error_message: string | null, };
+
 export type AgentDefinition = { id: string, name: string, command: string, arguments: Array<string>, environment: Array<[string, string]>, 
 /**
  * Whether the launch command currently resolves on this host.
@@ -72,6 +74,8 @@ export type GetChatParams = { chat_id: string, include_messages: boolean, };
 export type ListAcpEventsForRunParams = { run_id: string, };
 
 export type ListAcpEventsForChatParams = { chat_id: string, };
+
+export type ListAgentRunsForChatParams = { chat_id: string, };
 
 export type DeleteChatParams = { chat_id: string, };
 

@@ -6,10 +6,10 @@ pub mod types;
 
 pub use events::{EditorEvent, EventLine};
 pub use types::{
-    AcpEvent, AcpEventDirection, AgentDefinition, AgentFailureKind, AgentInfo, AgentRuntimeStatus,
-    Chat, ChatDetail, GetChatResult, Message, MessageDetail, MessagePart, MessagePartKind,
-    MessageRole, MessageStatus, RunStatus, SessionConfigAssignment, SessionConfigOption,
-    SessionConfigSelectChoice, SessionConfigValue, TurnStatus,
+    AcpEvent, AcpEventDirection, AgentDefinition, AgentFailureKind, AgentInfo, AgentRun,
+    AgentRuntimeStatus, Chat, ChatDetail, GetChatResult, Message, MessageDetail, MessagePart,
+    MessagePartKind, MessageRole, MessageStatus, RunStatus, SessionConfigAssignment,
+    SessionConfigOption, SessionConfigSelectChoice, SessionConfigValue, TurnStatus,
 };
 
 /// Increment when a wire change is not backward compatible.
@@ -30,6 +30,7 @@ pub fn typescript_bindings() -> String {
         AgentRuntimeStatus::decl(&config),
         AcpEventDirection::decl(&config),
         AcpEvent::decl(&config),
+        AgentRun::decl(&config),
         AgentDefinition::decl(&config),
         AgentInfo::decl(&config),
         SessionConfigSelectChoice::decl(&config),
@@ -53,6 +54,7 @@ pub fn typescript_bindings() -> String {
         rpc::GetChatParams::decl(&config),
         rpc::ListAcpEventsForRunParams::decl(&config),
         rpc::ListAcpEventsForChatParams::decl(&config),
+        rpc::ListAgentRunsForChatParams::decl(&config),
         rpc::DeleteChatParams::decl(&config),
         rpc::DeleteChatResult::decl(&config),
         rpc::GetAttachmentParams::decl(&config),
