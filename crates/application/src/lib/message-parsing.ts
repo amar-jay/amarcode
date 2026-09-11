@@ -47,7 +47,6 @@ export type ToolKind =
   | "other";
 
 export function getToolKindIcon(kind?: ToolKind): LucideIcon {
-  console.log("getToolKindIcon kind:", kind);
   if (!kind) return Wrench;
   if (!(kind in TOOL_KIND_ICONS)) return Wrench;
   return TOOL_KIND_ICONS[kind];
@@ -174,7 +173,6 @@ function toolSummary(part: MessagePart, _verbose: boolean) {
     if (!record.kind) {
       record.kind = cleanToolTitle(label).toLocaleLowerCase();
     }
-    console.log("tool kind: ", record.kind, "label:", label);
     const kind = stringed(
       record.kind,
       stringed(record.label, "other"),
