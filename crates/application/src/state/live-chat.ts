@@ -242,7 +242,6 @@ export const applyLiveChatEventAtom = atom(
 
     if (event.type === "chatUpdated" && event.payload.chat_id === live.chatId) {
       void set(scheduleLiveChatRefreshAtom);
-      void set(refreshChatsAtom);
       return;
     }
 

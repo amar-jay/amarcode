@@ -12,13 +12,13 @@ const command = {
 describe("permission modes", () => {
   it("only full agentic approves commands", () => {
     expect(shouldAutoApprove("confirm", command)).toBe(false);
-    expect(shouldAutoApprove("auto-edit", command)).toBe(false);
+    expect(shouldAutoApprove("autoedit", command)).toBe(false);
     expect(shouldAutoApprove("full-agentic", command)).toBe(true);
   });
 
-  it("auto-edit approves file edits", () => {
+  it("autoedit approves file edits", () => {
     expect(
-      shouldAutoApprove("auto-edit", {
+      shouldAutoApprove("autoedit", {
         toolCall: { kind: "edit", rawInput: { path: "src/app.ts" } },
       }),
     ).toBe(true);
