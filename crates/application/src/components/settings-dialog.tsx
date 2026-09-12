@@ -15,6 +15,7 @@ import {
   LoaderCircle,
   Download,
   Database,
+  DatabaseZap,
   FolderOpen,
   Trash2,
   TriangleAlert,
@@ -64,6 +65,12 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -245,7 +252,7 @@ export function SettingsDialog({
                 </BreadcrumbList>
               </Breadcrumb>
             </header>
-            <div className="flex flex-1 flex-col overflow-y-auto p-6">
+            <div className="flex flex-1 flex-col overflow-y-hidden p-6">
               {page === "appearance" ? (
                 <AppearancePanel
                   theme={theme}
@@ -383,14 +390,14 @@ function DaemonDataPanel() {
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         Control diagnostic data recorded by the background service.
       </p>
-      <Separator className="my-6" />
+      <Separator className="my-5" />
       <div className="rounded-xl border border-border">
-        <div className="flex items-center gap-4 px-4 py-4">
+        <div className="flex items-center gap-4 px-4 py-3">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium">Store raw ACP events</p>
             <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-              Keep agent protocol traffic for diagnostics. This can include
-              prompts, tool output, and file content, and may grow quickly.
+              Save protocol traffic for diagnostics. It may include prompts,
+              tool output, and file content.
             </p>
           </div>
           {config === null ? (
@@ -407,12 +414,11 @@ function DaemonDataPanel() {
           )}
         </div>
         <Separator />
-        <div className="flex items-center gap-4 px-4 py-4">
+        <div className="flex items-center gap-4 px-4 py-3">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium">Retention</p>
             <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-              Delete raw events older than this duration. Changes prune stored
-              events immediately.
+              Delete older raw events. Changes prune them immediately.
             </p>
           </div>
           <Select
@@ -434,21 +440,17 @@ function DaemonDataPanel() {
             </SelectContent>
           </Select>
         </div>
-      </div>
-      <p className="mt-3 text-[11px] leading-4 text-muted-foreground">
-        Recording is off by default. Chat messages and reasoning summaries are
-        stored separately and are not affected by this setting.
-      </p>
-      <Separator className="my-8" />
-      <section aria-labelledby="database-maintenance-title">
-        <div className="flex items-start justify-between gap-5 rounded-xl border border-border p-4">
-          <div className="min-w-0">
+        <Separator />
+        <section
+          className="flex items-center gap-4 px-4 py-3"
+          aria-labelledby="database-maintenance-title"
+        >
+          <div className="min-w-0 flex-1">
             <h3 id="database-maintenance-title" className="text-xs font-medium">
               Compact database
             </h3>
             <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-              Return unused SQLite pages to disk. This briefly pauses database
-              activity, so run it when no agent is working.
+              Return unused SQLite pages to disk while no agent is working.
             </p>
             {vacuumResult && (
               <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">
@@ -457,23 +459,37 @@ function DaemonDataPanel() {
               </p>
             )}
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={vacuuming || agentWorking}
-            title={agentWorking ? "Wait for active agent work to finish" : undefined}
-            onClick={() => void vacuumDatabase()}
-          >
-            {vacuuming ? (
-              <LoaderCircle className="animate-spin" />
-            ) : (
-              <Database />
-            )}
-            {vacuuming ? "Compacting…" : "Compact"}
-          </Button>
-        </div>
-      </section>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={vacuuming || agentWorking}
+                  aria-label={vacuuming ? "Compacting database" : "Compact database"}
+                  onClick={() => void vacuumDatabase()}
+                >
+                  {vacuuming ? (
+                    <LoaderCircle className="animate-spin" />
+                  ) : (
+                    <DatabaseZap />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                {agentWorking
+                  ? "Available when agents are idle"
+                  : "Compact database"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </section>
+      </div>
+      <p className="mt-3 text-[11px] leading-4 text-muted-foreground">
+        Raw event recording is off by default. Chat messages and reasoning
+        summaries are stored separately.
+      </p>
       {error && (
         <Alert className="mt-4" variant="destructive" aria-live="assertive">
           <TriangleAlert />
@@ -717,17 +733,17 @@ function AppearancePanel({
       <RadioGroup
         value={theme}
         onValueChange={(value) => onThemeChange(value as Theme)}
-        className="mt-5 grid grid-cols-3 gap-3"
+        className="mt-3 grid grid-cols-3 gap-3"
       >
         {themeChoices.map(({ value, label, description, Icon }) => (
           <label
             htmlFor={`theme-${value}`}
             key={value}
             data-active={theme === value || undefined}
-            className="group relative cursor-pointer rounded-xl border border-border p-3 transition-all hover:-translate-y-0.5 hover:shadow-sm data-active:border-primary data-active:ring-2 data-active:ring-primary/20"
+            className="group relative cursor-pointer rounded-xl border border-border p-2.5 transition-all hover:-translate-y-0.5 hover:shadow-sm data-active:border-primary data-active:ring-2 data-active:ring-primary/20"
           >
             <ThemePreview theme={value} palette={palette} />
-            <div className="mt-3 flex items-start gap-2">
+            <div className="mt-2 flex items-start gap-2">
               <RadioGroupItem
                 id={`theme-${value}`}
                 value={value}
@@ -751,7 +767,7 @@ function AppearancePanel({
           </label>
         ))}
       </RadioGroup>
-      <div className="mt-8">
+      <div className="mt-5">
         <p className="text-sm font-medium">Palette</p>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">
           Choose the accent and surface treatment used across the app.
@@ -760,17 +776,17 @@ function AppearancePanel({
       <RadioGroup
         value={palette}
         onValueChange={(value) => onPaletteChange(value as AppPalette)}
-        className="mt-5 grid grid-cols-2 gap-3"
+        className="mt-3 grid grid-cols-2 gap-3"
       >
         {paletteChoices.map(({ value, label, description }) => (
           <label
             htmlFor={`palette-${value}`}
             key={value}
             data-active={palette === value || undefined}
-            className="group relative cursor-pointer rounded-xl border border-border p-3 transition-all hover:-translate-y-0.5 hover:shadow-sm data-active:border-primary data-active:ring-2 data-active:ring-primary/20"
+            className="group relative cursor-pointer rounded-xl border border-border p-2.5 transition-all hover:-translate-y-0.5 hover:shadow-sm data-active:border-primary data-active:ring-2 data-active:ring-primary/20"
           >
             <PalettePreview palette={value} />
-            <div className="mt-3 flex items-start gap-2">
+            <div className="mt-2 flex items-start gap-2">
               <RadioGroupItem
                 id={`palette-${value}`}
                 value={value}
@@ -866,7 +882,7 @@ function GeneralPanel({
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         Set the defaults for starting and reviewing agent sessions.
       </p>
-      <Separator className="my-6" />
+      <Separator className="my-5" />
       <div className="divide-y divide-border rounded-xl border border-border">
         <PreferenceRow
           title="Restore recent workspace"
@@ -887,7 +903,7 @@ function GeneralPanel({
           onCheckedChange={setVerboseReasoning}
         />
       </div>
-      <div className="mt-6 flex items-center justify-between">
+      <div className="mt-4 flex items-center justify-between">
         <p className="text-[11px] text-muted-foreground">
           Reset these workspace preferences.
         </p>
@@ -904,10 +920,10 @@ function GeneralPanel({
           Restore defaults
         </Button>
       </div>
-      <Separator className="my-8" />
+      <Separator className="my-5" />
       <section aria-labelledby="danger-zone-title">
-        <div className="rounded-xl border border-destructive/35 bg-destructive/3 p-4">
-          <div className="flex items-start gap-3">
+        <div className="rounded-xl border border-destructive/35 bg-destructive/3 p-3">
+          <div className="flex items-center gap-3">
             <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-destructive/10 text-destructive">
               <Trash2 className="size-4" />
             </span>
@@ -922,20 +938,20 @@ function GeneralPanel({
                 Stop and remove the background service, then permanently delete
                 local chats, logs, settings, and downloaded daemon files.
               </p>
-              <Button
-                className="mt-4"
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  setConfirmation("");
-                  setCleanupError(null);
-                  setCleanupStatus(null);
-                  setCleanupOpen(true);
-                }}
-              >
-                Remove service and data
-              </Button>
             </div>
+            <Button
+              className="shrink-0"
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                setConfirmation("");
+                setCleanupError(null);
+                setCleanupStatus(null);
+                setCleanupOpen(true);
+              }}
+            >
+              Remove data
+            </Button>
           </div>
         </div>
       </section>
@@ -1052,7 +1068,7 @@ function ThemePreview({
         : "bg-transparent";
   return (
     <div
-      className={`h-28 overflow-hidden rounded-lg border border-black/10 p-2 ${canvas}`}
+      className={`h-20 overflow-hidden rounded-lg border border-black/10 p-2 ${canvas}`}
     >
       {theme === "system" ? (
         <div className="grid h-full grid-cols-2 overflow-hidden rounded-md">
@@ -1100,7 +1116,7 @@ function PalettePreview({ palette }: { palette: AppPalette }) {
       ? ["bg-[#fafafa]", "bg-[#e8e8e8]", "bg-[#303030]"]
       : ["bg-[#f8f3ea]", "bg-[#e0c9aa]", "bg-[#d7862f]"];
   return (
-    <div className="flex h-16 overflow-hidden rounded-lg border border-black/10">
+    <div className="flex h-10 overflow-hidden rounded-lg border border-black/10">
       {colors.map((color) => (
         <div className={`flex-1 ${color}`} key={color} />
       ))}
@@ -1120,7 +1136,7 @@ function PreferenceRow({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="flex items-center gap-4 px-4 py-4">
+    <div className="flex items-center gap-4 px-4 py-3">
       <div className="min-w-0 flex-1">
         <p className="text-xs font-medium">{title}</p>
         <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
