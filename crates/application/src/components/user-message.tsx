@@ -5,7 +5,7 @@ import {
   ChatBlock,
   groupChatBlocks,
 } from "@/lib/message-parsing";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
 import { LoaderCircle, AlertTriangle, CircleX } from "lucide-react";
@@ -79,11 +79,6 @@ export function UserMessage({
 }) {
   const [detailedBlock, setDetailedBlock] = useState<ChatBlock | null>(null);
   const detailRequest = useRef<Promise<void> | null>(null);
-
-  useEffect(() => {
-    setDetailedBlock(null);
-    detailRequest.current = null;
-  }, [block.key]);
 
   const displayedBlock = detailedBlock ?? block;
   const hasDeferredParts = useMemo(

@@ -217,6 +217,9 @@ fn compact_tool_value(value: &mut Value) {
     };
     object.remove("rawOutput");
     object.remove("raw_output");
+    // ACP terminal deltas duplicate command output under `_meta`; the full
+    // payload remains available through get_message_parts on expansion.
+    object.remove("_meta");
     object.insert("_deferred".into(), Value::Bool(true));
     for key in ["rawInput", "raw_input"] {
         if let Some(Value::Object(input)) = object.get_mut(key) {
