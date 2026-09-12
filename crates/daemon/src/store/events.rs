@@ -3,6 +3,7 @@
 //! Rows are the durable form of [`crate::protocol::RpcEnvelope`]. Prefer
 //! [`Store::save_acp_envelope`] from `service::session` after each ACP unit.
 
+use chrono::{Duration, Utc};
 use rusqlite::params;
 
 use super::{cell_parse, to_error, AcpEvent, Store};
@@ -12,6 +13,42 @@ use crate::{
 };
 
 impl Store {
+    pub fn daemon_config(&self) -> amarcode_protocol::rpc::DaemonConfigResult {
+        amarcode_protocol::rpc::DaemonConfigResult {
+            store_acp_events: self.acp_event_recording_enabled(),
+            acp_event_retention_days: self.acp_event_retention_days(),
+        }
+    }
+
+    pub fn set_daemon_config(
+        &self,
+        store_acp_events: bool,
+        retention_days: u32,
+    ) -> Result<amarcode_protocol::rpc::DaemonConfigResult> {
+        if !(1..=365).contains(&retention_days) {
+            return Err(crate::Error::msg(
+                "ACP event retention must be between 1 and 365 days",
+            ));
+        }
+        self.connection()?
+            .execute(
+                "UPDATE daemon_config SET store_acp_events=?1, acp_event_retention_days=?2 WHERE id=1",
+                params![store_acp_events, retention_days],
+            )
+            .map_err(to_error)?;
+        self.set_cached_acp_event_config(store_acp_events, retention_days);
+        self.prune_acp_events()?;
+        Ok(self.daemon_config())
+    }
+
+    pub fn prune_acp_events(&self) -> Result<usize> {
+        let cutoff =
+            (Utc::now() - Duration::days(i64::from(self.acp_event_retention_days()))).to_rfc3339();
+        self.connection()?
+            .execute("DELETE FROM acp_events WHERE created_at < ?1", [cutoff])
+            .map_err(to_error)
+    }
+
     pub fn save_acp_event(&self, event: &AcpEvent) -> Result<i64> {
         let connection = self.connection()?;
         connection
@@ -32,6 +69,13 @@ impl Store {
 
     /// Store-first helper: map envelope → row and insert.
     pub fn save_acp_envelope(&self, agent_run_id: &str, envelope: &RpcEnvelope) -> Result<i64> {
+        if !self.acp_event_recording_enabled() {
+            return Ok(0);
+        }
+        let now = Utc::now().timestamp();
+        if self.should_prune_acp_events(now) {
+            self.prune_acp_events()?;
+        }
         let event = AcpEvent::from_envelope(agent_run_id, envelope)?;
         self.save_acp_event(&event)
     }
@@ -58,5 +102,69 @@ impl Store {
             .map_err(to_error)?;
         rows.collect::<std::result::Result<_, _>>()
             .map_err(to_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn acp_event_recording_defaults_off_and_config_persists() {
+        let directory =
+            std::env::temp_dir().join(format!("amarcode-daemon-config-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).expect("create test directory");
+        let path = directory.join("store.sqlite3");
+        let store = Store::open(&path).expect("open store");
+
+        assert!(!store.daemon_config().store_acp_events);
+        assert_eq!(store.daemon_config().acp_event_retention_days, 7);
+        let skipped = store
+            .save_acp_envelope(
+                "missing-run",
+                &RpcEnvelope {
+                    direction: RpcDirection::Received,
+                    method: "session/update".into(),
+                    payload: json!({"large": "diagnostic payload"}),
+                },
+            )
+            .expect("disabled recording is a no-op");
+        assert_eq!(skipped, 0);
+
+        store.set_daemon_config(true, 30).expect("update config");
+        drop(store);
+        let reopened = Store::open(&path).expect("reopen store");
+        assert!(reopened.daemon_config().store_acp_events);
+        assert_eq!(reopened.daemon_config().acp_event_retention_days, 30);
+
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    fn vacuum_reports_reclaimed_database_pages() {
+        let directory =
+            std::env::temp_dir().join(format!("amarcode-vacuum-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).expect("create test directory");
+        let path = directory.join("store.sqlite3");
+        let store = Store::open(&path).expect("open store");
+        store
+            .connection()
+            .expect("connection")
+            .execute_batch(
+                "CREATE TABLE vacuum_fixture (value BLOB);
+                 INSERT INTO vacuum_fixture VALUES (zeroblob(2097152));
+                 DELETE FROM vacuum_fixture;",
+            )
+            .expect("create free pages");
+
+        let result = store.vacuum_database().expect("vacuum database");
+        assert!(result.reclaimed_bytes > 0);
+        assert!(result.after_bytes < result.before_bytes);
+
+        drop(store);
+        std::fs::remove_dir_all(directory).expect("remove test directory");
     }
 }

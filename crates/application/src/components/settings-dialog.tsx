@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAtom, useSetAtom } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   Check,
@@ -14,13 +14,18 @@ import {
   Sun,
   LoaderCircle,
   Download,
+  Database,
   FolderOpen,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
 import { daemonApi, type ApplicationCleanupStatus } from "@/api";
 import type { Palette as AppPalette, Theme } from "@/state";
-import { verboseReasoningAtom } from "@/state";
+import {
+  latestTurnByChatAtom,
+  liveChatIsWorkingAtom,
+  verboseReasoningAtom,
+} from "@/state";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -60,6 +65,13 @@ import {
 } from "@/components/ui/sidebar";
 import { Switch } from "@/components/ui/switch";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Field,
   FieldContent,
   FieldDescription,
@@ -84,12 +96,13 @@ import { AgentLogo } from "@/components/agent-logo";
 import { installAgentAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 
-type SettingsPage = "appearance" | "general" | "agent";
+type SettingsPage = "appearance" | "general" | "agent" | "daemon";
 
 const navigation: { id: SettingsPage; label: string; icon: typeof Palette }[] =
   [
     { id: "appearance", label: "Appearance", icon: Palette },
     { id: "agent", label: "Agent defaults", icon: Bot },
+    { id: "daemon", label: "Daemon data", icon: Database },
     { id: "general", label: "General", icon: SlidersHorizontal },
   ];
 
@@ -249,6 +262,8 @@ export function SettingsDialog({
                   onDefaultWorkspacePathChange={onDefaultWorkspacePathChange}
                   portalContainer={dialogContentElement}
                 />
+              ) : page === "daemon" ? (
+                <DaemonDataPanel />
               ) : (
                 <GeneralPanel
                   restoreWorkspace={restoreWorkspace}
@@ -264,6 +279,208 @@ export function SettingsDialog({
         </SidebarProvider>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const retentionChoices = [
+  { days: 1, label: "1 day" },
+  { days: 7, label: "7 days" },
+  { days: 30, label: "30 days" },
+  { days: 90, label: "90 days" },
+];
+
+function DaemonDataPanel() {
+  const latestTurns = useAtomValue(latestTurnByChatAtom);
+  const activeChatWorking = useAtomValue(liveChatIsWorkingAtom);
+  const [config, setConfig] = useState<{
+    store_acp_events: boolean;
+    acp_event_retention_days: number;
+  } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [vacuuming, setVacuuming] = useState(false);
+  const [vacuumResult, setVacuumResult] = useState<{
+    after_bytes: number;
+    reclaimed_bytes: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void daemonApi
+      .getDaemonConfig()
+      .then((value) => {
+        if (!cancelled) setConfig(value);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not load daemon settings.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const updateConfig = async (
+    storeAcpEvents: boolean,
+    retentionDays: number,
+  ) => {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const value = await daemonApi.setDaemonConfig(
+        storeAcpEvents,
+        retentionDays,
+      );
+      setConfig(value);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not save daemon settings.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const enabled = config?.store_acp_events ?? false;
+  const retentionDays = config?.acp_event_retention_days ?? 7;
+  const agentWorking =
+    activeChatWorking ||
+    Object.values(latestTurns).some((turn) => turn.status === "started");
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const vacuumDatabase = async () => {
+    if (vacuuming || agentWorking) return;
+    setVacuuming(true);
+    setVacuumResult(null);
+    setError(null);
+    try {
+      setVacuumResult(await daemonApi.vacuumDatabase());
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not compact the database.",
+      );
+    } finally {
+      setVacuuming(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto w-full max-w-132">
+      <h2 className="text-base font-medium">Daemon data</h2>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        Control diagnostic data recorded by the background service.
+      </p>
+      <Separator className="my-6" />
+      <div className="rounded-xl border border-border">
+        <div className="flex items-center gap-4 px-4 py-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium">Store raw ACP events</p>
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+              Keep agent protocol traffic for diagnostics. This can include
+              prompts, tool output, and file content, and may grow quickly.
+            </p>
+          </div>
+          {config === null ? (
+            <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+          ) : (
+            <Switch
+              checked={enabled}
+              disabled={saving}
+              aria-label="Store raw ACP events"
+              onCheckedChange={(checked) =>
+                void updateConfig(checked, retentionDays)
+              }
+            />
+          )}
+        </div>
+        <Separator />
+        <div className="flex items-center gap-4 px-4 py-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium">Retention</p>
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+              Delete raw events older than this duration. Changes prune stored
+              events immediately.
+            </p>
+          </div>
+          <Select
+            value={String(retentionDays)}
+            disabled={!config || !enabled || saving}
+            onValueChange={(value) =>
+              void updateConfig(enabled, Number(value))
+            }
+          >
+            <SelectTrigger className="w-28" aria-label="ACP event retention">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {retentionChoices.map((choice) => (
+                <SelectItem key={choice.days} value={String(choice.days)}>
+                  {choice.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="mt-3 text-[11px] leading-4 text-muted-foreground">
+        Recording is off by default. Chat messages and reasoning summaries are
+        stored separately and are not affected by this setting.
+      </p>
+      <Separator className="my-8" />
+      <section aria-labelledby="database-maintenance-title">
+        <div className="flex items-start justify-between gap-5 rounded-xl border border-border p-4">
+          <div className="min-w-0">
+            <h3 id="database-maintenance-title" className="text-xs font-medium">
+              Compact database
+            </h3>
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+              Return unused SQLite pages to disk. This briefly pauses database
+              activity, so run it when no agent is working.
+            </p>
+            {vacuumResult && (
+              <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">
+                Reclaimed {formatBytes(vacuumResult.reclaimed_bytes)} · Database
+                is now {formatBytes(vacuumResult.after_bytes)}
+              </p>
+            )}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={vacuuming || agentWorking}
+            title={agentWorking ? "Wait for active agent work to finish" : undefined}
+            onClick={() => void vacuumDatabase()}
+          >
+            {vacuuming ? (
+              <LoaderCircle className="animate-spin" />
+            ) : (
+              <Database />
+            )}
+            {vacuuming ? "Compacting…" : "Compact"}
+          </Button>
+        </div>
+      </section>
+      {error && (
+        <Alert className="mt-4" variant="destructive" aria-live="assertive">
+          <TriangleAlert />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+    </div>
   );
 }
 

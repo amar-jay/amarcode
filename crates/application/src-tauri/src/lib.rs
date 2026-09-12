@@ -21,6 +21,7 @@ use crate::{
             CancelResult, DeleteChatResult, GetAttachmentResult, HealthResult, PromptAttachment,
             PromptResultDto, RespondAgentParams, RespondAgentResult, VersionResult,
         },
+        rpc::{DaemonConfigResult, SetDaemonConfigParams, VacuumDatabaseResult},
         AgentInfo, Chat, GetChatResult, MessagePart,
     },
     state::AppState,
@@ -175,6 +176,24 @@ async fn get_message_parts(
     message_ids: Vec<String>,
 ) -> Result<Vec<MessagePart>, String> {
     state.get_message_parts(message_ids).await
+}
+
+#[tauri::command]
+async fn get_daemon_config(state: State<'_, AppState>) -> Result<DaemonConfigResult, String> {
+    state.daemon_config().await
+}
+
+#[tauri::command]
+async fn set_daemon_config(
+    state: State<'_, AppState>,
+    params: SetDaemonConfigParams,
+) -> Result<DaemonConfigResult, String> {
+    state.set_daemon_config(params).await
+}
+
+#[tauri::command]
+async fn vacuum_database(state: State<'_, AppState>) -> Result<VacuumDatabaseResult, String> {
+    state.vacuum_database().await
 }
 
 #[tauri::command]
@@ -657,6 +676,9 @@ pub fn run() {
             list_chats,
             get_chat,
             get_message_parts,
+            get_daemon_config,
+            set_daemon_config,
+            vacuum_database,
             get_attachment,
             delete_chat,
             prompt,

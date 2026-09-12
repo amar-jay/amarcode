@@ -11,10 +11,11 @@ use crate::{
     daemon::{DaemonBridge, EventSubscription},
     protocol::{
         rpc::{
-            methods, AuthenticateAgentResult, CancelResult, DeleteChatResult, GetAttachmentResult,
-            HealthResult, InstallAgentResult, ListAgentsResult, ListChatsResult, PromptAttachment,
-            PromptResultDto, RespondAgentParams, RespondAgentResult, SetSessionConfigOptionResult,
-            VersionResult,
+            methods, AuthenticateAgentResult, CancelResult, DaemonConfigResult, DeleteChatResult,
+            GetAttachmentResult, HealthResult, InstallAgentResult, ListAgentsResult,
+            ListChatsResult, PromptAttachment, PromptResultDto, RespondAgentParams,
+            RespondAgentResult, SetDaemonConfigParams, SetSessionConfigOptionResult,
+            VacuumDatabaseResult, VersionResult,
         },
         AgentInfo, Chat, GetChatResult, MessagePart, SessionConfigAssignment, SessionConfigValue,
     },
@@ -113,9 +114,28 @@ impl AppState {
         .await
     }
 
+    pub async fn daemon_config(&self) -> Result<DaemonConfigResult, String> {
+        self.call(methods::GET_DAEMON_CONFIG, Value::Null).await
+    }
+
+    pub async fn set_daemon_config(
+        &self,
+        params: SetDaemonConfigParams,
+    ) -> Result<DaemonConfigResult, String> {
+        self.call(
+            methods::SET_DAEMON_CONFIG,
+            serde_json::to_value(params).map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
     pub async fn delete_chat(&self, chat_id: String) -> Result<DeleteChatResult, String> {
         self.call(methods::DELETE_CHAT, json!({ "chat_id": chat_id }))
             .await
+    }
+
+    pub async fn vacuum_database(&self) -> Result<VacuumDatabaseResult, String> {
+        self.call(methods::VACUUM_DATABASE, Value::Null).await
     }
 
     pub async fn get_attachment(

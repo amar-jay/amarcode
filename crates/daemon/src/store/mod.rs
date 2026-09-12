@@ -9,7 +9,10 @@
 
 use std::{
     path::Path,
-    sync::{Mutex, MutexGuard},
+    sync::{
+        atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering},
+        Mutex, MutexGuard,
+    },
 };
 
 use chrono::Utc;
@@ -42,6 +45,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "0003_chat_session_config",
         include_str!("../../migrations/0003_chat_session_config.sql"),
+    ),
+    (
+        "0004_daemon_config",
+        include_str!("../../migrations/0004_daemon_config.sql"),
     ),
 ];
 
@@ -95,7 +102,12 @@ impl AcpEvent {
 }
 
 /// Thread-safe SQLite store.
-pub struct Store(Mutex<Connection>);
+pub struct Store {
+    connection: Mutex<Connection>,
+    store_acp_events: AtomicBool,
+    acp_event_retention_days: AtomicU32,
+    last_acp_event_prune: AtomicI64,
+}
 
 impl Store {
     /// Open (or create) the database at `path`, enable WAL/FKs, apply migrations.
@@ -116,13 +128,72 @@ impl Store {
 
         apply_migrations(&connection)?;
 
-        Ok(Self(Mutex::new(connection)))
+        let (store_acp_events, retention_days) = connection
+            .query_row(
+                "SELECT store_acp_events, acp_event_retention_days FROM daemon_config WHERE id=1",
+                [],
+                |row| Ok((row.get::<_, bool>(0)?, row.get::<_, u32>(1)?)),
+            )
+            .map_err(to_error)?;
+
+        Ok(Self {
+            connection: Mutex::new(connection),
+            store_acp_events: AtomicBool::new(store_acp_events),
+            acp_event_retention_days: AtomicU32::new(retention_days),
+            last_acp_event_prune: AtomicI64::new(0),
+        })
     }
 
     pub(crate) fn connection(&self) -> Result<MutexGuard<'_, Connection>> {
-        self.0
+        self.connection
             .lock()
             .map_err(|_| Error::msg("database lock poisoned"))
+    }
+
+    pub(crate) fn acp_event_recording_enabled(&self) -> bool {
+        self.store_acp_events.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn acp_event_retention_days(&self) -> u32 {
+        self.acp_event_retention_days.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn set_cached_acp_event_config(&self, enabled: bool, retention_days: u32) {
+        self.store_acp_events.store(enabled, Ordering::Relaxed);
+        self.acp_event_retention_days
+            .store(retention_days, Ordering::Relaxed);
+    }
+
+    pub(crate) fn should_prune_acp_events(&self, now: i64) -> bool {
+        let previous = self.last_acp_event_prune.load(Ordering::Relaxed);
+        if now - previous < 3600 {
+            return false;
+        }
+        self.last_acp_event_prune
+            .compare_exchange(previous, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+    }
+
+    pub fn vacuum_database(&self) -> Result<amarcode_protocol::rpc::VacuumDatabaseResult> {
+        let connection = self.connection()?;
+        let size = |connection: &Connection| -> Result<u64> {
+            let (pages, page_size): (u64, u64) = connection
+                .query_row(
+                    "SELECT page_count, page_size FROM pragma_page_count(), pragma_page_size()",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(to_error)?;
+            Ok(pages.saturating_mul(page_size))
+        };
+        let before_bytes = size(&connection)?;
+        connection.execute_batch("VACUUM").map_err(to_error)?;
+        let after_bytes = size(&connection)?;
+        Ok(amarcode_protocol::rpc::VacuumDatabaseResult {
+            before_bytes,
+            after_bytes,
+            reclaimed_bytes: before_bytes.saturating_sub(after_bytes),
+        })
     }
 
     pub(crate) fn touch_chat(&self, chat_id: &str) -> Result<()> {

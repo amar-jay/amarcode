@@ -67,6 +67,12 @@ export type GetChatParams = { chat_id: string, include_messages: boolean, includ
 
 export type GetMessagePartsParams = { message_ids: Array<string>, };
 
+export type DaemonConfigResult = { store_acp_events: boolean, acp_event_retention_days: number, };
+
+export type SetDaemonConfigParams = { store_acp_events: boolean, acp_event_retention_days: number, };
+
+export type VacuumDatabaseResult = { before_bytes: number, after_bytes: number, reclaimed_bytes: number, };
+
 export type DeleteChatParams = { chat_id: string, };
 
 export type DeleteChatResult = { deleted: boolean, };

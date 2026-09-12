@@ -6,6 +6,8 @@ import type {
   Chat,
   DeleteChatResult,
   DaemonVersion,
+  DaemonConfigResult,
+  VacuumDatabaseResult,
   EditorEvent,
   EventFilter,
   GetAttachmentResult,
@@ -181,6 +183,17 @@ export const daemonApi = {
     invoke("get_chat", { chatId, includeMessages, includeToolContent }),
   getMessageParts: (messageIds: string[]): Promise<MessagePart[]> =>
     invoke("get_message_parts", { messageIds }),
+  getDaemonConfig: (): Promise<DaemonConfigResult> =>
+    invoke("get_daemon_config"),
+  setDaemonConfig: (
+    storeAcpEvents: boolean,
+    acpEventRetentionDays: number,
+  ): Promise<DaemonConfigResult> =>
+    invoke("set_daemon_config", {
+      params: { store_acp_events: storeAcpEvents, acp_event_retention_days: acpEventRetentionDays },
+    }),
+  vacuumDatabase: (): Promise<VacuumDatabaseResult> =>
+    invoke("vacuum_database"),
   getAttachment: (
     chatId: string,
     attachmentId: string,

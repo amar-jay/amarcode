@@ -53,6 +53,13 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::LIST_CHATS => Ok(DispatchOutcome::Result(list_chats(app, params)?)),
         methods::GET_CHAT => Ok(DispatchOutcome::Result(get_chat(app, params)?)),
         methods::GET_MESSAGE_PARTS => Ok(DispatchOutcome::Result(get_message_parts(app, params)?)),
+        methods::GET_DAEMON_CONFIG => Ok(DispatchOutcome::Result(to_value(
+            app.store.daemon_config(),
+        )?)),
+        methods::SET_DAEMON_CONFIG => Ok(DispatchOutcome::Result(set_daemon_config(app, params)?)),
+        methods::VACUUM_DATABASE => Ok(DispatchOutcome::Result(to_value(
+            app.store.vacuum_database()?,
+        )?)),
         methods::GET_ATTACHMENT => Ok(DispatchOutcome::Result(get_attachment(app, params)?)),
         methods::DELETE_CHAT => Ok(DispatchOutcome::Result(delete_chat(app, params).await?)),
 
@@ -160,12 +167,21 @@ fn get_message_parts(app: &App, params: Value) -> Result<Value> {
     to_value(parts)
 }
 
+fn set_daemon_config(app: &App, params: Value) -> Result<Value> {
+    let p: amarcode_protocol::rpc::SetDaemonConfigParams = parse_params(params)?;
+    to_value(
+        app.store
+            .set_daemon_config(p.store_acp_events, p.acp_event_retention_days)?,
+    )
+}
+
 fn compact_tool_parts(detail: &mut ChatDetail) {
     for message in &mut detail.messages {
         if message.message.status == crate::protocol::MessageStatus::Streaming {
             continue;
         }
-        let mut latest = std::collections::HashMap::<String, (usize, serde_json::Map<String, Value>)>::new();
+        let mut latest =
+            std::collections::HashMap::<String, (usize, serde_json::Map<String, Value>)>::new();
         for (index, part) in message.parts.iter().enumerate() {
             if part.kind != crate::protocol::MessagePartKind::ToolCall {
                 continue;
@@ -177,7 +193,9 @@ fn compact_tool_parts(detail: &mut ChatDetail) {
                     .and_then(Value::as_str)
                     .map(str::to_owned)
                 {
-                    let merged = latest.entry(id).or_insert_with(|| (index, serde_json::Map::new()));
+                    let merged = latest
+                        .entry(id)
+                        .or_insert_with(|| (index, serde_json::Map::new()));
                     merged.0 = index;
                     merged.1.extend(value);
                 }
@@ -200,9 +218,13 @@ fn compact_tool_parts(detail: &mut ChatDetail) {
                     .map(str::to_owned);
                 let mut value = if let Some(id) = id {
                     let (latest_index, merged) = latest.get(&id)?;
-                    if *latest_index != index { return None; }
+                    if *latest_index != index {
+                        return None;
+                    }
                     Value::Object(merged.clone())
-                } else { value };
+                } else {
+                    value
+                };
                 compact_tool_value(&mut value);
                 part.content_json = value.to_string();
                 Some(part)
@@ -244,7 +266,10 @@ fn compact_tool_value(value: &mut Value) {
                         (_, Some("")) => "delete",
                         _ => "modify",
                     };
-                    diff.insert("changes".into(), json!([{"path": path, "operation": operation}]));
+                    diff.insert(
+                        "changes".into(),
+                        json!([{"path": path, "operation": operation}]),
+                    );
                 }
             }
             diff.remove("oldText");
