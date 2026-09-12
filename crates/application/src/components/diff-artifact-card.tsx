@@ -185,6 +185,7 @@ export type DiffArtifact = {
   title: string;
   changes: DiffChange[];
   patch: string | null;
+  deferred: boolean;
 };
 
 /**
@@ -239,7 +240,13 @@ export function diffArtifacts(parts: MessagePart[]): DiffArtifact[] {
         if (changes.length === 0 && !patch) return;
 
         const key = `${toolCallId}:${index}`;
-        byKey.set(key, { key, title, changes, patch });
+        byKey.set(key, {
+          key,
+          title,
+          changes,
+          patch,
+          deferred: tool._deferred === true,
+        });
       });
     } catch {
       // Malformed tool payload must never break the conversation.
@@ -249,8 +256,15 @@ export function diffArtifacts(parts: MessagePart[]): DiffArtifact[] {
   return [...byKey.values()];
 }
 
-export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
+export function DiffArtifactCard({
+  artifact,
+  onExpand,
+}: {
+  artifact: DiffArtifact;
+  onExpand?: () => Promise<void>;
+}) {
   const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
   const workspacePath = useAtomValue(workspacePathAtom);
   const changedFiles = artifact.changes.length;
   const additionCount =
@@ -283,10 +297,25 @@ export function DiffArtifactCard({ artifact }: { artifact: DiffArtifact }) {
         className="flex w-full min-w-0 items-center gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-muted/50"
         aria-expanded={expanded}
         aria-label={`${expanded ? "Collapse" : "Expand"} ${artifact.title.toLowerCase()}`}
-        onClick={() => setExpanded((value) => !value)}
+        disabled={loading}
+        onClick={() => {
+          if (expanded) {
+            setExpanded(false);
+            return;
+          }
+          if (artifact.deferred && onExpand) {
+            setLoading(true);
+            void onExpand()
+              .then(() => setExpanded(true))
+              .catch(() => {})
+              .finally(() => setLoading(false));
+            return;
+          }
+          setExpanded(true);
+        }}
       >
         <ChevronRight
-          className={`size-3.5 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+          className={`size-3.5 shrink-0 transition-transform ${expanded || loading ? "rotate-90" : ""}`}
           aria-hidden
         />
         <span className="shrink-0 font-medium">{artifact.title}</span>

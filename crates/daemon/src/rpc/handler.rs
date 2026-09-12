@@ -52,6 +52,7 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::CREATE_CHAT => Ok(DispatchOutcome::Result(create_chat(app, params)?)),
         methods::LIST_CHATS => Ok(DispatchOutcome::Result(list_chats(app, params)?)),
         methods::GET_CHAT => Ok(DispatchOutcome::Result(get_chat(app, params)?)),
+        methods::GET_MESSAGE_PARTS => Ok(DispatchOutcome::Result(get_message_parts(app, params)?)),
         methods::GET_ATTACHMENT => Ok(DispatchOutcome::Result(get_attachment(app, params)?)),
         methods::DELETE_CHAT => Ok(DispatchOutcome::Result(delete_chat(app, params).await?)),
 
@@ -139,11 +140,115 @@ fn list_chats(app: &App, params: Value) -> Result<Value> {
 fn get_chat(app: &App, params: Value) -> Result<Value> {
     let p: GetChatParams = parse_params(params)?;
     if p.include_messages {
-        let detail = app.chats.get_with_messages(&p.chat_id)?;
+        let mut detail = app.chats.get_with_messages(&p.chat_id)?;
+        if !p.include_tool_content {
+            compact_tool_parts(&mut detail);
+        }
         to_value(chat_detail_json(&detail)?)
     } else {
         let chat = app.chats.get_required(&p.chat_id)?;
         to_value(chat)
+    }
+}
+
+fn get_message_parts(app: &App, params: Value) -> Result<Value> {
+    let p: amarcode_protocol::rpc::GetMessagePartsParams = parse_params(params)?;
+    let mut parts = Vec::new();
+    for message_id in p.message_ids {
+        parts.extend(app.store.message_parts(&message_id)?);
+    }
+    to_value(parts)
+}
+
+fn compact_tool_parts(detail: &mut ChatDetail) {
+    for message in &mut detail.messages {
+        if message.message.status == crate::protocol::MessageStatus::Streaming {
+            continue;
+        }
+        let mut latest = std::collections::HashMap::<String, (usize, serde_json::Map<String, Value>)>::new();
+        for (index, part) in message.parts.iter().enumerate() {
+            if part.kind != crate::protocol::MessagePartKind::ToolCall {
+                continue;
+            }
+            if let Ok(Value::Object(value)) = serde_json::from_str::<Value>(&part.content_json) {
+                if let Some(id) = value
+                    .get("toolCallId")
+                    .or_else(|| value.get("tool_call_id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                {
+                    let merged = latest.entry(id).or_insert_with(|| (index, serde_json::Map::new()));
+                    merged.0 = index;
+                    merged.1.extend(value);
+                }
+            }
+        }
+
+        message.parts = message
+            .parts
+            .drain(..)
+            .enumerate()
+            .filter_map(|(index, mut part)| {
+                if part.kind != crate::protocol::MessagePartKind::ToolCall {
+                    return Some(part);
+                }
+                let value = serde_json::from_str::<Value>(&part.content_json).ok()?;
+                let id = value
+                    .get("toolCallId")
+                    .or_else(|| value.get("tool_call_id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let mut value = if let Some(id) = id {
+                    let (latest_index, merged) = latest.get(&id)?;
+                    if *latest_index != index { return None; }
+                    Value::Object(merged.clone())
+                } else { value };
+                compact_tool_value(&mut value);
+                part.content_json = value.to_string();
+                Some(part)
+            })
+            .collect();
+    }
+}
+
+fn compact_tool_value(value: &mut Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    object.remove("rawOutput");
+    object.remove("raw_output");
+    object.insert("_deferred".into(), Value::Bool(true));
+    for key in ["rawInput", "raw_input"] {
+        if let Some(Value::Object(input)) = object.get_mut(key) {
+            input.retain(|field, _| matches!(field.as_str(), "command" | "args" | "cwd"));
+        }
+    }
+    if let Some(Value::Array(content)) = object.get_mut("content") {
+        content.retain_mut(|item| {
+            let Some(diff) = item.as_object_mut() else {
+                return false;
+            };
+            if diff.get("type").and_then(Value::as_str) != Some("diff") {
+                return false;
+            }
+            if !diff.contains_key("changes") {
+                if let Some(path) = diff.get("path").and_then(Value::as_str).map(str::to_owned) {
+                    let operation = match (
+                        diff.get("oldText").and_then(Value::as_str),
+                        diff.get("newText").and_then(Value::as_str),
+                    ) {
+                        (None | Some(""), _) => "create",
+                        (_, Some("")) => "delete",
+                        _ => "modify",
+                    };
+                    diff.insert("changes".into(), json!([{"path": path, "operation": operation}]));
+                }
+            }
+            diff.remove("oldText");
+            diff.remove("newText");
+            diff.remove("patch");
+            true
+        });
     }
 }
 

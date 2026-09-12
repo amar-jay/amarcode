@@ -17,6 +17,7 @@ pub mod methods {
     pub const CREATE_CHAT: &str = "create_chat";
     pub const LIST_CHATS: &str = "list_chats";
     pub const GET_CHAT: &str = "get_chat";
+    pub const GET_MESSAGE_PARTS: &str = "get_message_parts";
     pub const GET_ATTACHMENT: &str = "get_attachment";
     pub const DELETE_CHAT: &str = "delete_chat";
     pub const PROMPT: &str = "prompt";
@@ -139,6 +140,13 @@ pub struct GetChatParams {
     pub chat_id: String,
     #[serde(default = "default_true")]
     pub include_messages: bool,
+    #[serde(default = "default_true")]
+    pub include_tool_content: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GetMessagePartsParams {
+    pub message_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

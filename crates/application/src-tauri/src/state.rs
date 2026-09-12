@@ -16,7 +16,7 @@ use crate::{
             PromptResultDto, RespondAgentParams, RespondAgentResult, SetSessionConfigOptionResult,
             VersionResult,
         },
-        AgentInfo, Chat, GetChatResult, SessionConfigAssignment, SessionConfigValue,
+        AgentInfo, Chat, GetChatResult, MessagePart, SessionConfigAssignment, SessionConfigValue,
     },
 };
 
@@ -89,10 +89,26 @@ impl AppState {
         &self,
         chat_id: String,
         include_messages: bool,
+        include_tool_content: bool,
     ) -> Result<GetChatResult, String> {
         self.call(
             methods::GET_CHAT,
-            json!({ "chat_id": chat_id, "include_messages": include_messages }),
+            json!({
+                "chat_id": chat_id,
+                "include_messages": include_messages,
+                "include_tool_content": include_tool_content
+            }),
+        )
+        .await
+    }
+
+    pub async fn get_message_parts(
+        &self,
+        message_ids: Vec<String>,
+    ) -> Result<Vec<MessagePart>, String> {
+        self.call(
+            methods::GET_MESSAGE_PARTS,
+            json!({ "message_ids": message_ids }),
         )
         .await
     }

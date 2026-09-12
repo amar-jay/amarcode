@@ -21,7 +21,7 @@ use crate::{
             CancelResult, DeleteChatResult, GetAttachmentResult, HealthResult, PromptAttachment,
             PromptResultDto, RespondAgentParams, RespondAgentResult, VersionResult,
         },
-        AgentInfo, Chat, GetChatResult,
+        AgentInfo, Chat, GetChatResult, MessagePart,
     },
     state::AppState,
 };
@@ -162,8 +162,19 @@ async fn get_chat(
     state: State<'_, AppState>,
     chat_id: String,
     include_messages: bool,
+    include_tool_content: bool,
 ) -> Result<GetChatResult, String> {
-    state.get_chat(chat_id, include_messages).await
+    state
+        .get_chat(chat_id, include_messages, include_tool_content)
+        .await
+}
+
+#[tauri::command]
+async fn get_message_parts(
+    state: State<'_, AppState>,
+    message_ids: Vec<String>,
+) -> Result<Vec<MessagePart>, String> {
+    state.get_message_parts(message_ids).await
 }
 
 #[tauri::command]
@@ -645,6 +656,7 @@ pub fn run() {
             create_chat,
             list_chats,
             get_chat,
+            get_message_parts,
             get_attachment,
             delete_chat,
             prompt,

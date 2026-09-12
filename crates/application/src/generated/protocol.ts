@@ -63,7 +63,9 @@ export type CreateChatParams = { workspace_path: string, title: string | null, }
 
 export type ListChatsParams = { workspace_path: string | null, };
 
-export type GetChatParams = { chat_id: string, include_messages: boolean, };
+export type GetChatParams = { chat_id: string, include_messages: boolean, include_tool_content: boolean, };
+
+export type GetMessagePartsParams = { message_ids: Array<string>, };
 
 export type DeleteChatParams = { chat_id: string, };
 

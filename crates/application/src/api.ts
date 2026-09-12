@@ -10,6 +10,7 @@ import type {
   EventFilter,
   GetAttachmentResult,
   GetChatResult,
+  MessagePart,
   Health,
   PromptResult,
   PromptAttachment,
@@ -172,8 +173,14 @@ export const daemonApi = {
     invoke("create_chat", { workspacePath, title }),
   listChats: (workspacePath?: string): Promise<Chat[]> =>
     invoke("list_chats", { workspacePath }),
-  getChat: (chatId: string, includeMessages = true): Promise<GetChatResult> =>
-    invoke("get_chat", { chatId, includeMessages }),
+  getChat: (
+    chatId: string,
+    includeMessages = true,
+    includeToolContent = false,
+  ): Promise<GetChatResult> =>
+    invoke("get_chat", { chatId, includeMessages, includeToolContent }),
+  getMessageParts: (messageIds: string[]): Promise<MessagePart[]> =>
+    invoke("get_message_parts", { messageIds }),
   getAttachment: (
     chatId: string,
     attachmentId: string,

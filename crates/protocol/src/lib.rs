@@ -49,6 +49,7 @@ pub fn typescript_bindings() -> String {
         rpc::CreateChatParams::decl(&config),
         rpc::ListChatsParams::decl(&config),
         rpc::GetChatParams::decl(&config),
+        rpc::GetMessagePartsParams::decl(&config),
         rpc::DeleteChatParams::decl(&config),
         rpc::DeleteChatResult::decl(&config),
         rpc::GetAttachmentParams::decl(&config),
