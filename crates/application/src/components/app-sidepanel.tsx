@@ -105,9 +105,13 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const selectPath: typeof workspaceFileTree.setSelectedPath = useCallback(
     (path) => {
       setSelectedLine(undefined);
+			if (workspaceFileTree.selectedPath === path) {
+				workspaceFileTree.setSelectedPath(undefined);
+				return;
+			}
       workspaceFileTree.setSelectedPath(path);
     },
-    [workspaceFileTree.setSelectedPath],
+    [workspaceFileTree.setSelectedPath, workspaceFileTree.selectedPath],
   );
   const refreshChanges = useCallback(async () => {
     if (!workspacePath) {
@@ -237,7 +241,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         onPointerDownOutside={(event) => event.preventDefault()}
         className={cn(
           workspaceFileTree.selectedPath
-            ? "w-280 min-w-[min(100vw-50rem,70rem)] max-w-[80vw]!"
+            ? "w-280 min-w-[33vw] max-w-[80vw]!"
             : "w-40 min-w-[min(100vw-30rem,10rem)] max-w-[33vw]!",
         )}
         showCloseButton={false}
