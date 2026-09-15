@@ -83,4 +83,4 @@ jobs:
             Existing installations receive this release through the in-app updater.
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
