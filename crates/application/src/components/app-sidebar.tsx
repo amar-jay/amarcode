@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Settings } from "lucide-react";
+import { Download, Plus, Settings } from "lucide-react";
 import { notify } from "@/lib/notify";
 import { RecentChats } from "@/components/recent-chats";
 import {
@@ -33,6 +33,8 @@ type ChatSidebarProps = {
   onSelectChat: (chatId: string) => void;
   onDeleteChat: (chatId: string) => Promise<void>;
   onOpenSettings: () => void;
+  updateAvailable: boolean;
+  onCheckForUpdates: () => void;
 };
 
 export function AppSidebar({
@@ -43,6 +45,8 @@ export function AppSidebar({
   onSelectChat,
   onDeleteChat,
   onOpenSettings,
+  updateAvailable,
+  onCheckForUpdates,
 }: ChatSidebarProps) {
   const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -105,6 +109,19 @@ export function AppSidebar({
             </span>
           </div> */}
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={onCheckForUpdates}
+                tooltip={
+                  updateAvailable ? "Update available" : "Check for updates"
+                }
+              >
+                <Download />
+                <span>
+                  {updateAvailable ? "Update available" : "Check for updates"}
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton onClick={onOpenSettings} tooltip="Settings">
                 <Settings />

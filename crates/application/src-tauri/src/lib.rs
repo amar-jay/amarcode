@@ -1,3 +1,4 @@
+mod app_update;
 mod config;
 mod daemon;
 mod protocol;
@@ -79,6 +80,27 @@ async fn daemon_update(
         Ok(health) => Ok(health),
         Err(error) => {
             let _ = on_status.send(daemon::DaemonUpdateStatus::Failed {
+                error: error.clone(),
+            });
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
+async fn app_check_update(app: AppHandle) -> Result<app_update::AppUpdateCheck, String> {
+    app_update::check(&app).await
+}
+
+#[tauri::command]
+async fn app_install_update(
+    app: AppHandle,
+    on_status: Channel<app_update::AppUpdateStatus>,
+) -> Result<(), String> {
+    match app_update::install(app, on_status.clone()).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = on_status.send(app_update::AppUpdateStatus::Failed {
                 error: error.clone(),
             });
             Err(error)
@@ -654,6 +676,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             window::fit_main_window(app)?;
             Ok(())
@@ -665,6 +688,8 @@ pub fn run() {
             daemon_install,
             daemon_check_update,
             daemon_update,
+            app_check_update,
+            app_install_update,
             prepare_application_uninstall,
             exit_application,
             daemon_health,

@@ -3,34 +3,31 @@ name: Release desktop app
 on:
   workflow_dispatch:
 
-# Builds only need to read the repository. The release job elevates this below.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: release-desktop
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build ${{ matrix.os }}
-    # A release must come from the protected default branch, not an arbitrary
-    # ref selected in the manual-dispatch UI.
+  publish:
+    name: Build and publish (${{ matrix.platform }})
     if: github.ref == 'refs/heads/main'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-22.04
-          - os: windows-latest
+        platform:
+          - ubuntu-22.04
+          - windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -45,13 +42,12 @@ jobs:
             librsvg2-dev \
             patchelf
 
-      # tauri.conf.json beforeBuildCommand uses bun; lockfile is bun.lock
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.10"
 
-      - name: Install Rust stable
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.94.0"
@@ -71,149 +67,20 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace
 
-      - name: Build desktop app
-        run: bun run app:build
-
-      # Workspace Cargo.toml puts release output under the repo-root target/
-      # (older layouts used crates/application/src-tauri/target).
-      #
-      # Important: never upload the whole bundle tree. Linux AppImage builds leave
-      # an AppDir full of shared libs (libwebkit…, dozens of "copyright" files,
-      # duplicate basenames). Publishing that to a GitHub Release races the API
-      # and blows past asset limits. Only ship final installers.
-      - name: Stage installers
-        id: bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          stage=dist-installers
-          rm -rf "$stage"
-          mkdir -p "$stage"
-
-          bundle=
-          for candidate in \
-            target/release/bundle \
-            crates/application/src-tauri/target/release/bundle
-          do
-            if [ -d "$candidate" ]; then
-              bundle=$candidate
-              break
-            fi
-          done
-
-          if [ -z "$bundle" ]; then
-            echo "No Tauri bundle directory found" >&2
-            find . -type d -name bundle 2>/dev/null | head -n 50 || true
-            exit 1
-          fi
-
-          echo "Scanning installers under $bundle"
-
-          # Final packages only — skip AppDir/ payload trees and bare binaries.
-          mapfile -t files < <(
-            find "$bundle" -type f \
-              \( \
-                -name '*.AppImage' -o \
-                -name '*.deb' -o \
-                -name '*.rpm' -o \
-                -name '*.dmg' -o \
-                -name '*.app.tar.gz' -o \
-                -name '*.msi' -o \
-                -name '*-setup.exe' -o \
-                -name '*.nsis.zip' \
-              \) \
-              ! -path '*/AppDir/*' \
-              ! -path '*/appimage_deb/*' \
-              2>/dev/null | sort
-          )
-
-          # Windows NSIS often emits a plain *.exe that is not always *-setup.exe.
-          # Pick top-level nsis/msi products; still exclude AppDir-style trees.
-          if [ "${#files[@]}" -eq 0 ]; then
-            mapfile -t files < <(
-              find "$bundle" -type f \
-                \( -path '*/nsis/*.exe' -o -path '*/msi/*.msi' -o -path '*/msi/*.exe' \) \
-                2>/dev/null | sort
-            )
-          fi
-
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "No installer packages found under $bundle" >&2
-            echo "Directory listing (depth 3):" >&2
-            find "$bundle" -maxdepth 3 \( -type d -o -type f \) 2>/dev/null | head -n 80 || true
-            exit 1
-          fi
-
-          for src in "${files[@]}"; do
-            base=$(basename "$src")
-            dest="$stage/$base"
-            # Disambiguate if two platforms produce the same basename (unlikely
-            # in a per-OS job, but keep staging deterministic).
-            if [ -e "$dest" ]; then
-              dest="$stage/${RUNNER_OS:-os}-$base"
-            fi
-            cp -f "$src" "$dest"
-            echo "  staged $dest  ($(du -h "$dest" | cut -f1))"
-          done
-
-          {
-            echo "path=$stage"
-            echo "count=${#files[@]}"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "Staged ${#files[@]} installer(s) into $stage"
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - name: Build and publish signed desktop release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          name: ${{ matrix.os }}-bundles
-          path: ${{ steps.bundle.outputs.path }}/*
-          if-no-files-found: error
-          retention-days: 7
+          projectPath: crates/application
+          tagName: app-v__VERSION__
+          releaseName: Amarcode v__VERSION__
+          releaseBody: |
+            Signed Amarcode desktop release.
 
-  release:
-    name: Publish latest release
-    needs: build
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts
-          pattern: "*-bundles"
-          merge-multiple: true
-
-      - name: List release files
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Publishing only these files:"
-          find release-artifacts -type f | sort
-          count=$(find release-artifacts -type f | wc -l)
-          if [ "$count" -eq 0 ]; then
-            echo "No installer artifacts downloaded" >&2
-            exit 1
-          fi
-          # Guardrail: if someone reintroduces AppDir upload, fail loudly.
-          if find release-artifacts -type f -name '*.so' | grep -q .; then
-            echo "Refusing to publish shared libraries — stage installers only" >&2
-            exit 1
-          fi
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: amarcode desktop
-          body: |
-            Automated desktop release generated from the workflow button.
-
-            Download the installer for your platform (`.AppImage` / `.deb` on Linux, `.msi` / setup `.exe` on Windows).
-          make_latest: true
-          overwrite_files: true
-          # Staging already filtered to installers only (flat copy).
-          files: release-artifacts/*
+            Existing installations receive this release through the in-app updater.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

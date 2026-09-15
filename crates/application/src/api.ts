@@ -51,6 +51,32 @@ export type DaemonUpdateStatus =
   | { status: "ready"; version: string }
   | { status: "failed"; error: string };
 
+export type AppUpdateCheck =
+  | { status: "upToDate"; currentVersion: string }
+  | {
+      status: "available";
+      currentVersion: string;
+      version: string;
+      notes: string | null;
+    };
+
+export type AppUpdateStatus =
+  | { status: "downloading"; received: number; total: number }
+  | { status: "installing" }
+  | { status: "restarting" }
+  | { status: "failed"; error: string };
+
+export const appUpdateApi = {
+  check: (): Promise<AppUpdateCheck> => invoke("app_check_update"),
+  install: async (
+    onStatus: (status: AppUpdateStatus) => void,
+  ): Promise<void> => {
+    const statusChannel = new Channel<AppUpdateStatus>();
+    statusChannel.onmessage = onStatus;
+    return invoke("app_install_update", { onStatus: statusChannel });
+  },
+};
+
 export type ApplicationCleanupStatus =
   | { status: "preparing" }
   | { status: "removingServiceAndData" }
@@ -192,7 +218,10 @@ export const daemonApi = {
     acpEventRetentionDays: number,
   ): Promise<DaemonConfigResult> =>
     invoke("set_daemon_config", {
-      params: { store_acp_events: storeAcpEvents, acp_event_retention_days: acpEventRetentionDays },
+      params: {
+        store_acp_events: storeAcpEvents,
+        acp_event_retention_days: acpEventRetentionDays,
+      },
     }),
   vacuumDatabase: (): Promise<VacuumDatabaseResult> =>
     invoke("vacuum_database"),

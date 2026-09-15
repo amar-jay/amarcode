@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { notify, notifyToast } from "@/lib/notify";
 import {
+  appUpdateApi,
+  type AppUpdateStatus,
   daemonApi,
   type DaemonBootstrapStatus,
   type DaemonUpdateStatus,
@@ -40,6 +42,10 @@ export function useAppBootstrap() {
   );
   const [daemonUpdateStatus, setDaemonUpdateStatus] =
     useState<DaemonUpdateStatus | null>(null);
+  const [appUpdateVersion, setAppUpdateVersion] = useState<string | null>(null);
+  const [appUpdateNotes, setAppUpdateNotes] = useState<string | null>(null);
+  const [appUpdateStatus, setAppUpdateStatus] =
+    useState<AppUpdateStatus | null>(null);
   const store = useStore();
   const theme = useAtomValue(themeAtom);
   const palette = useAtomValue(paletteAtom);
@@ -104,6 +110,44 @@ export function useAppBootstrap() {
     }
   }, [initializeDaemonClient]);
 
+  const checkAppUpdate = useCallback(async (announceUpToDate = false) => {
+    try {
+      const update = await appUpdateApi.check();
+      if (update.status === "upToDate") {
+        if (announceUpToDate) notify("Amarcode is up to date.", "success");
+        return;
+      }
+      setAppUpdateVersion(update.version);
+      setAppUpdateNotes(update.notes);
+      notifyToast(`Amarcode ${update.version} is available`, {
+        id: `app-update-${update.version}`,
+        description: `Installed version: ${update.currentVersion}`,
+        duration: 15_000,
+        action: {
+          label: "Update",
+          onClick: () => setAppUpdateStatus(null),
+        },
+      });
+    } catch (error) {
+      // A browser-only development session has no Tauri bridge. Packaged app
+      // update checks are best-effort so offline startup is never blocked.
+      console.info("Application update check failed:", error);
+      if (announceUpToDate) {
+        notify(error instanceof Error ? error.message : String(error), "error");
+      }
+    }
+  }, []);
+
+  const installAppUpdate = useCallback(async () => {
+    try {
+      await appUpdateApi.install(setAppUpdateStatus);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("Application update failed:", error);
+      setAppUpdateStatus({ status: "failed", error: message });
+    }
+  }, []);
+
   // Theme → <html class="dark">
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -116,6 +160,11 @@ export function useAppBootstrap() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void checkAppUpdate(), 0);
+    return () => window.clearTimeout(timer);
+  }, [checkAppUpdate]);
 
   // Palette → data-style
   useEffect(() => {
@@ -211,6 +260,18 @@ export function useAppBootstrap() {
     daemonUpdateVersion,
     daemonUpdateStatus,
     updateDaemon,
+    appUpdateVersion,
+    appUpdateNotes,
+    appUpdateStatus,
+    checkAppUpdate,
+    installAppUpdate,
+    closeAppUpdate: () => {
+      if (appUpdateStatus === null || appUpdateStatus.status === "failed") {
+        setAppUpdateVersion(null);
+        setAppUpdateNotes(null);
+        setAppUpdateStatus(null);
+      }
+    },
     closeDaemonUpdate: () => {
       if (
         daemonUpdateStatus === null ||

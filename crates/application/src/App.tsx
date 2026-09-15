@@ -8,6 +8,7 @@ import { TopBar } from "@/components/top-bar";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { DaemonConnectionDialog } from "@/components/daemon-connection-dialog";
 import { DaemonUpdateDialog } from "@/components/daemon-update-dialog";
+import { AppUpdateDialog } from "@/components/app-update-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { daemonApi } from "@/api";
 import {
@@ -47,6 +48,12 @@ export default function App() {
     daemonUpdateStatus,
     updateDaemon,
     closeDaemonUpdate,
+    appUpdateVersion,
+    appUpdateNotes,
+    appUpdateStatus,
+    checkAppUpdate,
+    installAppUpdate,
+    closeAppUpdate,
   } = useAppBootstrap();
 
   const [theme, setTheme] = useAtom(themeAtom);
@@ -104,6 +111,8 @@ export default function App() {
             await refreshChats();
           }}
           onOpenSettings={() => setSettingsOpen(true)}
+          updateAvailable={appUpdateVersion !== null}
+          onCheckForUpdates={() => void checkAppUpdate(true)}
         />
         <AppSidePanel workspacePath={workspacePath} />
         {activeSession ? (
@@ -169,6 +178,13 @@ export default function App() {
         status={daemonUpdateStatus}
         onConfirm={() => void updateDaemon()}
         onClose={closeDaemonUpdate}
+      />
+      <AppUpdateDialog
+        version={appUpdateVersion}
+        notes={appUpdateNotes}
+        status={appUpdateStatus}
+        onConfirm={() => void installAppUpdate()}
+        onClose={closeAppUpdate}
       />
     </div>
   );
