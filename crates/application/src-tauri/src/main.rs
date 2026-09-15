@@ -5,5 +5,5 @@ fn main() {
     // #[cfg(target_os = "linux")]
     // std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
 
-    acp_workbench_lib::run();
+    amarcode_lib::run();
 }

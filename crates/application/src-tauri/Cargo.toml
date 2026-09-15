@@ -6,7 +6,7 @@ authors = ["amarjay <abdelmanan.abdelrahman@gmail.com>"]
 edition = "2021"
 
 [lib]
-name = "acp_workbench_lib"
+name = "amarcode_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
