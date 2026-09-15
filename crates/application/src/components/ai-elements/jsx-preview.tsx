@@ -233,16 +233,14 @@ export const JSXPreviewContent = memo(
     // Track the last JSX that rendered without error
     useEffect(() => {
       if (!errorReportedRef.current) {
-      queueMicrotask(() => setLastGoodJsxState(processedJsx));
+        queueMicrotask(() => setLastGoodJsxState(processedJsx));
         setLastGoodJsx(processedJsx);
       }
     }, [processedJsx, setLastGoodJsx]);
 
     // During streaming, if the current JSX errored, re-render with last good version
     const displayJsx =
-      isStreaming && errorJsx === processedJsx
-        ? lastGoodJsx
-        : processedJsx;
+      isStreaming && errorJsx === processedJsx ? lastGoodJsx : processedJsx;
 
     return (
       <div className={cn("jsx-preview-content", className)} {...props}>

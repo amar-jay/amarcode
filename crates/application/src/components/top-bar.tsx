@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { daemonApi } from "@/api";
 import { sidePanelOpenAtom, workspacePathAtom } from "@/state";
 
-
 export function TopBar() {
   const [, setSheetOpen] = useAtom(sidePanelOpenAtom);
   const workspacePath = useAtomValue(workspacePathAtom);

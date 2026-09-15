@@ -242,30 +242,28 @@ async function releaseTui(
   let targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu"];
   if (targetSet === "all") {
     targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu"];
-  } 
-	if (targetSet === "host") {
+  }
+  if (targetSet === "host") {
     targets = [currentHostTarget];
-  } 
+  }
 
-	let overwrite: boolean | symbol = false;
-	const overwritable = releaseType === "current" || releaseType === "custom";
-	if (overwritable) {
-		  overwrite = await prompts.confirm({
-		    message: "Replace this version if it already exists?",
-		    initialValue: false,
-		  });
-		  if (prompts.isCancel(overwrite)) return cancelled(overwrite);
-	}
+  let overwrite: boolean | symbol = false;
+  const overwritable = releaseType === "current" || releaseType === "custom";
+  if (overwritable) {
+    overwrite = await prompts.confirm({
+      message: "Replace this version if it already exists?",
+      initialValue: false,
+    });
+    if (prompts.isCancel(overwrite)) return cancelled(overwrite);
+  }
 
   prompts.note(
     [
-		  `Version: ${version} ${
-		    overwritable && overwrite
-		      ? "(overwritable)"
-		      : ""
-		  }`,
-		  `Targets: ${targets.join(", ")}`,
-		].join("\n"),
+      `Version: ${version} ${
+        overwritable && overwrite ? "(overwritable)" : ""
+      }`,
+      `Targets: ${targets.join(", ")}`,
+    ].join("\n"),
     "Release plan",
   );
   const confirmed = await prompts.confirm({

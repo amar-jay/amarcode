@@ -111,14 +111,18 @@ export function UserMessage({
           ...item,
           parts: byMessage.get(item.message.id) ?? [],
         }));
-        const detailed = groupChatBlocks(items, block.streaming, verboseReasoning).find(
-          (candidate) => candidate.kind === "assistant",
-        );
+        const detailed = groupChatBlocks(
+          items,
+          block.streaming,
+          verboseReasoning,
+        ).find((candidate) => candidate.kind === "assistant");
         if (detailed) setDetailedBlock(detailed);
       })
       .catch((cause: unknown) => {
         notify(
-          cause instanceof Error ? cause.message : "Could not load reasoning details.",
+          cause instanceof Error
+            ? cause.message
+            : "Could not load reasoning details.",
           "error",
         );
         throw cause;
@@ -253,15 +257,21 @@ export function UserMessage({
             title={new Date(displayedBlock.completedAt).toLocaleString()}
           >
             <time dateTime={displayedBlock.completedAt}>
-              {messageTimeFormatter.format(new Date(displayedBlock.completedAt))}
+              {messageTimeFormatter.format(
+                new Date(displayedBlock.completedAt),
+              )}
             </time>
             <span aria-hidden="true">·</span>
             <span>
-              {formatDuration(displayedBlock.startedAt, displayedBlock.completedAt)}
+              {formatDuration(
+                displayedBlock.startedAt,
+                displayedBlock.completedAt,
+              )}
             </span>
             <span aria-hidden="true">·</span>
             <span>
-              {(displayedBlock.agentId && agentNames.get(displayedBlock.agentId)) ??
+              {(displayedBlock.agentId &&
+                agentNames.get(displayedBlock.agentId)) ??
                 displayedBlock.agentId ??
                 "Unknown ACP"}
             </span>

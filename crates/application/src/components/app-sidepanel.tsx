@@ -10,12 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { daemonApi, WorkspaceDiff, type WorkspaceChange } from "@/api";
 import { sidePanelOpenAtom, workspaceFileOpenRequestAtom } from "@/state";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "./ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "./ui/sheet";
 import {
   useWorkspaceFileTree,
   WorkspaceChangedFiles,
@@ -105,10 +100,10 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const selectPath: typeof workspaceFileTree.setSelectedPath = useCallback(
     (path) => {
       setSelectedLine(undefined);
-			if (workspaceFileTree.selectedPath === path) {
-				workspaceFileTree.setSelectedPath(undefined);
-				return;
-			}
+      if (workspaceFileTree.selectedPath === path) {
+        workspaceFileTree.setSelectedPath(undefined);
+        return;
+      }
       workspaceFileTree.setSelectedPath(path);
     },
     [workspaceFileTree.setSelectedPath, workspaceFileTree.selectedPath],

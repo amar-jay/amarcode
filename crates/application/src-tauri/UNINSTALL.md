@@ -21,11 +21,11 @@ retry if the desktop process is interrupted after daemon removal.
 
 ## Owned data
 
-| Owner                                    | Linux                               | macOS                                    | Windows                                                                    |
-| ---------------------------------------- | ----------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------- |
-| Daemon database, logs, and runtime state | Tauri `app_local_data_dir()/data`   | same API location                        | same API location                                                          |
-| Downloaded daemon releases               | Tauri `app_local_data_dir()/daemon` | same API location                        | same API location                                                          |
-| UI preferences/WebView storage           | Tauri WebView data                  | Tauri WebView data                       | `%APPDATA%\com.amarcode.desktop` and `%LOCALAPPDATA%\com.amarcode.desktop` |
+| Owner                                    | Linux                               | macOS              | Windows                                                                    |
+| ---------------------------------------- | ----------------------------------- | ------------------ | -------------------------------------------------------------------------- |
+| Daemon database, logs, and runtime state | Tauri `app_local_data_dir()/data`   | same API location  | same API location                                                          |
+| Downloaded daemon releases               | Tauri `app_local_data_dir()/daemon` | same API location  | same API location                                                          |
+| UI preferences/WebView storage           | Tauri WebView data                  | Tauri WebView data | `%APPDATA%\com.amarcode.desktop` and `%LOCALAPPDATA%\com.amarcode.desktop` |
 
 Workspace project files are never part of cleanup.
 

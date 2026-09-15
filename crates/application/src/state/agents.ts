@@ -43,17 +43,20 @@ export const reloadAgentsAtom = atom(null, async (_get, set) => {
 });
 
 /** Install a registry agent, then merge the updated row into the catalog. */
-export const installAgentAtom = atom(null, async (get, set, agentId: string) => {
-  const result = await daemonApi.installAgent(agentId);
-  const agents = get(agentsAtom);
-  const next = agents.some((candidate) => candidate.id === result.agent.id)
-    ? agents.map((candidate) =>
-        candidate.id === result.agent.id ? result.agent : candidate,
-      )
-    : [...agents, result.agent];
-  set(agentsAtom, next);
-  return result;
-});
+export const installAgentAtom = atom(
+  null,
+  async (get, set, agentId: string) => {
+    const result = await daemonApi.installAgent(agentId);
+    const agents = get(agentsAtom);
+    const next = agents.some((candidate) => candidate.id === result.agent.id)
+      ? agents.map((candidate) =>
+          candidate.id === result.agent.id ? result.agent : candidate,
+        )
+      : [...agents, result.agent];
+    set(agentsAtom, next);
+    return result;
+  },
+);
 
 /**
  * Agent currently selected in the home/chat composer.

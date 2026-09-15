@@ -19,10 +19,7 @@ import {
   Attachments,
 } from "@/components/ai-elements/attachments";
 
-
-import {
-  FolderOpen,
-} from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";

@@ -29,7 +29,7 @@ resolved against managed tools and PATH, then persisted on each agent row.
 Set `AMARCODE_ACP_REGISTRY_SOURCE` to another Git URL or a local repository for
 development. Set it to an empty value to disable startup synchronization.
 
->[!NOTE]
+> [!NOTE]
 > **Scope note for contributors:** the client wire contract lives in the
 > workspace's `amarcode-protocol` crate and is shared with the desktop shell.
 > Do not re-declare those wire types in either consumer.
@@ -219,21 +219,21 @@ One JSON object per line. No HTTP, no length prefixes.
 
 ### Methods
 
-| Method               | Manager  | Behavior                                                                           |
-| -------------------- | -------- | ---------------------------------------------------------------------------------- |
-| `health`             | —        | status, daemon version, protocol version, bind addr                                |
-| `version`            | —        | daemon version and protocol version                                                |
-| `subscribe_events`   | —        | ack, then stream `EditorEvent` lines (`chat_id` / `run_id` / `session_id` filters) |
-| `list_agents`        | agents   | registry agent definitions + host availability                                     |
+| Method               | Manager  | Behavior                                                                                 |
+| -------------------- | -------- | ---------------------------------------------------------------------------------------- |
+| `health`             | —        | status, daemon version, protocol version, bind addr                                      |
+| `version`            | —        | daemon version and protocol version                                                      |
+| `subscribe_events`   | —        | ack, then stream `EditorEvent` lines (`chat_id` / `run_id` / `session_id` filters)       |
+| `list_agents`        | agents   | registry agent definitions + host availability                                           |
 | `install_agent`      | agents   | install from registry distribution (`npx`/`uvx`/`binary`), probe runtime, mark available |
-| `authenticate_agent` | sessions | ACP `authenticate` for auth-required agents (live session or short-lived probe)    |
-| `create_chat`        | chats    | `{ workspace_path, title? }` → chat row + `ChatUpdated`                            |
-| `list_chats`         | chats    | optional `workspace_path` filter                                                   |
-| `get_chat`           | chats    | `{ chat_id, include_messages? }` (messages+parts by default)                       |
-| `prompt`             | sessions | `{ chat_id, agent_id, text }` → store user msg, ACP turn, return run ids           |
-| `cancel`             | sessions | `{ chat_id }` stop live run                                                        |
-| `respond_permission` | sessions | answer `ApprovalRequired` (`request_id` + `result` or `error`)                     |
-| `respond_input`      | sessions | answer `QuestionRequired` (same params shape)                                      |
+| `authenticate_agent` | sessions | ACP `authenticate` for auth-required agents (live session or short-lived probe)          |
+| `create_chat`        | chats    | `{ workspace_path, title? }` → chat row + `ChatUpdated`                                  |
+| `list_chats`         | chats    | optional `workspace_path` filter                                                         |
+| `get_chat`           | chats    | `{ chat_id, include_messages? }` (messages+parts by default)                             |
+| `prompt`             | sessions | `{ chat_id, agent_id, text }` → store user msg, ACP turn, return run ids                 |
+| `cancel`             | sessions | `{ chat_id }` stop live run                                                              |
+| `respond_permission` | sessions | answer `ApprovalRequired` (`request_id` + `result` or `error`)                           |
+| `respond_input`      | sessions | answer `QuestionRequired` (same params shape)                                            |
 
 ### Live events (`EditorEvent`)
 
@@ -256,14 +256,14 @@ These are **not** raw ACP notifications. ACP traffic is translated in service.
 
 SQLite file, embedded migrations under `migrations/`.
 
-| Table           | Purpose                                              |
-| --------------- | ---------------------------------------------------- |
-| `agents`        | Agent definitions (command, args, env, available)    |
-| `chats`         | Conversations scoped by `workspace_path`             |
-| `agent_runs`    | One execution of an agent inside a chat              |
-| `messages`      | Chat messages                                        |
-| `message_parts` | Structured parts (text, tool call, thinking, …)      |
-| `acp_events`    | Selectively retained raw ACP milestones per run      |
+| Table           | Purpose                                           |
+| --------------- | ------------------------------------------------- |
+| `agents`        | Agent definitions (command, args, env, available) |
+| `chats`         | Conversations scoped by `workspace_path`          |
+| `agent_runs`    | One execution of an agent inside a chat           |
+| `messages`      | Chat messages                                     |
+| `message_parts` | Structured parts (text, tool call, thinking, …)   |
+| `acp_events`    | Selectively retained raw ACP milestones per run   |
 
 `Store` is a `Mutex<Connection>` with table-focused methods in
 `agents` / `chats` / `runs` / `messages` / `events`.

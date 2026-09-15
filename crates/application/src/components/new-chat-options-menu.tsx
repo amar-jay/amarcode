@@ -2,7 +2,18 @@ import { PermissionMode, permissionModeAtom } from "@/state";
 import { SessionConfigOption, SessionConfigValue } from "@/types";
 import { Ellipsis, ShieldQuestion, ShieldCheck, Check } from "lucide-react";
 import { PromptInputButton } from "./ai-elements/prompt-input";
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuCheckboxItem } from "./ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuCheckboxItem,
+} from "./ui/dropdown-menu";
 import { useAtom } from "jotai/react";
 
 function NewChatOptionsMenu({
@@ -27,7 +38,9 @@ function NewChatOptionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
         {/* <DropdownMenuLabel>New chat options</DropdownMenuLabel> */}
-        {showPermissionFallback && (<PermissionFallbackMenuSub visibleOptions={visibleOptions} />)}
+        {showPermissionFallback && (
+          <PermissionFallbackMenuSub visibleOptions={visibleOptions} />
+        )}
         {visibleOptions.map((option) =>
           option.type === "boolean" ? (
             <DropdownMenuCheckboxItem
@@ -98,46 +111,39 @@ const permissionModes: Array<{
   },
 ];
 
-
 function PermissionFallbackMenuSub({
-	visibleOptions,
-}:{
-	visibleOptions: SessionConfigOption[];
+  visibleOptions,
+}: {
+  visibleOptions: SessionConfigOption[];
 }) {
   const [permissionMode, setPermissionMode] = useAtom(permissionModeAtom);
-	return (
-     <>
-		 <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              {permissionMode === "confirm" ? (
-                <ShieldQuestion />
-              ) : (
-                <ShieldCheck />
-              )}
-              <span>Permissions</span>
-              <span className="ml-auto text-[10px] text-muted-foreground">
-                {
-                  permissionModes.find((item) => item.value === permissionMode)
-                    ?.label
-                }
-              </span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="min-w-32">
-              {permissionModes.map((item) => (
-                <DropdownMenuItem
-                  key={item.value}
-                  onSelect={() => setPermissionMode(item.value)}
-                >
-                  <span className="min-w-0 flex-1">{item.label}</span>
-                  {permissionMode === item.value && <Check />}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        {visibleOptions.length > 0 && (
-          <DropdownMenuSeparator />
-        )}
-				</>
-	)
+  return (
+    <>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          {permissionMode === "confirm" ? <ShieldQuestion /> : <ShieldCheck />}
+          <span>Permissions</span>
+          <span className="ml-auto text-[10px] text-muted-foreground">
+            {
+              permissionModes.find((item) => item.value === permissionMode)
+                ?.label
+            }
+          </span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="min-w-32">
+          {permissionModes.map((item) => (
+            <DropdownMenuItem
+              key={item.value}
+              onSelect={() => setPermissionMode(item.value)}
+            >
+              <span className="min-w-0 flex-1">{item.label}</span>
+              {permissionMode === item.value && <Check />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      {visibleOptions.length > 0 && <DropdownMenuSeparator />}
+    </>
+  );
 }
 export default NewChatOptionsMenu;

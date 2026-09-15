@@ -385,8 +385,10 @@ export function WorkspaceChangedFiles({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-mono text-xs text-foreground">
-                        {name} {" "}
-												<span className="truncate text-muted-foreground text-[0.65rem]">{directory}</span>
+                        {name}{" "}
+                        <span className="truncate text-muted-foreground text-[0.65rem]">
+                          {directory}
+                        </span>
                       </span>
                     </span>
                   </button>
@@ -459,54 +461,51 @@ export function WorkspaceChangedFiles({
               className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2.5 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
             {/* </Button> */}
-						<Tooltip>
-							<TooltipTrigger asChild>
-  					<Button
-						variant={"secondary"}
-              type="submit"
-              size="sm"
-							name="Commit"
-              className="h-8 gap-1.5 px-2.5"
-              onClick={() => void onStageAll()}
-              disabled={
-								unstagedCount == 0 || stagingAll || committing
-              }
-            >
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={"secondary"}
+                  type="submit"
+                  size="sm"
+                  name="Commit"
+                  className="h-8 gap-1.5 px-2.5"
+                  onClick={() => void onStageAll()}
+                  disabled={unstagedCount == 0 || stagingAll || committing}
+                >
+                  {stagingAll ? (
+                    <LoaderCircle className="size-3.5 animate-spin" />
+                  ) : (
+                    <Plus className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent align="end" side="top">
+                Stage all changes
+              </TooltipContent>
+            </Tooltip>
 
-                {stagingAll ? (
-                  <LoaderCircle className="size-3.5 animate-spin" />
-                ) : (
-                  <Plus className="size-3.5" />
-                )}
-            </Button>
-							</TooltipTrigger>
-							<TooltipContent align="end" side="top">
-								Stage all changes
-							</TooltipContent>
-						</Tooltip>
-
-						<Tooltip>
-							<TooltipTrigger asChild>
-            <Button
-              type="submit"
-              size="sm"
-							name="Commit"
-              className="h-8 gap-1.5 px-2.5"
-              disabled={
-                stagedCount === 0 || !commitMessage.trim() || committing
-              }
-            >
-              {committing ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <GitCommitHorizontal className="size-3.5" />
-              )}
-            </Button>
-							</TooltipTrigger>
-							<TooltipContent align="end" side="right">
-								Commit changes
-							</TooltipContent>
-						</Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="submit"
+                  size="sm"
+                  name="Commit"
+                  className="h-8 gap-1.5 px-2.5"
+                  disabled={
+                    stagedCount === 0 || !commitMessage.trim() || committing
+                  }
+                >
+                  {committing ? (
+                    <LoaderCircle className="size-3.5 animate-spin" />
+                  ) : (
+                    <GitCommitHorizontal className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent align="end" side="right">
+                Commit changes
+              </TooltipContent>
+            </Tooltip>
           </form>
         </div>
       )}

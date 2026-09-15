@@ -424,9 +424,7 @@ function DaemonDataPanel() {
           <Select
             value={String(retentionDays)}
             disabled={!config || !enabled || saving}
-            onValueChange={(value) =>
-              void updateConfig(enabled, Number(value))
-            }
+            onValueChange={(value) => void updateConfig(enabled, Number(value))}
           >
             <SelectTrigger className="w-28" aria-label="ACP event retention">
               <SelectValue />
@@ -467,7 +465,9 @@ function DaemonDataPanel() {
                   variant="outline"
                   size="icon-sm"
                   disabled={vacuuming || agentWorking}
-                  aria-label={vacuuming ? "Compacting database" : "Compact database"}
+                  aria-label={
+                    vacuuming ? "Compacting database" : "Compact database"
+                  }
                   onClick={() => void vacuumDatabase()}
                 >
                   {vacuuming ? (
@@ -675,7 +675,9 @@ function AgentDefaultsPanel({
         </Field>
         <Field>
           <FieldContent>
-            <FieldLabel htmlFor="default-workspace">Default workspace</FieldLabel>
+            <FieldLabel htmlFor="default-workspace">
+              Default workspace
+            </FieldLabel>
             <FieldDescription>
               Project folder preselected when starting a new chat.
             </FieldDescription>

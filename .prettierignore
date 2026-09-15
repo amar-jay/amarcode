@@ -25,3 +25,4 @@ acl-manifests.json
 capabilities.json
 desktop-schema.json
 linux-schema.json
+vendor/

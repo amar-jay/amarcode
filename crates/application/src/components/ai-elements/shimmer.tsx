@@ -45,7 +45,8 @@ const ShimmerComponent = ({
   spread = 2,
 }: TextShimmerProps) => {
   const MotionComponent =
-    motionElements[Component as keyof typeof motionElements] ?? motionElements.p;
+    motionElements[Component as keyof typeof motionElements] ??
+    motionElements.p;
 
   const dynamicSpread = useMemo(
     () => (children?.length ?? 0) * spread,

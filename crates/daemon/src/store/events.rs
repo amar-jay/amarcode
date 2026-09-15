@@ -138,7 +138,7 @@ fn map_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<AcpEvent> {
 }
 
 #[cfg(test)]
-mod tests {
+mod activity_tests {
     use serde_json::json;
 
     use super::*;
@@ -150,6 +150,9 @@ mod tests {
     #[test]
     fn chat_events_include_all_of_its_runs_and_exclude_other_chats() {
         let store = Store::open(std::path::Path::new(":memory:")).expect("open store");
+        store
+            .set_daemon_config(true, 7)
+            .expect("enable ACP event recording");
         store
             .save_agent(&AgentDefinition {
                 id: "agent-1".into(),
@@ -218,7 +221,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod tests {
+mod config_tests {
     use serde_json::json;
 
     use super::*;

@@ -138,7 +138,9 @@ export const mockRawActivityEvents: RawActivityEvent[] = [
     method: "session/prompt",
     payload: {
       sessionId: SESSION_ID,
-      prompt: [{ type: "text", text: "Review and update the authentication flow." }],
+      prompt: [
+        { type: "text", text: "Review and update the authentication flow." },
+      ],
     },
   }),
   event(1010, {
@@ -161,9 +163,17 @@ export const mockRawActivityEvents: RawActivityEvent[] = [
   sessionUpdate(1011, 1100, {
     sessionUpdate: "plan",
     entries: [
-      { content: "Inspect the authentication flow", priority: "high", status: "in_progress" },
+      {
+        content: "Inspect the authentication flow",
+        priority: "high",
+        status: "in_progress",
+      },
       { content: "Run focused tests", priority: "high", status: "pending" },
-      { content: "Update the implementation", priority: "medium", status: "pending" },
+      {
+        content: "Update the implementation",
+        priority: "medium",
+        status: "pending",
+      },
     ],
   }),
   ...thoughtChunks.map((text, index) =>
@@ -185,7 +195,9 @@ export const mockRawActivityEvents: RawActivityEvent[] = [
     sessionUpdate: "tool_call_update",
     toolCallId: "tool-demo-read",
     status: "completed",
-    content: [{ type: "content", content: { type: "text", text: "148 lines read" } }],
+    content: [
+      { type: "content", content: { type: "text", text: "148 lines read" } },
+    ],
   }),
   sessionUpdate(1017, 2300, {
     sessionUpdate: "tool_call",
@@ -195,15 +207,18 @@ export const mockRawActivityEvents: RawActivityEvent[] = [
     status: "in_progress",
     rawInput: { command: "npm test -- auth", cwd: "/workspace/demo-project" },
     content: [{ type: "terminal", terminalId: TOOL_ID }],
-    _meta: { terminal_info: { cwd: "/workspace/demo-project", terminal_id: TOOL_ID } },
+    _meta: {
+      terminal_info: { cwd: "/workspace/demo-project", terminal_id: TOOL_ID },
+    },
   }),
-  ...["\n> test\n", "Running auth tests…\n", "3 tests passed\n"].map((data, index) =>
-    sessionUpdate(1018 + index, 2500 + index * 280, {
-      sessionUpdate: "tool_call_update",
-      toolCallId: TOOL_ID,
-      status: "in_progress",
-      _meta: { terminal_output_delta: { data, terminal_id: TOOL_ID } },
-    }),
+  ...["\n> test\n", "Running auth tests…\n", "3 tests passed\n"].map(
+    (data, index) =>
+      sessionUpdate(1018 + index, 2500 + index * 280, {
+        sessionUpdate: "tool_call_update",
+        toolCallId: TOOL_ID,
+        status: "in_progress",
+        _meta: { terminal_output_delta: { data, terminal_id: TOOL_ID } },
+      }),
   ),
   sessionUpdate(1021, 3450, {
     sessionUpdate: "tool_call_update",
@@ -237,7 +252,10 @@ export const mockRawActivityEvents: RawActivityEvent[] = [
     offsetMs: 5100,
     direction: "sent",
     method: "response:session/request_permission",
-    payload: { requestId: PERMISSION_ID, outcome: { outcome: "selected", optionId: "allow_once" } },
+    payload: {
+      requestId: PERMISSION_ID,
+      outcome: { outcome: "selected", optionId: "allow_once" },
+    },
   }),
   sessionUpdate(1024, 5200, {
     sessionUpdate: "tool_call",
@@ -253,14 +271,24 @@ export const mockRawActivityEvents: RawActivityEvent[] = [
     title: "Updated src/auth/session.ts",
     kind: "edit",
     status: "completed",
-    content: [{ type: "diff", path: "src/auth/session.ts", oldText: "", newText: "" }],
+    content: [
+      { type: "diff", path: "src/auth/session.ts", oldText: "", newText: "" },
+    ],
   }),
   sessionUpdate(1026, 5700, {
     sessionUpdate: "plan",
     entries: [
-      { content: "Inspect the authentication flow", priority: "high", status: "completed" },
+      {
+        content: "Inspect the authentication flow",
+        priority: "high",
+        status: "completed",
+      },
       { content: "Run focused tests", priority: "high", status: "completed" },
-      { content: "Update the implementation", priority: "medium", status: "completed" },
+      {
+        content: "Update the implementation",
+        priority: "medium",
+        status: "completed",
+      },
     ],
   }),
   sessionUpdate(1027, 5850, {
@@ -291,7 +319,11 @@ export const mockRawActivityEvents: RawActivityEvent[] = [
     offsetMs: 7000,
     direction: "received",
     method: "_x.demo/unknown_event",
-    payload: { sessionId: SESSION_ID, feature: "future-capability", enabled: true },
+    payload: {
+      sessionId: SESSION_ID,
+      feature: "future-capability",
+      enabled: true,
+    },
   }),
   sessionUpdate(1033, 7250, {
     sessionUpdate: "tool_call",
@@ -307,7 +339,8 @@ export const mockRawActivityEvents: RawActivityEvent[] = [
     title: "Could not read missing.config.json",
     kind: "read",
     status: "failed",
-    content: [{ type: "content", content: { type: "text", text: "File not found" } }],
+    content: [
+      { type: "content", content: { type: "text", text: "File not found" } },
+    ],
   }),
 ];
-

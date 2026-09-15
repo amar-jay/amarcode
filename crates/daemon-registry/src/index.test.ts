@@ -66,7 +66,9 @@ function environment(entries: Record<string, string>): Env {
             .filter((key) => key.startsWith("daemon/"))
             .map((key) => key.slice(0, key.indexOf("/", "daemon/".length) + 1))
             .filter((prefix) => prefix !== "daemon/")
-            .filter((prefix, index, prefixes) => prefixes.indexOf(prefix) === index),
+            .filter(
+              (prefix, index, prefixes) => prefixes.indexOf(prefix) === index,
+            ),
         };
       },
     } as unknown as R2Bucket,
@@ -116,9 +118,9 @@ describe("handleRequest", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toContain("max-age=60");
-    expect(
-      (await response.json()) as { versions: string[] },
-    ).toEqual({ versions: ["0.1.0", "0.2.0"] });
+    expect((await response.json()) as { versions: string[] }).toEqual({
+      versions: ["0.1.0", "0.2.0"],
+    });
   });
 
   test("supports HEAD for the versions route", async () => {
