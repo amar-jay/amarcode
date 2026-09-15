@@ -80,12 +80,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: crates/application
-          tagName: app-v__VERSION__
-          releaseName: Amarcode v__VERSION__
+          tagName: latest
+          releaseName: amarcode desktop
           releaseBody: |
             Signed Amarcode desktop release.
 
-            Existing installations receive this release through the in-app updater.
+            Existing installations receive this release when the signed
+            updater artifacts change, even if the package version is unchanged.
           releaseDraft: false
           prerelease: false
           uploadUpdaterJson: true

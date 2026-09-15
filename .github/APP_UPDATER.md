@@ -38,13 +38,13 @@ bun run app:build
 
 ## Publishing
 
-1. Increase `version` in `crates/application/src-tauri/tauri.conf.json`.
-2. Commit and push the version change to `main`.
-3. Run the **Release desktop app** workflow.
+1. Commit and push to `main`. A package version bump is not required.
+2. Run the **Release desktop app** workflow.
 
-The workflow publishes normal installers, signed updater archives, signatures,
-and `latest.json` to an `app-v<version>` GitHub Release. Installed applications
-check GitHub's latest-release `latest.json` endpoint.
+The workflow overwrites the rolling GitHub Release tagged `latest` (name:
+`amarcode desktop`) with installers, signed updater archives, signatures, and
+`latest.json`. Installed applications treat a new artifact signature as an
+update even when the package version stays `0.1.0`.
 
 Back up the private key securely. Losing it prevents existing installations
 from accepting future updates. Rotating only the public key in a new release

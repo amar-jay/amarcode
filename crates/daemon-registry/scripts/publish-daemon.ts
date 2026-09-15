@@ -47,7 +47,6 @@ type Options = {
 
 type AppPublicationPlan = {
   commitMessage: string | null;
-  appVersion: string | null;
   push: boolean;
 };
 
@@ -64,14 +63,6 @@ const workerDirectory = join(projectRoot, "crates", "daemon-registry");
 const wranglerConfig = join(workerDirectory, "wrangler.jsonc");
 const daemonManifestPath = join(projectRoot, "crates", "daemon", "Cargo.toml");
 const cargoLockPath = join(projectRoot, "Cargo.lock");
-const tauriConfigPath = join(
-  projectRoot,
-  "crates",
-  "application",
-  "src-tauri",
-  "tauri.conf.json",
-);
-const packageManifestPath = join(projectRoot, "package.json");
 const releasePublicKey =
   "5ef56cd7772e8c601ca9c5a15378b7088fc558e7edcde73770cbb116d9e255d2";
 
@@ -97,40 +88,6 @@ function run(
 function output(command: string[]): string {
   const result = run(command, { quiet: true });
   return result.stdout.toString().trim();
-}
-
-function appVersion(): string {
-  const contents = readFileSync(tauriConfigPath, "utf8");
-  const match = contents.match(/"version"\s*:\s*"([^"]+)"/);
-  if (!match) throw new Error(`could not find version in ${tauriConfigPath}`);
-  return match[1];
-}
-
-function updateAppVersion(version: string) {
-  const currentVersion = appVersion();
-  if (currentVersion === version) return;
-
-  const tauriConfig = readFileSync(tauriConfigPath, "utf8");
-  const updatedTauriConfig = tauriConfig.replace(
-    /("version"\s*:\s*")[^"]+(")/,
-    `$1${version}$2`,
-  );
-  if (updatedTauriConfig === tauriConfig) {
-    throw new Error(`could not update app version in ${tauriConfigPath}`);
-  }
-
-  const packageManifest = readFileSync(packageManifestPath, "utf8");
-  const updatedPackageManifest = packageManifest.replace(
-    /("version"\s*:\s*")[^"]+(")/,
-    `$1${version}$2`,
-  );
-  if (updatedPackageManifest === packageManifest) {
-    throw new Error(`could not update app version in ${packageManifestPath}`);
-  }
-
-  writeFileSync(tauriConfigPath, updatedTauriConfig);
-  writeFileSync(packageManifestPath, updatedPackageManifest);
-  console.log(`Updated desktop app version: ${currentVersion} -> ${version}`);
 }
 
 function cargoValue(manifestPath: string, key: string): string {
@@ -319,13 +276,7 @@ async function releaseTui(
         overwritable && overwrite ? "(overwritable)" : ""
       }`,
       `Targets: ${targets.join(", ")}`,
-      `Desktop app: ${
-        appPublication
-          ? appPublication.appVersion
-            ? `publish ${appPublication.appVersion} after daemon`
-            : "publish after daemon"
-          : "skip"
-      }`,
+      `Desktop app: ${appPublication ? "publish after daemon" : "skip"}`,
       ...(appPublication?.commitMessage
         ? [`Commit: ${appPublication.commitMessage}`]
         : []),
@@ -541,71 +492,14 @@ async function inquireAppPublication(
   run(["gh", "--version"], { quiet: true });
   run(["gh", "auth", "status"], { quiet: true });
 
-  const currentAppVersion = appVersion();
-  const appReleaseType = await prompts.select({
-    message: "Desktop app version",
-    initialValue: "patch",
-    options: [
-      {
-        value: "patch",
-        label: "Patch",
-        hint: bumpVersion(currentAppVersion, "patch"),
-      },
-      {
-        value: "minor",
-        label: "Minor",
-        hint: bumpVersion(currentAppVersion, "minor"),
-      },
-      {
-        value: "major",
-        label: "Major",
-        hint: bumpVersion(currentAppVersion, "major"),
-      },
-      { value: "custom", label: "Custom version" },
-      {
-        value: "current",
-        label: "Keep current version",
-        hint: currentAppVersion,
-      },
-    ],
-  });
-  if (prompts.isCancel(appReleaseType))
-    return cancelled(appReleaseType) ?? undefined;
-
-  let nextAppVersion: string;
-  if (appReleaseType === "custom") {
-    const customVersion = await prompts.text({
-      message: "Custom desktop app version",
-      placeholder: currentAppVersion,
-      validate: (value) =>
-        /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(value)
-          ? undefined
-          : "Enter a valid release version.",
-    });
-    if (prompts.isCancel(customVersion))
-      return cancelled(customVersion) ?? undefined;
-    nextAppVersion = customVersion;
-  } else if (appReleaseType === "current") {
-    nextAppVersion = currentAppVersion;
-  } else {
-    nextAppVersion = bumpVersion(currentAppVersion, appReleaseType);
-  }
-
   const changes = output(["git", "status", "--short"]);
   const daemonVersionWillChange = daemonVersion !== currentVersion;
-  const appVersionWillChange = nextAppVersion !== currentAppVersion;
   const plannedChanges = [
     ...(changes ? [changes] : []),
     ...(daemonVersionWillChange
       ? [
           `M crates/daemon/Cargo.toml (${currentVersion} -> ${daemonVersion})`,
           "M Cargo.lock (daemon package version)",
-        ]
-      : []),
-    ...(appVersionWillChange
-      ? [
-          `M crates/application/src-tauri/tauri.conf.json (${currentAppVersion} -> ${nextAppVersion})`,
-          `M package.json (${currentAppVersion} -> ${nextAppVersion})`,
         ]
       : []),
   ];
@@ -626,9 +520,7 @@ async function inquireAppPublication(
 
     const message = await prompts.text({
       message: "Commit message",
-      initialValue: appVersionWillChange
-        ? `chore: publish daemon ${daemonVersion} and app ${nextAppVersion}`
-        : `chore: publish daemon ${daemonVersion}`,
+      initialValue: `chore: publish daemon ${daemonVersion}`,
       validate: (value) =>
         value.trim() ? undefined : "Enter a non-empty commit message.",
     });
@@ -645,14 +537,11 @@ async function inquireAppPublication(
 
   return {
     commitMessage,
-    appVersion: appVersionWillChange ? nextAppVersion : null,
     push: true,
   };
 }
 
 function executeAppPublication(plan: AppPublicationPlan) {
-  if (plan.appVersion) updateAppVersion(plan.appVersion);
-
   const changes = output(["git", "status", "--short"]);
   if (changes) {
     if (!plan.commitMessage) {
