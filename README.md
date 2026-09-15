@@ -9,9 +9,9 @@ understand and improve your code.
   alt="Amarcode shown in dark and light themes"
   width="100%"/>
 
-<p align="center">
+<!-- <p align="center">
   <sub>Your coding conversations, carried across agents.</sub>
-</p>
+</p> -->
 
 ## What you can do
 
@@ -20,8 +20,7 @@ understand and improve your code.
 - Follow the agent's progress as it works.
 - Review file changes inside the app.
 - Leave tasks running in the background without supervision.
-- Continue a saved conversation even when its original agent session is no
-  longer available.
+- Preserve conversational context semantically across agents
 
 Amarcode uses the open [Agent Client Protocol](https://agentclientprotocol.com/),
 allowing it to work with a growing range of compatible agents, including
@@ -49,7 +48,7 @@ agents.
 
 - Semantic continuation is not native state restoration. Hidden reasoning,
   provider-side conversation state, model caches, permissions, and other
-  agent-private data cannot be reconstructed from ACP messages.
+  vendor proprietary data cannot be reconstructed from ACP messages.
 - Hydration currently includes non-empty user and assistant text. Structured
   tool calls, tool results, thinking, and prior attachments are retained for
   Amarcode's UI where applicable but are not replayed into the new agent
@@ -62,10 +61,6 @@ agents.
   into a session.
 - A live prompt can be cancelled, but individual historical messages cannot be
   mutated or deleted through ACP.
-- Deleting an Amarcode chat permanently removes its locally stored messages,
-  run records, stored ACP session IDs, and related ACP event records. Semantic
-  continuation is no longer possible from Amarcode after that deletion unless
-  the history was saved elsewhere.
 
 In short, Amarcode first uses native ACP resumption when available and uses
 local transcript hydration as the interoperable fallback. This lets one durable
