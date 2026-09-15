@@ -53,6 +53,10 @@ impl App {
         // it discovers the RPC port is already occupied.
         let instance_lock = InstanceLock::acquire(&config.db_path)?;
         let store = Arc::new(Store::open(&config.db_path)?);
+        let pruned_events = store.prune_acp_events()?;
+        if pruned_events > 0 {
+            info!(count = pruned_events, "pruned expired ACP events");
+        }
         let stopped = store.stop_interrupted_runs()?;
         if stopped > 0 {
             info!(count = stopped, "marked interrupted agent runs as stopped");

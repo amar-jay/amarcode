@@ -17,9 +17,10 @@ pub mod methods {
     pub const CREATE_CHAT: &str = "create_chat";
     pub const LIST_CHATS: &str = "list_chats";
     pub const GET_CHAT: &str = "get_chat";
-    pub const LIST_ACP_EVENTS_FOR_RUN: &str = "list_acp_events_for_run";
-    pub const LIST_ACP_EVENTS_FOR_CHAT: &str = "list_acp_events_for_chat";
-    pub const LIST_AGENT_RUNS_FOR_CHAT: &str = "list_agent_runs_for_chat";
+    pub const GET_MESSAGE_PARTS: &str = "get_message_parts";
+    pub const GET_DAEMON_CONFIG: &str = "get_daemon_config";
+    pub const SET_DAEMON_CONFIG: &str = "set_daemon_config";
+    pub const VACUUM_DATABASE: &str = "vacuum_database";
     pub const GET_ATTACHMENT: &str = "get_attachment";
     pub const DELETE_CHAT: &str = "delete_chat";
     pub const PROMPT: &str = "prompt";
@@ -142,6 +143,37 @@ pub struct GetChatParams {
     pub chat_id: String,
     #[serde(default = "default_true")]
     pub include_messages: bool,
+    #[serde(default = "default_true")]
+    pub include_tool_content: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GetMessagePartsParams {
+    pub message_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct DaemonConfigResult {
+    pub store_acp_events: bool,
+    #[ts(type = "number")]
+    pub acp_event_retention_days: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SetDaemonConfigParams {
+    pub store_acp_events: bool,
+    #[ts(type = "number")]
+    pub acp_event_retention_days: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct VacuumDatabaseResult {
+    #[ts(type = "number")]
+    pub before_bytes: u64,
+    #[ts(type = "number")]
+    pub after_bytes: u64,
+    #[ts(type = "number")]
+    pub reclaimed_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

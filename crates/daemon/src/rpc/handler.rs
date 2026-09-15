@@ -13,8 +13,7 @@ use crate::{
         methods, AuthenticateAgentParams, AuthenticateAgentResult, CancelParams, CancelResult,
         CreateChatParams, DeleteChatParams, DeleteChatResult, GetAttachmentParams,
         GetAttachmentResult, GetChatParams, HealthResult, InstallAgentParams,
-        ListAcpEventsForChatParams, ListAcpEventsForRunParams, ListAcpEventsResult,
-        ListAgentRunsForChatParams, ListAgentRunsResult, ListAgentsResult, ListChatsParams,
+        ListAgentsResult, ListChatsParams,
         ListChatsResult, PromptParams, PromptResultDto, RespondAgentParams, RespondAgentResult,
         SetSessionConfigOptionParams, SetSessionConfigOptionResult, SubscribeEventsParams,
         VersionResult,
@@ -54,14 +53,13 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::CREATE_CHAT => Ok(DispatchOutcome::Result(create_chat(app, params)?)),
         methods::LIST_CHATS => Ok(DispatchOutcome::Result(list_chats(app, params)?)),
         methods::GET_CHAT => Ok(DispatchOutcome::Result(get_chat(app, params)?)),
-        methods::LIST_ACP_EVENTS_FOR_RUN => Ok(DispatchOutcome::Result(list_acp_events_for_run(
-            app, params,
+        methods::GET_MESSAGE_PARTS => Ok(DispatchOutcome::Result(get_message_parts(app, params)?)),
+        methods::GET_DAEMON_CONFIG => Ok(DispatchOutcome::Result(to_value(
+            app.store.daemon_config(),
         )?)),
-        methods::LIST_ACP_EVENTS_FOR_CHAT => Ok(DispatchOutcome::Result(list_acp_events_for_chat(
-            app, params,
-        )?)),
-        methods::LIST_AGENT_RUNS_FOR_CHAT => Ok(DispatchOutcome::Result(list_agent_runs_for_chat(
-            app, params,
+        methods::SET_DAEMON_CONFIG => Ok(DispatchOutcome::Result(set_daemon_config(app, params)?)),
+        methods::VACUUM_DATABASE => Ok(DispatchOutcome::Result(to_value(
+            app.store.vacuum_database()?,
         )?)),
         methods::GET_ATTACHMENT => Ok(DispatchOutcome::Result(get_attachment(app, params)?)),
         methods::DELETE_CHAT => Ok(DispatchOutcome::Result(delete_chat(app, params).await?)),
@@ -150,7 +148,10 @@ fn list_chats(app: &App, params: Value) -> Result<Value> {
 fn get_chat(app: &App, params: Value) -> Result<Value> {
     let p: GetChatParams = parse_params(params)?;
     if p.include_messages {
-        let detail = app.chats.get_with_messages(&p.chat_id)?;
+        let mut detail = app.chats.get_with_messages(&p.chat_id)?;
+        if !p.include_tool_content {
+            compact_tool_parts(&mut detail);
+        }
         to_value(chat_detail_json(&detail)?)
     } else {
         let chat = app.chats.get_required(&p.chat_id)?;
@@ -158,50 +159,126 @@ fn get_chat(app: &App, params: Value) -> Result<Value> {
     }
 }
 
-fn list_acp_events_for_run(app: &App, params: Value) -> Result<Value> {
-    let p: ListAcpEventsForRunParams = parse_params(params)?;
-    if app.store.get_run(&p.run_id)?.is_none() {
-        return Err(Error::msg(format!("agent run not found: {}", p.run_id)));
+fn get_message_parts(app: &App, params: Value) -> Result<Value> {
+    let p: amarcode_protocol::rpc::GetMessagePartsParams = parse_params(params)?;
+    let mut parts = Vec::new();
+    for message_id in p.message_ids {
+        parts.extend(app.store.message_parts(&message_id)?);
     }
-    let events = app
-        .store
-        .acp_events(&p.run_id)?
-        .into_iter()
-        .map(wire_acp_event)
-        .collect::<Result<Vec<_>>>()?;
-    to_value(ListAcpEventsResult { events })
+    to_value(parts)
 }
 
-fn list_acp_events_for_chat(app: &App, params: Value) -> Result<Value> {
-    let p: ListAcpEventsForChatParams = parse_params(params)?;
-    app.chats.get_required(&p.chat_id)?;
-    let events = app
-        .store
-        .acp_events_for_chat(&p.chat_id)?
-        .into_iter()
-        .map(wire_acp_event)
-        .collect::<Result<Vec<_>>>()?;
-    to_value(ListAcpEventsResult { events })
+fn set_daemon_config(app: &App, params: Value) -> Result<Value> {
+    let p: amarcode_protocol::rpc::SetDaemonConfigParams = parse_params(params)?;
+    to_value(
+        app.store
+            .set_daemon_config(p.store_acp_events, p.acp_event_retention_days)?,
+    )
 }
 
-fn list_agent_runs_for_chat(app: &App, params: Value) -> Result<Value> {
-    let p: ListAgentRunsForChatParams = parse_params(params)?;
-    app.chats.get_required(&p.chat_id)?;
-    let runs = app.store.list_runs_for_chat(&p.chat_id)?;
-    to_value(ListAgentRunsResult { runs })
+fn compact_tool_parts(detail: &mut ChatDetail) {
+    for message in &mut detail.messages {
+        if message.message.status == crate::protocol::MessageStatus::Streaming {
+            continue;
+        }
+        let mut latest =
+            std::collections::HashMap::<String, (usize, serde_json::Map<String, Value>)>::new();
+        for (index, part) in message.parts.iter().enumerate() {
+            if part.kind != crate::protocol::MessagePartKind::ToolCall {
+                continue;
+            }
+            if let Ok(Value::Object(value)) = serde_json::from_str::<Value>(&part.content_json) {
+                if let Some(id) = value
+                    .get("toolCallId")
+                    .or_else(|| value.get("tool_call_id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                {
+                    let merged = latest
+                        .entry(id)
+                        .or_insert_with(|| (index, serde_json::Map::new()));
+                    merged.0 = index;
+                    merged.1.extend(value);
+                }
+            }
+        }
+
+        message.parts = message
+            .parts
+            .drain(..)
+            .enumerate()
+            .filter_map(|(index, mut part)| {
+                if part.kind != crate::protocol::MessagePartKind::ToolCall {
+                    return Some(part);
+                }
+                let value = serde_json::from_str::<Value>(&part.content_json).ok()?;
+                let id = value
+                    .get("toolCallId")
+                    .or_else(|| value.get("tool_call_id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let mut value = if let Some(id) = id {
+                    let (latest_index, merged) = latest.get(&id)?;
+                    if *latest_index != index {
+                        return None;
+                    }
+                    Value::Object(merged.clone())
+                } else {
+                    value
+                };
+                compact_tool_value(&mut value);
+                part.content_json = value.to_string();
+                Some(part)
+            })
+            .collect();
+    }
 }
 
-fn wire_acp_event(event: crate::store::AcpEvent) -> Result<crate::protocol::AcpEvent> {
-    let payload = event.payload_value()?;
-    Ok(crate::protocol::AcpEvent {
-        id: event.id,
-        agent_run_id: event.agent_run_id,
-        direction: crate::protocol::AcpEventDirection::parse(event.direction.as_str())
-            .map_err(Error::msg)?,
-        method: event.method,
-        payload,
-        created_at: event.created_at,
-    })
+fn compact_tool_value(value: &mut Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    object.remove("rawOutput");
+    object.remove("raw_output");
+    // ACP terminal deltas duplicate command output under `_meta`; the full
+    // payload remains available through get_message_parts on expansion.
+    object.remove("_meta");
+    object.insert("_deferred".into(), Value::Bool(true));
+    for key in ["rawInput", "raw_input"] {
+        if let Some(Value::Object(input)) = object.get_mut(key) {
+            input.retain(|field, _| matches!(field.as_str(), "command" | "args" | "cwd"));
+        }
+    }
+    if let Some(Value::Array(content)) = object.get_mut("content") {
+        content.retain_mut(|item| {
+            let Some(diff) = item.as_object_mut() else {
+                return false;
+            };
+            if diff.get("type").and_then(Value::as_str) != Some("diff") {
+                return false;
+            }
+            if !diff.contains_key("changes") {
+                if let Some(path) = diff.get("path").and_then(Value::as_str).map(str::to_owned) {
+                    let operation = match (
+                        diff.get("oldText").and_then(Value::as_str),
+                        diff.get("newText").and_then(Value::as_str),
+                    ) {
+                        (None | Some(""), _) => "create",
+                        (_, Some("")) => "delete",
+                        _ => "modify",
+                    };
+                    diff.insert(
+                        "changes".into(),
+                        json!([{"path": path, "operation": operation}]),
+                    );
+                }
+            }
+            diff.remove("oldText");
+            diff.remove("newText");
+            diff.remove("patch");
+            true
+        });
+    }
 }
 
 fn get_attachment(app: &App, params: Value) -> Result<Value> {

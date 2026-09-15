@@ -21,7 +21,8 @@ use crate::{
             CancelResult, DeleteChatResult, GetAttachmentResult, HealthResult, PromptAttachment,
             PromptResultDto, RespondAgentParams, RespondAgentResult, VersionResult,
         },
-        AcpEvent, AgentInfo, AgentRun, Chat, GetChatResult,
+        rpc::{DaemonConfigResult, SetDaemonConfigParams, VacuumDatabaseResult},
+        AgentInfo, Chat, GetChatResult, MessagePart,
     },
     state::AppState,
 };
@@ -162,32 +163,37 @@ async fn get_chat(
     state: State<'_, AppState>,
     chat_id: String,
     include_messages: bool,
+    include_tool_content: bool,
 ) -> Result<GetChatResult, String> {
-    state.get_chat(chat_id, include_messages).await
+    state
+        .get_chat(chat_id, include_messages, include_tool_content)
+        .await
 }
 
 #[tauri::command]
-async fn list_acp_events_for_run(
+async fn get_message_parts(
     state: State<'_, AppState>,
-    run_id: String,
-) -> Result<Vec<AcpEvent>, String> {
-    state.list_acp_events_for_run(run_id).await
+    message_ids: Vec<String>,
+) -> Result<Vec<MessagePart>, String> {
+    state.get_message_parts(message_ids).await
 }
 
 #[tauri::command]
-async fn list_acp_events_for_chat(
-    state: State<'_, AppState>,
-    chat_id: String,
-) -> Result<Vec<AcpEvent>, String> {
-    state.list_acp_events_for_chat(chat_id).await
+async fn get_daemon_config(state: State<'_, AppState>) -> Result<DaemonConfigResult, String> {
+    state.daemon_config().await
 }
 
 #[tauri::command]
-async fn list_agent_runs_for_chat(
+async fn set_daemon_config(
     state: State<'_, AppState>,
-    chat_id: String,
-) -> Result<Vec<AgentRun>, String> {
-    state.list_agent_runs_for_chat(chat_id).await
+    params: SetDaemonConfigParams,
+) -> Result<DaemonConfigResult, String> {
+    state.set_daemon_config(params).await
+}
+
+#[tauri::command]
+async fn vacuum_database(state: State<'_, AppState>) -> Result<VacuumDatabaseResult, String> {
+    state.vacuum_database().await
 }
 
 #[tauri::command]
@@ -669,9 +675,10 @@ pub fn run() {
             create_chat,
             list_chats,
             get_chat,
-            list_acp_events_for_run,
-            list_acp_events_for_chat,
-            list_agent_runs_for_chat,
+            get_message_parts,
+            get_daemon_config,
+            set_daemon_config,
+            vacuum_database,
             get_attachment,
             delete_chat,
             prompt,

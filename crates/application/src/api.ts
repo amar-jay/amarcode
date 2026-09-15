@@ -8,10 +8,13 @@ import type {
   Chat,
   DeleteChatResult,
   DaemonVersion,
+  DaemonConfigResult,
+  VacuumDatabaseResult,
   EditorEvent,
   EventFilter,
   GetAttachmentResult,
   GetChatResult,
+  MessagePart,
   Health,
   PromptResult,
   PromptAttachment,
@@ -174,14 +177,25 @@ export const daemonApi = {
     invoke("create_chat", { workspacePath, title }),
   listChats: (workspacePath?: string): Promise<Chat[]> =>
     invoke("list_chats", { workspacePath }),
-  getChat: (chatId: string, includeMessages = true): Promise<GetChatResult> =>
-    invoke("get_chat", { chatId, includeMessages }),
-  listAcpEventsForRun: (runId: string): Promise<AcpEvent[]> =>
-    invoke("list_acp_events_for_run", { runId }),
-  listAcpEventsForChat: (chatId: string): Promise<AcpEvent[]> =>
-    invoke("list_acp_events_for_chat", { chatId }),
-  listAgentRunsForChat: (chatId: string): Promise<AgentRun[]> =>
-    invoke("list_agent_runs_for_chat", { chatId }),
+  getChat: (
+    chatId: string,
+    includeMessages = true,
+    includeToolContent = false,
+  ): Promise<GetChatResult> =>
+    invoke("get_chat", { chatId, includeMessages, includeToolContent }),
+  getMessageParts: (messageIds: string[]): Promise<MessagePart[]> =>
+    invoke("get_message_parts", { messageIds }),
+  getDaemonConfig: (): Promise<DaemonConfigResult> =>
+    invoke("get_daemon_config"),
+  setDaemonConfig: (
+    storeAcpEvents: boolean,
+    acpEventRetentionDays: number,
+  ): Promise<DaemonConfigResult> =>
+    invoke("set_daemon_config", {
+      params: { store_acp_events: storeAcpEvents, acp_event_retention_days: acpEventRetentionDays },
+    }),
+  vacuumDatabase: (): Promise<VacuumDatabaseResult> =>
+    invoke("vacuum_database"),
   getAttachment: (
     chatId: string,
     attachmentId: string,

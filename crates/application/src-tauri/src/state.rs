@@ -11,12 +11,13 @@ use crate::{
     daemon::{DaemonBridge, EventSubscription},
     protocol::{
         rpc::{
-            methods, AuthenticateAgentResult, CancelResult, DeleteChatResult, GetAttachmentResult,
-            HealthResult, InstallAgentResult, ListAcpEventsResult, ListAgentRunsResult,
-            ListAgentsResult, ListChatsResult, PromptAttachment, PromptResultDto,
-            RespondAgentParams, RespondAgentResult, SetSessionConfigOptionResult, VersionResult,
+            methods, AuthenticateAgentResult, CancelResult, DaemonConfigResult, DeleteChatResult,
+            GetAttachmentResult, HealthResult, InstallAgentResult, ListAgentsResult,
+            ListChatsResult, PromptAttachment, PromptResultDto, RespondAgentParams,
+            RespondAgentResult, SetDaemonConfigParams, SetSessionConfigOptionResult,
+            VacuumDatabaseResult, VersionResult,
         },
-        AgentInfo, Chat, GetChatResult, SessionConfigAssignment, SessionConfigValue,
+        AgentInfo, Chat, GetChatResult, MessagePart, SessionConfigAssignment, SessionConfigValue,
     },
 };
 
@@ -89,56 +90,52 @@ impl AppState {
         &self,
         chat_id: String,
         include_messages: bool,
+        include_tool_content: bool,
     ) -> Result<GetChatResult, String> {
         self.call(
             methods::GET_CHAT,
-            json!({ "chat_id": chat_id, "include_messages": include_messages }),
+            json!({
+                "chat_id": chat_id,
+                "include_messages": include_messages,
+                "include_tool_content": include_tool_content
+            }),
         )
         .await
     }
 
-    pub async fn list_acp_events_for_run(
+    pub async fn get_message_parts(
         &self,
-        run_id: String,
-    ) -> Result<Vec<crate::protocol::AcpEvent>, String> {
-        Ok(self
-            .call::<ListAcpEventsResult>(
-                methods::LIST_ACP_EVENTS_FOR_RUN,
-                json!({ "run_id": run_id }),
-            )
-            .await?
-            .events)
+        message_ids: Vec<String>,
+    ) -> Result<Vec<MessagePart>, String> {
+        self.call(
+            methods::GET_MESSAGE_PARTS,
+            json!({ "message_ids": message_ids }),
+        )
+        .await
     }
 
-    pub async fn list_acp_events_for_chat(
-        &self,
-        chat_id: String,
-    ) -> Result<Vec<crate::protocol::AcpEvent>, String> {
-        Ok(self
-            .call::<ListAcpEventsResult>(
-                methods::LIST_ACP_EVENTS_FOR_CHAT,
-                json!({ "chat_id": chat_id }),
-            )
-            .await?
-            .events)
+    pub async fn daemon_config(&self) -> Result<DaemonConfigResult, String> {
+        self.call(methods::GET_DAEMON_CONFIG, Value::Null).await
     }
 
-    pub async fn list_agent_runs_for_chat(
+    pub async fn set_daemon_config(
         &self,
-        chat_id: String,
-    ) -> Result<Vec<crate::protocol::AgentRun>, String> {
-        Ok(self
-            .call::<ListAgentRunsResult>(
-                methods::LIST_AGENT_RUNS_FOR_CHAT,
-                json!({ "chat_id": chat_id }),
-            )
-            .await?
-            .runs)
+        params: SetDaemonConfigParams,
+    ) -> Result<DaemonConfigResult, String> {
+        self.call(
+            methods::SET_DAEMON_CONFIG,
+            serde_json::to_value(params).map_err(|error| error.to_string())?,
+        )
+        .await
     }
 
     pub async fn delete_chat(&self, chat_id: String) -> Result<DeleteChatResult, String> {
         self.call(methods::DELETE_CHAT, json!({ "chat_id": chat_id }))
             .await
+    }
+
+    pub async fn vacuum_database(&self) -> Result<VacuumDatabaseResult, String> {
+        self.call(methods::VACUUM_DATABASE, Value::Null).await
     }
 
     pub async fn get_attachment(

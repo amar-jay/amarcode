@@ -171,7 +171,9 @@ function AppPromptInput({
           agent.unavailable_reason ?? "Selected agent is not installed.",
         );
       const title =
-        text.slice(0, 72) || message.files[0]?.filename || "Attachment prompt";
+        text.length > 48
+          ? `${text.slice(0, 48).trimEnd()}…`
+          : text || message.files[0]?.filename || "Attachment prompt";
       const chat = await daemonApi.createChat(workspacePath, title);
 
       // Transition immediately. The daemon's prompt RPC remains open until the

@@ -341,6 +341,7 @@ export function LiveChatScreen() {
     () => groupChatBlocks(messages, isWorking, verboseReasoning),
     [messages, isWorking, verboseReasoning],
   );
+
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const matchingBlockKeys = useMemo(
     () =>

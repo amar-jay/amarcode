@@ -31,14 +31,14 @@ pub async fn synchronize(app_dir: &Path, source: &str) -> Result<PathBuf> {
         run_git([
             "-C",
             path_text(&checkout)?,
-            "pull",
-            "--ff-only",
+            "fetch",
             "--depth",
             "1",
             "origin",
             "main",
         ])
         .await?;
+        run_git(["-C", path_text(&checkout)?, "reset", "--hard", "FETCH_HEAD"]).await?;
     } else if checkout.exists() {
         return Err(Error::msg(format!(
             "ACP registry path exists but is not a Git checkout: {}",

@@ -355,7 +355,7 @@ export function WorkspaceChangedFiles({
                   role="treeitem"
                   aria-selected={selected}
                   className={cn(
-                    "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    "group flex w-full items-center gap-2 px-2 py-0 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 border-b-1 border-border rounded-none",
                     selected &&
                       "bg-accent text-accent-foreground hover:bg-accent",
                   )}
@@ -364,7 +364,7 @@ export function WorkspaceChangedFiles({
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
-                    onClick={() => setSelectedPath(change.path)}
+                    onClick={() => setSelectedPath(() => selectedPath === change.path? "" : change.path)}
                   >
                     <span
                       className={cn(
@@ -381,10 +381,8 @@ export function WorkspaceChangedFiles({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-mono text-xs text-foreground">
-                        {name}
-                      </span>
-                      <span className="block truncate font-mono text-[0.65rem] text-muted-foreground">
-                        {directory}
+                        {name} {" "}
+												<span className="truncate text-muted-foreground text-[0.65rem]">{directory}</span>
                       </span>
                     </span>
                   </button>
