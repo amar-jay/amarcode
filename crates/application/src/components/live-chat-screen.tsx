@@ -5,7 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   KeyRound,
-  ListTree,
+  // ListTree,
   LoaderCircle,
   Search,
   Timer,
@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Toggle } from "@/components/ui/toggle";
+// import { Toggle } from "@/components/ui/toggle";
 import AppPromptInput from "./main-prompt-input";
 import { ActivityView } from "./activity/activity-view";
 import { PendingAgentRequestCard } from "./pending-agent-request";
@@ -546,7 +546,7 @@ export function LiveChatScreen() {
                 {live.runStatus}
               </span>
             )}
-            <Toggle
+            {/* <Toggle
               size="sm"
               className="ml-auto"
               pressed={conversationView === "activity"}
@@ -567,7 +567,7 @@ export function LiveChatScreen() {
             >
               <ListTree className="size-4" />
               <span className="hidden sm:inline">Activity</span>
-            </Toggle>
+            </Toggle> */}
             <Button
               type="button"
               variant="ghost"
@@ -575,7 +575,7 @@ export function LiveChatScreen() {
               aria-label="Find in chat"
               title="Find in chat (Ctrl+F)"
               onClick={openSearch}
-              className={conversationView === "activity" ? "hidden" : ""}
+              className="ml-auto"
             >
               <Search className="size-4" />
             </Button>
