@@ -364,7 +364,11 @@ export function WorkspaceChangedFiles({
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
-                    onClick={() => setSelectedPath(() => selectedPath === change.path? "" : change.path)}
+                    onClick={() =>
+                      setSelectedPath(
+                        selectedPath === change.path ? "" : change.path,
+                      )
+                    }
                   >
                     <span
                       className={cn(

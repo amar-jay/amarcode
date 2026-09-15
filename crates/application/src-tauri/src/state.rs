@@ -12,10 +12,10 @@ use crate::{
     protocol::{
         rpc::{
             methods, AuthenticateAgentResult, CancelResult, DaemonConfigResult, DeleteChatResult,
-            GetAttachmentResult, HealthResult, InstallAgentResult, ListAgentsResult,
-            ListChatsResult, PromptAttachment, PromptResultDto, RespondAgentParams,
-            RespondAgentResult, SetDaemonConfigParams, SetSessionConfigOptionResult,
-            VacuumDatabaseResult, VersionResult,
+            GetAttachmentResult, HealthResult, InstallAgentResult, ListAcpEventsResult,
+            ListAgentRunsResult, ListAgentsResult, ListChatsResult, PromptAttachment,
+            PromptResultDto, RespondAgentParams, RespondAgentResult, SetDaemonConfigParams,
+            SetSessionConfigOptionResult, VacuumDatabaseResult, VersionResult,
         },
         AgentInfo, Chat, GetChatResult, MessagePart, SessionConfigAssignment, SessionConfigValue,
     },
@@ -112,6 +112,32 @@ impl AppState {
             json!({ "message_ids": message_ids }),
         )
         .await
+    }
+
+    pub async fn list_acp_events_for_chat(
+        &self,
+        chat_id: String,
+    ) -> Result<Vec<crate::protocol::AcpEvent>, String> {
+        Ok(self
+            .call::<ListAcpEventsResult>(
+                methods::LIST_ACP_EVENTS_FOR_CHAT,
+                json!({ "chat_id": chat_id }),
+            )
+            .await?
+            .events)
+    }
+
+    pub async fn list_agent_runs_for_chat(
+        &self,
+        chat_id: String,
+    ) -> Result<Vec<crate::protocol::AgentRun>, String> {
+        Ok(self
+            .call::<ListAgentRunsResult>(
+                methods::LIST_AGENT_RUNS_FOR_CHAT,
+                json!({ "chat_id": chat_id }),
+            )
+            .await?
+            .runs)
     }
 
     pub async fn daemon_config(&self) -> Result<DaemonConfigResult, String> {

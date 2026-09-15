@@ -211,6 +211,10 @@ export const daemonApi = {
     invoke("get_chat", { chatId, includeMessages, includeToolContent }),
   getMessageParts: (messageIds: string[]): Promise<MessagePart[]> =>
     invoke("get_message_parts", { messageIds }),
+  listAcpEventsForChat: (chatId: string): Promise<AcpEvent[]> =>
+    invoke("list_acp_events_for_chat", { chatId }),
+  listAgentRunsForChat: (chatId: string): Promise<AgentRun[]> =>
+    invoke("list_agent_runs_for_chat", { chatId }),
   getDaemonConfig: (): Promise<DaemonConfigResult> =>
     invoke("get_daemon_config"),
   setDaemonConfig: (

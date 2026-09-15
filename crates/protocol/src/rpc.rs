@@ -18,6 +18,8 @@ pub mod methods {
     pub const LIST_CHATS: &str = "list_chats";
     pub const GET_CHAT: &str = "get_chat";
     pub const GET_MESSAGE_PARTS: &str = "get_message_parts";
+    pub const LIST_ACP_EVENTS_FOR_CHAT: &str = "list_acp_events_for_chat";
+    pub const LIST_AGENT_RUNS_FOR_CHAT: &str = "list_agent_runs_for_chat";
     pub const GET_DAEMON_CONFIG: &str = "get_daemon_config";
     pub const SET_DAEMON_CONFIG: &str = "set_daemon_config";
     pub const VACUUM_DATABASE: &str = "vacuum_database";

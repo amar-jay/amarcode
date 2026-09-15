@@ -13,10 +13,10 @@ use crate::{
         methods, AuthenticateAgentParams, AuthenticateAgentResult, CancelParams, CancelResult,
         CreateChatParams, DeleteChatParams, DeleteChatResult, GetAttachmentParams,
         GetAttachmentResult, GetChatParams, HealthResult, InstallAgentParams,
-        ListAgentsResult, ListChatsParams,
-        ListChatsResult, PromptParams, PromptResultDto, RespondAgentParams, RespondAgentResult,
-        SetSessionConfigOptionParams, SetSessionConfigOptionResult, SubscribeEventsParams,
-        VersionResult,
+        ListAcpEventsForChatParams, ListAcpEventsResult, ListAgentRunsForChatParams,
+        ListAgentRunsResult, ListAgentsResult, ListChatsParams, ListChatsResult, PromptParams,
+        PromptResultDto, RespondAgentParams, RespondAgentResult, SetSessionConfigOptionParams,
+        SetSessionConfigOptionResult, SubscribeEventsParams, VersionResult,
     },
     service::{ChatDetail, MessageDetail, PromptResult},
     App, Error, Result,
@@ -54,6 +54,12 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::LIST_CHATS => Ok(DispatchOutcome::Result(list_chats(app, params)?)),
         methods::GET_CHAT => Ok(DispatchOutcome::Result(get_chat(app, params)?)),
         methods::GET_MESSAGE_PARTS => Ok(DispatchOutcome::Result(get_message_parts(app, params)?)),
+        methods::LIST_ACP_EVENTS_FOR_CHAT => Ok(DispatchOutcome::Result(list_acp_events_for_chat(
+            app, params,
+        )?)),
+        methods::LIST_AGENT_RUNS_FOR_CHAT => Ok(DispatchOutcome::Result(list_agent_runs_for_chat(
+            app, params,
+        )?)),
         methods::GET_DAEMON_CONFIG => Ok(DispatchOutcome::Result(to_value(
             app.store.daemon_config(),
         )?)),
@@ -166,6 +172,39 @@ fn get_message_parts(app: &App, params: Value) -> Result<Value> {
         parts.extend(app.store.message_parts(&message_id)?);
     }
     to_value(parts)
+}
+
+fn list_acp_events_for_chat(app: &App, params: Value) -> Result<Value> {
+    let p: ListAcpEventsForChatParams = parse_params(params)?;
+    app.chats.get_required(&p.chat_id)?;
+    let events = app
+        .store
+        .acp_events_for_chat(&p.chat_id)?
+        .into_iter()
+        .map(wire_acp_event)
+        .collect::<Result<Vec<_>>>()?;
+    to_value(ListAcpEventsResult { events })
+}
+
+fn list_agent_runs_for_chat(app: &App, params: Value) -> Result<Value> {
+    let p: ListAgentRunsForChatParams = parse_params(params)?;
+    app.chats.get_required(&p.chat_id)?;
+    let runs = app.store.list_runs_for_chat(&p.chat_id)?;
+    to_value(ListAgentRunsResult { runs })
+}
+
+fn wire_acp_event(event: crate::store::AcpEvent) -> Result<crate::protocol::AcpEvent> {
+    let payload = event.payload_value()?;
+    let direction =
+        crate::protocol::AcpEventDirection::parse(event.direction.as_str()).map_err(Error::msg)?;
+    Ok(crate::protocol::AcpEvent {
+        id: event.id,
+        agent_run_id: event.agent_run_id,
+        direction,
+        method: event.method,
+        payload,
+        created_at: event.created_at,
+    })
 }
 
 fn set_daemon_config(app: &App, params: Value) -> Result<Value> {
