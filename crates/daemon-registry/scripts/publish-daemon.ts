@@ -444,6 +444,65 @@ function signManifest(contents: string): string {
   return sign(null, Buffer.from(contents), privateKey).toString("base64");
 }
 
+async function offerAppPublication(daemonVersion: string) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
+
+  const publishApp = await prompts.confirm({
+    message: "Publish the desktop app too?",
+    initialValue: false,
+  });
+  if (prompts.isCancel(publishApp) || !publishApp) {
+    prompts.log.info("Desktop app publication skipped.");
+    return;
+  }
+
+  const branch = output(["git", "branch", "--show-current"]);
+  if (branch !== "main") {
+    throw new Error(
+      `desktop publication requires the main branch; current branch is ${branch || "detached HEAD"}`,
+    );
+  }
+
+  // Validate this before creating a commit so a missing or logged-out GitHub
+  // CLI cannot leave a release commit that the script is unable to publish.
+  run(["gh", "--version"], { quiet: true });
+  run(["gh", "auth", "status"], { quiet: true });
+
+  const changes = output(["git", "status", "--short"]);
+  if (changes) {
+    prompts.note(changes, "Changes to commit");
+    const commitChanges = await prompts.confirm({
+      message: "Commit all listed changes before publishing the app?",
+      initialValue: false,
+    });
+    if (prompts.isCancel(commitChanges) || !commitChanges) {
+      prompts.log.warn(
+        "Desktop app publication skipped because the changes were not committed.",
+      );
+      return;
+    }
+
+    const commitMessage = await prompts.text({
+      message: "Commit message",
+      initialValue: `chore: publish daemon ${daemonVersion}`,
+      validate: (value) =>
+        value.trim() ? undefined : "Enter a non-empty commit message.",
+    });
+    if (prompts.isCancel(commitMessage)) {
+      prompts.log.warn("Desktop app publication skipped.");
+      return;
+    }
+
+    run(["git", "add", "--all"]);
+    run(["git", "commit", "-m", commitMessage.trim()]);
+  }
+
+  // The workflow dispatch targets GitHub's main branch, so the release commit
+  // must be present on the remote before app:publish triggers the workflow.
+  run(["git", "push", "origin", "main"]);
+  run(["bun", "run", "app:publish"]);
+}
+
 async function main() {
   let options = parseArgs(process.argv.slice(2));
   const currentHostTarget = hostTarget();
@@ -618,10 +677,12 @@ async function main() {
         cwd: workerDirectory,
       });
     }
-    console.log("\nDaemon publication completed successfully.");
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
+
+  console.log("\nDaemon publication completed successfully.");
+  await offerAppPublication(options.version);
 }
 
 if (import.meta.main) {

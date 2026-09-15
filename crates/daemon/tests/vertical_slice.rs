@@ -72,6 +72,28 @@ async fn create_chat_prompt_store_and_events() {
         "health must advertise the shared protocol version"
     );
 
+    // Raw ACP traffic is opt-in. This test explicitly verifies the durable
+    // ACP event log, so enable recording before starting the agent session.
+    let daemon_config = rpc(
+        &addr,
+        json!({
+            "method": "set_daemon_config",
+            "params": {
+                "store_acp_events": true,
+                "acp_event_retention_days": 7
+            }
+        }),
+    )
+    .await
+    .expect("enable ACP event recording");
+    assert_eq!(
+        daemon_config
+            .pointer("/result/store_acp_events")
+            .and_then(Value::as_bool),
+        Some(true),
+        "ACP event recording must be enabled for this test: {daemon_config}"
+    );
+
     insert_mock_agent_with_environment(
         &app_dir,
         &mock_agent,
