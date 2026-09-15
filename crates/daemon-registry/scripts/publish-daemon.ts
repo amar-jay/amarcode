@@ -42,6 +42,13 @@ type Options = {
   skipBuild: boolean;
   skipDeploy: boolean;
   dryRun: boolean;
+  appPublication: AppPublicationPlan | null;
+};
+
+type AppPublicationPlan = {
+  commitMessage: string | null;
+  appVersion: string | null;
+  push: boolean;
 };
 
 type BuiltArtifact = {
@@ -57,6 +64,14 @@ const workerDirectory = join(projectRoot, "crates", "daemon-registry");
 const wranglerConfig = join(workerDirectory, "wrangler.jsonc");
 const daemonManifestPath = join(projectRoot, "crates", "daemon", "Cargo.toml");
 const cargoLockPath = join(projectRoot, "Cargo.lock");
+const tauriConfigPath = join(
+  projectRoot,
+  "crates",
+  "application",
+  "src-tauri",
+  "tauri.conf.json",
+);
+const packageManifestPath = join(projectRoot, "package.json");
 const releasePublicKey =
   "5ef56cd7772e8c601ca9c5a15378b7088fc558e7edcde73770cbb116d9e255d2";
 
@@ -82,6 +97,40 @@ function run(
 function output(command: string[]): string {
   const result = run(command, { quiet: true });
   return result.stdout.toString().trim();
+}
+
+function appVersion(): string {
+  const contents = readFileSync(tauriConfigPath, "utf8");
+  const match = contents.match(/"version"\s*:\s*"([^"]+)"/);
+  if (!match) throw new Error(`could not find version in ${tauriConfigPath}`);
+  return match[1];
+}
+
+function updateAppVersion(version: string) {
+  const currentVersion = appVersion();
+  if (currentVersion === version) return;
+
+  const tauriConfig = readFileSync(tauriConfigPath, "utf8");
+  const updatedTauriConfig = tauriConfig.replace(
+    /("version"\s*:\s*")[^"]+(")/,
+    `$1${version}$2`,
+  );
+  if (updatedTauriConfig === tauriConfig) {
+    throw new Error(`could not update app version in ${tauriConfigPath}`);
+  }
+
+  const packageManifest = readFileSync(packageManifestPath, "utf8");
+  const updatedPackageManifest = packageManifest.replace(
+    /("version"\s*:\s*")[^"]+(")/,
+    `$1${version}$2`,
+  );
+  if (updatedPackageManifest === packageManifest) {
+    throw new Error(`could not update app version in ${packageManifestPath}`);
+  }
+
+  writeFileSync(tauriConfigPath, updatedTauriConfig);
+  writeFileSync(packageManifestPath, updatedPackageManifest);
+  console.log(`Updated desktop app version: ${currentVersion} -> ${version}`);
 }
 
 function cargoValue(manifestPath: string, key: string): string {
@@ -176,7 +225,11 @@ async function releaseTui(
   currentHostTarget: string,
 ): Promise<Pick<
   Options,
-  "version" | "versionProvided" | "overwrite" | "targets"
+  | "version"
+  | "versionProvided"
+  | "overwrite"
+  | "targets"
+  | "appPublication"
 > | null> {
   prompts.intro("Amarcode daemon release");
   prompts.note(
@@ -257,12 +310,26 @@ async function releaseTui(
     if (prompts.isCancel(overwrite)) return cancelled(overwrite);
   }
 
+  const appPublication = await inquireAppPublication(version, currentVersion);
+  if (appPublication === undefined) return null;
+
   prompts.note(
     [
       `Version: ${version} ${
         overwritable && overwrite ? "(overwritable)" : ""
       }`,
       `Targets: ${targets.join(", ")}`,
+      `Desktop app: ${
+        appPublication
+          ? appPublication.appVersion
+            ? `publish ${appPublication.appVersion} after daemon`
+            : "publish after daemon"
+          : "skip"
+      }`,
+      ...(appPublication?.commitMessage
+        ? [`Commit: ${appPublication.commitMessage}`]
+        : []),
+      ...(appPublication?.push ? ["Push: origin/main, then trigger workflow"] : []),
     ].join("\n"),
     "Release plan",
   );
@@ -277,7 +344,13 @@ async function releaseTui(
   }
 
   prompts.log.success("Release confirmed. Preparing artifacts…");
-  return { version, versionProvided: true, overwrite, targets };
+  return {
+    version,
+    versionProvided: true,
+    overwrite,
+    targets,
+    appPublication,
+  };
 }
 
 function parseArgs(args: string[]): Options {
@@ -334,6 +407,7 @@ Options:
     skipBuild: flags.has("--skip-build"),
     skipDeploy: flags.has("--skip-deploy"),
     dryRun: flags.has("--dry-run"),
+    appPublication: null,
   };
 }
 
@@ -444,17 +518,16 @@ function signManifest(contents: string): string {
   return sign(null, Buffer.from(contents), privateKey).toString("base64");
 }
 
-async function offerAppPublication(daemonVersion: string) {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
-
+async function inquireAppPublication(
+  daemonVersion: string,
+  currentVersion: string,
+): Promise<AppPublicationPlan | null | undefined> {
   const publishApp = await prompts.confirm({
     message: "Publish the desktop app too?",
     initialValue: false,
   });
-  if (prompts.isCancel(publishApp) || !publishApp) {
-    prompts.log.info("Desktop app publication skipped.");
-    return;
-  }
+  if (prompts.isCancel(publishApp)) return cancelled(publishApp) ?? undefined;
+  if (!publishApp) return null;
 
   const branch = output(["git", "branch", "--show-current"]);
   if (branch !== "main") {
@@ -468,39 +541,135 @@ async function offerAppPublication(daemonVersion: string) {
   run(["gh", "--version"], { quiet: true });
   run(["gh", "auth", "status"], { quiet: true });
 
-  const changes = output(["git", "status", "--short"]);
-  if (changes) {
-    prompts.note(changes, "Changes to commit");
-    const commitChanges = await prompts.confirm({
-      message: "Commit all listed changes before publishing the app?",
-      initialValue: false,
-    });
-    if (prompts.isCancel(commitChanges) || !commitChanges) {
-      prompts.log.warn(
-        "Desktop app publication skipped because the changes were not committed.",
-      );
-      return;
-    }
+  const currentAppVersion = appVersion();
+  const appReleaseType = await prompts.select({
+    message: "Desktop app version",
+    initialValue: "patch",
+    options: [
+      {
+        value: "patch",
+        label: "Patch",
+        hint: bumpVersion(currentAppVersion, "patch"),
+      },
+      {
+        value: "minor",
+        label: "Minor",
+        hint: bumpVersion(currentAppVersion, "minor"),
+      },
+      {
+        value: "major",
+        label: "Major",
+        hint: bumpVersion(currentAppVersion, "major"),
+      },
+      { value: "custom", label: "Custom version" },
+      {
+        value: "current",
+        label: "Keep current version",
+        hint: currentAppVersion,
+      },
+    ],
+  });
+  if (prompts.isCancel(appReleaseType))
+    return cancelled(appReleaseType) ?? undefined;
 
-    const commitMessage = await prompts.text({
+  let nextAppVersion: string;
+  if (appReleaseType === "custom") {
+    const customVersion = await prompts.text({
+      message: "Custom desktop app version",
+      placeholder: currentAppVersion,
+      validate: (value) =>
+        /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(value)
+          ? undefined
+          : "Enter a valid release version.",
+    });
+    if (prompts.isCancel(customVersion))
+      return cancelled(customVersion) ?? undefined;
+    nextAppVersion = customVersion;
+  } else if (appReleaseType === "current") {
+    nextAppVersion = currentAppVersion;
+  } else {
+    nextAppVersion = bumpVersion(currentAppVersion, appReleaseType);
+  }
+
+  const changes = output(["git", "status", "--short"]);
+  const daemonVersionWillChange = daemonVersion !== currentVersion;
+  const appVersionWillChange = nextAppVersion !== currentAppVersion;
+  const plannedChanges = [
+    ...(changes ? [changes] : []),
+    ...(daemonVersionWillChange
+      ? [
+          `M crates/daemon/Cargo.toml (${currentVersion} -> ${daemonVersion})`,
+          "M Cargo.lock (daemon package version)",
+        ]
+      : []),
+    ...(appVersionWillChange
+      ? [
+          `M crates/application/src-tauri/tauri.conf.json (${currentAppVersion} -> ${nextAppVersion})`,
+          `M package.json (${currentAppVersion} -> ${nextAppVersion})`,
+        ]
+      : []),
+  ];
+
+  let commitMessage: string | null = null;
+  if (plannedChanges.length > 0) {
+    prompts.note(
+      plannedChanges.join("\n"),
+      "Changes to commit after daemon publication",
+    );
+    const commitChanges = await prompts.confirm({
+      message: "Commit all listed release changes before publishing the app?",
+      initialValue: true,
+    });
+    if (prompts.isCancel(commitChanges))
+      return cancelled(commitChanges) ?? undefined;
+    if (!commitChanges) return null;
+
+    const message = await prompts.text({
       message: "Commit message",
-      initialValue: `chore: publish daemon ${daemonVersion}`,
+      initialValue: appVersionWillChange
+        ? `chore: publish daemon ${daemonVersion} and app ${nextAppVersion}`
+        : `chore: publish daemon ${daemonVersion}`,
       validate: (value) =>
         value.trim() ? undefined : "Enter a non-empty commit message.",
     });
-    if (prompts.isCancel(commitMessage)) {
-      prompts.log.warn("Desktop app publication skipped.");
-      return;
-    }
+    if (prompts.isCancel(message)) return cancelled(message) ?? undefined;
+    commitMessage = message.trim();
+  }
 
+  const push = await prompts.confirm({
+    message: "Push main to origin and trigger the desktop release workflow?",
+    initialValue: true,
+  });
+  if (prompts.isCancel(push)) return cancelled(push) ?? undefined;
+  if (!push) return null;
+
+  return {
+    commitMessage,
+    appVersion: appVersionWillChange ? nextAppVersion : null,
+    push: true,
+  };
+}
+
+function executeAppPublication(plan: AppPublicationPlan) {
+  if (plan.appVersion) updateAppVersion(plan.appVersion);
+
+  const changes = output(["git", "status", "--short"]);
+  if (changes) {
+    if (!plan.commitMessage) {
+      throw new Error(
+        "uncommitted changes appeared after the release inquiry; refusing to publish the desktop app without commit approval",
+      );
+    }
     run(["git", "add", "--all"]);
-    run(["git", "commit", "-m", commitMessage.trim()]);
+    run(["git", "commit", "-m", plan.commitMessage]);
   }
 
   // The workflow dispatch targets GitHub's main branch, so the release commit
   // must be present on the remote before app:publish triggers the workflow.
-  run(["git", "push", "origin", "main"]);
-  run(["bun", "run", "app:publish"]);
+  if (plan.push) {
+    run(["git", "push", "origin", "main"]);
+    run(["bun", "run", "app:publish"]);
+  }
 }
 
 async function main() {
@@ -682,7 +851,7 @@ async function main() {
   }
 
   console.log("\nDaemon publication completed successfully.");
-  await offerAppPublication(options.version);
+  if (options.appPublication) executeAppPublication(options.appPublication);
 }
 
 if (import.meta.main) {
