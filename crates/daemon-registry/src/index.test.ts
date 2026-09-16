@@ -49,6 +49,7 @@ function fakeObject(key: string, value: string): R2ObjectBody {
 
 function environment(entries: Record<string, string>): Env {
   return {
+    GITHUB_TOKEN: "test-github-token",
     DAEMON_ARTIFACTS: {
       async get(key: string) {
         const value = entries[key];
@@ -106,6 +107,77 @@ describe("resolveArtifactRoute", () => {
 });
 
 describe("handleRequest", () => {
+  test("proxies the desktop updater manifest from the rolling GitHub release", async () => {
+    let upstreamRequest: Request | undefined;
+    const response = await handleRequest(
+      new Request("https://downloads.example/v1/app/latest.json"),
+      environment({}),
+      async (request) => {
+        upstreamRequest = request;
+        return new Response('{"version":"0.1.1"}', {
+          headers: {
+            "content-type": "application/octet-stream",
+            etag: '"app-manifest"',
+            "set-cookie": "not-forwarded=true",
+          },
+        });
+      },
+    );
+
+    expect(upstreamRequest?.url).toBe(
+      "https://github.com/amar-jay/amarcode/releases/latest/download/latest.json",
+    );
+    expect(upstreamRequest?.headers.get("accept")).toBe("application/json");
+    expect(upstreamRequest?.headers.get("authorization")).toBe(
+      "Bearer test-github-token",
+    );
+    expect(upstreamRequest?.headers.get("user-agent")).toBe(
+      "amarcode-update-proxy",
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(response.headers.get("cache-control")).toContain("max-age=60");
+    expect(response.headers.get("etag")).toBe('"app-manifest"');
+    expect(response.headers.has("set-cookie")).toBe(false);
+    expect(response.headers.has("authorization")).toBe(false);
+    expect((await response.json()) as unknown).toEqual({ version: "0.1.1" });
+  });
+
+  test("supports HEAD for the desktop updater manifest", async () => {
+    let upstreamMethod: string | undefined;
+    const response = await handleRequest(
+      new Request("https://downloads.example/v1/app/latest.json", {
+        method: "HEAD",
+      }),
+      environment({}),
+      async (request) => {
+        upstreamMethod = request.method;
+        return new Response(null, { headers: { etag: '"app-manifest"' } });
+      },
+    );
+
+    expect(upstreamMethod).toBe("HEAD");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("etag")).toBe('"app-manifest"');
+    expect(await response.text()).toBe("");
+  });
+
+  test("returns a non-cacheable 502 when the app manifest origin fails", async () => {
+    const response = await handleRequest(
+      new Request("https://downloads.example/v1/app/latest.json"),
+      environment({}),
+      async () => {
+        throw new Error("origin unavailable");
+      },
+    );
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect((await response.json()) as unknown).toEqual({
+      error: "app update manifest unavailable",
+    });
+  });
+
   test("lists published daemon versions", async () => {
     const response = await handleRequest(
       new Request("https://downloads.example/v1/daemon/versions.json"),

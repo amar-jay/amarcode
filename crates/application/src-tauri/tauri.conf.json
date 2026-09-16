@@ -44,7 +44,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYwNjk2MTJDMEI4ODI0MTEKUldRUkpJZ0xMR0ZwOEp6dGxhdHVIejc3VTFXZWtISDc4ZVp5Rk5GUUozNVNPcTFGMlRIREg1aTIK",
       "endpoints": [
-        "https://github.com/amar-jay/amarcode/releases/latest/download/latest.json"
+        "https://updates.amarcode.amarjay.com/v1/app/latest.json"
       ]
     }
   }

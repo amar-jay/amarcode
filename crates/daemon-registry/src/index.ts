@@ -1,5 +1,6 @@
 export interface Env {
   DAEMON_ARTIFACTS: R2Bucket;
+  GITHUB_TOKEN: string;
 }
 
 type ArtifactRoute = {
@@ -12,6 +13,11 @@ const JSON_CACHE_CONTROL = "public, max-age=60, must-revalidate";
 const BINARY_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
 const VERSIONS_PATH = "/v1/daemon/versions.json";
+const APP_LATEST_PATH = "/v1/app/latest.json";
+const APP_LATEST_URL =
+  "https://github.com/amar-jay/amarcode/releases/latest/download/latest.json";
+
+type Fetcher = (request: Request) => Promise<Response>;
 
 function json(
   value: unknown,
@@ -184,9 +190,56 @@ async function listVersions(env: Env): Promise<string[]> {
   return [...versions].sort();
 }
 
+async function proxyAppManifest(
+  request: Request,
+  githubToken: string,
+  fetcher: Fetcher,
+): Promise<Response> {
+  const requestHeaders = new Headers({
+    accept: "application/json",
+    authorization: `Bearer ${githubToken}`,
+    "user-agent": "amarcode-update-proxy",
+  });
+  for (const name of ["if-none-match", "if-modified-since"]) {
+    const value = request.headers.get(name);
+    if (value) requestHeaders.set(name, value);
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetcher(
+      new Request(APP_LATEST_URL, {
+        method: request.method,
+        headers: requestHeaders,
+        redirect: "follow",
+        cf: { cacheEverything: true, cacheTtl: 60 },
+      }),
+    );
+  } catch {
+    return json({ error: "app update manifest unavailable" }, 502, {
+      "cache-control": "no-store",
+    });
+  }
+
+  const headers = new Headers(upstream.headers);
+  headers.delete("set-cookie");
+  headers.set("cache-control", JSON_CACHE_CONTROL);
+  headers.set("x-content-type-options", "nosniff");
+  if (upstream.ok) {
+    headers.set("content-type", "application/json; charset=utf-8");
+  }
+
+  return new Response(request.method === "HEAD" ? null : upstream.body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers,
+  });
+}
+
 export async function handleRequest(
   request: Request,
   env: Env,
+  fetcher: Fetcher = fetch,
 ): Promise<Response> {
   const url = new URL(request.url);
 
@@ -212,11 +265,17 @@ export async function handleRequest(
     return json({ versions: await listVersions(env) }, 200, headers);
   }
 
+  if (url.pathname === APP_LATEST_PATH) {
+    return proxyAppManifest(request, env.GITHUB_TOKEN, fetcher);
+  }
+
   const route = resolveArtifactRoute(url.pathname);
   if (!route) return json({ error: "not found" }, 404);
   return serveArtifact(request, env, route);
 }
 
 export default {
-  fetch: handleRequest,
+  fetch(request, env) {
+    return handleRequest(request, env);
+  },
 } satisfies ExportedHandler<Env>;

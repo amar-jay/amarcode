@@ -72,6 +72,7 @@ export function useAppBootstrap() {
     const live = store.get(liveChatAtom);
     if (live) await loadLiveChat({ chatId: live.chatId, silent: true });
   }, [initializeDaemonClient, loadLiveChat, store]);
+
   const checkDaemonUpdate = useCallback(async () => {
     try {
       const update = await daemonApi.checkUpdate();
@@ -93,6 +94,7 @@ export function useAppBootstrap() {
       console.info("Daemon update check failed:", error);
     }
   }, []);
+
   const installDaemon = useCallback(async () => {
     try {
       await daemonApi.install(setDaemonConnection);
@@ -119,9 +121,9 @@ export function useAppBootstrap() {
       }
       setAppUpdateVersion(update.version);
       setAppUpdateNotes(update.notes);
-      notifyToast(`Amarcode ${update.version} is available`, {
+      notifyToast(`Amarcode update available`, {
         id: `app-update-${update.version}`,
-        description: `Installed version: ${update.currentVersion}`,
+        description: `Update now.`,
         duration: 15_000,
         action: {
           label: "Update",
