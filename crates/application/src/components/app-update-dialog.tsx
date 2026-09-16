@@ -56,13 +56,13 @@ export function AppUpdateDialog({
             {failed
               ? "Application update failed"
               : updating
-                ? `Updating Amarcode to ${version}…`
-                : `Update Amarcode to ${version}?`}
+                ? `Updating Amarcode…`
+                : `Update Amarcode to latest version?`}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {appUpdateDescription(status) ??
               notes ??
-              "The signed update will be downloaded from GitHub. Amarcode will restart after installation."}
+              "The signed update will be downloaded. Amarcode will restart after installation."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
