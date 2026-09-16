@@ -66,9 +66,7 @@ fn write_applied_signature(app: &AppHandle, signature: &str) -> Result<(), Strin
         .map_err(|error| format!("failed to record installed update signature: {error}"))
 }
 
-async fn fetch_update(
-    app: &AppHandle,
-) -> Result<Option<tauri_plugin_updater::Update>, String> {
+async fn fetch_update(app: &AppHandle) -> Result<Option<tauri_plugin_updater::Update>, String> {
     // Ignore package semver. A new GitHub upload is a new build when the
     // signed updater artifact (minisign payload) changed.
     let update = app

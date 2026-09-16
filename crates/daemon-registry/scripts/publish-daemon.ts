@@ -182,11 +182,7 @@ async function releaseTui(
   currentHostTarget: string,
 ): Promise<Pick<
   Options,
-  | "version"
-  | "versionProvided"
-  | "overwrite"
-  | "targets"
-  | "appPublication"
+  "version" | "versionProvided" | "overwrite" | "targets" | "appPublication"
 > | null> {
   prompts.intro("Amarcode daemon release");
   prompts.note(
@@ -280,7 +276,9 @@ async function releaseTui(
       ...(appPublication?.commitMessage
         ? [`Commit: ${appPublication.commitMessage}`]
         : []),
-      ...(appPublication?.push ? ["Push: origin/main, then trigger workflow"] : []),
+      ...(appPublication?.push
+        ? ["Push: origin/main, then trigger workflow"]
+        : []),
     ].join("\n"),
     "Release plan",
   );
