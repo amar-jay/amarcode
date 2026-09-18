@@ -276,6 +276,15 @@ impl SessionManager {
             });
         }
 
+        if prompt_result.get("usage").is_some() {
+            let _ = super::super::usage::apply_context_usage(
+                &self.inner,
+                &run_id,
+                chat_id,
+                &prompt_result,
+            );
+        }
+
         let stop_reason = extract_stop_reason(&prompt_result);
         self.finish_turn(
             chat_id,

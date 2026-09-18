@@ -4,6 +4,7 @@ import type {
   AgentFailureKind,
   Chat,
   ChatDetail,
+  ContextUsage,
   JsonValue,
   PromptAttachment,
   RunStatus,
@@ -36,6 +37,7 @@ export type LiveChatState = {
   turnStatus: TurnStatus | null;
   pendingRequest: PendingAgentRequest | null;
   contextRestoration: string | null;
+  contextUsage: ContextUsage | null;
   sessionConfig: SessionConfigOption[];
   loading: boolean;
   error: string | null;
@@ -58,6 +60,7 @@ const emptyLiveChat = (
   turnStatus: null,
   pendingRequest: null,
   contextRestoration: null,
+  contextUsage: null,
   sessionConfig: [],
   loading: true,
   error: null,
@@ -202,6 +205,7 @@ export const loadLiveChatAtom = atom(
           ...current,
           detail: result,
           sessionConfig: result.session_config ?? current.sessionConfig,
+          contextUsage: result.context_usage ?? current.contextUsage,
           loading: false,
           error: null,
         });
@@ -250,6 +254,8 @@ export const applyLiveChatEventAtom = atom(
         ...live,
         turnStatus: event.payload.status,
         runId: event.payload.run_id,
+        contextUsage:
+          event.payload.run_id === live.runId ? live.contextUsage : null,
         pendingRequest:
           event.payload.status !== "started" ? null : live.pendingRequest,
         contextRestoration:
@@ -280,6 +286,18 @@ export const applyLiveChatEventAtom = atom(
       const session = get(activeSessionAtom);
       if (session?.agent?.id) rememberSessionConfig(session.agent.id, options);
       set(liveChatAtom, { ...live, sessionConfig: options });
+      return;
+    }
+
+    if (
+      event.type === "contextUsageUpdated" &&
+      event.payload.chat_id === live.chatId
+    ) {
+      set(liveChatAtom, {
+        ...live,
+        runId: event.payload.run_id,
+        contextUsage: event.payload.usage,
+      });
       return;
     }
 

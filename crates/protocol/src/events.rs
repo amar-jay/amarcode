@@ -3,7 +3,8 @@ use serde_json::Value;
 use ts_rs::TS;
 
 use crate::{
-    AgentFailureKind, MessagePartKind, MessageStatus, RunStatus, SessionConfigOption, TurnStatus,
+    AgentFailureKind, ContextUsage, MessagePartKind, MessageStatus, RunStatus, SessionConfigOption,
+    TurnStatus,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +42,11 @@ pub enum EditorEvent {
         chat_id: String,
         run_id: String,
         source: String,
+    },
+    ContextUsageUpdated {
+        chat_id: String,
+        run_id: String,
+        usage: ContextUsage,
     },
     MessageUpdated {
         message_id: String,

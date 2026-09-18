@@ -188,6 +188,7 @@ mod tests {
                 started_at: "2026-01-01T00:00:01Z".to_owned(),
                 finished_at: None,
                 error_message: None,
+                context_usage: None,
             })
             .expect("create active run");
 

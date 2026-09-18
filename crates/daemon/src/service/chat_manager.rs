@@ -24,6 +24,7 @@ pub struct ChatDetail {
     pub chat: Chat,
     pub messages: Vec<MessageDetail>,
     pub session_config: Vec<crate::protocol::SessionConfigOption>,
+    pub context_usage: Option<crate::protocol::ContextUsage>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,10 +94,17 @@ impl ChatManager {
             });
         }
         let session_config = self.store.session_config(id)?;
+        let context_usage = self
+            .store
+            .list_runs_for_chat(id)?
+            .into_iter()
+            .next()
+            .and_then(|run| run.context_usage);
         Ok(ChatDetail {
             chat,
             messages: detailed,
             session_config,
+            context_usage,
         })
     }
 

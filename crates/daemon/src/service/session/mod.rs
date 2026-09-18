@@ -29,6 +29,7 @@ mod messages;
 pub(crate) mod session_config;
 mod terminal;
 mod types;
+mod usage;
 mod util;
 
 pub use failures::ClassifiedFailure;

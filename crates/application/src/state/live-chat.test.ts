@@ -14,6 +14,7 @@ vi.hoisted(() => {
 });
 import { activeSessionAtom } from "./navigation";
 import {
+  applyLiveChatEventAtom,
   failStartedPromptAtom,
   liveChatAtom,
   type LiveChatState,
@@ -55,6 +56,7 @@ describe("failed home-composer prompts", () => {
       turnStatus: "started",
       pendingRequest: null,
       contextRestoration: null,
+      contextUsage: null,
       sessionConfig: [],
       loading: true,
       error: null,
@@ -71,6 +73,46 @@ describe("failed home-composer prompts", () => {
     expect(store.get(liveChatAtom)).toMatchObject({
       turnStatus: "failed",
       error: "ACP connection closed",
+    });
+  });
+});
+
+describe("ACP context usage", () => {
+  it("applies live usage updates to the open chat", () => {
+    const store = createStore();
+    store.set(liveChatAtom, {
+      chatId: chat.id,
+      detail: null,
+      runId: "run-1",
+      runStatus: "running",
+      turnStatus: "started",
+      pendingRequest: null,
+      contextRestoration: null,
+      contextUsage: null,
+      sessionConfig: [],
+      loading: false,
+      error: null,
+      errorKind: null,
+      authRequired: null,
+    });
+
+    store.set(applyLiveChatEventAtom, {
+      type: "contextUsageUpdated",
+      payload: {
+        chat_id: chat.id,
+        run_id: "run-1",
+        usage: {
+          used: 53_000,
+          size: 200_000,
+          cost: { amount: 0.42, currency: "USD" },
+        },
+      },
+    });
+
+    expect(store.get(liveChatAtom)?.contextUsage).toEqual({
+      used: 53_000,
+      size: 200_000,
+      cost: { amount: 0.42, currency: "USD" },
     });
   });
 });

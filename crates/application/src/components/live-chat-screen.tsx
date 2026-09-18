@@ -660,6 +660,7 @@ export function LiveChatScreen() {
           onAgentSelected={(next) => bindAgent(next)}
           onSendPrompt={submit}
           sessionConfig={live.sessionConfig}
+          contextUsage={live.contextUsage}
           onSessionConfigChange={(configId, value) =>
             changeSessionConfig({ configId, value })
           }

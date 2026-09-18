@@ -23,7 +23,11 @@ export type AcpEventDirection = "sent" | "received";
 
 export type AcpEvent = { id: number, agentRunId: string, direction: AcpEventDirection, method: string, payload: Record<string, unknown>, createdAt: string, };
 
-export type AgentRun = { id: string, chat_id: string, agent_id: string, acp_session_id: string | null, status: RunStatus, started_at: string, finished_at: string | null, error_message: string | null, };
+export type AgentRun = { id: string, chat_id: string, agent_id: string, acp_session_id: string | null, status: RunStatus, started_at: string, finished_at: string | null, error_message: string | null, context_usage: ContextUsage | null, };
+
+export type ContextCost = { amount: number, currency: string, };
+
+export type ContextUsage = { used: number, size: number, cost: ContextCost | null, };
 
 export type AgentDefinition = { id: string, name: string, command: string, arguments: Array<string>, environment: Array<[string, string]>, 
 /**
@@ -49,7 +53,7 @@ export type MessagePart = { message_id: string, ordinal: number, kind: MessagePa
 
 export type MessageDetail = { message: Message, parts: Array<MessagePart>, agent_id: string | null, };
 
-export type ChatDetail = { chat: Chat, messages: Array<MessageDetail>, session_config: Array<SessionConfigOption>, };
+export type ChatDetail = { chat: Chat, messages: Array<MessageDetail>, session_config: Array<SessionConfigOption>, context_usage: ContextUsage | null, };
 
 export type GetChatResult = ChatDetail | Chat;
 
@@ -111,4 +115,4 @@ export type RespondAgentParams = { request_id: string, result: JsonValue | null,
 
 export type RespondAgentResult = { ok: boolean, request_id: string, };
 
-export type EditorEvent = { "type": "chatUpdated", "payload": { chat_id: string, } } | { "type": "runUpdated", "payload": { run_id: string, status: RunStatus, error_message: string | null, error_kind: AgentFailureKind | null, } } | { "type": "turnUpdated", "payload": { chat_id: string, run_id: string, user_message_id: string, status: TurnStatus, stop_reason: string | null, error_message: string | null, error_kind: AgentFailureKind | null, } } | { "type": "contextRestoration", "payload": { chat_id: string, run_id: string, source: string, } } | { "type": "messageUpdated", "payload": { message_id: string, status: MessageStatus, } } | { "type": "messagePartAdded", "payload": { message_id: string, ordinal: number, kind: MessagePartKind, } } | { "type": "approvalRequired", "payload": { run_id: string, request_id: string, details: JsonValue, } } | { "type": "questionRequired", "payload": { run_id: string, request_id: string, details: JsonValue, } } | { "type": "workspaceFilesChanged", "payload": { workspace_path: string, paths: Array<string>, } } | { "type": "agentConnectionChanged", "payload": { agent_id: string, connected: boolean, error_message: string | null, error_kind: AgentFailureKind | null, } } | { "type": "agentAuthRequired", "payload": { agent_id: string, run_id: string | null, methods: JsonValue, } } | { "type": "sessionConfigUpdated", "payload": { chat_id: string, options: Array<SessionConfigOption>, } };
+export type EditorEvent = { "type": "chatUpdated", "payload": { chat_id: string, } } | { "type": "runUpdated", "payload": { run_id: string, status: RunStatus, error_message: string | null, error_kind: AgentFailureKind | null, } } | { "type": "turnUpdated", "payload": { chat_id: string, run_id: string, user_message_id: string, status: TurnStatus, stop_reason: string | null, error_message: string | null, error_kind: AgentFailureKind | null, } } | { "type": "contextRestoration", "payload": { chat_id: string, run_id: string, source: string, } } | { "type": "contextUsageUpdated", "payload": { chat_id: string, run_id: string, usage: ContextUsage, } } | { "type": "messageUpdated", "payload": { message_id: string, status: MessageStatus, } } | { "type": "messagePartAdded", "payload": { message_id: string, ordinal: number, kind: MessagePartKind, } } | { "type": "approvalRequired", "payload": { run_id: string, request_id: string, details: JsonValue, } } | { "type": "questionRequired", "payload": { run_id: string, request_id: string, details: JsonValue, } } | { "type": "workspaceFilesChanged", "payload": { workspace_path: string, paths: Array<string>, } } | { "type": "agentConnectionChanged", "payload": { agent_id: string, connected: boolean, error_message: string | null, error_kind: AgentFailureKind | null, } } | { "type": "agentAuthRequired", "payload": { agent_id: string, run_id: string | null, methods: JsonValue, } } | { "type": "sessionConfigUpdated", "payload": { chat_id: string, options: Array<SessionConfigOption>, } };

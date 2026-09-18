@@ -202,6 +202,9 @@ fn event_matches(
         }
         | EditorEvent::ContextRestoration {
             chat_id, run_id, ..
+        }
+        | EditorEvent::ContextUsageUpdated {
+            chat_id, run_id, ..
         } => EventScope {
             chat_id: Some(chat_id.clone()),
             run_id: Some(run_id.clone()),
@@ -371,6 +374,7 @@ mod tests {
                 started_at: "2026-01-01T00:00:00Z".into(),
                 finished_at: None,
                 error_message: None,
+                context_usage: None,
             })
             .expect("create run");
         store

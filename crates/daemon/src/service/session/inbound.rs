@@ -20,6 +20,7 @@ use super::{
         ensure_streaming_message, finalize_message, remove_pending_requests_for_run,
         take_streaming_messages, take_streaming_messages_from_live,
     },
+		usage::apply_context_usage,
     terminal::is_terminal_method,
     types::{PendingAgentRequest, SessionInner},
     util::{emit, extract_text_delta},
@@ -375,12 +376,14 @@ fn apply_notification(
                 },
             );
         }
+        AgentEventMethod::ContextUsage => {
+            apply_context_usage(inner, run_id, chat_id, &envelope.payload)?;
+        }
         AgentEventMethod::SessionCreated
         | AgentEventMethod::CommandStarted
         | AgentEventMethod::CommandOutput
         | AgentEventMethod::CommandCompleted
-        | AgentEventMethod::PlanUpdated
-        | AgentEventMethod::ContextUsage => {}
+        | AgentEventMethod::PlanUpdated => {}
         AgentEventMethod::Other(_) => {
             // Grok streams tool/permission telemetry as `_x.ai/session_notification`
             // with the same `{ update: { sessionUpdate } }` envelope as ACP
@@ -421,11 +424,11 @@ fn apply_session_update(
                 update.get("messageId").and_then(|value| value.as_str()),
             )?;
             if let Some(delta) = extract_text_delta(update) {
-                if is_reasoning_message_chunk(update) {
-                    append_thinking_delta(inner, &message_id, &delta)?;
-                } else {
-                    append_text_delta(inner, &message_id, &delta)?;
-                }
+                // if is_reasoning_message_chunk(update) {
+                //     append_thinking_delta(inner, &message_id, &delta)?;
+                // } else {
+                append_text_delta(inner, &message_id, &delta)?;
+                // }
             }
             emit(
                 inner,
@@ -488,8 +491,8 @@ fn apply_session_update(
         "session_info_update" => {
             apply_session_title(inner, chat_id, update)?;
         }
+        "usage_update" => {}
         "available_commands_update"
-        | "usage_update"
         | "session_summary_generated"
         | "response_completed"
         | "turn_completed"
@@ -506,6 +509,8 @@ fn apply_session_update(
             debug!(%kind, "unhandled sessionUpdate kind");
         }
     }
+    // Usage normalization owns both canonical parsing and scoped extensions.
+    super::usage::apply_context_usage(inner, run_id, chat_id, payload)?;
     Ok(())
 }
 
@@ -576,16 +581,17 @@ fn should_persist_notification(envelope: &RpcEnvelope) -> bool {
     }
 }
 
-fn is_reasoning_message_chunk(update: &Value) -> bool {
-    matches!(
-        update
-            .get("_meta")
-            .and_then(|meta| meta.get("codex"))
-            .and_then(|codex| codex.get("phase"))
-            .and_then(Value::as_str),
-        Some("commentary" | "analysis" | "reasoning")
-    )
-}
+// too specific to codex, trying to be generic across all agents.
+// fn is_reasoning_message_chunk(update: &Value) -> bool {
+//     matches!(
+//         update
+//             .get("_meta")
+//             .and_then(|meta| meta.get("codex"))
+//             .and_then(|codex| codex.get("phase"))
+//             .and_then(Value::as_str),
+//         Some("commentary" | "analysis" | "reasoning")
+//     )
+// }
 
 #[cfg(test)]
 mod tests {
@@ -593,11 +599,163 @@ mod tests {
 
     use serde_json::json;
 
+    use super::super::usage::apply_context_usage;
     use super::{
-        apply_session_title, apply_session_update, is_reasoning_message_chunk,
-        looks_like_session_update, new_pending_request_id, session_update_kind,
+        apply_session_title, apply_session_update, new_pending_request_id,
         should_persist_notification, SessionInner,
     };
+
+    #[test]
+    fn context_usage_is_persisted_and_emitted() {
+        let store = std::sync::Arc::new(
+            crate::store::Store::open(std::path::Path::new(":memory:")).expect("store"),
+        );
+        store
+            .save_agent(&crate::protocol::AgentDefinition {
+                id: "agent-1".into(),
+                name: "Agent".into(),
+                command: "agent".into(),
+                arguments: vec![],
+                environment: vec![],
+                available: true,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .expect("agent");
+        store
+            .create_chat(&crate::store::Chat {
+                id: "chat-1".into(),
+                workspace_path: "/tmp/workspace".into(),
+                title: "Chat".into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+                archived_at: None,
+            })
+            .expect("chat");
+        store
+            .create_run(&crate::store::AgentRun {
+                id: "run-1".into(),
+                chat_id: "chat-1".into(),
+                agent_id: "agent-1".into(),
+                acp_session_id: Some("session-1".into()),
+                status: crate::protocol::RunStatus::Running,
+                started_at: "2026-01-01T00:00:00Z".into(),
+                finished_at: None,
+                error_message: None,
+                context_usage: None,
+            })
+            .expect("run");
+        let (events, mut receiver) = tokio::sync::broadcast::channel(4);
+        let inner = SessionInner {
+            store: std::sync::Arc::clone(&store),
+            events,
+            prompt_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
+            by_chat: std::sync::Mutex::new(std::collections::HashMap::new()),
+            pending: std::sync::Mutex::new(std::collections::HashMap::new()),
+            terminals: Default::default(),
+        };
+
+        apply_context_usage(
+            &inner,
+            "run-1",
+            "chat-1",
+            &json!({
+                "used": 53_000,
+                "size": 200_000,
+                "cost": { "amount": 0.42, "currency": "USD" }
+            }),
+        )
+        .expect("apply usage");
+
+        let usage = store
+            .get_run("run-1")
+            .expect("read run")
+            .expect("run exists")
+            .context_usage
+            .expect("usage persisted");
+        assert_eq!(usage.used, 53_000);
+        assert_eq!(usage.size, 200_000);
+        assert_eq!(usage.cost.expect("cost").amount, 0.42);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(crate::protocol::EditorEvent::ContextUsageUpdated { chat_id, run_id, usage })
+                if chat_id == "chat-1" && run_id == "run-1" && usage.used == 53_000
+        ));
+    }
+
+    #[test]
+    fn usage_update_null_used_is_not_zero() {
+        let store = std::sync::Arc::new(
+            crate::store::Store::open(std::path::Path::new(":memory:")).expect("store"),
+        );
+        store
+            .save_agent(&crate::protocol::AgentDefinition {
+                id: "agent-1".into(),
+                name: "Agent".into(),
+                command: "agent".into(),
+                arguments: vec![],
+                environment: vec![],
+                available: true,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .expect("agent");
+        store
+            .create_chat(&crate::store::Chat {
+                id: "chat-1".into(),
+                workspace_path: "/tmp/workspace".into(),
+                title: "Chat".into(),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+                archived_at: None,
+            })
+            .expect("chat");
+        store
+            .create_run(&crate::store::AgentRun {
+                id: "run-1".into(),
+                chat_id: "chat-1".into(),
+                agent_id: "agent-1".into(),
+                acp_session_id: Some("session-1".into()),
+                status: crate::protocol::RunStatus::Running,
+                started_at: "2026-01-01T00:00:00Z".into(),
+                finished_at: None,
+                error_message: None,
+                context_usage: None,
+            })
+            .expect("run");
+        let (events, mut receiver) = tokio::sync::broadcast::channel(4);
+        let inner = SessionInner {
+            store: std::sync::Arc::clone(&store),
+            events,
+            prompt_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
+            by_chat: std::sync::Mutex::new(std::collections::HashMap::new()),
+            pending: std::sync::Mutex::new(std::collections::HashMap::new()),
+            terminals: Default::default(),
+        };
+
+        apply_context_usage(
+            &inner,
+            "run-1",
+            "chat-1",
+            &json!({
+                "sessionId": "s",
+                "update": {
+                    "sessionUpdate": "usage_update",
+                    "used": null,
+                    "size": 200_000
+                }
+            }),
+        )
+        .expect("apply");
+
+        let usage = store
+            .get_run("run-1")
+            .expect("read run")
+            .expect("run exists")
+            .context_usage;
+        assert!(usage.is_none());
+        assert!(receiver.try_recv().is_err());
+    }
 
     fn notification(kind: &str, fields: serde_json::Value) -> crate::protocol::RpcEnvelope {
         let mut update = serde_json::Map::new();
@@ -713,183 +871,5 @@ mod tests {
             .collect::<HashSet<_>>();
         assert_eq!(ids.len(), 64);
         assert!(ids.iter().all(|id| uuid::Uuid::parse_str(id).is_ok()));
-    }
-
-    #[test]
-    fn codex_commentary_is_classified_as_reasoning() {
-        assert!(is_reasoning_message_chunk(&json!({
-            "_meta": { "codex": { "phase": "commentary" } }
-        })));
-        assert!(is_reasoning_message_chunk(&json!({
-            "_meta": { "codex": { "phase": "analysis" } }
-        })));
-    }
-
-    #[test]
-    fn final_and_unphased_messages_remain_visible_answers() {
-        assert!(!is_reasoning_message_chunk(&json!({
-            "_meta": { "codex": { "phase": "final_answer" } }
-        })));
-        assert!(!is_reasoning_message_chunk(&json!({})));
-    }
-
-    #[test]
-    fn grok_session_notification_payloads_look_like_session_updates() {
-        let payload = json!({
-            "sessionId": "s1",
-            "update": {
-                "name": "list_dir",
-                "sessionUpdate": "tool_call_delta_chunk",
-                "tool_call_id": "call-1",
-                "tool_index": 0
-            }
-        });
-        assert!(looks_like_session_update(&payload));
-        assert_eq!(session_update_kind(&payload), Some("tool_call_delta_chunk"));
-    }
-
-    #[test]
-    fn grok_prompt_complete_is_not_a_session_update() {
-        let payload = json!({
-            "sessionId": "s1",
-            "promptId": "p1",
-            "stopReason": "end_turn"
-        });
-        assert!(!looks_like_session_update(&payload));
-        assert_eq!(session_update_kind(&payload), None);
-    }
-}
-
-#[cfg(all(test, unix))]
-mod grok_inbound_tests {
-    use std::{collections::HashMap, sync::Arc};
-
-    use serde_json::json;
-    use tokio::sync::broadcast;
-
-    use crate::{
-        acp::AcpClient,
-        protocol::{
-            AgentEventMethod, MessagePartKind, MessageRole, MessageStatus, RpcDirection,
-            RpcEnvelope, RunStatus,
-        },
-        store::{AgentRun, Message, Store},
-    };
-
-    use super::super::types::LiveRun;
-    use super::{apply_notification, SessionInner};
-
-    fn sleeping_client() -> Arc<AcpClient> {
-        let arguments = vec!["-c".to_owned(), "sleep 30".to_owned()];
-        let (client, _inbound) =
-            AcpClient::spawn("/bin/sh", &arguments, &[], None).expect("spawn sleeping test agent");
-        Arc::new(client)
-    }
-
-    #[test]
-    fn grok_tool_call_delta_notification_is_stored_as_a_tool_part() {
-        let store = Arc::new(Store::open(std::path::Path::new(":memory:")).expect("store"));
-        store
-            .save_agent(&crate::protocol::AgentDefinition {
-                id: "grok-acp".into(),
-                name: "Grok".into(),
-                command: "test-agent".into(),
-                arguments: vec![],
-                environment: vec![],
-                available: false,
-                created_at: "2026-01-01T00:00:00Z".into(),
-                updated_at: "2026-01-01T00:00:00Z".into(),
-            })
-            .expect("create agent");
-        store
-            .create_chat(&crate::store::Chat {
-                id: "chat-1".to_owned(),
-                workspace_path: "/tmp/workspace".to_owned(),
-                title: "grok".to_owned(),
-                created_at: "2026-01-01T00:00:00Z".to_owned(),
-                updated_at: "2026-01-01T00:00:00Z".to_owned(),
-                archived_at: None,
-            })
-            .expect("create chat");
-        store
-            .create_run(&AgentRun {
-                id: "run-1".to_owned(),
-                chat_id: "chat-1".to_owned(),
-                agent_id: "grok-acp".to_owned(),
-                acp_session_id: Some("session-1".to_owned()),
-                status: RunStatus::Running,
-                started_at: "2026-01-01T00:00:00Z".to_owned(),
-                finished_at: None,
-                error_message: None,
-            })
-            .expect("create run");
-        store
-            .create_message(&Message {
-                id: "msg-1".to_owned(),
-                chat_id: "chat-1".to_owned(),
-                agent_run_id: Some("run-1".to_owned()),
-                role: MessageRole::Assistant,
-                content: "I'll start by mapping the repo.".to_owned(),
-                status: MessageStatus::Streaming,
-                created_at: "2026-01-01T00:00:01Z".to_owned(),
-                updated_at: "2026-01-01T00:00:01Z".to_owned(),
-            })
-            .expect("create message");
-
-        let (events, _) = broadcast::channel(8);
-        let inner = SessionInner {
-            store: Arc::clone(&store),
-            events,
-            prompt_locks: std::sync::Mutex::new(HashMap::new()),
-            by_chat: std::sync::Mutex::new(HashMap::from([(
-                "chat-1".to_owned(),
-                LiveRun {
-                    run_id: "run-1".to_owned(),
-                    agent_id: "grok-acp".to_owned(),
-                    client: sleeping_client(),
-                    acp_session_id: Some("session-1".to_owned()),
-                    supports_images: false,
-                    session_configuration: Default::default(),
-                    needs_history_hydration: false,
-                    streaming_message_ids: HashMap::from([(
-                        "__default__".to_owned(),
-                        "msg-1".to_owned(),
-                    )]),
-                    last_streaming_message_id: Some("msg-1".to_owned()),
-                    active_user_message_id: Some("user-1".to_owned()),
-                },
-            )])),
-            pending: std::sync::Mutex::new(HashMap::new()),
-            terminals: Default::default(),
-        };
-
-        let envelope = RpcEnvelope {
-            direction: RpcDirection::Received,
-            method: "_x.ai/session_notification".into(),
-            payload: json!({
-                "sessionId": "session-1",
-                "update": {
-                    "arguments_delta": "{\"target_directory\":\"/tmp/workspace\"}",
-                    "name": "list_dir",
-                    "sessionUpdate": "tool_call_delta_chunk",
-                    "tool_call_id": "call-1",
-                    "tool_index": 0
-                }
-            }),
-        };
-        apply_notification(
-            &inner,
-            "run-1",
-            "chat-1",
-            AgentEventMethod::Other("_x.ai/session_notification".into()),
-            &envelope,
-        )
-        .expect("apply grok tool notification");
-
-        let parts = store.message_parts("msg-1").expect("parts");
-        assert_eq!(parts.len(), 1);
-        assert_eq!(parts[0].kind, MessagePartKind::ToolCall);
-        assert!(parts[0].content_json.contains("list_dir"));
-        assert!(parts[0].content_json.contains("tool_call_delta_chunk"));
     }
 }

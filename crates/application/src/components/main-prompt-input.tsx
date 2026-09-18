@@ -18,6 +18,13 @@ import {
   AttachmentRemove,
   Attachments,
 } from "@/components/ai-elements/attachments";
+import {
+  Context,
+  ContextContent,
+  ContextContentFooter,
+  ContextContentHeader,
+  ContextTrigger,
+} from "@/components/ai-elements/context";
 
 import { FolderOpen } from "lucide-react";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
@@ -27,6 +34,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type {
   AgentInfo,
   Chat,
+  ContextUsage,
   PromptAttachment,
   SessionConfigAssignment,
   SessionConfigOption,
@@ -98,6 +106,7 @@ interface AppPromptInputProps {
     configId: string,
     value: SessionConfigValue,
   ) => Promise<void> | void;
+  contextUsage?: ContextUsage | null;
 }
 
 function AppPromptInput({
@@ -112,6 +121,7 @@ function AppPromptInput({
   onStop,
   sessionConfig,
   onSessionConfigChange,
+  contextUsage,
 }: AppPromptInputProps) {
   const [pendingConfig, setPendingConfig] = useState<{
     agentId: string;
@@ -286,6 +296,25 @@ function AppPromptInput({
                 void selectConfig(configId, value)
               }
             />
+          )}
+          {contextUsage && contextUsage.size > 0 && (
+            <Context usedTokens={contextUsage.used} maxTokens={contextUsage.size}>
+              <ContextTrigger />
+              <ContextContent>
+                <ContextContentHeader />
+                {contextUsage.cost && (
+                  <ContextContentFooter>
+                    <span className="text-muted-foreground">Session cost</span>
+                    <span>
+                      {new Intl.NumberFormat(undefined, {
+                        style: "currency",
+                        currency: contextUsage.cost.currency,
+                      }).format(contextUsage.cost.amount)}
+                    </span>
+                  </ContextContentFooter>
+                )}
+              </ContextContent>
+            </Context>
           )}
         </PromptInputTools>
         <PromptInputSubmit

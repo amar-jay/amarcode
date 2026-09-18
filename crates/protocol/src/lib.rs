@@ -7,9 +7,10 @@ pub mod types;
 pub use events::{EditorEvent, EventLine};
 pub use types::{
     AcpEvent, AcpEventDirection, AgentDefinition, AgentFailureKind, AgentInfo, AgentRun,
-    AgentRuntimeStatus, Chat, ChatDetail, GetChatResult, Message, MessageDetail, MessagePart,
-    MessagePartKind, MessageRole, MessageStatus, RunStatus, SessionConfigAssignment,
-    SessionConfigOption, SessionConfigSelectChoice, SessionConfigValue, TurnStatus,
+    AgentRuntimeStatus, Chat, ChatDetail, ContextCost, ContextUsage, GetChatResult, Message,
+    MessageDetail, MessagePart, MessagePartKind, MessageRole, MessageStatus, RunStatus,
+    SessionConfigAssignment, SessionConfigOption, SessionConfigSelectChoice, SessionConfigValue,
+    TurnStatus,
 };
 
 /// Increment when a wire change is not backward compatible.
@@ -31,6 +32,8 @@ pub fn typescript_bindings() -> String {
         AcpEventDirection::decl(&config),
         AcpEvent::decl(&config),
         AgentRun::decl(&config),
+        ContextCost::decl(&config),
+        ContextUsage::decl(&config),
         AgentDefinition::decl(&config),
         AgentInfo::decl(&config),
         SessionConfigSelectChoice::decl(&config),

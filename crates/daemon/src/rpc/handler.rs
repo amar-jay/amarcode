@@ -344,6 +344,7 @@ fn chat_detail_json(detail: &ChatDetail) -> Result<Value> {
         "chat": detail.chat,
         "messages": messages,
         "session_config": detail.session_config,
+        "context_usage": detail.context_usage,
     }))
 }
 

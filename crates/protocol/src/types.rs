@@ -124,6 +124,24 @@ pub struct AgentRun {
     pub started_at: String,
     pub finished_at: Option<String>,
     pub error_message: Option<String>,
+    #[serde(default)]
+    pub context_usage: Option<ContextUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ContextCost {
+    pub amount: f64,
+    pub currency: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ContextUsage {
+    #[ts(type = "number")]
+    pub used: u64,
+    #[ts(type = "number")]
+    pub size: u64,
+    #[serde(default)]
+    pub cost: Option<ContextCost>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -203,6 +221,8 @@ pub struct ChatDetail {
     pub messages: Vec<MessageDetail>,
     #[serde(default)]
     pub session_config: Vec<SessionConfigOption>,
+    #[serde(default)]
+    pub context_usage: Option<ContextUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

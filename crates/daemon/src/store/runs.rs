@@ -3,15 +3,19 @@
 use rusqlite::params;
 
 use super::{cell_parse, now, to_error, AgentRun, Store};
-use crate::{protocol::RunStatus, Result};
+use crate::{
+    protocol::{ContextCost, ContextUsage, RunStatus},
+    Result,
+};
 
 impl Store {
     pub fn create_run(&self, run: &AgentRun) -> Result<()> {
         self.connection()?
             .execute(
                 "INSERT INTO agent_runs
-                 (id,chat_id,agent_id,acp_session_id,status,started_at,finished_at,error_message)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                 (id,chat_id,agent_id,acp_session_id,status,started_at,finished_at,error_message,
+                  context_used,context_size,context_cost_amount,context_cost_currency)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                 params![
                     run.id,
                     run.chat_id,
@@ -21,6 +25,16 @@ impl Store {
                     run.started_at,
                     run.finished_at,
                     run.error_message,
+                    run.context_usage.as_ref().map(|usage| usage.used),
+                    run.context_usage.as_ref().map(|usage| usage.size),
+                    run.context_usage
+                        .as_ref()
+                        .and_then(|usage| usage.cost.as_ref())
+                        .map(|cost| cost.amount),
+                    run.context_usage
+                        .as_ref()
+                        .and_then(|usage| usage.cost.as_ref())
+                        .map(|cost| cost.currency.as_str()),
                 ],
             )
             .map_err(to_error)?;
@@ -64,7 +78,8 @@ impl Store {
         let connection = self.connection()?;
         let mut statement = connection
             .prepare(
-                "SELECT id,chat_id,agent_id,acp_session_id,status,started_at,finished_at,error_message
+                "SELECT id,chat_id,agent_id,acp_session_id,status,started_at,finished_at,error_message,
+                        context_used,context_size,context_cost_amount,context_cost_currency
                  FROM agent_runs WHERE id=?1",
             )
             .map_err(to_error)?;
@@ -81,7 +96,8 @@ impl Store {
         let connection = self.connection()?;
         let mut statement = connection
             .prepare(
-                "SELECT id,chat_id,agent_id,acp_session_id,status,started_at,finished_at,error_message
+                "SELECT id,chat_id,agent_id,acp_session_id,status,started_at,finished_at,error_message,
+                        context_used,context_size,context_cost_amount,context_cost_currency
                  FROM agent_runs WHERE chat_id=?1 ORDER BY started_at DESC",
             )
             .map_err(to_error)?;
@@ -90,6 +106,23 @@ impl Store {
             .map_err(to_error)?;
         rows.collect::<std::result::Result<_, _>>()
             .map_err(to_error)
+    }
+
+    pub fn update_run_context_usage(&self, id: &str, usage: &ContextUsage) -> Result<()> {
+        self.connection()?
+            .execute(
+                "UPDATE agent_runs SET context_used=?2, context_size=?3,
+                 context_cost_amount=?4, context_cost_currency=?5 WHERE id=?1",
+                params![
+                    id,
+                    usage.used,
+                    usage.size,
+                    usage.cost.as_ref().map(|cost| cost.amount),
+                    usage.cost.as_ref().map(|cost| cost.currency.as_str()),
+                ],
+            )
+            .map_err(to_error)?;
+        Ok(())
     }
 }
 
@@ -103,5 +136,19 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRun> {
         started_at: row.get(5)?,
         finished_at: row.get(6)?,
         error_message: row.get(7)?,
+        context_usage: match (row.get::<_, Option<u64>>(8)?, row.get::<_, Option<u64>>(9)?) {
+            (Some(used), Some(size)) => Some(ContextUsage {
+                used,
+                size,
+                cost: match (
+                    row.get::<_, Option<f64>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                ) {
+                    (Some(amount), Some(currency)) => Some(ContextCost { amount, currency }),
+                    _ => None,
+                },
+            }),
+            _ => None,
+        },
     })
 }

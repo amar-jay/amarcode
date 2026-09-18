@@ -107,6 +107,7 @@ impl SessionManager {
             started_at: now,
             finished_at: None,
             error_message: None,
+            context_usage: None,
         };
         self.inner.store.create_run(&run)?;
         self.emit(EditorEvent::RunUpdated {
