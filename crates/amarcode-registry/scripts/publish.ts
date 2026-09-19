@@ -51,7 +51,6 @@ function commitWorkingTree(message: string) {
     .trim();
   if (!staged) return;
   run(["git", "commit", "-m", message]);
-  console.log(`Committed ${gitCommit()}: ${message}\n${staged}`);
 }
 
 function executeAppPublication(plan: AppPublicationPlan) {

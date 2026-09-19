@@ -470,23 +470,35 @@ fn transcript_executes_tool_and_returns_result_to_model() {
 
     let (response, messages) = agent.response_with_messages(3);
     assert_eq!(response["result"]["stopReason"], "end_turn");
-    assert!(messages.iter().any(|message| {
-        message["params"]["update"]["sessionUpdate"] == "agent_thought_chunk"
-            && message["params"]["update"]["content"]["text"] == "I should inspect the file."
+    let updates = messages
+        .iter()
+        .filter_map(|message| message.pointer("/params/update"))
+        .collect::<Vec<_>>();
+    let think = updates
+        .iter()
+        .find(|update| {
+            update["sessionUpdate"] == "tool_call" && update["kind"] == "think"
+        })
+        .expect("think tool start");
+    assert_eq!(
+        think["content"][0]["content"]["text"],
+        "I should inspect the file."
+    );
+    assert!(updates.iter().any(|update| {
+        update["sessionUpdate"] == "tool_call" && update["toolCallId"] == "call-read"
     }));
-    assert!(messages.iter().any(|message| {
-        message["params"]["update"]["sessionUpdate"] == "tool_call"
-            && message["params"]["update"]["toolCallId"] == "call-read"
+    assert!(updates.iter().any(|update| {
+        update["sessionUpdate"] == "tool_call_update"
+            && update["toolCallId"] == "call-read"
+            && update["status"] == "completed"
     }));
-    assert!(messages.iter().any(|message| {
-        message["params"]["update"]["sessionUpdate"] == "tool_call_update"
-            && message["params"]["update"]["toolCallId"] == "call-read"
-            && message["params"]["update"]["status"] == "completed"
+    assert!(updates.iter().any(|update| {
+        update["sessionUpdate"] == "agent_message_chunk"
+            && update["content"]["text"] == "I read the file."
     }));
-    assert!(messages.iter().any(|message| {
-        message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
-            && message["params"]["update"]["content"]["text"] == "I read the file."
-    }));
+    assert!(updates
+        .iter()
+        .all(|update| update["sessionUpdate"] != "agent_thought_chunk"));
 
     let _first_request = request_receiver
         .recv_timeout(TIMEOUT)
