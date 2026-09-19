@@ -536,3 +536,10 @@
   [data-watermark-mark] {
   opacity: 0.14;
 }
+
+@keyframes pickaxe {
+  0%   { transform: rotate(-18deg); }
+  65%  { transform: rotate(22deg); }
+  78%  { transform: rotate(16deg); }
+  100% { transform: rotate(-18deg); }
+}

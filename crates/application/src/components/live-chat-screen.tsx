@@ -6,7 +6,6 @@ import {
   ChevronUp,
   KeyRound,
 	RotateCwFadingClock,
-	RotateCcwClock,
   LoaderCircle,
   Search,
   Timer,
@@ -40,6 +39,7 @@ import { Input } from "@/components/ui/input";
 import { Toggle } from "@/components/ui/toggle";
 import AppPromptInput from "./main-prompt-input";
 import { ActivityView } from "./activity/activity-view";
+import { ChatStateIndicators } from "./chat-state-indicators";
 import { PendingAgentRequestCard } from "./pending-agent-request";
 import {
   activeSessionAtom,
@@ -529,24 +529,12 @@ export function LiveChatScreen() {
             <h1 className="min-w-0 truncate text-sm font-medium w-2xl">
               {live.detail?.chat.title ?? session.chat.title ?? "Loading chat"}
             </h1>
-            {live.loading && (
-              <LoaderCircle className="ml-2 size-4 animate-spin text-muted-foreground" />
-            )}
-            {isWorking && (
-              <span className="ml-3 text-xs text-muted-foreground">
-                Working…
-              </span>
-            )}
-            {live.contextRestoration && (
-              <span className="ml-3 text-xs text-muted-foreground">
-                {live.contextRestoration}…
-              </span>
-            )}
-            {!isWorking && live.runStatus && live.runStatus !== "running" && (
-              <span className="ml-3 text-xs text-muted-foreground">
-                {live.runStatus}
-              </span>
-            )}
+            <ChatStateIndicators
+              loading={live.loading}
+              isWorking={isWorking}
+              contextRestoration={live.contextRestoration}
+              runStatus={live.runStatus}
+            />
 
 						<div className="ml-auto">
             <Toggle
