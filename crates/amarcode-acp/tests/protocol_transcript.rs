@@ -19,6 +19,7 @@ struct AgentProcess {
     stdin: ChildStdin,
     output: Receiver<Value>,
     config_path: PathBuf,
+    session_store_path: PathBuf,
 }
 
 impl AgentProcess {
@@ -59,11 +60,13 @@ impl AgentProcess {
                 }
             }
         });
+        let session_store_path = config_path.with_extension("sessions.json");
         Self {
             child,
             stdin,
             output,
             config_path,
+            session_store_path,
         }
     }
 
@@ -94,6 +97,7 @@ impl Drop for AgentProcess {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = fs::remove_file(&self.config_path);
+        let _ = fs::remove_file(&self.session_store_path);
     }
 }
 
@@ -130,10 +134,10 @@ fn transcript_advertises_truthful_capabilities_and_routes_by_session_id() {
     assert_eq!(result["protocolVersion"], 1);
     assert_eq!(result["agentInfo"]["name"], "transcript-agent");
     assert_eq!(result["authMethods"], json!([]));
-    assert_eq!(result["agentCapabilities"]["loadSession"], false);
+    assert_eq!(result["agentCapabilities"]["loadSession"], true);
     assert_eq!(
         result["agentCapabilities"]["sessionCapabilities"],
-        json!({ "close": {} })
+        json!({ "list": {}, "delete": {}, "resume": {}, "close": {} })
     );
 
     let first = new_session(&mut agent, 2, "/same-workspace");
@@ -165,6 +169,67 @@ fn transcript_advertises_truthful_capabilities_and_routes_by_session_id() {
         second_options["result"]["configOptions"][0]["currentValue"],
         "plan"
     );
+}
+
+#[test]
+fn transcript_lists_resumes_and_deletes_persisted_sessions() {
+    let mut agent = AgentProcess::spawn("http://127.0.0.1:9/v1");
+    initialize(&mut agent);
+    let session_id = new_session(&mut agent, 2, "/persistent-workspace");
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "session/set_config_option",
+        "params": { "sessionId": session_id, "configId": "mode", "value": "code" }
+    }));
+    agent.response(3);
+
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "session/list",
+        "params": { "cwd": "/persistent-workspace" }
+    }));
+    let listed = agent.response(4);
+    assert_eq!(listed["result"]["sessions"][0]["sessionId"], session_id);
+
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "session/close",
+        "params": { "sessionId": session_id }
+    }));
+    agent.response(5);
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "session/resume",
+        "params": {
+            "sessionId": session_id,
+            "cwd": "/persistent-workspace",
+            "mcpServers": []
+        }
+    }));
+    let resumed = agent.response(6);
+    assert_eq!(
+        resumed["result"]["configOptions"][0]["currentValue"],
+        "code"
+    );
+
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "session/delete",
+        "params": { "sessionId": session_id }
+    }));
+    agent.response(7);
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "session/list",
+        "params": {}
+    }));
+    assert_eq!(agent.response(8)["result"]["sessions"], json!([]));
 }
 
 #[test]

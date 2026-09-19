@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -8,6 +8,10 @@ use serde_json::Value;
 pub struct Config {
     pub name: String,
     pub provider: ProviderConfig,
+    #[serde(default)]
+    pub persistence: PersistenceConfig,
+    #[serde(skip)]
+    pub(crate) source_path: PathBuf,
 }
 
 impl Config {
@@ -33,6 +37,7 @@ impl Config {
         let mut config: Self = serde_json::from_str(&contents)
             .map_err(|error| format!("invalid JSON in {}: {error}", path.display()))?;
         config.name = config.name.trim().to_owned();
+        config.source_path = path.to_owned();
         config.provider.base_url = config.provider.base_url.trim_end_matches('/').to_owned();
         if !valid_agent_name(&config.name) {
             return Err("name must start with an ASCII lowercase letter or digit and contain only lowercase letters, digits, '.', '_', or '-'".into());
@@ -47,6 +52,47 @@ impl Config {
         }
         Ok(config)
     }
+
+    pub fn session_store_path(&self) -> PathBuf {
+        let configured = self.persistence.path.as_deref();
+        match configured {
+            Some(path) if path.is_absolute() => path.to_owned(),
+            Some(path) => self
+                .source_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(path),
+            None => self.source_path.with_extension("sessions.json"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PersistenceConfig {
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+    #[serde(default = "default_ttl_seconds")]
+    pub ttl_seconds: u64,
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+}
+
+impl Default for PersistenceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl_seconds: default_ttl_seconds(),
+            path: None,
+        }
+    }
+}
+
+fn enabled_by_default() -> bool {
+    true
+}
+
+fn default_ttl_seconds() -> u64 {
+    24 * 60 * 60
 }
 
 #[derive(Debug, Clone, Deserialize)]

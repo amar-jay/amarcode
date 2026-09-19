@@ -4,12 +4,16 @@ use agent_client_protocol::{
     schema::{
         v1::{
             AgentCapabilities, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-            ContentBlock, Implementation, InitializeRequest, InitializeResponse, NewSessionRequest,
-            NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse,
-            SessionCapabilities, SessionCloseCapabilities, SessionConfigOption,
-            SessionConfigOptionCategory, SessionConfigOptionValue, SessionId,
+            ContentBlock, ContentChunk, DeleteSessionRequest, DeleteSessionResponse,
+            Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
+            ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, MessageId,
+            NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest,
+            PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
+            SessionCloseCapabilities, SessionConfigOption, SessionConfigOptionCategory,
+            SessionConfigOptionValue, SessionDeleteCapabilities, SessionId, SessionInfo,
+            SessionListCapabilities, SessionNotification, SessionResumeCapabilities, SessionUpdate,
             SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-            SetSessionModeResponse, StopReason,
+            SetSessionModeResponse, StopReason, TextContent,
         },
         ProtocolVersion,
     },
@@ -21,6 +25,7 @@ use uuid::Uuid;
 
 use crate::{
     config::Config,
+    persistence::{PersistedSession, SessionStore},
     provider::{self, Completion, ModelTurn},
 };
 
@@ -29,6 +34,7 @@ struct Runtime {
     config: Arc<Config>,
     http: HttpClient,
     sessions: Arc<Mutex<HashMap<SessionId, Session>>>,
+    store: Option<Arc<SessionStore>>,
 }
 
 struct Session {
@@ -37,6 +43,28 @@ struct Session {
     mode: String,
     active_turn: Option<ActiveTurn>,
     permissions: Arc<crate::tools::PermissionState>,
+}
+
+impl Session {
+    fn from_persisted(saved: PersistedSession) -> Self {
+        Self {
+            cwd: saved.cwd,
+            history: saved.history,
+            mode: saved.mode,
+            active_turn: None,
+            permissions: Arc::new(crate::tools::PermissionState::default()),
+        }
+    }
+
+    fn persisted(&self, session_id: &SessionId) -> PersistedSession {
+        PersistedSession {
+            session_id: session_id.to_string(),
+            cwd: self.cwd.clone(),
+            history: self.history.clone(),
+            mode: self.mode.clone(),
+            updated_at: crate::persistence::now_seconds(),
+        }
+    }
 }
 
 struct ActiveTurn {
@@ -53,10 +81,31 @@ pub async fn serve(config: Config) -> agent_client_protocol::Result<()> {
 
 impl Runtime {
     fn new(config: Config) -> Self {
+        let store = config.persistence.enabled.then(|| {
+            Arc::new(SessionStore::new(
+                config.session_store_path(),
+                config.persistence.ttl_seconds,
+            ))
+        });
+        let saved = store
+            .as_ref()
+            .and_then(|store| match store.load() {
+                Ok(sessions) => Some(sessions),
+                Err(error) => {
+                    eprintln!("amarcode-acp: persistence error: {error}");
+                    None
+                }
+            })
+            .unwrap_or_default();
+        let sessions = saved
+            .into_iter()
+            .map(|(id, saved)| (id, Session::from_persisted(saved)))
+            .collect();
         Self {
             config: Arc::new(config),
             http: HttpClient::new(),
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            sessions: Arc::new(Mutex::new(sessions)),
+            store,
         }
     }
 
@@ -65,13 +114,20 @@ impl Runtime {
             ProtocolVersion::V1 => ProtocolVersion::V1,
             _ => ProtocolVersion::V1,
         };
+        let mut session_capabilities =
+            SessionCapabilities::new().close(SessionCloseCapabilities::new());
+        if self.store.is_some() {
+            session_capabilities = session_capabilities
+                .list(SessionListCapabilities::new())
+                .delete(SessionDeleteCapabilities::new())
+                .resume(SessionResumeCapabilities::new());
+        }
         InitializeResponse::new(protocol_version)
             .agent_capabilities(
                 AgentCapabilities::new()
+                    .load_session(self.store.is_some())
                     .prompt_capabilities(PromptCapabilities::new())
-                    .session_capabilities(
-                        SessionCapabilities::new().close(SessionCloseCapabilities::new()),
-                    ),
+                    .session_capabilities(session_capabilities),
             )
             .agent_info(
                 Implementation::new(self.config.name.clone(), env!("CARGO_PKG_VERSION"))
@@ -81,16 +137,18 @@ impl Runtime {
 
     async fn new_session(&self, request: NewSessionRequest) -> NewSessionResponse {
         let session_id = SessionId::new(Uuid::new_v4().to_string());
-        self.sessions.lock().await.insert(
-            session_id.clone(),
-            Session {
-                cwd: request.cwd,
-                history: Vec::new(),
-                mode: "ask".into(),
-                active_turn: None,
-                permissions: Arc::new(crate::tools::PermissionState::default()),
-            },
-        );
+        let session = Session {
+            cwd: request.cwd,
+            history: Vec::new(),
+            mode: "ask".into(),
+            active_turn: None,
+            permissions: Arc::new(crate::tools::PermissionState::default()),
+        };
+        self.persist(&session_id, &session);
+        self.sessions
+            .lock()
+            .await
+            .insert(session_id.clone(), session);
         NewSessionResponse::new(session_id).config_options(self.config_options("ask"))
     }
 
@@ -107,6 +165,7 @@ impl Runtime {
             .get_mut(session_id)
             .ok_or_else(|| Error::invalid_params().data("unknown session"))?;
         session.mode = mode.to_owned();
+        self.persist(session_id, session);
         Ok(())
     }
 
@@ -129,6 +188,85 @@ impl Runtime {
             let _ = turn.cancel.send(true);
         }
         Ok(())
+    }
+
+    async fn restore(
+        &self,
+        session_id: &SessionId,
+        cwd: &std::path::Path,
+    ) -> agent_client_protocol::Result<String> {
+        let store = self
+            .store
+            .as_ref()
+            .ok_or_else(|| Error::invalid_request().data("session persistence is disabled"))?;
+        let saved = store
+            .load()
+            .map_err(|error| Error::internal_error().data(error))?
+            .remove(session_id)
+            .ok_or_else(|| Error::invalid_params().data("unknown or expired session"))?;
+        if saved.cwd != cwd {
+            return Err(Error::invalid_params().data("session working directory does not match"));
+        }
+        let mode = saved.mode.clone();
+        self.sessions
+            .lock()
+            .await
+            .insert(session_id.clone(), Session::from_persisted(saved));
+        Ok(mode)
+    }
+
+    async fn list_sessions(
+        &self,
+        request: &ListSessionsRequest,
+    ) -> agent_client_protocol::Result<ListSessionsResponse> {
+        let store = self
+            .store
+            .as_ref()
+            .ok_or_else(|| Error::invalid_request().data("session persistence is disabled"))?;
+        if request.cursor.is_some() {
+            return Err(Error::invalid_params().data("session list cursor is not supported"));
+        }
+        let mut sessions = store
+            .load()
+            .map_err(|error| Error::internal_error().data(error))?
+            .into_values()
+            .filter(|session| request.cwd.as_ref().is_none_or(|cwd| cwd == &session.cwd))
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        Ok(ListSessionsResponse::new(
+            sessions
+                .into_iter()
+                .map(|session| {
+                    let title = session_title(&session.history);
+                    SessionInfo::new(session.session_id, session.cwd).title(title)
+                })
+                .collect(),
+        ))
+    }
+
+    async fn delete_session(&self, session_id: &SessionId) -> agent_client_protocol::Result<()> {
+        if let Some(session) = self.sessions.lock().await.remove(session_id) {
+            if let Some(turn) = session.active_turn {
+                let _ = turn.cancel.send(true);
+            }
+        }
+        let deleted = self
+            .store
+            .as_ref()
+            .ok_or_else(|| Error::invalid_request().data("session persistence is disabled"))?
+            .delete(session_id)
+            .map_err(|error| Error::internal_error().data(error))?;
+        if !deleted {
+            return Err(Error::invalid_params().data("unknown or expired session"));
+        }
+        Ok(())
+    }
+
+    fn persist(&self, session_id: &SessionId, session: &Session) {
+        let Some(store) = &self.store else { return };
+        if let Err(error) = store.upsert(session.persisted(session_id)) {
+            eprintln!("amarcode-acp: persistence error: {error}");
+        }
     }
 
     fn config_options(&self, mode: &str) -> Vec<SessionConfigOption> {
@@ -227,6 +365,7 @@ impl Runtime {
         let active = session.active_turn.take().expect("checked active turn");
         if let Some(history) = history {
             session.history = history;
+            self.persist(session_id, session);
         } else {
             session.history.truncate(active.history_len);
         }
@@ -236,6 +375,10 @@ impl Runtime {
 fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client> {
     let initialize_runtime = runtime.clone();
     let new_session_runtime = runtime.clone();
+    let load_session_runtime = runtime.clone();
+    let resume_session_runtime = runtime.clone();
+    let list_sessions_runtime = runtime.clone();
+    let delete_session_runtime = runtime.clone();
     let set_mode_runtime = runtime.clone();
     let set_config_runtime = runtime.clone();
     let prompt_runtime = runtime.clone();
@@ -254,6 +397,56 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
         .on_receive_request(
             async move |request: NewSessionRequest, responder, _connection| {
                 responder.respond(new_session_runtime.new_session(request).await)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: LoadSessionRequest,
+                        responder,
+                        connection: ConnectionTo<Client>| {
+                let result = async {
+                    let mode = load_session_runtime
+                        .restore(&request.session_id, &request.cwd)
+                        .await?;
+                    let sessions = load_session_runtime.sessions.lock().await;
+                    let session = sessions.get(&request.session_id).ok_or_else(|| {
+                        Error::internal_error().data("restored session disappeared")
+                    })?;
+                    replay_history(&connection, &request.session_id, &session.history)?;
+                    Ok(LoadSessionResponse::new()
+                        .config_options(load_session_runtime.config_options(&mode)))
+                }
+                .await;
+                responder.respond_with_result(result)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: ResumeSessionRequest, responder, _connection| {
+                let result = resume_session_runtime
+                    .restore(&request.session_id, &request.cwd)
+                    .await
+                    .map(|mode| {
+                        ResumeSessionResponse::new()
+                            .config_options(resume_session_runtime.config_options(&mode))
+                    });
+                responder.respond_with_result(result)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: ListSessionsRequest, responder, _connection| {
+                responder.respond_with_result(list_sessions_runtime.list_sessions(&request).await)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: DeleteSessionRequest, responder, _connection| {
+                let result = delete_session_runtime
+                    .delete_session(&request.session_id)
+                    .await
+                    .map(|()| DeleteSessionResponse::new());
+                responder.respond_with_result(result)
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -492,6 +685,40 @@ fn normalize_tool_ids(turn: &mut ModelTurn) {
     }
 }
 
+fn replay_history(
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+    history: &[serde_json::Value],
+) -> agent_client_protocol::Result<()> {
+    for message in history {
+        let Some(text) = message.get("content").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text)))
+            .message_id(MessageId::new(Uuid::new_v4().to_string()));
+        let update = match message.get("role").and_then(serde_json::Value::as_str) {
+            Some("user") => SessionUpdate::UserMessageChunk(chunk),
+            Some("assistant") => SessionUpdate::AgentMessageChunk(chunk),
+            _ => continue,
+        };
+        connection.send_notification(SessionNotification::new(session_id.clone(), update))?;
+    }
+    Ok(())
+}
+
+fn session_title(history: &[serde_json::Value]) -> Option<String> {
+    let prompt = history.iter().find_map(|message| {
+        (message.get("role").and_then(serde_json::Value::as_str) == Some("user"))
+            .then(|| message.get("content").and_then(serde_json::Value::as_str))
+            .flatten()
+    })?;
+    let mut title = prompt.chars().take(80).collect::<String>();
+    if prompt.chars().count() > 80 {
+        title.push('…');
+    }
+    Some(title)
+}
+
 fn extract_prompt_text(prompt: &[ContentBlock]) -> String {
     prompt
         .iter()
@@ -506,8 +733,8 @@ fn extract_prompt_text(prompt: &[ContentBlock]) -> String {
 mod tests {
     use super::*;
 
-    fn runtime() -> Runtime {
-        Runtime::new(Config {
+    fn config(persistence: crate::config::PersistenceConfig, source_path: PathBuf) -> Config {
+        Config {
             name: "test-agent".into(),
             provider: crate::config::ProviderConfig {
                 base_url: "https://example.test/v1".into(),
@@ -515,7 +742,19 @@ mod tests {
                 model: "test-model".into(),
                 reasoning: None,
             },
-        })
+            persistence,
+            source_path,
+        }
+    }
+
+    fn runtime() -> Runtime {
+        Runtime::new(config(
+            crate::config::PersistenceConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            PathBuf::from("test-config.json"),
+        ))
     }
 
     #[tokio::test]
@@ -577,6 +816,54 @@ mod tests {
         assert!(capabilities.resume.is_none());
         assert!(capabilities.delete.is_none());
         assert!(response.auth_methods.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sessions_survive_runtime_restart() {
+        let path = std::env::temp_dir().join(format!(
+            "amarcode-acp-runtime-persistence-{}.json",
+            Uuid::new_v4()
+        ));
+        let persistence = crate::config::PersistenceConfig {
+            enabled: true,
+            ttl_seconds: 24 * 60 * 60,
+            path: Some(path.clone()),
+        };
+        let config = config(persistence, PathBuf::from("test-config.json"));
+        let runtime = Runtime::new(config.clone());
+        let created = runtime
+            .new_session(NewSessionRequest::new("/workspace"))
+            .await;
+        runtime
+            .set_mode(&created.session_id, "code")
+            .await
+            .expect("persist mode");
+        {
+            let mut sessions = runtime.sessions.lock().await;
+            let session = sessions.get_mut(&created.session_id).expect("live session");
+            session
+                .history
+                .push(serde_json::json!({ "role": "user", "content": "remember me" }));
+            runtime.persist(&created.session_id, session);
+        }
+        drop(runtime);
+
+        let restored = Runtime::new(config);
+        let sessions = restored.sessions.lock().await;
+        let session = sessions.get(&created.session_id).expect("restored session");
+        assert_eq!(session.mode, "code");
+        assert_eq!(session.history[0]["content"], "remember me");
+        assert!(session.active_turn.is_none());
+        drop(sessions);
+        let capabilities = restored
+            .initialize(InitializeRequest::new(ProtocolVersion::V1))
+            .await
+            .agent_capabilities;
+        assert!(capabilities.load_session);
+        assert!(capabilities.session_capabilities.list.is_some());
+        assert!(capabilities.session_capabilities.resume.is_some());
+        assert!(capabilities.session_capabilities.delete.is_some());
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

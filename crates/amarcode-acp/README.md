@@ -23,6 +23,11 @@ Configuration:
     "api_key": "sk-...",
     "model": "gpt-4.1",
     "reasoning": { "enabled": true }
+  },
+  "persistence": {
+    "enabled": true,
+    "ttl_seconds": 86400,
+    "path": "amarcode-acp.sessions.json"
   }
 }
 ```
@@ -46,6 +51,13 @@ remain opt-in. Streamed `reasoning_details`, `reasoning`, and
 Reasoning is presented through an ACP tool-call lifecycle with `kind: "think"`,
 including cumulative streamed content and a final completed status.
 
+Session persistence is enabled by default with a 24-hour TTL. Unless `path` is
+configured, sessions are stored beside the configuration file by replacing its
+extension with `.sessions.json`. Relative paths are resolved from the
+configuration file's directory. The store contains conversation history,
+workspace paths, mode, and timestamps, but never the provider API key or tool
+permission decisions. Set `persistence.enabled` to `false` to disable it.
+
 ## Protocol behavior
 
 The adapter uses the official typed ACP Rust SDK over stdio. Each `session/new`
@@ -54,10 +66,12 @@ requests are routed by their explicit `sessionId`. Prompt turns run concurrently
 with protocol input so `session/cancel` can stop an active provider request or
 stream and return a `cancelled` stop reason.
 
-The adapter currently advertises only the optional `session/close` capability.
-Session load, resume, list, delete, authentication, images, audio, embedded
-context, and MCP capabilities are not advertised because they are not yet
-implemented. Session state remains in memory and is lost when the process exits.
+With persistence enabled, the adapter advertises ACP session load, resume, list,
+delete, and close capabilities. Loading replays stored user and assistant text;
+resuming restores context without replay. Closing detaches the live session but
+keeps it available until its TTL expires, while deleting removes it immediately.
+Authentication, images, audio, embedded context, and MCP capabilities are not
+advertised because they are not yet implemented.
 
 ## Tools
 
