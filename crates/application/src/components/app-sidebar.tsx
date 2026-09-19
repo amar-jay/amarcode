@@ -76,7 +76,7 @@ export function AppSidebar({
         className="inset-y-auto! top-9! bottom-0! h-auto!  select-none"
       >
         <SidebarHeader className="gap-0 border-b border-sidebar-border">
-          <div className="flex items-center gap-1 pl-1.5">
+          <div className="flex items-center gap-1">
             <SidebarMenu className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
               <SidebarMenuItem>
                 <SidebarMenuButton
@@ -89,7 +89,7 @@ export function AppSidebar({
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
-            <SidebarTrigger className="shrink-0" />
+            <SidebarTrigger className="shrink-0 text-card-foreground/80" />
           </div>
         </SidebarHeader>
         <SidebarContent className="px-2 py-2">
