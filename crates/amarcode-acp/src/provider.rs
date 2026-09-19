@@ -102,6 +102,29 @@ pub fn tool_definitions() -> Vec<Value> {
             }),
         ),
         function_tool(
+            "move_file",
+            "Move or rename one file inside the workspace. The destination parent directory must exist, and an existing destination is never overwritten. Requires host approval.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "source_path": { "type": "string" },
+                    "destination_path": { "type": "string" }
+                },
+                "required": ["source_path", "destination_path"],
+                "additionalProperties": false
+            }),
+        ),
+        function_tool(
+            "delete_file",
+            "Delete one file inside the workspace. Directories are rejected and deletion requires host approval.",
+            json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" } },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        ),
+        function_tool(
             "run_command",
             "Run an executable in the workspace through the ACP client's terminal service. Pass the executable and arguments separately; shell syntax is not interpreted. Invoke the tool directly when needed; the host handles any required approval.",
             json!({

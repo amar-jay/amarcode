@@ -77,13 +77,15 @@ advertised because they are not yet implemented.
 
 OpenAI-compatible function calling is executed as an iterative model → tool →
 model loop. The built-in tools are `read_file`, `list_directory`, `search_text`,
-`edit_file`, `write_file`, and `run_command`. `edit_file` performs one exact,
+`edit_file`, `write_file`, `move_file`, `delete_file`, and `run_command`.
+`edit_file` performs one exact,
 uniquely matched text replacement, rejecting stale or ambiguous edits without
 changing the file. `read_file` accepts UTF-8 byte `offset` and `limit` values;
 partial reads return the exact `next_offset` needed to continue. All paths are
 restricted to the session workspace, symlink
-escapes are rejected, and output is bounded. `edit_file`, `write_file`, and
-`run_command` are available only in code mode and require approval through
+escapes are rejected, and output is bounded. Moving never overwrites an existing
+destination, and deletion accepts files only. `edit_file`, `write_file`,
+`move_file`, `delete_file`, and `run_command` are available only in code mode and require approval through
 ACP `session/request_permission`. Permission prompts offer allow/reject once and
 allow/reject for the session. Remembered decisions use exact operation keys:
 the target path for writes, and the executable, full argument vector, and

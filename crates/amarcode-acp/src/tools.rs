@@ -16,7 +16,10 @@ use tokio::sync::watch;
 
 mod filesystem;
 
-use filesystem::{edit_file, existing_path, list_directory, read_file, search_text, write_file};
+use filesystem::{
+    delete_file, edit_file, existing_path, list_directory, move_file, read_file, search_text,
+    write_file,
+};
 
 const MAX_OUTPUT: usize = 64 * 1024;
 
@@ -89,6 +92,13 @@ pub fn finish_search_group(
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum PermissionKey {
     WriteFile {
+        path: String,
+    },
+    MoveFile {
+        source_path: String,
+        destination_path: String,
+    },
+    DeleteFile {
         path: String,
     },
     RunCommand {
@@ -228,6 +238,8 @@ pub async fn execute(
         "search_text" => search_text(workspace, &arguments),
         "edit_file" => edit_file(workspace, &arguments),
         "write_file" => write_file(workspace, &arguments),
+        "move_file" => move_file(workspace, &arguments),
+        "delete_file" => delete_file(workspace, &arguments),
         other => Err(format!("unknown tool: {other}")),
     };
     finish(connection, session_id, call, result)
@@ -236,6 +248,13 @@ pub async fn execute(
 fn permission_key(call: &ModelToolCall, arguments: &Value) -> Option<PermissionKey> {
     match call.name.as_str() {
         "write_file" | "edit_file" => Some(PermissionKey::WriteFile {
+            path: arguments.get("path")?.as_str()?.to_owned(),
+        }),
+        "move_file" => Some(PermissionKey::MoveFile {
+            source_path: arguments.get("source_path")?.as_str()?.to_owned(),
+            destination_path: arguments.get("destination_path")?.as_str()?.to_owned(),
+        }),
+        "delete_file" => Some(PermissionKey::DeleteFile {
             path: arguments.get("path")?.as_str()?.to_owned(),
         }),
         "run_command" => Some(PermissionKey::RunCommand {
@@ -421,6 +440,8 @@ fn tool_kind(name: &str) -> ToolKind {
         "read_file" => ToolKind::Read,
         "list_directory" | "search_text" => ToolKind::Search,
         "write_file" | "edit_file" => ToolKind::Edit,
+        "move_file" => ToolKind::Move,
+        "delete_file" => ToolKind::Delete,
         "run_command" => ToolKind::Execute,
         _ => ToolKind::Other,
     }
@@ -446,6 +467,17 @@ fn tool_title(call: &ModelToolCall, args: &Value) -> String {
         } else {
             format!("{command} {suffix}")
         };
+    }
+    if call.name == "move_file" {
+        let source = args
+            .get("source_path")
+            .and_then(Value::as_str)
+            .unwrap_or("<invalid source>");
+        let destination = args
+            .get("destination_path")
+            .and_then(Value::as_str)
+            .unwrap_or("<invalid destination>");
+        return format!("move file {source} → {destination}");
     }
     args.get("path").and_then(Value::as_str).map_or_else(
         || call.name.clone(),
@@ -549,7 +581,9 @@ fn truncate(mut value: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::filesystem::{edit_file, read_file, safe_relative, write_file};
+    use super::filesystem::{
+        delete_file, edit_file, move_file, read_file, safe_relative, write_file,
+    };
     use super::*;
     use agent_client_protocol::schema::v1::{RequestPermissionResponse, SelectedPermissionOutcome};
 
@@ -736,6 +770,57 @@ mod tests {
         assert!(zero_limit
             .expect_err("reject zero limit")
             .contains("limit must be between"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn move_file_renames_without_overwriting() {
+        let root =
+            std::env::temp_dir().join(format!("amarcode-move-root-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).expect("create root");
+        std::fs::write(root.join("source.txt"), "source").expect("write source");
+
+        move_file(
+            &root,
+            &json!({ "source_path": "source.txt", "destination_path": "renamed.txt" }),
+        )
+        .expect("move file");
+        assert!(!root.join("source.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(root.join("renamed.txt")).expect("read moved file"),
+            "source"
+        );
+
+        std::fs::write(root.join("other.txt"), "other").expect("write other");
+        let overwrite = move_file(
+            &root,
+            &json!({ "source_path": "renamed.txt", "destination_path": "other.txt" }),
+        );
+        assert!(overwrite
+            .expect_err("reject overwrite")
+            .contains("destination already exists"));
+        assert_eq!(
+            std::fs::read_to_string(root.join("other.txt")).expect("read unchanged destination"),
+            "other"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_file_removes_files_but_rejects_directories() {
+        let root =
+            std::env::temp_dir().join(format!("amarcode-delete-root-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).expect("create root");
+        std::fs::write(root.join("delete-me.txt"), "content").expect("write fixture");
+        std::fs::create_dir(root.join("keep-directory")).expect("create directory");
+
+        delete_file(&root, &json!({ "path": "delete-me.txt" })).expect("delete file");
+        assert!(!root.join("delete-me.txt").exists());
+        let directory = delete_file(&root, &json!({ "path": "keep-directory" }));
+        assert!(directory
+            .expect_err("reject directory")
+            .contains("not a directory"));
+        assert!(root.join("keep-directory").is_dir());
         let _ = std::fs::remove_dir_all(root);
     }
 

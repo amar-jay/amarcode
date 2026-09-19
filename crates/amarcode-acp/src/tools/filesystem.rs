@@ -176,6 +176,75 @@ pub(super) fn edit_file(workspace: &Path, args: &Value) -> Result<String, String
     ))
 }
 
+pub(super) fn move_file(workspace: &Path, args: &Value) -> Result<String, String> {
+    let source = existing_entry_path(workspace, required_str(args, "source_path")?)?;
+    let metadata = std::fs::symlink_metadata(&source)
+        .map_err(|error| format!("failed to inspect {}: {error}", source.display()))?;
+    if metadata.file_type().is_dir() {
+        return Err("source_path must be a file, not a directory".into());
+    }
+    let destination = new_entry_path(workspace, required_str(args, "destination_path")?)?;
+    if std::fs::symlink_metadata(&destination).is_ok() {
+        return Err(format!(
+            "destination already exists: {}",
+            destination.display()
+        ));
+    }
+    std::fs::rename(&source, &destination).map_err(|error| {
+        format!(
+            "failed to move {} to {}: {error}",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    Ok(format!(
+        "Moved {} to {}",
+        source.display(),
+        destination.display()
+    ))
+}
+
+pub(super) fn delete_file(workspace: &Path, args: &Value) -> Result<String, String> {
+    let path = existing_entry_path(workspace, required_str(args, "path")?)?;
+    let metadata = std::fs::symlink_metadata(&path)
+        .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+    if metadata.file_type().is_dir() {
+        return Err("path must be a file, not a directory".into());
+    }
+    std::fs::remove_file(&path)
+        .map_err(|error| format!("failed to delete {}: {error}", path.display()))?;
+    Ok(format!("Deleted {}", path.display()))
+}
+
+fn existing_entry_path(workspace: &Path, value: &str) -> Result<PathBuf, String> {
+    let path = workspace.join(safe_relative(value)?);
+    let canonical_root = workspace
+        .canonicalize()
+        .map_err(|error| format!("invalid workspace: {error}"))?;
+    let canonical_target = path
+        .canonicalize()
+        .map_err(|error| format!("path not found: {error}"))?;
+    if !canonical_target.starts_with(&canonical_root) {
+        return Err("path escapes workspace".into());
+    }
+    Ok(path)
+}
+
+fn new_entry_path(workspace: &Path, value: &str) -> Result<PathBuf, String> {
+    let path = workspace.join(safe_relative(value)?);
+    let parent = path.parent().ok_or_else(|| "invalid path".to_string())?;
+    let canonical_root = workspace
+        .canonicalize()
+        .map_err(|error| format!("invalid workspace: {error}"))?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|error| format!("destination parent directory does not exist: {error}"))?;
+    if !canonical_parent.starts_with(&canonical_root) {
+        return Err("path escapes workspace".into());
+    }
+    Ok(path)
+}
+
 pub(super) fn existing_path(workspace: &Path, value: &str) -> Result<PathBuf, String> {
     let root = workspace
         .canonicalize()
