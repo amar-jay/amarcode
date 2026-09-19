@@ -19,7 +19,10 @@ use reqwest::Client as HttpClient;
 use tokio::sync::{watch, Mutex};
 use uuid::Uuid;
 
-use crate::provider::{self, Completion, Config, ModelTurn};
+use crate::{
+    config::Config,
+    provider::{self, Completion, ModelTurn},
+};
 
 #[derive(Clone)]
 struct Runtime {
@@ -387,10 +390,12 @@ async fn run_agent_turn(
             &runtime.config,
             &history,
             &mode,
-            session_id.clone(),
-            message_id,
-            connection.clone(),
-            cancellation.clone(),
+            provider::StreamContext {
+                session_id: session_id.clone(),
+                message_id,
+                connection: connection.clone(),
+                cancellation: cancellation.clone(),
+            },
         )
         .await
         {
@@ -504,7 +509,7 @@ mod tests {
     fn runtime() -> Runtime {
         Runtime::new(Config {
             name: "test-agent".into(),
-            provider: provider::ProviderConfig {
+            provider: crate::config::ProviderConfig {
                 base_url: "https://example.test/v1".into(),
                 api_key: "secret".into(),
                 model: "test-model".into(),

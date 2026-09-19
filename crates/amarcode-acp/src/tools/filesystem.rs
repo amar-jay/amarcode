@@ -1,0 +1,129 @@
+use std::path::{Component, Path, PathBuf};
+
+use serde_json::Value;
+use walkdir::WalkDir;
+
+use super::{required_str, truncate, MAX_OUTPUT};
+
+pub(super) fn read_file(workspace: &Path, args: &Value) -> Result<String, String> {
+    let path = existing_path(workspace, required_str(args, "path")?)?;
+    std::fs::read_to_string(&path)
+        .map(truncate)
+        .map_err(|e| format!("failed to read {}: {e}", path.display()))
+}
+
+pub(super) fn list_directory(workspace: &Path, args: &Value) -> Result<String, String> {
+    let path = existing_path(workspace, required_str(args, "path")?)?;
+    let mut entries = std::fs::read_dir(&path)
+        .map_err(|e| format!("failed to list {}: {e}", path.display()))?
+        .map(|entry| {
+            entry
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .map_err(|e| e.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort();
+    Ok(truncate(entries.join("\n")))
+}
+
+pub(super) fn search_text(workspace: &Path, args: &Value) -> Result<String, String> {
+    let query = required_str(args, "query")?;
+    if query.is_empty() {
+        return Err("query must not be empty".into());
+    }
+    let start = existing_path(
+        workspace,
+        args.get("path").and_then(Value::as_str).unwrap_or("."),
+    )?;
+    let mut matches = String::new();
+    for entry in WalkDir::new(start)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .take(10_000)
+    {
+        let Ok(text) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        for (line, content) in text.lines().enumerate() {
+            if content.contains(query) {
+                let relative = entry.path().strip_prefix(workspace).unwrap_or(entry.path());
+                matches.push_str(&format!(
+                    "{}:{}:{}\n",
+                    relative.display(),
+                    line + 1,
+                    content
+                ));
+                if matches.len() >= MAX_OUTPUT {
+                    return Ok(truncate(matches));
+                }
+            }
+        }
+    }
+    Ok(if matches.is_empty() {
+        "No matches found.".into()
+    } else {
+        matches
+    })
+}
+
+pub(super) fn write_file(workspace: &Path, args: &Value) -> Result<String, String> {
+    let relative = safe_relative(required_str(args, "path")?)?;
+    let path = workspace.join(relative);
+    let parent = path.parent().ok_or_else(|| "invalid path".to_string())?;
+    let canonical_root = workspace
+        .canonicalize()
+        .map_err(|e| format!("invalid workspace: {e}"))?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|e| format!("parent directory does not exist: {e}"))?;
+    if !canonical_parent.starts_with(&canonical_root) {
+        return Err("path escapes workspace".into());
+    }
+    if path.exists() {
+        let canonical_target = path
+            .canonicalize()
+            .map_err(|e| format!("invalid destination: {e}"))?;
+        if !canonical_target.starts_with(&canonical_root) {
+            return Err("path escapes workspace".into());
+        }
+    }
+    let content = required_str(args, "content")?;
+    std::fs::write(&path, content)
+        .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+    Ok(format!(
+        "Wrote {} bytes to {}",
+        content.len(),
+        path.display()
+    ))
+}
+
+pub(super) fn existing_path(workspace: &Path, value: &str) -> Result<PathBuf, String> {
+    let root = workspace
+        .canonicalize()
+        .map_err(|e| format!("invalid workspace: {e}"))?;
+    let path = workspace
+        .join(safe_relative(value)?)
+        .canonicalize()
+        .map_err(|e| format!("path not found: {e}"))?;
+    if !path.starts_with(&root) {
+        return Err("path escapes workspace".into());
+    }
+    Ok(path)
+}
+
+pub(super) fn safe_relative(value: &str) -> Result<PathBuf, String> {
+    let path = Path::new(value);
+    if path.is_absolute()
+        || path.components().any(|part| {
+            matches!(
+                part,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("path must be relative and remain inside the workspace".into());
+    }
+    Ok(path.to_owned())
+}

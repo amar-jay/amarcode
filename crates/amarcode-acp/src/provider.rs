@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, path::Path};
+use std::collections::BTreeMap;
 
 use agent_client_protocol::{
     schema::v1::{
@@ -9,81 +9,10 @@ use agent_client_protocol::{
 };
 use futures_util::StreamExt;
 use reqwest::Client as HttpClient;
-use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::watch;
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct Config {
-    pub name: String,
-    pub provider: ProviderConfig,
-}
-
-impl Config {
-    pub fn title(&self) -> String {
-        self.name
-            .split(['.', '_', '-'])
-            .filter(|part| !part.is_empty())
-            .map(|part| {
-                let mut chars = part.chars();
-                chars.next().map_or_else(String::new, |first| {
-                    let mut word = first.to_ascii_uppercase().to_string();
-                    word.extend(chars);
-                    word
-                })
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-
-    pub fn from_file(path: &Path) -> Result<Self, String> {
-        let contents = std::fs::read_to_string(path)
-            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-        let mut config: Self = serde_json::from_str(&contents)
-            .map_err(|error| format!("invalid JSON in {}: {error}", path.display()))?;
-        config.name = config.name.trim().to_owned();
-        config.provider.base_url = config.provider.base_url.trim_end_matches('/').to_owned();
-        if !valid_agent_name(&config.name) {
-            return Err("name must start with an ASCII lowercase letter or digit and contain only lowercase letters, digits, '.', '_', or '-'".into());
-        }
-        if config.provider.base_url.is_empty()
-            || config.provider.api_key.trim().is_empty()
-            || config.provider.model.trim().is_empty()
-        {
-            return Err(
-                "provider.base_url, provider.api_key, and provider.model must not be empty".into(),
-            );
-        }
-        Ok(config)
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ProviderConfig {
-    #[serde(alias = "baseUrl")]
-    pub base_url: String,
-    #[serde(alias = "apiKey")]
-    pub api_key: String,
-    pub model: String,
-    /// Optional OpenAI-compatible reasoning request configuration.
-    #[serde(default)]
-    pub reasoning: Option<Value>,
-}
-
-impl ProviderConfig {
-    fn endpoint(&self) -> String {
-        format!("{}/chat/completions", self.base_url)
-    }
-}
-
-fn valid_agent_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        && chars
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
-}
+use crate::config::{Config, ProviderConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelToolCall {
@@ -103,6 +32,17 @@ pub struct ModelTurn {
 pub enum Completion<T = ModelTurn> {
     Completed(T),
     Cancelled,
+}
+
+/// ACP state associated with one streamed model response.
+///
+/// Keeping this together prevents the transport API from growing one argument
+/// for every piece of protocol context needed while translating the stream.
+pub struct StreamContext {
+    pub session_id: SessionId,
+    pub message_id: MessageId,
+    pub connection: ConnectionTo<AcpClient>,
+    pub cancellation: watch::Receiver<bool>,
 }
 
 pub fn tool_definitions() -> Vec<Value> {
@@ -161,12 +101,9 @@ pub async fn stream_completion(
     config: &Config,
     history: &[Value],
     mode: &str,
-    session_id: SessionId,
-    message_id: MessageId,
-    connection: ConnectionTo<AcpClient>,
-    mut cancellation: watch::Receiver<bool>,
+    mut context: StreamContext,
 ) -> Result<Completion, String> {
-    if *cancellation.borrow() {
+    if *context.cancellation.borrow() {
         return Ok(Completion::Cancelled);
     }
     let mut request_body = json!({
@@ -186,7 +123,7 @@ pub async fn stream_completion(
         .send();
     let response = tokio::select! {
         response = request => response.map_err(|error| format!("provider request failed: {error}"))?,
-        _ = cancellation.changed() => return Ok(Completion::Cancelled),
+        _ = context.cancellation.changed() => return Ok(Completion::Cancelled),
     };
     let status = response.status();
     if !status.is_success() {
@@ -209,7 +146,7 @@ pub async fn stream_completion(
     loop {
         let chunk = tokio::select! {
             chunk = stream.next() => chunk,
-            _ = cancellation.changed() => return Ok(Completion::Cancelled),
+            _ = context.cancellation.changed() => return Ok(Completion::Cancelled),
         };
         let Some(chunk) = chunk else { break };
         buffer.push_str(&String::from_utf8_lossy(
@@ -222,9 +159,9 @@ pub async fn stream_completion(
                 &line,
                 &mut turn,
                 &mut calls,
-                &session_id,
-                &message_id,
-                &connection,
+                &context.session_id,
+                &context.message_id,
+                &context.connection,
             )?;
         }
     }
@@ -233,9 +170,9 @@ pub async fn stream_completion(
             buffer.trim_end_matches('\r'),
             &mut turn,
             &mut calls,
-            &session_id,
-            &message_id,
-            &connection,
+            &context.session_id,
+            &context.message_id,
+            &context.connection,
         )?;
     }
     turn.tool_calls = calls.into_values().collect();

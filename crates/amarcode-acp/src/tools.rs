@@ -1,9 +1,6 @@
-use std::{
-    collections::HashMap,
-    path::{Component, Path, PathBuf},
-    sync::Mutex,
-};
+use std::{collections::HashMap, path::Path, sync::Mutex};
 
+use crate::provider::ModelToolCall;
 use agent_client_protocol::{
     schema::v1::{
         ContentBlock, CreateTerminalRequest, KillTerminalRequest, PermissionOption,
@@ -16,9 +13,10 @@ use agent_client_protocol::{
 };
 use serde_json::{json, Value};
 use tokio::sync::watch;
-use walkdir::WalkDir;
 
-use crate::provider::ModelToolCall;
+mod filesystem;
+
+use filesystem::{existing_path, list_directory, read_file, search_text, write_file};
 
 const MAX_OUTPUT: usize = 64 * 1024;
 
@@ -394,129 +392,6 @@ async fn run_command(
     finish(connection, session_id, call, result)
 }
 
-fn read_file(workspace: &Path, args: &Value) -> Result<String, String> {
-    let path = existing_path(workspace, required_str(args, "path")?)?;
-    std::fs::read_to_string(&path)
-        .map(truncate)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))
-}
-
-fn list_directory(workspace: &Path, args: &Value) -> Result<String, String> {
-    let path = existing_path(workspace, required_str(args, "path")?)?;
-    let mut entries = std::fs::read_dir(&path)
-        .map_err(|e| format!("failed to list {}: {e}", path.display()))?
-        .map(|entry| {
-            entry
-                .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                .map_err(|e| e.to_string())
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    entries.sort();
-    Ok(truncate(entries.join("\n")))
-}
-
-fn search_text(workspace: &Path, args: &Value) -> Result<String, String> {
-    let query = required_str(args, "query")?;
-    if query.is_empty() {
-        return Err("query must not be empty".into());
-    }
-    let start = existing_path(
-        workspace,
-        args.get("path").and_then(Value::as_str).unwrap_or("."),
-    )?;
-    let mut matches = String::new();
-    for entry in WalkDir::new(start)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
-        .take(10_000)
-    {
-        let Ok(text) = std::fs::read_to_string(entry.path()) else {
-            continue;
-        };
-        for (line, content) in text.lines().enumerate() {
-            if content.contains(query) {
-                let relative = entry.path().strip_prefix(workspace).unwrap_or(entry.path());
-                matches.push_str(&format!(
-                    "{}:{}:{}\n",
-                    relative.display(),
-                    line + 1,
-                    content
-                ));
-                if matches.len() >= MAX_OUTPUT {
-                    return Ok(truncate(matches));
-                }
-            }
-        }
-    }
-    Ok(if matches.is_empty() {
-        "No matches found.".into()
-    } else {
-        matches
-    })
-}
-
-fn write_file(workspace: &Path, args: &Value) -> Result<String, String> {
-    let relative = safe_relative(required_str(args, "path")?)?;
-    let path = workspace.join(relative);
-    let parent = path.parent().ok_or_else(|| "invalid path".to_string())?;
-    let canonical_root = workspace
-        .canonicalize()
-        .map_err(|e| format!("invalid workspace: {e}"))?;
-    let canonical_parent = parent
-        .canonicalize()
-        .map_err(|e| format!("parent directory does not exist: {e}"))?;
-    if !canonical_parent.starts_with(&canonical_root) {
-        return Err("path escapes workspace".into());
-    }
-    if path.exists() {
-        let canonical_target = path
-            .canonicalize()
-            .map_err(|e| format!("invalid destination: {e}"))?;
-        if !canonical_target.starts_with(&canonical_root) {
-            return Err("path escapes workspace".into());
-        }
-    }
-    let content = required_str(args, "content")?;
-    std::fs::write(&path, content)
-        .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
-    Ok(format!(
-        "Wrote {} bytes to {}",
-        content.len(),
-        path.display()
-    ))
-}
-
-fn existing_path(workspace: &Path, value: &str) -> Result<PathBuf, String> {
-    let root = workspace
-        .canonicalize()
-        .map_err(|e| format!("invalid workspace: {e}"))?;
-    let path = workspace
-        .join(safe_relative(value)?)
-        .canonicalize()
-        .map_err(|e| format!("path not found: {e}"))?;
-    if !path.starts_with(&root) {
-        return Err("path escapes workspace".into());
-    }
-    Ok(path)
-}
-
-fn safe_relative(value: &str) -> Result<PathBuf, String> {
-    let path = Path::new(value);
-    if path.is_absolute()
-        || path.components().any(|part| {
-            matches!(
-                part,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
-        return Err("path must be relative and remain inside the workspace".into());
-    }
-    Ok(path.to_owned())
-}
-
 fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
         .and_then(Value::as_str)
@@ -656,7 +531,14 @@ fn finish(
 
 fn truncate(mut value: String) -> String {
     if value.len() > MAX_OUTPUT {
-        value.truncate(MAX_OUTPUT);
+        // `String::truncate` requires a UTF-8 character boundary. Tool output
+        // is limited in bytes, so walk backward from the byte limit when it
+        // happens to split a multi-byte character.
+        let mut boundary = MAX_OUTPUT;
+        while !value.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        value.truncate(boundary);
         value.push_str("\n[truncated]");
     }
     value
@@ -664,6 +546,7 @@ fn truncate(mut value: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::filesystem::{safe_relative, write_file};
     use super::*;
     use agent_client_protocol::schema::v1::{RequestPermissionResponse, SelectedPermissionOutcome};
 
@@ -681,6 +564,29 @@ mod tests {
         assert!(is_search_tool(&model_call("list_directory")));
         assert!(!is_search_tool(&model_call("read_file")));
         assert!(!is_search_tool(&model_call("run_command")));
+    }
+
+    #[test]
+    fn truncation_is_safe_when_limit_splits_a_utf8_character() {
+        let mut input = "a".repeat(MAX_OUTPUT - 1);
+        input.push('🙂');
+        input.push_str("unreachable");
+
+        let output = truncate(input);
+
+        assert_eq!(output, format!("{}\n[truncated]", "a".repeat(MAX_OUTPUT - 1)));
+        assert!(output.is_char_boundary(output.len()));
+    }
+
+    #[test]
+    fn truncation_keeps_output_at_or_below_the_byte_limit() {
+        let input = format!("{}extra", "a".repeat(MAX_OUTPUT));
+        let output = truncate(input);
+        let content = output
+            .strip_suffix("\n[truncated]")
+            .expect("truncation marker");
+
+        assert_eq!(content.len(), MAX_OUTPUT);
     }
 
     #[test]

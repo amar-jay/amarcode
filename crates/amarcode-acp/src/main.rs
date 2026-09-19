@@ -1,10 +1,11 @@
 use std::{env, path::PathBuf};
 
+mod config;
 mod provider;
 mod runtime;
 mod tools;
 
-use provider::Config;
+use config::Config;
 
 #[tokio::main]
 async fn main() -> agent_client_protocol::Result<()> {
@@ -39,5 +40,5 @@ fn config_path() -> Option<PathBuf> {
         }
     }
     eprintln!("amarcode-acp: need to define --config flag with a file path");
-    return None;
+    None
 }
