@@ -56,13 +56,18 @@ targets, overwrite confirmation, and a final plan covering builds, uploads,
 the single Worker deploy, and any Git actions. App publication always runs
 last, and only when `app` was selected.
 
-The orchestrator builds and validates every selected binary before any
+A changed daemon or ACP version is written to that crate's `Cargo.toml` and
+`Cargo.lock`, then committed before the release build so the signed manifest
+records a clean `sourceCommit` instead of `sourceDirty: true`. Unrelated dirty
+files still refuse a production publish unless `--allow-dirty` is passed.
+
+The orchestrator then builds and validates every selected binary before any
 Cloudflare write, uploads immutable artifacts first, publishes versioned
 manifests next, advances each product's `latest.json` only after that
 product's artifacts succeed, and deploys the Worker at most once.
 
-Production publishes from a dirty worktree are refused unless `--allow-dirty`
-is passed. `--dry-run` still builds and signs locally.
+`--dry-run` still builds and signs locally; it does not create the version
+commit or write to Cloudflare.
 
 ```sh
 bun run publish -- \

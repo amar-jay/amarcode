@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parseArgs } from "./cli";
+import { releaseCommitMessage, versionReleasePaths } from "./products";
 
 describe("parseArgs", () => {
   test("parses positional products and independent versions", () => {
@@ -37,5 +38,27 @@ describe("parseArgs", () => {
     expect(options.products).toEqual(["daemon"]);
     expect(options.versions.daemon).toBe("0.6.13");
     expect(options.versionsProvided.daemon).toBe(true);
+  });
+});
+
+describe("version release commit", () => {
+  test("names only the selected crate manifests", () => {
+    expect(versionReleasePaths(["daemon"])).toEqual([
+      "Cargo.lock",
+      "crates/daemon/Cargo.toml",
+    ]);
+    expect(versionReleasePaths(["acp"])).toEqual([
+      "Cargo.lock",
+      "crates/amarcode-acp/Cargo.toml",
+    ]);
+  });
+
+  test("writes a chore release message", () => {
+    expect(
+      releaseCommitMessage(["daemon", "acp"], {
+        daemon: "0.6.13",
+        acp: "0.1.1",
+      }),
+    ).toBe("chore: release amarcode-daemon 0.6.13, amarcode-acp 0.1.1");
   });
 });

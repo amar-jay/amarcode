@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { buildProduct, type BuiltArtifact } from "./release/build";
 import {
   gitCommit,
-  gitDirty,
+  gitPorcelainPaths,
   gitStatusShort,
   registryDirectory,
   run,
@@ -26,13 +26,33 @@ import {
   signManifest,
   type Manifest,
 } from "./release/manifest";
-import { binaryProducts, type BinaryProductId } from "./release/products";
+import {
+  binaryProducts,
+  releaseCommitMessage,
+  versionReleasePaths,
+  type BinaryProductId,
+} from "./release/products";
 import { loadRemoteManifest, upload } from "./release/r2";
 
 export async function publish(args: string[]) {
   const selected = await interactive(parseArgs(args));
   if (!selected) return;
   await execute(selected);
+}
+
+function commitVersionRelease(
+  ids: BinaryProductId[],
+  versions: Record<BinaryProductId, string>,
+  versionPaths: string[],
+) {
+  const dirtyVersionFiles = gitPorcelainPaths().filter((path) =>
+    versionPaths.includes(path),
+  );
+  if (dirtyVersionFiles.length === 0) return;
+  run(["git", "add", "--", ...dirtyVersionFiles]);
+  const message = releaseCommitMessage(ids, versions);
+  run(["git", "commit", "-m", message]);
+  console.log(`Committed version bump as ${gitCommit()}: ${message}`);
 }
 
 function executeAppPublication(plan: AppPublicationPlan) {
@@ -59,9 +79,13 @@ async function execute(plan: ReleasePlan) {
   for (const target of plan.targets) validateSegment("target", target);
   for (const id of binaryIds) validateSegment("version", plan.versions[id]);
 
-  if (!plan.dryRun && gitDirty() && !plan.allowDirty) {
+  const versionPaths = versionReleasePaths(binaryIds);
+  const unrelatedDirty = gitPorcelainPaths().filter(
+    (path) => !versionPaths.includes(path),
+  );
+  if (!plan.dryRun && unrelatedDirty.length > 0 && !plan.allowDirty) {
     throw new Error(
-      "refusing production publish from a dirty worktree; commit first or pass --allow-dirty",
+      `refusing production publish from a dirty worktree (${unrelatedDirty.join(", ")}); commit first or pass --allow-dirty`,
     );
   }
 
@@ -78,6 +102,10 @@ async function execute(plan: ReleasePlan) {
     }
   }
 
+  if (!plan.dryRun && binaryIds.length > 0) {
+    commitVersionRelease(binaryIds, plan.versions, versionPaths);
+  }
+
   const built: Record<BinaryProductId, BuiltArtifact[]> = {
     daemon: [],
     acp: [],
@@ -92,10 +120,13 @@ async function execute(plan: ReleasePlan) {
   }
 
   const sourceCommit = gitCommit();
-  const dirty = gitDirty();
+  const remainingDirty = gitPorcelainPaths().filter(
+    (path) => !plan.dryRun || !versionPaths.includes(path),
+  );
+  const dirty = remainingDirty.length > 0;
   if (dirty) {
     console.warn(
-      `Publishing from a dirty worktree; manifests will record commit ${sourceCommit}.`,
+      `Publishing from a dirty worktree (${remainingDirty.join(", ")}); manifests will record commit ${sourceCommit}.`,
     );
   }
 

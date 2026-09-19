@@ -12,6 +12,8 @@ import {
   binaryProductIds,
   binaryProducts,
   expandProducts,
+  releaseCommitMessage,
+  versionReleasePaths,
   type BinaryProductId,
   type ProductId,
 } from "./products";
@@ -236,10 +238,18 @@ async function inquireAppPublication(): Promise<
   run(["gh", "--version"], { quiet: true });
   run(["gh", "auth", "status"], { quiet: true });
 
-  const changes = gitStatusShort();
+  const versionPaths = new Set(versionReleasePaths(binaryProductIds));
+  const extraChanges = gitStatusShort()
+    .split("\n")
+    .filter((line) => {
+      if (!line) return false;
+      const path = line.match(/^R. (.+) -> (.+)$/)?.[2] ?? line.slice(3);
+      return path ? !versionPaths.has(path) : false;
+    })
+    .join("\n");
   let commitMessage: string | null = null;
-  if (changes) {
-    prompts.note(changes, "Changes to commit before publishing the app");
+  if (extraChanges) {
+    prompts.note(extraChanges, "Changes to commit before publishing the app");
     const commitChanges = await prompts.confirm({
       message: "Commit all listed release changes before publishing the app?",
       initialValue: true,
@@ -367,6 +377,14 @@ export async function interactive(
       : []),
     `Overwrite: ${overwrite ? "yes" : "no"}`,
     `Dirty tree: ${options.allowDirty ? "allowed" : "refused for production"}`,
+    ...(products.some((id) => id !== "app")
+      ? [
+          `Version commit: ${releaseCommitMessage(
+            products.filter((id): id is BinaryProductId => id !== "app"),
+            versions,
+          )}`,
+        ]
+      : []),
     `Desktop app: ${products.includes("app") ? "publish last" : "skip"}`,
     ...(appPublication?.commitMessage
       ? [`Commit: ${appPublication.commitMessage}`]
