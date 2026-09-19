@@ -43,6 +43,8 @@ set it explicitly to `{ "enabled": false }` to disable it. Other providers
 remain opt-in. Streamed `reasoning_details`, `reasoning`, and
 `reasoning_content` are rendered as ACP thought chunks. Structured
 `reasoning_details` are reassembled and preserved across tool-call rounds.
+Reasoning is presented through an ACP tool-call lifecycle with `kind: "think"`,
+including cumulative streamed content and a final completed status.
 
 ## Protocol behavior
 

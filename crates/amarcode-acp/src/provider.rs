@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use agent_client_protocol::{
     schema::v1::{
         ContentBlock, ContentChunk, MessageId, SessionId, SessionNotification, SessionUpdate,
-        TextContent,
+        TextContent, ToolCall as AcpToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
+        ToolCallUpdateFields, ToolKind,
     },
     Client as AcpClient, ConnectionTo,
 };
@@ -43,6 +44,10 @@ pub struct StreamContext {
     pub message_id: MessageId,
     pub connection: ConnectionTo<AcpClient>,
     pub cancellation: watch::Receiver<bool>,
+}
+
+struct ReasoningToolCall {
+    id: String,
 }
 
 pub fn tool_definitions() -> Vec<Value> {
@@ -143,38 +148,76 @@ pub async fn stream_completion(
         tool_calls: Vec::new(),
     };
     let mut calls = BTreeMap::<usize, ModelToolCall>::new();
+    let mut reasoning_call = None;
     loop {
         let chunk = tokio::select! {
             chunk = stream.next() => chunk,
-            _ = context.cancellation.changed() => return Ok(Completion::Cancelled),
+            _ = context.cancellation.changed() => {
+                finish_reasoning_tool(&context, reasoning_call.as_ref(), &turn.reasoning, ToolCallStatus::Failed)?;
+                return Ok(Completion::Cancelled);
+            },
         };
         let Some(chunk) = chunk else { break };
-        buffer.push_str(&String::from_utf8_lossy(
-            &chunk.map_err(|e| format!("provider stream failed: {e}"))?,
-        ));
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                let _ = finish_reasoning_tool(
+                    &context,
+                    reasoning_call.as_ref(),
+                    &turn.reasoning,
+                    ToolCallStatus::Failed,
+                );
+                return Err(format!("provider stream failed: {error}"));
+            }
+        };
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
         while let Some(index) = buffer.find('\n') {
             let line = buffer[..index].trim_end_matches('\r').to_owned();
             buffer.drain(..=index);
-            process_sse_line(
+            if let Err(error) = process_sse_line(
                 &line,
                 &mut turn,
                 &mut calls,
                 &context.session_id,
                 &context.message_id,
                 &context.connection,
-            )?;
+                &mut reasoning_call,
+            ) {
+                let _ = finish_reasoning_tool(
+                    &context,
+                    reasoning_call.as_ref(),
+                    &turn.reasoning,
+                    ToolCallStatus::Failed,
+                );
+                return Err(error);
+            }
         }
     }
     if !buffer.is_empty() {
-        process_sse_line(
+        if let Err(error) = process_sse_line(
             buffer.trim_end_matches('\r'),
             &mut turn,
             &mut calls,
             &context.session_id,
             &context.message_id,
             &context.connection,
-        )?;
+            &mut reasoning_call,
+        ) {
+            let _ = finish_reasoning_tool(
+                &context,
+                reasoning_call.as_ref(),
+                &turn.reasoning,
+                ToolCallStatus::Failed,
+            );
+            return Err(error);
+        }
     }
+    finish_reasoning_tool(
+        &context,
+        reasoning_call.as_ref(),
+        &turn.reasoning,
+        ToolCallStatus::Completed,
+    )?;
     turn.tool_calls = calls.into_values().collect();
     Ok(Completion::Completed(turn))
 }
@@ -212,6 +255,7 @@ fn process_sse_line(
     session_id: &SessionId,
     message_id: &MessageId,
     connection: &ConnectionTo<AcpClient>,
+    reasoning_call: &mut Option<ReasoningToolCall>,
 ) -> Result<(), String> {
     let Some(data) = line.strip_prefix("data:") else {
         return Ok(());
@@ -228,15 +272,13 @@ fn process_sse_line(
     let delta = &value["choices"][0]["delta"];
     let thought = apply_reasoning_delta(delta, turn);
     if !thought.is_empty() {
-        connection
-            .send_notification(SessionNotification::new(
-                session_id.clone(),
-                SessionUpdate::AgentThoughtChunk(
-                    ContentChunk::new(ContentBlock::Text(TextContent::new(thought)))
-                        .message_id(message_id.clone()),
-                ),
-            ))
-            .map_err(|e| format!("ACP write failed: {e}"))?;
+        publish_reasoning_tool(
+            connection,
+            session_id,
+            message_id,
+            reasoning_call,
+            &turn.reasoning,
+        )?;
     }
     if let Some(text) = delta["content"].as_str().filter(|text| !text.is_empty()) {
         turn.text.push_str(text);
@@ -270,6 +312,59 @@ fn process_sse_line(
         }
     }
     Ok(())
+}
+
+fn publish_reasoning_tool(
+    connection: &ConnectionTo<AcpClient>,
+    session_id: &SessionId,
+    message_id: &MessageId,
+    reasoning_call: &mut Option<ReasoningToolCall>,
+    reasoning: &str,
+) -> Result<(), String> {
+    let content = vec![ToolCallContent::from(ContentBlock::Text(TextContent::new(
+        reasoning,
+    )))];
+    let update = if let Some(call) = reasoning_call {
+        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            call.id.clone(),
+            ToolCallUpdateFields::new().content(content),
+        ))
+    } else {
+        let id = format!("think-{message_id}");
+        *reasoning_call = Some(ReasoningToolCall { id: id.clone() });
+        SessionUpdate::ToolCall(
+            AcpToolCall::new(id, "Thinking")
+                .kind(ToolKind::Think)
+                .status(ToolCallStatus::InProgress)
+                .content(content),
+        )
+    };
+    connection
+        .send_notification(SessionNotification::new(session_id.clone(), update))
+        .map_err(|error| format!("ACP write failed: {error}"))
+}
+
+fn finish_reasoning_tool(
+    context: &StreamContext,
+    reasoning_call: Option<&ReasoningToolCall>,
+    reasoning: &str,
+    status: ToolCallStatus,
+) -> Result<(), String> {
+    let Some(call) = reasoning_call else {
+        return Ok(());
+    };
+    let fields = ToolCallUpdateFields::new()
+        .status(status)
+        .content(vec![ToolCallContent::from(ContentBlock::Text(
+            TextContent::new(reasoning),
+        ))]);
+    context
+        .connection
+        .send_notification(SessionNotification::new(
+            context.session_id.clone(),
+            SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(call.id.clone(), fields)),
+        ))
+        .map_err(|error| format!("ACP write failed: {error}"))
 }
 
 fn apply_reasoning_delta(delta: &Value, turn: &mut ModelTurn) -> String {

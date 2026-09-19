@@ -274,6 +274,86 @@ fn transcript_streams_a_uuid_message_id() {
 }
 
 #[test]
+fn transcript_streams_reasoning_as_a_think_tool() {
+    let listener = match TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping socket transcript test: sandbox forbids loopback listeners");
+            return;
+        }
+        Err(error) => panic!("bind provider: {error}"),
+    };
+    let address = listener.local_addr().expect("provider address");
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().expect("provider connection");
+        let mut request = [0_u8; 4096];
+        let _ = socket.read(&mut request).expect("read HTTP request");
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"reasoning\":\"first \"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"reasoning\":\"second\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        write!(
+            socket,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .expect("write provider response");
+        socket.flush().expect("flush provider response");
+    });
+
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session_id = new_session(&mut agent, 2, "/workspace");
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "session/prompt",
+        "params": {
+            "sessionId": session_id,
+            "prompt": [{ "type": "text", "text": "think first" }]
+        }
+    }));
+
+    let (response, messages) = agent.response_with_messages(3);
+    assert_eq!(response["result"]["stopReason"], "end_turn");
+    let updates = messages
+        .iter()
+        .filter_map(|message| message.pointer("/params/update"))
+        .collect::<Vec<_>>();
+    let started = updates
+        .iter()
+        .find(|update| update["sessionUpdate"] == "tool_call")
+        .expect("think tool start");
+    assert_eq!(started["kind"], "think");
+    assert_eq!(started["status"], "in_progress");
+    assert_eq!(started["title"], "Thinking");
+    assert_eq!(started["content"][0]["content"]["text"], "first ");
+
+    let think_id = started["toolCallId"].clone();
+    let think_updates = updates
+        .iter()
+        .filter(|update| {
+            update["sessionUpdate"] == "tool_call_update" && update["toolCallId"] == think_id
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(think_updates.len(), 2);
+    assert_eq!(
+        think_updates[0]["content"][0]["content"]["text"],
+        "first second"
+    );
+    assert_eq!(think_updates[1]["status"], "completed");
+    assert_eq!(
+        think_updates[1]["content"][0]["content"]["text"],
+        "first second"
+    );
+    assert!(updates
+        .iter()
+        .all(|update| update["sessionUpdate"] != "agent_thought_chunk"));
+}
+
+#[test]
 fn transcript_executes_tool_and_returns_result_to_model() {
     let listener = match TcpListener::bind("127.0.0.1:0") {
         Ok(listener) => listener,
