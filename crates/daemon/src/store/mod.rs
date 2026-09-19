@@ -58,6 +58,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0006_chat_agent_title",
         include_str!("../../migrations/0006_chat_agent_title.sql"),
     ),
+    (
+        "0007_repair_agent_titles",
+        include_str!("../../migrations/0007_repair_agent_titles.sql"),
+    ),
 ];
 
 /// Persisted ACP traffic row (DB form of [`RpcEnvelope`] plus run metadata).

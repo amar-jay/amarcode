@@ -20,9 +20,9 @@ use super::{
         ensure_streaming_message, finalize_message, remove_pending_requests_for_run,
         take_streaming_messages, take_streaming_messages_from_live,
     },
-		usage::apply_context_usage,
     terminal::is_terminal_method,
     types::{PendingAgentRequest, SessionInner},
+    usage::apply_context_usage,
     util::{emit, extract_text_delta},
 };
 
@@ -827,6 +827,25 @@ mod tests {
             pending: std::sync::Mutex::new(std::collections::HashMap::new()),
             terminals: Default::default(),
         };
+
+        apply_session_update(
+            &inner,
+            "run-1",
+            "chat-1",
+            &json!({
+                "sessionId": "session-1",
+                "update": {
+                    "sessionUpdate": "session_info_update",
+                    "title": "first prompt fallback"
+                }
+            }),
+        )
+        .expect("ignore prompt title echo");
+        assert_eq!(
+            store.get_chat("chat-1").expect("read chat").unwrap().title,
+            "first prompt fallback"
+        );
+        assert!(receiver.try_recv().is_err());
 
         apply_session_update(
             &inner,

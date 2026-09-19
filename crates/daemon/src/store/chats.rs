@@ -101,17 +101,35 @@ impl Store {
     }
 
     /// Set the first title supplied by ACP session metadata. This is an atomic
-    /// claim: once one session has supplied a title, later sessions cannot
-    /// rename the chat. Returns whether this call claimed the title.
+    /// claim: prompt echoes do not count, and once an agent has supplied a
+    /// generated title, later sessions cannot rename the chat. Returns whether
+    /// this call claimed the title.
     pub fn claim_agent_title(&self, id: &str, title: &str) -> Result<bool> {
-        let updated = self
-            .connection()?
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(to_error)?;
+        let current: Option<(String, bool)> = transaction
+            .query_row(
+                "SELECT title, agent_title_set FROM chats WHERE id=?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(to_error)?;
+        let Some((fallback, already_claimed)) = current else {
+            return Ok(false);
+        };
+        if already_claimed || is_prompt_title_echo(&fallback, title) {
+            return Ok(false);
+        }
+
+        let updated = transaction
             .execute(
                 "UPDATE chats SET title=?2, agent_title_set=1, updated_at=?3
                  WHERE id=?1 AND agent_title_set=0",
                 params![id, title, super::now()],
             )
             .map_err(to_error)?;
+        transaction.commit().map_err(to_error)?;
         Ok(updated > 0)
     }
 
@@ -166,10 +184,32 @@ impl Store {
     }
 }
 
+fn is_prompt_title_echo(fallback: &str, candidate: &str) -> bool {
+    if fallback == candidate {
+        return true;
+    }
+    fallback
+        .strip_suffix('…')
+        .is_some_and(|prefix| candidate.starts_with(prefix))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::{MessageRole, MessageStatus};
+
+    #[test]
+    fn prompt_title_echo_matches_exact_and_truncated_fallbacks() {
+        assert!(is_prompt_title_echo("short prompt", "short prompt"));
+        assert!(is_prompt_title_echo(
+            "A long prompt that was truncated at the boundary…",
+            "A long prompt that was truncated at the boundary and keeps going",
+        ));
+        assert!(!is_prompt_title_echo(
+            "A long prompt that was truncated at the boundary…",
+            "A concise generated title",
+        ));
+    }
 
     #[test]
     fn delete_chat_removes_the_row_and_reports_missing_chats() {
