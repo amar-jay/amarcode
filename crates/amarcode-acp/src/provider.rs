@@ -54,9 +54,16 @@ pub fn tool_definitions() -> Vec<Value> {
     vec![
         function_tool(
             "read_file",
-            "Read a UTF-8 text file inside the workspace.",
+            "Read a page of a UTF-8 text file inside the workspace. offset and limit are byte counts; use the exact next_offset returned by a partial read to continue.",
             json!({
-                "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"], "additionalProperties": false
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "offset": { "type": "integer", "minimum": 0, "default": 0, "description": "UTF-8 byte offset. Use next_offset from the previous page." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 61440, "default": 61440, "description": "Maximum bytes to return." }
+                },
+                "required": ["path"],
+                "additionalProperties": false
             }),
         ),
         function_tool(

@@ -549,7 +549,7 @@ fn truncate(mut value: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::filesystem::{edit_file, safe_relative, write_file};
+    use super::filesystem::{edit_file, read_file, safe_relative, write_file};
     use super::*;
     use agent_client_protocol::schema::v1::{RequestPermissionResponse, SelectedPermissionOutcome};
 
@@ -685,6 +685,57 @@ mod tests {
             std::fs::read_to_string(&path).expect("read unchanged file"),
             original
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_file_pages_without_losing_utf8_content() {
+        let root =
+            std::env::temp_dir().join(format!("amarcode-read-root-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).expect("create root");
+        let path = root.join("example.txt");
+        std::fs::write(&path, "ab🙂cd").expect("write fixture");
+
+        let first = read_file(
+            &root,
+            &json!({ "path": "example.txt", "offset": 0, "limit": 4 }),
+        )
+        .expect("read first page");
+        assert_eq!(first, "ab\n[partial read: bytes 0..2 of 8; next_offset=2]");
+        let second = read_file(
+            &root,
+            &json!({ "path": "example.txt", "offset": 2, "limit": 4 }),
+        )
+        .expect("read second page");
+        assert_eq!(second, "🙂\n[partial read: bytes 2..6 of 8; next_offset=6]");
+        let third = read_file(
+            &root,
+            &json!({ "path": "example.txt", "offset": 6, "limit": 4 }),
+        )
+        .expect("read final page");
+        assert_eq!(third, "cd");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_file_rejects_invalid_offsets_and_limits() {
+        let root =
+            std::env::temp_dir().join(format!("amarcode-read-root-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).expect("create root");
+        std::fs::write(root.join("example.txt"), "🙂").expect("write fixture");
+
+        let split_character = read_file(&root, &json!({ "path": "example.txt", "offset": 1 }));
+        assert!(split_character
+            .expect_err("reject split character")
+            .contains("UTF-8 character boundary"));
+        let beyond_end = read_file(&root, &json!({ "path": "example.txt", "offset": 5 }));
+        assert!(beyond_end
+            .expect_err("reject offset beyond end")
+            .contains("beyond end of file"));
+        let zero_limit = read_file(&root, &json!({ "path": "example.txt", "limit": 0 }));
+        assert!(zero_limit
+            .expect_err("reject zero limit")
+            .contains("limit must be between"));
         let _ = std::fs::remove_dir_all(root);
     }
 

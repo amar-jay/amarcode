@@ -79,7 +79,9 @@ OpenAI-compatible function calling is executed as an iterative model â†’ tool â†
 model loop. The built-in tools are `read_file`, `list_directory`, `search_text`,
 `edit_file`, `write_file`, and `run_command`. `edit_file` performs one exact,
 uniquely matched text replacement, rejecting stale or ambiguous edits without
-changing the file. All paths are restricted to the session workspace, symlink
+changing the file. `read_file` accepts UTF-8 byte `offset` and `limit` values;
+partial reads return the exact `next_offset` needed to continue. All paths are
+restricted to the session workspace, symlink
 escapes are rejected, and output is bounded. `edit_file`, `write_file`, and
 `run_command` are available only in code mode and require approval through
 ACP `session/request_permission`. Permission prompts offer allow/reject once and

@@ -5,11 +5,56 @@ use walkdir::WalkDir;
 
 use super::{required_str, truncate, MAX_OUTPUT};
 
+const DEFAULT_READ_LIMIT: usize = 60 * 1024;
+
 pub(super) fn read_file(workspace: &Path, args: &Value) -> Result<String, String> {
     let path = existing_path(workspace, required_str(args, "path")?)?;
-    std::fs::read_to_string(&path)
-        .map(truncate)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))
+    let contents = std::fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let offset = optional_usize(args, "offset", 0)?;
+    let limit = optional_usize(args, "limit", DEFAULT_READ_LIMIT)?;
+    if limit == 0 || limit > DEFAULT_READ_LIMIT {
+        return Err(format!(
+            "limit must be between 1 and {DEFAULT_READ_LIMIT} bytes"
+        ));
+    }
+    if offset > contents.len() {
+        return Err(format!(
+            "offset {offset} is beyond end of file ({} bytes)",
+            contents.len()
+        ));
+    }
+    if !contents.is_char_boundary(offset) {
+        return Err(format!("offset {offset} is not a UTF-8 character boundary"));
+    }
+    let requested_end = offset.saturating_add(limit).min(contents.len());
+    let mut end = requested_end;
+    while end > offset && !contents.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end == offset && offset < contents.len() {
+        return Err("limit is too small to include the next UTF-8 character".into());
+    }
+    let page = &contents[offset..end];
+    if end == contents.len() {
+        return Ok(page.to_owned());
+    }
+    Ok(format!(
+        "{page}\n[partial read: bytes {offset}..{end} of {}; next_offset={end}]",
+        contents.len()
+    ))
+}
+
+fn optional_usize(args: &Value, key: &str, default: usize) -> Result<usize, String> {
+    match args.get(key) {
+        None => Ok(default),
+        Some(value) => value
+            .as_u64()
+            .ok_or_else(|| format!("{key} must be a non-negative integer"))
+            .and_then(|value| {
+                usize::try_from(value).map_err(|_| format!("{key} is too large for this platform"))
+            }),
+    }
 }
 
 pub(super) fn list_directory(workspace: &Path, args: &Value) -> Result<String, String> {
