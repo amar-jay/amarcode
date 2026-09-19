@@ -31,50 +31,47 @@ ETags, and immutable caching.
 ```sh
 bunx wrangler login
 bunx wrangler r2 bucket create amarcode-daemons
-bun run daemon:publish
+bun run publish
 ```
 
 For CI, provide `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as encrypted
 secrets. Scope the token to this account and to the required Workers/R2 edits.
 
-## Daemon publishing
+## Publishing
 
-The main command builds Linux and Windows first, uploads both binaries, updates
-the version and latest manifests once, then deploys the Worker once:
+Daemon, ACP, and desktop-app releases share one orchestrator:
 
 ```sh
-bun run daemon:publish
+bun run publish
+bun run publish -- daemon
+bun run publish -- acp
+bun run publish -- app
+bun run publish -- all
 ```
 
-Useful variants:
+Selecting the daemon never implies the app; each product is independent.
+
+Interactive mode asks which products to release, independent version policies,
+targets, overwrite confirmation, and a final plan covering builds, uploads,
+the single Worker deploy, and any Git actions. App publication always runs
+last, and only when `app` was selected.
+
+The orchestrator builds and validates every selected binary before any
+Cloudflare write, uploads immutable artifacts first, publishes versioned
+manifests next, advances each product's `latest.json` only after that
+product's artifacts succeed, and deploys the Worker at most once.
+
+Production publishes from a dirty worktree are refused unless `--allow-dirty`
+is passed. `--dry-run` still builds and signs locally.
 
 ```sh
-bun run daemon:publish -- --dry-run
-bun scripts/publish-daemon.ts --target x86_64-unknown-linux-gnu
-bun scripts/publish-daemon.ts --target x86_64-pc-windows-gnu --skip-deploy
-```
-
-The lower-level script accepts repeated `--target` arguments. It builds every
-requested target before making Cloudflare changes and advances `latest.json`
-only after all binary uploads succeed.
-
-Publishing without `--version` opens an interactive release TUI. It lets you
-choose a patch, minor, major, custom, or deliberate same-version release; then
-choose the target set and confirm the complete publication plan. A changed
-version is written to both `crates/daemon/Cargo.toml` and `Cargo.lock` before
-the daemon is built.
-
-The manifest records the exact full Git commit hash used for the release. If
-the worktree has local changes, it also records `sourceDirty: true` so the
-commit is not mistaken for an exact source snapshot.
-
-Publishing is intentionally version-safe: the script refuses to replace an
-existing remote version unless replacement was confirmed in the TUI or
-`--overwrite` is supplied for automation. To publish non-interactively:
-
-```sh
-bun scripts/publish-daemon.ts --version 0.3.4 \
-  --target x86_64-unknown-linux-gnu --target x86_64-pc-windows-gnu
+bun run publish -- \
+  --products daemon,acp \
+  --daemon-version 0.6.13 \
+  --acp-version 0.1.0 \
+  --target x86_64-unknown-linux-gnu \
+  --target x86_64-pc-windows-gnu \
+  --non-interactive
 ```
 
 Use `--overwrite` only when intentionally replacing an already published
@@ -94,7 +91,7 @@ sudo apt-get install mingw-w64
 Then publish the Windows executable from Linux:
 
 ```sh
-bun scripts/publish-daemon.ts --target x86_64-pc-windows-gnu
+bun run publish -- daemon --target x86_64-pc-windows-gnu --version 0.6.13
 ```
 
 The bundled SQLite feature compiles SQLite into the executable. The resulting
@@ -184,44 +181,29 @@ binary elsewhere. Use `bun run daemon:status`, `daemon:stop`, or
 
 For CI publishing, store the private PEM as an encrypted secret, write it to a
 temporary file with restricted permissions, set `AMARCODE_DAEMON_SIGNING_KEY`
-to that path, and run `bun run daemon:publish`.
+to that path, and run `bun run publish -- daemon --version <version> --non-interactive`.
 
 ## ACP publishing
 
-The ACP pipeline follows the same release ordering and safety properties as the
-daemon pipeline: it builds every requested target first, refuses accidental
-version replacement, uploads immutable binaries, and advances the signed
-version and `latest` manifests only after all binaries upload successfully.
+ACP uses the same orchestrator and signing identity as the daemon. Select the
+`acp` product.
 
 ```sh
-bun run acp:publish
-```
-
-Publishing interactively offers patch, minor, major, and deliberate
-same-version releases. For CI or another non-interactive environment, provide
-the version explicitly:
-
-```sh
-bun crates/amarcode-registry/scripts/publish-acp.ts --version 0.2.0 \
+bun run publish -- acp --acp-version 0.2.0 \
   --target x86_64-unknown-linux-gnu \
-  --target x86_64-pc-windows-gnu
+  --target x86_64-pc-windows-gnu \
+  --non-interactive
 ```
-
-Useful validation and recovery options:
 
 ```sh
-bun crates/amarcode-registry/scripts/publish-acp.ts --version 0.2.0 \
-  --target x86_64-unknown-linux-gnu --dry-run
-bun crates/amarcode-registry/scripts/publish-acp.ts --version 0.2.0 \
-  --target x86_64-unknown-linux-gnu --skip-build --skip-deploy
+bun run publish -- acp --version 0.2.0 --target x86_64-unknown-linux-gnu --dry-run
 ```
 
-Changing the release version updates both `crates/amarcode-acp/Cargo.toml` and
-`Cargo.lock`. Each manifest records the source commit, dirty-worktree state,
-artifact sizes, and SHA-256 checksums. It is signed with the same Amarcode
-Ed25519 release identity used by daemon manifests. The publisher reads
-`AMARCODE_ACP_SIGNING_KEY`, then `AMARCODE_DAEMON_SIGNING_KEY`, and finally
-falls back to `~/.config/amarcode/daemon-release-signing-key.pem`.
+Changing the ACP version updates both `crates/amarcode-acp/Cargo.toml` and
+`Cargo.lock`. Manifests record the source commit, dirty-worktree state,
+artifact sizes, and SHA-256 checksums, signed with the Amarcode Ed25519
+release key (`AMARCODE_ACP_SIGNING_KEY`, then `AMARCODE_DAEMON_SIGNING_KEY`,
+then `~/.config/amarcode/daemon-release-signing-key.pem`).
 
 The published executable remains a configurable ACP adapter. Installation must
 pair it with a private provider configuration containing the model, endpoint,
