@@ -14,7 +14,8 @@ use std::{path::PathBuf, sync::OnceLock};
 /// Default TCP address for the JSON-line RPC server.
 pub const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:43821";
 
-pub const DEFAULT_RELEASE_MANIFEST_URL: &str = "https://amarcode-daemon-distribution.abdelmanan-abdelrahman03.workers.dev/v1/daemon/latest.json";
+pub const DEFAULT_RELEASE_MANIFEST_URL: &str =
+    "https://updates.amarcode.amarjay.com/v1/daemon/latest.json";
 pub const RELEASE_PUBLIC_KEY_HEX: &str =
     "5ef56cd7772e8c601ca9c5a15378b7088fc558e7edcde73770cbb116d9e255d2";
 pub const CURRENT_MANIFEST_FILE: &str = "current-manifest.json";

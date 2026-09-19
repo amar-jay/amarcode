@@ -59,7 +59,7 @@ type BuiltArtifact = {
 const requiredLifecycleCommands = ["install", "start", "restart", "status"];
 
 const projectRoot = resolve(import.meta.dir, "..", "..", "..");
-const workerDirectory = join(projectRoot, "crates", "daemon-registry");
+const workerDirectory = join(projectRoot, "crates", "amarcode-registry");
 const wranglerConfig = join(workerDirectory, "wrangler.jsonc");
 const daemonManifestPath = join(projectRoot, "crates", "daemon", "Cargo.toml");
 const cargoLockPath = join(projectRoot, "Cargo.lock");

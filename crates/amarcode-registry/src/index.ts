@@ -249,7 +249,7 @@ export async function handleRequest(
     }
     return request.method === "HEAD"
       ? new Response(null, { status: 200 })
-      : json({ status: "ok", service: "amarcode-daemon-distribution" });
+      : json({ status: "ok", service: "amarcode-registry" });
   }
 
   if (request.method !== "GET" && request.method !== "HEAD") {
