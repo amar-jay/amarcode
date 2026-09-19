@@ -35,8 +35,8 @@ use super::{
     },
     session_config::{set_config_params, SessionConfiguration, SET_CONFIG_OPTION_METHOD},
     types::{
-        LiveRun, PendingAgentRequest, PromptResult, SessionInner, ACP_PROMPT_IDLE_TIMEOUT,
-        ACP_PROMPT_TOTAL_TIMEOUT, ACP_REQUEST_TIMEOUT,
+        HistoryHydration, LiveRun, PendingAgentRequest, PromptResult, SessionInner,
+        ACP_PROMPT_IDLE_TIMEOUT, ACP_PROMPT_TOTAL_TIMEOUT, ACP_REQUEST_TIMEOUT,
     },
     util::{extract_session_id, extract_stop_reason, normalize_permission_result, timestamp},
     with_stderr_detail, ClassifiedFailure,
@@ -157,7 +157,7 @@ impl SessionManager {
                     acp_session_id: None,
                     supports_images: false,
                     session_configuration: SessionConfiguration::default(),
-                    needs_history_hydration: false,
+                    history_hydration: HistoryHydration::None,
                     streaming_message_ids: HashMap::new(),
                     last_streaming_message_id: None,
                     active_user_message_id: None,
@@ -227,18 +227,36 @@ impl SessionManager {
             live.supports_images = supports_images;
         }
 
-        let previous_session_id = self
+        let previous_run = self
             .inner
             .store
             .list_runs_for_chat(chat_id)?
             .into_iter()
             .filter(|previous| previous.id != run.id && previous.agent_id == agent_id)
-            .find_map(|previous| previous.acp_session_id);
+            .find(|previous| previous.acp_session_id.is_some());
+        let resumed_hydration = if !has_persisted_history {
+            HistoryHydration::None
+        } else if let Some(previous) = previous_run.as_ref() {
+            self.inner
+                .store
+                .messages(chat_id)?
+                .into_iter()
+                .rev()
+                .find(|message| message.agent_run_id.as_deref() == Some(previous.id.as_str()))
+                .map(|message| HistoryHydration::AfterMessage(message.id))
+                .unwrap_or(HistoryHydration::Full)
+        } else {
+            HistoryHydration::Full
+        };
         let session_setup = (|| -> std::result::Result<
-            (Option<String>, bool, SessionConfiguration),
+            (Option<String>, HistoryHydration, SessionConfiguration),
             ClassifiedFailure,
         > {
-            if let Some(session_id) = previous_session_id {
+            if let Some(previous) = previous_run {
+                let session_id = previous
+                    .acp_session_id
+                    .as_deref()
+                    .expect("filtered previous run has an ACP session id");
                 self.emit(EditorEvent::ContextRestoration {
                     chat_id: chat_id.to_owned(),
                     run_id: run.id.clone(),
@@ -254,13 +272,13 @@ impl SessionManager {
                         "mcpServers": [],
                     }),
                 ) {
-                    // ACP may acknowledge a resume without recreating model
-                    // context. Durable chat history remains authoritative.
-                    Ok(value) => Ok((
-                        Some(session_id),
-                        has_persisted_history,
-                        SessionConfiguration::from_response(&value),
-                    )),
+                    Ok(value) => {
+                        Ok((
+                            Some(session_id.to_owned()),
+                            resumed_hydration.clone(),
+                            SessionConfiguration::from_response(&value),
+                        ))
+                    }
                     Err(error) => {
                         debug!(%chat_id, %agent_id, %error, "ACP session resume unavailable; creating a hydrated session");
                         let value = self.acp_request(
@@ -274,7 +292,11 @@ impl SessionManager {
                         )?;
                         Ok((
                             extract_session_id(&value),
-                            has_persisted_history,
+                            if has_persisted_history {
+                                HistoryHydration::Full
+                            } else {
+                                HistoryHydration::None
+                            },
                             SessionConfiguration::from_response(&value),
                         ))
                     }
@@ -291,12 +313,16 @@ impl SessionManager {
                 )?;
                 Ok((
                     extract_session_id(&value),
-                    has_persisted_history,
+                    if has_persisted_history {
+                        HistoryHydration::Full
+                    } else {
+                        HistoryHydration::None
+                    },
                     SessionConfiguration::from_response(&value),
                 ))
             }
         })();
-        let (acp_session_id, needs_history_hydration, session_configuration) = match session_setup {
+        let (acp_session_id, history_hydration, session_configuration) = match session_setup {
             Ok(value) => value,
             Err(mut failure) => {
                 if failure.kind == crate::protocol::AgentFailureKind::AuthRequired
@@ -344,7 +370,7 @@ impl SessionManager {
             .ok_or_else(|| Error::msg("agent disconnected during session startup"))?;
         live.acp_session_id = acp_session_id.clone();
         live.session_configuration = session_configuration.clone();
-        live.needs_history_hydration = needs_history_hydration;
+        live.history_hydration = history_hydration;
         drop(live_runs);
         self.publish_session_config(chat_id, &session_configuration)?;
 

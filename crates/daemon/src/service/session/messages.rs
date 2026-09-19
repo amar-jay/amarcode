@@ -338,7 +338,7 @@ mod tests {
 
     use tokio::sync::broadcast;
 
-    use crate::{acp::AcpClient, store::Store};
+    use crate::{acp::AcpClient, service::session::types::HistoryHydration, store::Store};
 
     use super::*;
 
@@ -366,7 +366,7 @@ mod tests {
                     acp_session_id: Some("session".to_owned()),
                     supports_images: false,
                     session_configuration: Default::default(),
-                    needs_history_hydration: false,
+                    history_hydration: HistoryHydration::None,
                     streaming_message_ids: HashMap::from([(
                         "upstream".to_owned(),
                         "new-message".to_owned(),

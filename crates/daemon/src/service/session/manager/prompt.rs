@@ -48,7 +48,7 @@ impl SessionManager {
             self.apply_config_assignments(chat_id, &config_values, true)?;
         }
 
-        let (run_id, client, session_id, needs_history_hydration, supports_images) = {
+        let (run_id, client, session_id, history_hydration, supports_images) = {
             let mut guard = self
                 .inner
                 .by_chat
@@ -61,7 +61,7 @@ impl SessionManager {
                 live.run_id.clone(),
                 Arc::clone(&live.client),
                 live.acp_session_id.clone(),
-                live.needs_history_hydration,
+                live.history_hydration.clone(),
                 live.supports_images,
             )
         };
@@ -87,7 +87,7 @@ impl SessionManager {
                 }
             }
         }
-        if needs_history_hydration {
+        if !matches!(history_hydration, HistoryHydration::None) {
             if let Some(live) = self
                 .inner
                 .by_chat
@@ -95,7 +95,7 @@ impl SessionManager {
                 .map_err(|_| Error::msg("session lock poisoned"))?
                 .get_mut(chat_id)
             {
-                live.needs_history_hydration = false;
+                live.history_hydration = HistoryHydration::None;
             }
         }
 
@@ -171,13 +171,13 @@ impl SessionManager {
         });
 
         // ACP session/prompt: prompt is an array of content blocks.
-        let prompt_text = if needs_history_hydration {
+        let prompt_text = if !matches!(history_hydration, HistoryHydration::None) {
             self.emit(EditorEvent::ContextRestoration {
                 chat_id: chat_id.to_owned(),
                 run_id: run_id.clone(),
                 source: "Restoring saved chat context".into(),
             });
-            self.hydrated_prompt(chat_id, &user_message.id, text)?
+            self.hydrated_prompt(chat_id, &user_message.id, text, &history_hydration)?
         } else {
             text.to_owned()
         };
@@ -424,15 +424,16 @@ impl SessionManager {
     /// Provide an isolated fallback when an agent cannot resume its own saved
     /// session. The transcript contains only rows from this chat and excludes
     /// the message about to be sent, which is appended once as the live prompt.
-    fn hydrated_prompt(
+    pub(super) fn hydrated_prompt(
         &self,
         chat_id: &str,
         current_message_id: &str,
         prompt: &str,
+        hydration: &HistoryHydration,
     ) -> Result<String> {
         const MAX_HISTORY_CHARS: usize = 60_000;
 
-        let mut turns = self
+        let messages = self
             .inner
             .store
             .messages(chat_id)?
@@ -440,6 +441,20 @@ impl SessionManager {
             .filter(|message| {
                 message.id != current_message_id && !message.content.trim().is_empty()
             })
+            .collect::<Vec<_>>();
+
+        let start = match hydration {
+            HistoryHydration::None => return Ok(prompt.to_owned()),
+            HistoryHydration::Full => 0,
+            HistoryHydration::AfterMessage(message_id) => messages
+                .iter()
+                .position(|message| message.id == *message_id)
+                .map_or(0, |index| index + 1),
+        };
+
+        let mut turns = messages
+            .into_iter()
+            .skip(start)
             .filter_map(|message| match message.role {
                 MessageRole::User => Some(format!("User: {}", message.content.trim())),
                 MessageRole::Assistant => Some(format!("Assistant: {}", message.content.trim())),

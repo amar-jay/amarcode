@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -15,6 +15,140 @@ fn sleeping_client() -> Arc<AcpClient> {
     let (client, _inbound) =
         AcpClient::spawn("/bin/sh", &arguments, &[], None).expect("spawn test agent");
     Arc::new(client)
+}
+
+fn hydration_manager_with_messages(messages: &[(&str, &str, MessageRole, &str)]) -> SessionManager {
+    let store = Arc::new(Store::open(Path::new(":memory:")).expect("store"));
+    store
+        .create_chat(&crate::store::Chat {
+            id: "chat-1".to_owned(),
+            workspace_path: "/tmp/workspace".to_owned(),
+            title: "continuation".to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+            archived_at: None,
+        })
+        .expect("create chat");
+    for run_id in messages
+        .iter()
+        .map(|(_, run_id, _, _)| *run_id)
+        .collect::<HashSet<_>>()
+    {
+        store
+            .save_agent(&crate::protocol::AgentDefinition {
+                id: run_id.to_owned(),
+                name: run_id.to_owned(),
+                command: "test-agent".to_owned(),
+                arguments: vec![],
+                environment: vec![],
+                available: false,
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+                updated_at: "2026-01-01T00:00:00Z".to_owned(),
+            })
+            .expect("create agent");
+        store
+            .create_run(&AgentRun {
+                id: run_id.to_owned(),
+                chat_id: "chat-1".to_owned(),
+                agent_id: run_id.to_owned(),
+                acp_session_id: Some(format!("session-{run_id}")),
+                status: RunStatus::Stopped,
+                started_at: "2026-01-01T00:00:00Z".to_owned(),
+                finished_at: Some("2026-01-01T00:00:01Z".to_owned()),
+                error_message: None,
+                context_usage: None,
+            })
+            .expect("create run");
+    }
+    for (index, (id, run_id, role, content)) in messages.iter().enumerate() {
+        store
+            .create_message(&Message {
+                id: (*id).to_owned(),
+                chat_id: "chat-1".to_owned(),
+                agent_run_id: Some((*run_id).to_owned()),
+                role: role.clone(),
+                content: (*content).to_owned(),
+                status: MessageStatus::Complete,
+                created_at: format!("2026-01-01T00:00:{index:02}Z"),
+                updated_at: format!("2026-01-01T00:00:{index:02}Z"),
+            })
+            .expect("create message");
+    }
+    let (events, _) = broadcast::channel(4);
+    SessionManager::new(
+        Arc::clone(&store),
+        AgentManager::new(store, PathBuf::from("/tmp/amarcode-test")),
+        events,
+        PathBuf::from("/tmp/amarcode-test-attachments"),
+    )
+}
+
+#[test]
+fn resumed_agent_hydrates_only_messages_after_its_watermark() {
+    let manager = hydration_manager_with_messages(&[
+        ("a-user", "run-a", MessageRole::User, "question for A"),
+        ("a-answer", "run-a", MessageRole::Assistant, "answer from A"),
+        ("b-user", "run-b", MessageRole::User, "question for B"),
+        ("b-answer", "run-b", MessageRole::Assistant, "answer from B"),
+    ]);
+
+    let hydrated = manager
+        .hydrated_prompt(
+            "chat-1",
+            "current",
+            "back to A",
+            &HistoryHydration::AfterMessage("a-answer".to_owned()),
+        )
+        .expect("hydrate delta");
+
+    assert!(!hydrated.contains("question for A"));
+    assert!(!hydrated.contains("answer from A"));
+    assert!(hydrated.contains("question for B"));
+    assert!(hydrated.contains("answer from B"));
+    assert!(hydrated.ends_with("User: back to A"));
+}
+
+#[test]
+fn resumed_agent_without_intervening_messages_gets_plain_prompt() {
+    let manager = hydration_manager_with_messages(&[(
+        "a-answer",
+        "run-a",
+        MessageRole::Assistant,
+        "answer from A",
+    )]);
+
+    let hydrated = manager
+        .hydrated_prompt(
+            "chat-1",
+            "current",
+            "continue A",
+            &HistoryHydration::AfterMessage("a-answer".to_owned()),
+        )
+        .expect("hydrate empty delta");
+
+    assert_eq!(hydrated, "continue A");
+}
+
+#[test]
+fn missing_watermark_safely_falls_back_to_full_history() {
+    let manager = hydration_manager_with_messages(&[(
+        "existing",
+        "run-b",
+        MessageRole::User,
+        "existing context",
+    )]);
+
+    let hydrated = manager
+        .hydrated_prompt(
+            "chat-1",
+            "current",
+            "new prompt",
+            &HistoryHydration::AfterMessage("missing".to_owned()),
+        )
+        .expect("hydrate full fallback");
+
+    assert!(hydrated.contains("existing context"));
+    assert!(hydrated.ends_with("User: new prompt"));
 }
 
 #[test]
@@ -37,7 +171,7 @@ fn stale_pending_request_cannot_target_replacement_client() {
             acp_session_id: Some("new-session".to_owned()),
             supports_images: false,
             session_configuration: SessionConfiguration::default(),
-            needs_history_hydration: false,
+            history_hydration: HistoryHydration::None,
             streaming_message_ids: HashMap::new(),
             last_streaming_message_id: None,
             active_user_message_id: None,
@@ -151,7 +285,7 @@ fn failed_prompt_interrupts_partial_messages() {
             acp_session_id: Some("session-1".to_owned()),
             supports_images: false,
             session_configuration: SessionConfiguration::default(),
-            needs_history_hydration: false,
+            history_hydration: HistoryHydration::None,
             streaming_message_ids: HashMap::from([(
                 "upstream".to_owned(),
                 "partial-message".to_owned(),
@@ -282,7 +416,7 @@ fn cancel_interrupts_partial_messages() {
             acp_session_id: Some("session-1".to_owned()),
             supports_images: false,
             session_configuration: SessionConfiguration::default(),
-            needs_history_hydration: false,
+            history_hydration: HistoryHydration::None,
             streaming_message_ids: HashMap::from([(
                 "upstream".to_owned(),
                 "partial-message".to_owned(),

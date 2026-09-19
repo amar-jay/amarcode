@@ -47,6 +47,16 @@ pub struct PendingAgentRequest {
     pub params: Value,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(super) enum HistoryHydration {
+    #[default]
+    None,
+    Full,
+    /// Replay only chat messages recorded after this message. The resumed ACP
+    /// session already owns everything through the watermark.
+    AfterMessage(String),
+}
+
 pub(super) struct LiveRun {
     pub(super) run_id: String,
     pub(super) agent_id: String,
@@ -58,9 +68,8 @@ pub(super) struct LiveRun {
     /// values are agent-defined, so mode changes must be planned from these
     /// capabilities rather than from the executable name.
     pub(super) session_configuration: SessionConfiguration,
-    /// A newly created session needs the persisted chat transcript before its
-    /// first prompt because resuming a prior ACP session was unavailable.
-    pub(super) needs_history_hydration: bool,
+    /// Persisted chat context to prepend to the first prompt for this run.
+    pub(super) history_hydration: HistoryHydration,
     /// Assistant messages currently being streamed, keyed by the upstream ACP
     /// message id. A turn may contain distinct commentary and final-answer
     /// messages, so they must not be collapsed into one row.
