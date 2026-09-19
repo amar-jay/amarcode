@@ -1,8 +1,10 @@
-# Daemon distribution Worker
+# Amarcode registry Worker
 
-This Worker exposes versioned `amarcode-daemon` binaries stored in the private
-`amarcode-daemons` R2 bucket. It is intentionally read-only; authenticated
-publishing happens through Wrangler, never through a public HTTP route.
+This Worker exposes signed, versioned `amarcode-daemon` and `amarcode-acp`
+binaries stored in the private `amarcode-daemons` R2 bucket, and proxies the
+desktop application's update manifest. It is intentionally read-only;
+authenticated publishing happens through Wrangler, never through a public HTTP
+route.
 
 ## Routes
 
@@ -13,6 +15,13 @@ publishing happens through Wrangler, never through a public HTTP route.
 - `GET /v1/daemon/:version/manifest.json`
 - `GET /v1/daemon/:version/manifest.json.sig`
 - `GET /v1/daemon/:version/:rust-target`
+- `GET /v1/acp/versions.json`
+- `GET /v1/acp/latest.json`
+- `GET /v1/acp/latest.json.sig`
+- `GET /v1/acp/:version/manifest.json`
+- `GET /v1/acp/:version/manifest.json.sig`
+- `GET /v1/acp/:version/:rust-target`
+- `GET /v1/app/latest.json`
 
 `HEAD` is supported for every route. Binary responses support HTTP byte ranges,
 ETags, and immutable caching.
@@ -28,7 +37,7 @@ bun run daemon:publish
 For CI, provide `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as encrypted
 secrets. Scope the token to this account and to the required Workers/R2 edits.
 
-## Publishing
+## Daemon publishing
 
 The main command builds Linux and Windows first, uploads both binaries, updates
 the version and latest manifests once, then deploys the Worker once:
@@ -176,3 +185,45 @@ binary elsewhere. Use `bun run daemon:status`, `daemon:stop`, or
 For CI publishing, store the private PEM as an encrypted secret, write it to a
 temporary file with restricted permissions, set `AMARCODE_DAEMON_SIGNING_KEY`
 to that path, and run `bun run daemon:publish`.
+
+## ACP publishing
+
+The ACP pipeline follows the same release ordering and safety properties as the
+daemon pipeline: it builds every requested target first, refuses accidental
+version replacement, uploads immutable binaries, and advances the signed
+version and `latest` manifests only after all binaries upload successfully.
+
+```sh
+bun run acp:publish
+```
+
+Publishing interactively offers patch, minor, major, and deliberate
+same-version releases. For CI or another non-interactive environment, provide
+the version explicitly:
+
+```sh
+bun crates/amarcode-registry/scripts/publish-acp.ts --version 0.2.0 \
+  --target x86_64-unknown-linux-gnu \
+  --target x86_64-pc-windows-gnu
+```
+
+Useful validation and recovery options:
+
+```sh
+bun crates/amarcode-registry/scripts/publish-acp.ts --version 0.2.0 \
+  --target x86_64-unknown-linux-gnu --dry-run
+bun crates/amarcode-registry/scripts/publish-acp.ts --version 0.2.0 \
+  --target x86_64-unknown-linux-gnu --skip-build --skip-deploy
+```
+
+Changing the release version updates both `crates/amarcode-acp/Cargo.toml` and
+`Cargo.lock`. Each manifest records the source commit, dirty-worktree state,
+artifact sizes, and SHA-256 checksums. It is signed with the same Amarcode
+Ed25519 release identity used by daemon manifests. The publisher reads
+`AMARCODE_ACP_SIGNING_KEY`, then `AMARCODE_DAEMON_SIGNING_KEY`, and finally
+falls back to `~/.config/amarcode/daemon-release-signing-key.pem`.
+
+The published executable remains a configurable ACP adapter. Installation must
+pair it with a private provider configuration containing the model, endpoint,
+and API key; the public release manifest intentionally contains none of those
+credentials.

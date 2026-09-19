@@ -13,6 +13,7 @@ const JSON_CACHE_CONTROL = "public, max-age=60, must-revalidate";
 const BINARY_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
 const VERSIONS_PATH = "/v1/daemon/versions.json";
+const ACP_VERSIONS_PATH = "/v1/acp/versions.json";
 const APP_LATEST_PATH = "/v1/app/latest.json";
 const APP_LATEST_URL =
   "https://github.com/amar-jay/amarcode/releases/latest/download/latest.json";
@@ -51,6 +52,41 @@ export function resolveArtifactRoute(pathname: string): ArtifactRoute | null {
     return {
       key: "daemon/latest.json.sig",
       cacheControl: JSON_CACHE_CONTROL,
+    };
+  }
+
+  if (pathname === "/v1/acp/latest.json") {
+    return { key: "acp/latest.json", cacheControl: JSON_CACHE_CONTROL };
+  }
+
+  if (pathname === "/v1/acp/latest.json.sig") {
+    return { key: "acp/latest.json.sig", cacheControl: JSON_CACHE_CONTROL };
+  }
+
+  const acpManifestMatch = pathname.match(
+    /^\/v1\/acp\/([^/]+)\/(manifest\.json(?:\.sig)?)$/,
+  );
+  if (acpManifestMatch) {
+    const version = safeSegment(acpManifestMatch[1]);
+    if (!version) return null;
+    return {
+      key: `acp/${version}/${acpManifestMatch[2]}`,
+      cacheControl: JSON_CACHE_CONTROL,
+    };
+  }
+
+  const acpArtifactMatch = pathname.match(/^\/v1\/acp\/([^/]+)\/([^/]+)$/);
+  if (acpArtifactMatch) {
+    const version = safeSegment(acpArtifactMatch[1]);
+    const target = safeSegment(acpArtifactMatch[2]);
+    if (!version || !target) return null;
+    const filename = target.includes("windows")
+      ? "amarcode-acp.exe"
+      : "amarcode-acp";
+    return {
+      key: `acp/${version}/${target}/${filename}`,
+      cacheControl: BINARY_CACHE_CONTROL,
+      downloadName: filename,
     };
   }
 
@@ -168,19 +204,22 @@ async function serveArtifact(
   return new Response(object.body, { status, headers });
 }
 
-async function listVersions(env: Env): Promise<string[]> {
+async function listVersions(
+  env: Env,
+  product: "daemon" | "acp",
+): Promise<string[]> {
   const versions = new Set<string>();
   let cursor: string | undefined;
 
   do {
     const page = await env.DAEMON_ARTIFACTS.list({
-      prefix: "daemon/",
+      prefix: `${product}/`,
       delimiter: "/",
       ...(cursor ? { cursor } : {}),
     });
 
     for (const prefix of page.delimitedPrefixes) {
-      const version = prefix.slice("daemon/".length, -1);
+      const version = prefix.slice(`${product}/`.length, -1);
       if (safeSegment(version)) versions.add(version);
     }
 
@@ -256,13 +295,14 @@ export async function handleRequest(
     return json({ error: "method not allowed" }, 405, { allow: "GET, HEAD" });
   }
 
-  if (url.pathname === VERSIONS_PATH) {
+  if (url.pathname === VERSIONS_PATH || url.pathname === ACP_VERSIONS_PATH) {
+    const product = url.pathname === VERSIONS_PATH ? "daemon" : "acp";
     const headers = new Headers({
       "cache-control": JSON_CACHE_CONTROL,
       "x-content-type-options": "nosniff",
     });
     if (request.method === "HEAD") return new Response(null, { headers });
-    return json({ versions: await listVersions(env) }, 200, headers);
+    return json({ versions: await listVersions(env, product) }, 200, headers);
   }
 
   if (url.pathname === APP_LATEST_PATH) {

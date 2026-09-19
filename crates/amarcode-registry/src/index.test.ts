@@ -59,14 +59,15 @@ function environment(entries: Record<string, string>): Env {
         const value = entries[key];
         return value === undefined ? null : fakeObject(key, value);
       },
-      async list() {
+      async list(options?: R2ListOptions) {
+        const prefix = options?.prefix ?? "";
         return {
           objects: [],
           truncated: false,
           delimitedPrefixes: Object.keys(entries)
-            .filter((key) => key.startsWith("daemon/"))
-            .map((key) => key.slice(0, key.indexOf("/", "daemon/".length) + 1))
-            .filter((prefix) => prefix !== "daemon/")
+            .filter((key) => key.startsWith(prefix))
+            .map((key) => key.slice(0, key.indexOf("/", prefix.length) + 1))
+            .filter((value) => value !== prefix)
             .filter(
               (prefix, index, prefixes) => prefixes.indexOf(prefix) === index,
             ),
@@ -90,6 +91,21 @@ describe("resolveArtifactRoute", () => {
     expect(
       resolveArtifactRoute("/v1/daemon/0.1.0/manifest.json.sig")?.key,
     ).toBe("daemon/0.1.0/manifest.json.sig");
+    expect(resolveArtifactRoute("/v1/acp/latest.json")?.key).toBe(
+      "acp/latest.json",
+    );
+    expect(resolveArtifactRoute("/v1/acp/latest.json.sig")?.key).toBe(
+      "acp/latest.json.sig",
+    );
+    expect(resolveArtifactRoute("/v1/acp/0.1.0/manifest.json")?.key).toBe(
+      "acp/0.1.0/manifest.json",
+    );
+    expect(
+      resolveArtifactRoute("/v1/acp/0.1.0/x86_64-pc-windows-gnu"),
+    ).toMatchObject({
+      key: "acp/0.1.0/x86_64-pc-windows-gnu/amarcode-acp.exe",
+      downloadName: "amarcode-acp.exe",
+    });
     expect(
       resolveArtifactRoute("/v1/daemon/0.1.0/x86_64-pc-windows-msvc")?.key,
     ).toBe("daemon/0.1.0/x86_64-pc-windows-msvc/amarcode-daemon.exe");
@@ -205,6 +221,21 @@ describe("handleRequest", () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("");
+  });
+
+  test("lists published ACP versions independently", async () => {
+    const response = await handleRequest(
+      new Request("https://downloads.example/v1/acp/versions.json"),
+      environment({
+        "acp/0.2.0/manifest.json": "manifest",
+        "acp/0.1.0/manifest.json": "manifest",
+        "daemon/9.9.9/manifest.json": "manifest",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()) as { versions: string[] }).toEqual({
+      versions: ["0.1.0", "0.2.0"],
+    });
   });
 
   test("serves a binary with immutable download headers", async () => {
