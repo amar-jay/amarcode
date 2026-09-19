@@ -7,7 +7,7 @@ import {
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { cargoLockPath, projectRoot } from "./commands";
+import { projectRoot } from "./commands";
 import type { BinaryProduct } from "./products";
 
 export type Artifact = {
@@ -48,18 +48,10 @@ export function setPackageVersion(product: BinaryProduct, version: string) {
     /^version\s*=\s*"[^"]+"/m,
     `version = "${version}"`,
   );
-  const lock = readFileSync(cargoLockPath, "utf8");
-  const updatedLock = lock.replace(
-    new RegExp(
-      `(?<=\\[\\[package\\]\\]\\nname = "${product.cargoLockName}"\\nversion = ")[^"]+(?=")`,
-    ),
-    version,
-  );
-  if (updatedManifest === manifest || updatedLock === lock) {
+  if (updatedManifest === manifest) {
     throw new Error(`could not update the ${product.label} package version`);
   }
   writeFileSync(product.cargoToml, updatedManifest);
-  writeFileSync(cargoLockPath, updatedLock);
   console.log(`Updated ${product.label} version: ${current} -> ${version}`);
 }
 

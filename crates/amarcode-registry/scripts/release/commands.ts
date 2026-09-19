@@ -77,6 +77,11 @@ export function gitBranch(): string {
   return output(["git", "branch", "--show-current"]);
 }
 
+export function refreshCargoLockfile() {
+  console.log("Refreshing Cargo.lock from package manifests");
+  run(["cargo", "metadata", "--format-version", "1"], { quiet: true });
+}
+
 export function hostTarget(): string {
   const match = output(["rustc", "-vV"]).match(/^host:\s*(.+)$/m);
   if (!match) throw new Error("rustc did not report a host target");

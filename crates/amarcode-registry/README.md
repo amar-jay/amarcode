@@ -26,61 +26,6 @@ route.
 `HEAD` is supported for every route. Binary responses support HTTP byte ranges,
 ETags, and immutable caching.
 
-## First-time Cloudflare setup
-
-```sh
-bunx wrangler login
-bunx wrangler r2 bucket create amarcode-daemons
-bun run publish
-```
-
-For CI, provide `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as encrypted
-secrets. Scope the token to this account and to the required Workers/R2 edits.
-
-## Publishing
-
-Daemon, ACP, and desktop-app releases share one orchestrator:
-
-```sh
-bun run publish
-bun run publish -- daemon
-bun run publish -- acp
-bun run publish -- app
-bun run publish -- all
-```
-
-Selecting the daemon never implies the app; each product is independent.
-
-Interactive mode asks which products to release, independent version policies,
-targets, overwrite confirmation, and a final plan covering builds, uploads,
-the single Worker deploy, and any Git actions. App publication always runs
-last, and only when `app` was selected.
-
-A changed daemon or ACP version is written to that crate's `Cargo.toml` and
-`Cargo.lock`, then committed before the release build so the signed manifest
-records a clean `sourceCommit` instead of `sourceDirty: true`. Unrelated dirty
-files still refuse a production publish unless `--allow-dirty` is passed.
-
-The orchestrator then builds and validates every selected binary before any
-Cloudflare write, uploads immutable artifacts first, publishes versioned
-manifests next, advances each product's `latest.json` only after that
-product's artifacts succeed, and deploys the Worker at most once.
-
-`--dry-run` still builds and signs locally; it does not create the version
-commit or write to Cloudflare.
-
-```sh
-bun run publish -- \
-  --products daemon,acp \
-  --daemon-version 0.6.13 \
-  --acp-version 0.1.0 \
-  --target x86_64-unknown-linux-gnu \
-  --target x86_64-pc-windows-gnu \
-  --non-interactive
-```
-
-Use `--overwrite` only when intentionally replacing an already published
-version, such as when adding a missing target.
 
 ### Cross-compile Windows from Linux
 
@@ -189,20 +134,6 @@ temporary file with restricted permissions, set `AMARCODE_DAEMON_SIGNING_KEY`
 to that path, and run `bun run publish -- daemon --version <version> --non-interactive`.
 
 ## ACP publishing
-
-ACP uses the same orchestrator and signing identity as the daemon. Select the
-`acp` product.
-
-```sh
-bun run publish -- acp --acp-version 0.2.0 \
-  --target x86_64-unknown-linux-gnu \
-  --target x86_64-pc-windows-gnu \
-  --non-interactive
-```
-
-```sh
-bun run publish -- acp --version 0.2.0 --target x86_64-unknown-linux-gnu --dry-run
-```
 
 Changing the ACP version updates both `crates/amarcode-acp/Cargo.toml` and
 `Cargo.lock`. Manifests record the source commit, dirty-worktree state,

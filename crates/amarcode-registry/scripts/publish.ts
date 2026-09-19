@@ -8,6 +8,7 @@ import {
   gitCommit,
   gitPorcelainPaths,
   gitStatusShort,
+  refreshCargoLockfile,
   registryDirectory,
   run,
   validateSegment,
@@ -102,8 +103,8 @@ async function execute(plan: ReleasePlan) {
     }
   }
 
-  if (!plan.dryRun && binaryIds.length > 0) {
-    commitVersionRelease(binaryIds, plan.versions, versionPaths);
+  if (binaryIds.length > 0 && !plan.skipBuild) {
+    refreshCargoLockfile();
   }
 
   const built: Record<BinaryProductId, BuiltArtifact[]> = {
@@ -117,6 +118,10 @@ async function execute(plan: ReleasePlan) {
       plan.targets,
       plan.skipBuild,
     );
+  }
+
+  if (!plan.dryRun && binaryIds.length > 0) {
+    commitVersionRelease(binaryIds, plan.versions, versionPaths);
   }
 
   const sourceCommit = gitCommit();
