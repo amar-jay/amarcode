@@ -43,10 +43,7 @@ export function TopBar() {
           className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 select-none"
         >
           <img src="/acp-mark.svg" alt="" className="size-4" />
-          <span className="text-xs font-medium">AMARCODE</span>
-          <span className="border-l border-border pl-2 text-xs text-muted-foreground">
-            workspace
-          </span>
+          <span className="text-xs font-medium border-r pr-2">AMARCODE</span>
         </div>
         <div className="flex h-full">
           <button
