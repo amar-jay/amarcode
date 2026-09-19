@@ -96,16 +96,16 @@ function AgentRunTimeline({ runs }: { runs: AgentRun[] }) {
           {runs.length} runs · {durationLabel(timeline.span)}
         </span>
       </div>
-      <div className="max-h-28 overflow-y-auto px-3 py-2">
+      <div className="max-h-28 overflow-y-auto px-1">
         {timeline.lanes.map(([agentId, lane]) => (
-          <div key={agentId} className="flex h-5 items-center gap-2">
+          <div key={agentId} className="flex max-h-5 items-center gap-2">
             <div
-              className="w-28 shrink-0 truncate text-right font-mono text-[9px] text-muted-foreground"
+              className="w-20 shrink-0 truncate text-right font-mono text-[9px] text-muted-foreground"
               title={agentId}
             >
               {agentId}
             </div>
-            <div className="relative h-3 flex-1 overflow-hidden rounded-[2px] bg-muted/60">
+            <div className="relative h-5 flex-1 border-b-1 overflow-hidden bg-muted/60">
               {[25, 50, 75].map((position) => (
                 <span
                   key={position}

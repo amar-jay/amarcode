@@ -5,7 +5,8 @@ import {
   ChevronDown,
   ChevronUp,
   KeyRound,
-  // ListTree,
+	RotateCwFadingClock,
+	RotateCcwClock,
   LoaderCircle,
   Search,
   Timer,
@@ -36,7 +37,7 @@ import {
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-// import { Toggle } from "@/components/ui/toggle";
+import { Toggle } from "@/components/ui/toggle";
 import AppPromptInput from "./main-prompt-input";
 import { ActivityView } from "./activity/activity-view";
 import { PendingAgentRequestCard } from "./pending-agent-request";
@@ -525,7 +526,7 @@ export function LiveChatScreen() {
           </div>
         ) : (
           <>
-            <h1 className="min-w-0 truncate text-sm font-medium">
+            <h1 className="min-w-0 truncate text-sm font-medium w-2xl">
               {live.detail?.chat.title ?? session.chat.title ?? "Loading chat"}
             </h1>
             {live.loading && (
@@ -546,7 +547,9 @@ export function LiveChatScreen() {
                 {live.runStatus}
               </span>
             )}
-            {/* <Toggle
+
+						<div className="ml-auto">
+            <Toggle
               size="sm"
               className="ml-auto"
               pressed={conversationView === "activity"}
@@ -565,9 +568,10 @@ export function LiveChatScreen() {
                   : "Show activity"
               }
             >
-              <ListTree className="size-4" />
-              <span className="hidden sm:inline">Activity</span>
-            </Toggle> */}
+              <RotateCwFadingClock className="size-4" />
+              {/* <span className="hidden sm:inline">Activity</span> */}
+            </Toggle>
+
             <Button
               type="button"
               variant="ghost"
@@ -579,6 +583,7 @@ export function LiveChatScreen() {
             >
               <Search className="size-4" />
             </Button>
+						</div>
           </>
         )}
       </header>
