@@ -59,7 +59,11 @@ function reasoningLabel(
   return (
     <div className="whitespace-pre-wrap space-x-2 space-y-2 mt-1">
       {kind && <span className="font-bold">{kind.replaceAll("_", " ")}</span>}
-      {showToolTitle && <span>{toolTitle}</span>}
+      {showToolTitle && <>
+				<br/>
+				<span className="text-xs font-mono">{toolTitle}</span>
+			</>
+			}
       {kind === "execute" && verbose && (
         <>
           <br />
