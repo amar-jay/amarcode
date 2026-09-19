@@ -115,4 +115,34 @@ impl Store {
         rows.collect::<std::result::Result<_, _>>()
             .map_err(to_error)
     }
+
+    /// Load only the small context-bearing parts used for semantic handoff.
+    /// Tool completion updates can contain megabytes of output, so exclude
+    /// them in SQLite rather than materializing and discarding them in Rust.
+    pub fn message_context_parts(&self, message_id: &str) -> Result<Vec<MessagePart>> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT message_id,ordinal,kind,content_json
+                 FROM message_parts
+                 WHERE message_id=?1 AND (
+                    kind='thinking' OR
+                    (kind='tool_call' AND json_extract(content_json, '$.sessionUpdate')='tool_call')
+                 )
+                 ORDER BY ordinal",
+            )
+            .map_err(to_error)?;
+        let rows = statement
+            .query_map(params![message_id], |row| {
+                Ok(MessagePart {
+                    message_id: row.get(0)?,
+                    ordinal: row.get(1)?,
+                    kind: cell_parse(row.get(2)?, crate::protocol::MessagePartKind::parse)?,
+                    content_json: row.get(3)?,
+                })
+            })
+            .map_err(to_error)?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(to_error)
+    }
 }

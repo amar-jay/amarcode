@@ -154,6 +154,72 @@ fn missing_watermark_safely_falls_back_to_full_history() {
 }
 
 #[test]
+fn hydration_includes_compact_thinking_and_tool_hints_without_outputs() {
+    let manager = hydration_manager_with_messages(&[
+        (
+            "a-answer",
+            "run-a",
+            MessageRole::Assistant,
+            "previous answer",
+        ),
+        ("b-activity", "run-b", MessageRole::Assistant, ""),
+    ]);
+    manager
+        .inner
+        .store
+        .replace_message_parts(
+            "b-activity",
+            &[
+                MessagePart {
+                    message_id: "b-activity".to_owned(),
+                    ordinal: 0,
+                    kind: MessagePartKind::Thinking,
+                    content_json:
+                        json!({ "text": "Inspect the authentication flow before editing." })
+                            .to_string(),
+                },
+                MessagePart {
+                    message_id: "b-activity".to_owned(),
+                    ordinal: 1,
+                    kind: MessagePartKind::ToolCall,
+                    content_json: json!({
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "tool-1",
+                        "kind": "read",
+                        "title": "Viewing src/auth.rs"
+                    })
+                    .to_string(),
+                },
+                MessagePart {
+                    message_id: "b-activity".to_owned(),
+                    ordinal: 2,
+                    kind: MessagePartKind::ToolCall,
+                    content_json: json!({
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "tool-1",
+                        "rawOutput": { "formatted_output": "EXPENSIVE TOOL OUTPUT" }
+                    })
+                    .to_string(),
+                },
+            ],
+        )
+        .expect("store activity parts");
+
+    let hydrated = manager
+        .hydrated_prompt(
+            "chat-1",
+            "current",
+            "continue",
+            &HistoryHydration::AfterMessage("a-answer".to_owned()),
+        )
+        .expect("hydrate activity");
+
+    assert!(hydrated.contains("Thinking: Inspect the authentication flow before editing."));
+    assert!(hydrated.contains("Tool: read — Viewing src/auth.rs"));
+    assert!(!hydrated.contains("EXPENSIVE TOOL OUTPUT"));
+}
+
+#[test]
 fn stale_pending_request_cannot_target_replacement_client() {
     let store = Arc::new(Store::open(Path::new(":memory:")).expect("store"));
     let (events, _) = broadcast::channel(4);

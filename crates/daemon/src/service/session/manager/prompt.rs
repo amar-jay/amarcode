@@ -2,6 +2,89 @@
 
 use super::*;
 use base64::Engine as _;
+use std::collections::HashSet;
+
+const MAX_THINKING_CHARS_PER_MESSAGE: usize = 600;
+const MAX_TOOL_HINTS_PER_MESSAGE: usize = 8;
+const MAX_TOOL_HINT_CHARS: usize = 240;
+
+fn compact_text(value: &str, limit: usize) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= limit {
+        return compact;
+    }
+    format!("{}…", compact.chars().take(limit).collect::<String>())
+}
+
+fn activity_digest(parts: &[MessagePart]) -> Option<String> {
+    let mut thinking = String::new();
+    let mut tools = Vec::new();
+    let mut seen_tools = HashSet::new();
+
+    for part in parts {
+        let Ok(value) = serde_json::from_str::<Value>(&part.content_json) else {
+            continue;
+        };
+        match part.kind {
+            MessagePartKind::Thinking => {
+                if let Some(text) = value.get("text").and_then(Value::as_str) {
+                    if !thinking.is_empty() {
+                        thinking.push(' ');
+                    }
+                    thinking.push_str(text);
+                }
+            }
+            MessagePartKind::ToolCall if tools.len() < MAX_TOOL_HINTS_PER_MESSAGE => {
+                if value.get("sessionUpdate").and_then(Value::as_str) != Some("tool_call") {
+                    continue;
+                }
+                let id = value
+                    .get("toolCallId")
+                    .or_else(|| value.get("tool_call_id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !id.is_empty() && !seen_tools.insert(id.to_owned()) {
+                    continue;
+                }
+                let title = value.get("title").and_then(Value::as_str).unwrap_or("");
+                let identifier = value
+                    .get("kind")
+                    .or_else(|| value.get("name"))
+                    .or_else(|| value.get("toolName"))
+                    .and_then(Value::as_str)
+                    .filter(|item| !item.trim().is_empty())
+                    .unwrap_or(title);
+                let command = value
+                    .pointer("/rawInput/command")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let detail = if !title.trim().is_empty()
+                    && !title.trim().eq_ignore_ascii_case(identifier.trim())
+                {
+                    title
+                } else {
+                    command
+                };
+                let hint = match (identifier.trim(), detail.trim()) {
+                    ("", "") => continue,
+                    ("", detail) => detail.to_owned(),
+                    (identifier, "") => identifier.to_owned(),
+                    (identifier, detail) => format!("{identifier} — {detail}"),
+                };
+                tools.push(compact_text(&hint, MAX_TOOL_HINT_CHARS));
+            }
+            _ => {}
+        }
+    }
+
+    let thinking = compact_text(&thinking, MAX_THINKING_CHARS_PER_MESSAGE);
+    let mut lines = Vec::new();
+    if !thinking.is_empty() {
+        lines.push(format!("Thinking: {thinking}"));
+    }
+    lines.extend(tools.into_iter().map(|tool| format!("Tool: {tool}")));
+    (!lines.is_empty()).then(|| format!("[Activity]\n{}", lines.join("\n")))
+}
 
 impl SessionManager {
     /// Persist a user message and send it to the agent (starts a run if needed).
@@ -438,9 +521,7 @@ impl SessionManager {
             .store
             .messages(chat_id)?
             .into_iter()
-            .filter(|message| {
-                message.id != current_message_id && !message.content.trim().is_empty()
-            })
+            .filter(|message| message.id != current_message_id)
             .collect::<Vec<_>>();
 
         let (start, restoring_full_history) = match hydration {
@@ -457,15 +538,28 @@ impl SessionManager {
             }
         };
 
-        let mut turns = messages
-            .into_iter()
-            .skip(start)
-            .filter_map(|message| match message.role {
-                MessageRole::User => Some(format!("User: {}", message.content.trim())),
-                MessageRole::Assistant => Some(format!("Assistant: {}", message.content.trim())),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        let mut turns = Vec::new();
+        for message in messages.into_iter().skip(start) {
+            match message.role {
+                MessageRole::User if !message.content.trim().is_empty() => {
+                    turns.push(format!("User: {}", message.content.trim()));
+                }
+                MessageRole::Assistant => {
+                    let activity =
+                        activity_digest(&self.inner.store.message_context_parts(&message.id)?);
+                    let text = message.content.trim();
+                    match (text.is_empty(), activity) {
+                        (false, Some(activity)) => {
+                            turns.push(format!("Assistant: {text}\n{activity}"));
+                        }
+                        (false, None) => turns.push(format!("Assistant: {text}")),
+                        (true, Some(activity)) => turns.push(format!("Assistant:\n{activity}")),
+                        (true, None) => {}
+                    }
+                }
+                _ => {}
+            }
+        }
 
         let mut history = turns.join("\n\n");
         if history.len() > MAX_HISTORY_CHARS {
