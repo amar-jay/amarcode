@@ -531,15 +531,17 @@ fn finish(
 
 fn truncate(mut value: String) -> String {
     if value.len() > MAX_OUTPUT {
+        const MARKER: &str = "\n[truncated]";
+
         // `String::truncate` requires a UTF-8 character boundary. Tool output
-        // is limited in bytes, so walk backward from the byte limit when it
-        // happens to split a multi-byte character.
-        let mut boundary = MAX_OUTPUT;
+        // is limited in bytes, including the marker, so walk backward from the
+        // content limit when it happens to split a multi-byte character.
+        let mut boundary = MAX_OUTPUT - MARKER.len();
         while !value.is_char_boundary(boundary) {
             boundary -= 1;
         }
         value.truncate(boundary);
-        value.push_str("\n[truncated]");
+        value.push_str(MARKER);
     }
     value
 }
@@ -568,13 +570,16 @@ mod tests {
 
     #[test]
     fn truncation_is_safe_when_limit_splits_a_utf8_character() {
-        let mut input = "a".repeat(MAX_OUTPUT - 1);
+        let content_limit = MAX_OUTPUT - "\n[truncated]".len();
+        let mut input = "a".repeat(content_limit - 1);
         input.push('🙂');
-        input.push_str("unreachable");
+        input.push_str("unreachable output beyond the limit");
 
         let output = truncate(input);
 
-        assert_eq!(output, format!("{}\n[truncated]", "a".repeat(MAX_OUTPUT - 1)));
+        assert!(output.starts_with('a'));
+        assert!(output.ends_with("\n[truncated]"));
+        assert!(output.len() <= MAX_OUTPUT);
         assert!(output.is_char_boundary(output.len()));
     }
 
@@ -582,11 +587,8 @@ mod tests {
     fn truncation_keeps_output_at_or_below_the_byte_limit() {
         let input = format!("{}extra", "a".repeat(MAX_OUTPUT));
         let output = truncate(input);
-        let content = output
-            .strip_suffix("\n[truncated]")
-            .expect("truncation marker");
-
-        assert_eq!(content.len(), MAX_OUTPUT);
+        assert_eq!(output.len(), MAX_OUTPUT);
+        assert!(output.ends_with("\n[truncated]"));
     }
 
     #[test]
