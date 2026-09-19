@@ -1,7 +1,7 @@
 use std::{
     fs,
     io::{BufRead, BufReader, Read, Write},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, ChildStdin, Command, Stdio},
     sync::mpsc::{self, Receiver},
@@ -13,6 +13,51 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
+
+fn read_http_request(socket: &mut TcpStream) -> Vec<u8> {
+    socket
+        .set_read_timeout(Some(TIMEOUT))
+        .expect("set read timeout");
+    let mut buffer = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let size = socket.read(&mut chunk).expect("read HTTP request");
+        if size == 0 {
+            break;
+        }
+        buffer.extend_from_slice(&chunk[..size]);
+        let Some(header_end) = buffer
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+        else {
+            continue;
+        };
+        let headers = std::str::from_utf8(&buffer[..header_end]).unwrap_or("");
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())
+                    .flatten()
+            })
+            .unwrap_or(0);
+        if buffer.len() >= header_end + 4 + content_length {
+            break;
+        }
+    }
+    buffer
+}
+
+fn write_sse(socket: &mut impl Write, body: &str) {
+    write!(
+        socket,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .expect("write provider response");
+    socket.flush().expect("flush provider response");
+}
 
 struct AgentProcess {
     child: Child,
@@ -249,8 +294,7 @@ fn transcript_cancels_an_in_flight_provider_stream() {
         socket
             .set_read_timeout(Some(TIMEOUT))
             .expect("set read timeout");
-        let mut request = [0_u8; 4096];
-        let _ = socket.read(&mut request).expect("read HTTP request");
+        let _ = read_http_request(&mut socket);
         socket
             .write_all(
                 b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
@@ -299,16 +343,11 @@ fn transcript_streams_a_uuid_message_id() {
     let address = listener.local_addr().expect("provider address");
     thread::spawn(move || {
         let (mut socket, _) = listener.accept().expect("provider connection");
-        let mut request = [0_u8; 4096];
-        let _ = socket.read(&mut request).expect("read HTTP request");
-        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\ndata: [DONE]\n\n";
-        write!(
-            socket,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        )
-        .expect("write provider response");
-        socket.flush().expect("flush provider response");
+        let _ = read_http_request(&mut socket);
+        write_sse(
+            &mut socket,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\ndata: [DONE]\n\n",
+        );
     });
 
     let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
@@ -351,21 +390,16 @@ fn transcript_streams_reasoning_as_a_think_tool() {
     let address = listener.local_addr().expect("provider address");
     thread::spawn(move || {
         let (mut socket, _) = listener.accept().expect("provider connection");
-        let mut request = [0_u8; 4096];
-        let _ = socket.read(&mut request).expect("read HTTP request");
-        let body = concat!(
-            "data: {\"choices\":[{\"delta\":{\"reasoning\":\"first \"}}]}\n\n",
-            "data: {\"choices\":[{\"delta\":{\"reasoning\":\"second\"}}]}\n\n",
-            "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n",
-            "data: [DONE]\n\n"
+        let _ = read_http_request(&mut socket);
+        write_sse(
+            &mut socket,
+            concat!(
+                "data: {\"choices\":[{\"delta\":{\"reasoning\":\"first \"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"reasoning\":\"second\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n",
+                "data: [DONE]\n\n"
+            ),
         );
-        write!(
-            socket,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        )
-        .expect("write provider response");
-        socket.flush().expect("flush provider response");
     });
 
     let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
@@ -436,18 +470,11 @@ fn transcript_executes_tool_and_returns_result_to_model() {
             "data: {\"choices\":[{\"delta\":{\"content\":\"I read the file.\"}}]}\n\ndata: [DONE]\n\n",
         ] {
             let (mut socket, _) = listener.accept().expect("provider connection");
-            let mut request = [0_u8; 16_384];
-            let size = socket.read(&mut request).expect("read HTTP request");
+            let request = read_http_request(&mut socket);
             request_sender
-                .send(String::from_utf8_lossy(&request[..size]).into_owned())
+                .send(String::from_utf8_lossy(&request).into_owned())
                 .expect("capture request");
-            write!(
-                socket,
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-            .expect("write provider response");
-            socket.flush().expect("flush provider response");
+            write_sse(&mut socket, body);
         }
     });
 
@@ -532,18 +559,11 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
             "data: {\"choices\":[{\"delta\":{\"content\":\"Command completed.\"}}]}\n\ndata: [DONE]\n\n",
         ] {
             let (mut socket, _) = listener.accept().expect("provider connection");
-            let mut request = [0_u8; 16_384];
-            let size = socket.read(&mut request).expect("read HTTP request");
+            let request = read_http_request(&mut socket);
             request_sender
-                .send(String::from_utf8_lossy(&request[..size]).into_owned())
+                .send(String::from_utf8_lossy(&request).into_owned())
                 .expect("capture request");
-            write!(
-                socket,
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-            .expect("write provider response");
-            socket.flush().expect("flush provider response");
+            write_sse(&mut socket, body);
         }
     });
 
