@@ -48,9 +48,18 @@ function reasoningLabel(
   verbose: boolean,
 ): React.ReactNode {
   const display = verbose ? text : `${text.slice(0, 320)}…`;
+  const toolTitle =
+    verbose || text.length <= 320 ? text : `${text.slice(0, 320)}…`;
+  const normalizedKind = kind.trim().replaceAll("_", " ").toLowerCase();
+  const normalizedTitle = text.trim().replaceAll("_", " ").toLowerCase();
+  const showToolTitle =
+    kind !== "execute" &&
+    kind !== "thinking" &&
+    normalizedTitle !== normalizedKind;
   return (
     <div className="whitespace-pre-wrap space-x-2 space-y-2 mt-1">
       {kind && <span className="font-bold">{kind.replaceAll("_", " ")}</span>}
+      {showToolTitle && <span>{toolTitle}</span>}
       {kind === "execute" && verbose && (
         <>
           <br />
