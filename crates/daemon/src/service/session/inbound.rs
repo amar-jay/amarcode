@@ -529,14 +529,9 @@ pub(super) fn apply_session_title(
     else {
         return Ok(());
     };
-    let Some(chat) = inner.store.get_chat(chat_id)? else {
-        return Ok(());
-    };
-    if chat.title == title {
+    if !inner.store.claim_agent_title(chat_id, title)? {
         return Ok(());
     }
-
-    inner.store.update_title(chat_id, title)?;
     emit(
         inner,
         EditorEvent::ChatUpdated {
@@ -855,6 +850,18 @@ mod tests {
             receiver.try_recv(),
             Ok(crate::protocol::EditorEvent::ChatUpdated { chat_id }) if chat_id == "chat-1"
         ));
+
+        apply_session_title(
+            &inner,
+            "chat-1",
+            &json!({ "title": "A later agent's title" }),
+        )
+        .expect("ignore later agent title");
+        assert_eq!(
+            store.get_chat("chat-1").expect("read chat").unwrap().title,
+            "Agent-generated title"
+        );
+        assert!(receiver.try_recv().is_err());
 
         apply_session_title(&inner, "chat-1", &json!({ "title": "  " }))
             .expect("ignore blank title");

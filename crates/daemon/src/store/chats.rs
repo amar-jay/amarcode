@@ -100,6 +100,21 @@ impl Store {
         Ok(())
     }
 
+    /// Set the first title supplied by ACP session metadata. This is an atomic
+    /// claim: once one session has supplied a title, later sessions cannot
+    /// rename the chat. Returns whether this call claimed the title.
+    pub fn claim_agent_title(&self, id: &str, title: &str) -> Result<bool> {
+        let updated = self
+            .connection()?
+            .execute(
+                "UPDATE chats SET title=?2, agent_title_set=1, updated_at=?3
+                 WHERE id=?1 AND agent_title_set=0",
+                params![id, title, super::now()],
+            )
+            .map_err(to_error)?;
+        Ok(updated > 0)
+    }
+
     pub fn archive_chat(&self, id: &str) -> Result<()> {
         let now = super::now();
         self.connection()?
