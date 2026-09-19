@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseArgs } from "./cli";
-import { releaseCommitMessage, versionReleasePaths } from "./products";
+import { parseGitPorcelain } from "./commands";
+import { releaseCommitMessage } from "./products";
 
 describe("parseArgs", () => {
   test("parses positional products and independent versions", () => {
@@ -42,13 +43,14 @@ describe("parseArgs", () => {
 });
 
 describe("version release commit", () => {
-  test("names only the selected crate manifests", () => {
-    expect(versionReleasePaths(["daemon"])).toEqual([
+  test("parses root and nested porcelain paths", () => {
+    expect(
+      parseGitPorcelain(
+        " M Cargo.lock\nM  crates/daemon/Cargo.toml\nR  old.toml -> crates/amarcode-acp/Cargo.toml",
+      ),
+    ).toEqual([
       "Cargo.lock",
       "crates/daemon/Cargo.toml",
-    ]);
-    expect(versionReleasePaths(["acp"])).toEqual([
-      "Cargo.lock",
       "crates/amarcode-acp/Cargo.toml",
     ]);
   });

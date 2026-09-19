@@ -13,7 +13,6 @@ import {
   binaryProducts,
   expandProducts,
   releaseCommitMessage,
-  versionReleasePaths,
   type BinaryProductId,
   type ProductId,
 } from "./products";
@@ -238,33 +237,12 @@ async function inquireAppPublication(): Promise<
   run(["gh", "--version"], { quiet: true });
   run(["gh", "auth", "status"], { quiet: true });
 
-  const versionPaths = new Set(versionReleasePaths(binaryProductIds));
-  const extraChanges = gitStatusShort()
-    .split("\n")
-    .filter((line) => {
-      if (!line) return false;
-      const path = line.match(/^R. (.+) -> (.+)$/)?.[2] ?? line.slice(3);
-      return path ? !versionPaths.has(path) : false;
-    })
-    .join("\n");
-  let commitMessage: string | null = null;
+  const extraChanges = gitStatusShort();
   if (extraChanges) {
-    prompts.note(extraChanges, "Changes to commit before publishing the app");
-    const commitChanges = await prompts.confirm({
-      message: "Commit all listed release changes before publishing the app?",
-      initialValue: true,
-    });
-    if (prompts.isCancel(commitChanges))
-      return cancelled(commitChanges) ?? undefined;
-    if (!commitChanges) return null;
-    const message = await prompts.text({
-      message: "Commit message",
-      initialValue: "chore: publish amarcode release",
-      validate: (value) =>
-        value.trim() ? undefined : "Enter a non-empty commit message.",
-    });
-    if (prompts.isCancel(message)) return cancelled(message) ?? undefined;
-    commitMessage = message.trim();
+    prompts.note(
+      extraChanges,
+      "These changes will be committed with git add -A after the release build",
+    );
   }
 
   const push = await prompts.confirm({
@@ -273,7 +251,7 @@ async function inquireAppPublication(): Promise<
   });
   if (prompts.isCancel(push)) return cancelled(push) ?? undefined;
   if (!push) return null;
-  return { commitMessage, push: true };
+  return { commitMessage: null, push: true };
 }
 
 export async function interactive(
@@ -377,14 +355,12 @@ export async function interactive(
       : []),
     `Overwrite: ${overwrite ? "yes" : "no"}`,
     `Dirty tree: ${options.allowDirty ? "allowed" : "refused for production"}`,
-    ...(products.some((id) => id !== "app")
-      ? [
-          `Version commit: ${releaseCommitMessage(
-            products.filter((id): id is BinaryProductId => id !== "app"),
-            versions,
-          )}`,
-        ]
-      : []),
+    `Commit after build: git add -A; ${releaseCommitMessage(
+      products.filter((id): id is BinaryProductId => id !== "app").length
+        ? products.filter((id): id is BinaryProductId => id !== "app")
+        : binaryProductIds,
+      versions,
+    )}`,
     `Desktop app: ${products.includes("app") ? "publish last" : "skip"}`,
     ...(appPublication?.commitMessage
       ? [`Commit: ${appPublication.commitMessage}`]

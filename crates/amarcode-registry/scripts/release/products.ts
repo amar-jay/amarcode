@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { cargoLockPath, projectRoot, repoPath } from "./commands";
+import { projectRoot } from "./commands";
 
 export type BinaryProductId = "daemon" | "acp";
 export type ProductId = BinaryProductId | "app";
@@ -65,14 +65,6 @@ export function expandProducts(values: string[]): ProductId[] {
   return [...new Set(expanded)];
 }
 
-export function versionReleasePaths(ids: BinaryProductId[]): string[] {
-  if (ids.length === 0) return [];
-  return [
-    repoPath(cargoLockPath),
-    ...ids.map((id) => repoPath(binaryProducts[id].cargoToml)),
-  ];
-}
-
 export function releaseCommitMessage(
   ids: BinaryProductId[],
   versions: Record<BinaryProductId, string>,
@@ -80,5 +72,3 @@ export function releaseCommitMessage(
   const parts = ids.map((id) => `${binaryProducts[id].label} ${versions[id]}`);
   return `chore: release ${parts.join(", ")}`;
 }
-
-export { cargoLockPath };

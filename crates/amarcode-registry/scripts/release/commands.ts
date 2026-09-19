@@ -1,4 +1,4 @@
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 export const projectRoot = resolve(import.meta.dir, "..", "..", "..", "..");
 export const registryDirectory = join(
@@ -53,24 +53,20 @@ export function gitStatusShort(): string {
   return output(["git", "status", "--short"]);
 }
 
+export function parseGitPorcelain(text: string): string[] {
+  if (!text) return [];
+  return text.split(/\r?\n/).flatMap((line) => {
+    const match = line.match(/^.{2}\s+(?:.+ -> )?(.+)$/);
+    return match ? [match[1]] : [];
+  });
+}
+
 export function gitPorcelainPaths(): string[] {
   const text = run(["git", "status", "--porcelain"], {
     quiet: true,
     allowFailure: true,
-  })
-    .stdout.toString()
-    .trim();
-  if (!text) return [];
-  return text.split("\n").flatMap((line) => {
-    const renamed = line.match(/^R. (.+) -> (.+)$/);
-    if (renamed) return [renamed[2]];
-    const path = line.slice(3);
-    return path ? [path] : [];
-  });
-}
-
-export function repoPath(absolutePath: string): string {
-  return relative(projectRoot, absolutePath);
+  }).stdout.toString();
+  return parseGitPorcelain(text.trim());
 }
 
 export function gitBranch(): string {

@@ -28,9 +28,9 @@ import {
   type Manifest,
 } from "./release/manifest";
 import {
+  binaryProductIds,
   binaryProducts,
   releaseCommitMessage,
-  versionReleasePaths,
   type BinaryProductId,
 } from "./release/products";
 import { loadRemoteManifest, upload } from "./release/r2";
@@ -41,31 +41,25 @@ export async function publish(args: string[]) {
   await execute(selected);
 }
 
-function commitVersionRelease(
-  ids: BinaryProductId[],
-  versions: Record<BinaryProductId, string>,
-  versionPaths: string[],
-) {
-  const dirtyVersionFiles = gitPorcelainPaths().filter((path) =>
-    versionPaths.includes(path),
-  );
-  if (dirtyVersionFiles.length === 0) return;
-  run(["git", "add", "--", ...dirtyVersionFiles]);
-  const message = releaseCommitMessage(ids, versions);
+function commitWorkingTree(message: string) {
+  run(["git", "add", "-A"]);
+  const staged = run(["git", "diff", "--cached", "--name-only"], {
+    quiet: true,
+    allowFailure: true,
+  })
+    .stdout.toString()
+    .trim();
+  if (!staged) return;
   run(["git", "commit", "-m", message]);
-  console.log(`Committed version bump as ${gitCommit()}: ${message}`);
+  console.log(`Committed ${gitCommit()}: ${message}\n${staged}`);
 }
 
 function executeAppPublication(plan: AppPublicationPlan) {
   const changes = gitStatusShort();
   if (changes) {
-    if (!plan.commitMessage) {
-      throw new Error(
-        "uncommitted changes appeared after the release inquiry; refusing to publish the desktop app without commit approval",
-      );
-    }
-    run(["git", "add", "--all"]);
-    run(["git", "commit", "-m", plan.commitMessage]);
+    throw new Error(
+      `uncommitted changes remain before desktop publication:\n${changes}`,
+    );
   }
   if (plan.push) {
     run(["git", "push", "origin", "main"]);
@@ -79,16 +73,6 @@ async function execute(plan: ReleasePlan) {
   );
   for (const target of plan.targets) validateSegment("target", target);
   for (const id of binaryIds) validateSegment("version", plan.versions[id]);
-
-  const versionPaths = versionReleasePaths(binaryIds);
-  const unrelatedDirty = gitPorcelainPaths().filter(
-    (path) => !versionPaths.includes(path),
-  );
-  if (!plan.dryRun && unrelatedDirty.length > 0 && !plan.allowDirty) {
-    throw new Error(
-      `refusing production publish from a dirty worktree (${unrelatedDirty.join(", ")}); commit first or pass --allow-dirty`,
-    );
-  }
 
   for (const id of binaryIds) {
     const product = binaryProducts[id];
@@ -120,15 +104,23 @@ async function execute(plan: ReleasePlan) {
     );
   }
 
-  if (!plan.dryRun && binaryIds.length > 0) {
-    commitVersionRelease(binaryIds, plan.versions, versionPaths);
+  if (!plan.dryRun) {
+    const versionCommitIds =
+      binaryIds.length > 0 ? binaryIds : binaryProductIds;
+    commitWorkingTree(
+      plan.appPublication?.commitMessage ??
+        releaseCommitMessage(versionCommitIds, plan.versions),
+    );
   }
 
   const sourceCommit = gitCommit();
-  const remainingDirty = gitPorcelainPaths().filter(
-    (path) => !plan.dryRun || !versionPaths.includes(path),
-  );
-  const dirty = remainingDirty.length > 0;
+  const remainingDirty = gitPorcelainPaths();
+  if (!plan.dryRun && remainingDirty.length > 0 && !plan.allowDirty) {
+    throw new Error(
+      `worktree still dirty after git add -A (${remainingDirty.join(", ")}); refusing to publish a dirty source snapshot`,
+    );
+  }
+  const dirty = !plan.dryRun && remainingDirty.length > 0;
   if (dirty) {
     console.warn(
       `Publishing from a dirty worktree (${remainingDirty.join(", ")}); manifests will record commit ${sourceCommit}.`,
