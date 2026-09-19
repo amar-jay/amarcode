@@ -443,13 +443,18 @@ impl SessionManager {
             })
             .collect::<Vec<_>>();
 
-        let start = match hydration {
+        let (start, restoring_full_history) = match hydration {
             HistoryHydration::None => return Ok(prompt.to_owned()),
-            HistoryHydration::Full => 0,
-            HistoryHydration::AfterMessage(message_id) => messages
-                .iter()
-                .position(|message| message.id == *message_id)
-                .map_or(0, |index| index + 1),
+            HistoryHydration::Full => (0, true),
+            HistoryHydration::AfterMessage(message_id) => {
+                match messages
+                    .iter()
+                    .position(|message| message.id == *message_id)
+                {
+                    Some(index) => (index + 1, false),
+                    None => (0, true),
+                }
+            }
         };
 
         let mut turns = messages
@@ -475,8 +480,14 @@ impl SessionManager {
             return Ok(prompt.to_owned());
         }
 
+        let context_instruction = if restoring_full_history {
+            "The following transcript is the conversation history for this chat. Use it as prior context, then respond directly to the new user message. Do not mention the transcript or the context-restoration process."
+        } else {
+            "The following messages were added to this chat while another agent was active. They are the only conversation updates since you were last active. Incorporate them into your existing context, then respond directly to the new user message. Do not repeat or summarize the updates unless the user asks or they are relevant to the answer."
+        };
+
         Ok(format!(
-            "Continue this conversation for the current chat only. Treat the transcript as prior context; respond to the final user message normally.\n\n<chat-history>\n{history}\n</chat-history>\n\nUser: {prompt}"
+            "{context_instruction}\n\n<chat-history>\n{history}\n</chat-history>\n\n<new-user-message>\n{prompt}\n</new-user-message>"
         ))
     }
 }

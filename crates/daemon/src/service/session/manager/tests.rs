@@ -105,7 +105,8 @@ fn resumed_agent_hydrates_only_messages_after_its_watermark() {
     assert!(!hydrated.contains("answer from A"));
     assert!(hydrated.contains("question for B"));
     assert!(hydrated.contains("answer from B"));
-    assert!(hydrated.ends_with("User: back to A"));
+    assert!(hydrated.contains("while another agent was active"));
+    assert!(hydrated.ends_with("<new-user-message>\nback to A\n</new-user-message>"));
 }
 
 #[test]
@@ -148,7 +149,8 @@ fn missing_watermark_safely_falls_back_to_full_history() {
         .expect("hydrate full fallback");
 
     assert!(hydrated.contains("existing context"));
-    assert!(hydrated.ends_with("User: new prompt"));
+    assert!(hydrated.contains("conversation history for this chat"));
+    assert!(hydrated.ends_with("<new-user-message>\nnew prompt\n</new-user-message>"));
 }
 
 #[test]
