@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { buildAgentRunTimeline } from "@/lib/agent-run-timeline";
 
 type DirectionFilter = "all" | RawActivityEvent["direction"];
 
@@ -56,32 +57,10 @@ function agentColor(agentId: string) {
 
 function AgentRunTimeline({ runs }: { runs: AgentRun[] }) {
   const [capturedNow] = useState(() => Date.now());
-  const timeline = useMemo(() => {
-    const validRuns = runs
-      .map((run) => ({
-        run,
-        start: Date.parse(run.started_at),
-        end: run.finished_at ? Date.parse(run.finished_at) : capturedNow,
-      }))
-      .filter(
-        ({ start, end }) => Number.isFinite(start) && Number.isFinite(end),
-      )
-      .sort((left, right) => left.start - right.start);
-    if (!validRuns.length) return null;
-
-    const start = Math.min(...validRuns.map((item) => item.start));
-    const end = Math.max(
-      ...validRuns.map((item) => Math.max(item.start, item.end)),
-    );
-    const span = Math.max(end - start, 1);
-    const lanes = new Map<string, typeof validRuns>();
-    for (const item of validRuns) {
-      const lane = lanes.get(item.run.agent_id) ?? [];
-      lane.push(item);
-      lanes.set(item.run.agent_id, lane);
-    }
-    return { start, end, span, lanes: [...lanes.entries()] };
-  }, [capturedNow, runs]);
+  const timeline = useMemo(
+    () => buildAgentRunTimeline(runs, capturedNow),
+    [capturedNow, runs],
+  );
 
   if (!timeline) return null;
 
@@ -93,7 +72,10 @@ function AgentRunTimeline({ runs }: { runs: AgentRun[] }) {
       <div className="flex items-center justify-between border-b px-6 py-1.5 text-[10px] text-muted-foreground">
         <span className="font-medium uppercase tracking-wider">Agent runs</span>
         <span className="font-mono tabular-nums">
-          {runs.length} runs · {durationLabel(timeline.span)}
+          {runs.length} runs · {durationLabel(timeline.activeDuration)} active
+          {timeline.elapsedDuration > timeline.activeDuration * 2 && (
+            <> across {durationLabel(timeline.elapsedDuration)}</>
+          )}
         </span>
       </div>
       <div className="max-h-28 overflow-y-auto px-1">
@@ -113,10 +95,22 @@ function AgentRunTimeline({ runs }: { runs: AgentRun[] }) {
                   style={{ left: `${position}%` }}
                 />
               ))}
-              {lane.map(({ run, start, end }) => {
-                const left = ((start - timeline.start) / timeline.span) * 100;
+              {timeline.breaks.map((gap) => (
+                <span
+                  key={`${agentId}-${gap.position}`}
+                  className="absolute inset-y-0 z-10 w-2 -translate-x-1 bg-muted/60"
+                  style={{ left: `${gap.position}%` }}
+                  title={`${durationLabel(gap.duration)} inactive`}
+                  aria-label={`${durationLabel(gap.duration)} inactive gap`}
+                >
+                  <span className="absolute inset-y-0 left-0.5 -skew-x-12 border-l border-foreground/35" />
+                  <span className="absolute inset-y-0 right-0.5 -skew-x-12 border-l border-foreground/35" />
+                </span>
+              ))}
+              {lane.map(({ run, start, end, visualStart, visualEnd }) => {
+                const left = (visualStart / timeline.visualSpan) * 100;
                 const width =
-                  ((Math.max(end, start) - start) / timeline.span) * 100;
+                  ((visualEnd - visualStart) / timeline.visualSpan) * 100;
                 const stoppedAt = run.finished_at ?? "Still running";
                 const title = `${run.agent_id}\n${run.status}\n${new Date(start).toLocaleString()} → ${stoppedAt === "Still running" ? stoppedAt : new Date(end).toLocaleString()}\n${durationLabel(Math.max(end - start, 0))}`;
                 return (
