@@ -16,7 +16,7 @@ use tokio::sync::watch;
 
 mod filesystem;
 
-use filesystem::{existing_path, list_directory, read_file, search_text, write_file};
+use filesystem::{edit_file, existing_path, list_directory, read_file, search_text, write_file};
 
 const MAX_OUTPUT: usize = 64 * 1024;
 
@@ -226,6 +226,7 @@ pub async fn execute(
         "read_file" => read_file(workspace, &arguments),
         "list_directory" => list_directory(workspace, &arguments),
         "search_text" => search_text(workspace, &arguments),
+        "edit_file" => edit_file(workspace, &arguments),
         "write_file" => write_file(workspace, &arguments),
         other => Err(format!("unknown tool: {other}")),
     };
@@ -234,7 +235,7 @@ pub async fn execute(
 
 fn permission_key(call: &ModelToolCall, arguments: &Value) -> Option<PermissionKey> {
     match call.name.as_str() {
-        "write_file" => Some(PermissionKey::WriteFile {
+        "write_file" | "edit_file" => Some(PermissionKey::WriteFile {
             path: arguments.get("path")?.as_str()?.to_owned(),
         }),
         "run_command" => Some(PermissionKey::RunCommand {
@@ -419,7 +420,7 @@ fn tool_kind(name: &str) -> ToolKind {
     match name {
         "read_file" => ToolKind::Read,
         "list_directory" | "search_text" => ToolKind::Search,
-        "write_file" => ToolKind::Edit,
+        "write_file" | "edit_file" => ToolKind::Edit,
         "run_command" => ToolKind::Execute,
         _ => ToolKind::Other,
     }
@@ -548,7 +549,7 @@ fn truncate(mut value: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::filesystem::{safe_relative, write_file};
+    use super::filesystem::{edit_file, safe_relative, write_file};
     use super::*;
     use agent_client_protocol::schema::v1::{RequestPermissionResponse, SelectedPermissionOutcome};
 
@@ -619,6 +620,72 @@ mod tests {
         );
         assert_eq!(first, same);
         assert_ne!(first, different);
+
+        let write = permission_key(
+            &model_call("write_file"),
+            &json!({ "path": "src/lib.rs", "content": "full" }),
+        );
+        let edit = permission_key(
+            &model_call("edit_file"),
+            &json!({ "path": "src/lib.rs", "old_text": "old", "new_text": "new" }),
+        );
+        assert_eq!(write, edit);
+    }
+
+    #[test]
+    fn targeted_edit_replaces_one_unique_match() {
+        let root =
+            std::env::temp_dir().join(format!("amarcode-edit-root-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).expect("create root");
+        let path = root.join("example.txt");
+        std::fs::write(&path, "before\nold block\nafter\n").expect("write fixture");
+
+        let result = edit_file(
+            &root,
+            &json!({
+                "path": "example.txt",
+                "old_text": "old block",
+                "new_text": "new block"
+            }),
+        )
+        .expect("edit file");
+
+        assert!(result.contains("Replaced 9 bytes with 9 bytes"));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read result"),
+            "before\nnew block\nafter\n"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn targeted_edit_rejects_stale_and_ambiguous_matches_without_writing() {
+        let root =
+            std::env::temp_dir().join(format!("amarcode-edit-root-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).expect("create root");
+        let path = root.join("example.txt");
+        let original = "repeat\nmiddle\nrepeat\n";
+        std::fs::write(&path, original).expect("write fixture");
+
+        let missing = edit_file(
+            &root,
+            &json!({ "path": "example.txt", "old_text": "stale", "new_text": "new" }),
+        );
+        assert!(missing
+            .expect_err("reject stale edit")
+            .contains("not found"));
+        let ambiguous = edit_file(
+            &root,
+            &json!({ "path": "example.txt", "old_text": "repeat", "new_text": "new" }),
+        );
+        assert!(ambiguous
+            .expect_err("reject ambiguous edit")
+            .contains("matched 2 locations"));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read unchanged file"),
+            original
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

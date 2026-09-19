@@ -74,8 +74,22 @@ pub fn tool_definitions() -> Vec<Value> {
             }),
         ),
         function_tool(
+            "edit_file",
+            "Replace one exact, uniquely matching text block in an existing UTF-8 workspace file. Include enough unchanged surrounding text in old_text to make the match unique. Use this instead of write_file for targeted edits.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "old_text": { "type": "string", "description": "Exact text currently present in the file." },
+                    "new_text": { "type": "string", "description": "Replacement text; may be empty to delete the matched block." }
+                },
+                "required": ["path", "old_text", "new_text"],
+                "additionalProperties": false
+            }),
+        ),
+        function_tool(
             "write_file",
-            "Create or replace a UTF-8 text file inside the workspace. Invoke the tool directly when needed; the host handles any required approval.",
+            "Create or fully replace a UTF-8 text file inside the workspace. Prefer edit_file when changing part of an existing file. Invoke the tool directly when needed; the host handles any required approval.",
             json!({
                 "type": "object", "properties": { "path": { "type": "string" }, "content": { "type": "string" } }, "required": ["path", "content"], "additionalProperties": false
             }),

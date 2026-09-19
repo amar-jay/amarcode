@@ -99,6 +99,38 @@ pub(super) fn write_file(workspace: &Path, args: &Value) -> Result<String, Strin
     ))
 }
 
+pub(super) fn edit_file(workspace: &Path, args: &Value) -> Result<String, String> {
+    let path = existing_path(workspace, required_str(args, "path")?)?;
+    if !path.is_file() {
+        return Err(format!("not a file: {}", path.display()));
+    }
+    let old_text = required_str(args, "old_text")?;
+    if old_text.is_empty() {
+        return Err("old_text must not be empty".into());
+    }
+    let new_text = required_str(args, "new_text")?;
+    let contents = std::fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let matches = contents.match_indices(old_text).count();
+    if matches == 0 {
+        return Err("old_text was not found; the file was not changed".into());
+    }
+    if matches > 1 {
+        return Err(format!(
+            "old_text matched {matches} locations; include more surrounding context so it is unique"
+        ));
+    }
+    let updated = contents.replacen(old_text, new_text, 1);
+    std::fs::write(&path, updated.as_bytes())
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    Ok(format!(
+        "Replaced {} bytes with {} bytes in {}",
+        old_text.len(),
+        new_text.len(),
+        path.display()
+    ))
+}
+
 pub(super) fn existing_path(workspace: &Path, value: &str) -> Result<PathBuf, String> {
     let root = workspace
         .canonicalize()
