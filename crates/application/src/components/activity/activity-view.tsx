@@ -55,7 +55,15 @@ function agentColor(agentId: string) {
   return runColors[Math.abs(hash) % runColors.length];
 }
 
-function AgentRunTimeline({ runs }: { runs: AgentRun[] }) {
+function AgentRunTimeline({
+  runs,
+  selectedRunId,
+  onSelectRun,
+}: {
+  runs: AgentRun[];
+  selectedRunId: string | null;
+  onSelectRun: (runId: string | null) => void;
+}) {
   const [capturedNow] = useState(() => Date.now());
   const timeline = useMemo(
     () => buildAgentRunTimeline(runs, capturedNow),
@@ -114,17 +122,27 @@ function AgentRunTimeline({ runs }: { runs: AgentRun[] }) {
                 const stoppedAt = run.finished_at ?? "Still running";
                 const title = `${run.agent_id}\n${run.status}\n${new Date(start).toLocaleString()} → ${stoppedAt === "Still running" ? stoppedAt : new Date(end).toLocaleString()}\n${durationLabel(Math.max(end - start, 0))}`;
                 return (
-                  <span
+                  <button
+                    type="button"
                     key={run.id}
                     className={cn(
-                      "absolute inset-y-0 rounded-[2px] ring-1 ring-black/10",
+                      "absolute inset-y-0 cursor-pointer rounded-[2px] ring-1 ring-black/10 transition-opacity focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       agentColor(run.agent_id),
                       run.status === "failed" && "bg-red-400",
                       run.status === "running" && "animate-pulse",
+                      selectedRunId &&
+                        selectedRunId !== run.id &&
+                        "opacity-35",
+                      selectedRunId === run.id &&
+                        "z-20 ring-2 ring-foreground",
                     )}
                     style={{ left: `${left}%`, width: `max(3px, ${width}%)` }}
                     title={title}
                     aria-label={title.replaceAll("\n", ", ")}
+                    aria-pressed={selectedRunId === run.id}
+                    onClick={() =>
+                      onSelectRun(selectedRunId === run.id ? null : run.id)
+                    }
                   />
                 );
               })}
@@ -255,19 +273,21 @@ export function ActivityView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState<DirectionFilter>("all");
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
   const normalizedQuery = query.trim().toLocaleLowerCase();
 
   const visibleEvents = useMemo(
     () =>
       events.filter((event) => {
+        if (selectedRunId && event.agentRunId !== selectedRunId) return false;
         if (direction !== "all" && event.direction !== direction) return false;
         if (!normalizedQuery) return true;
         return `${event.method}\n${JSON.stringify(event.payload)}`
           .toLocaleLowerCase()
           .includes(normalizedQuery);
       }),
-    [direction, events, normalizedQuery],
+    [direction, events, normalizedQuery, selectedRunId],
   );
   const selectedEvent =
     events.find((event) => event.id === selectedEventId) ?? null;
@@ -294,7 +314,14 @@ export function ActivityView({
         </span>
       </div>
 
-      <AgentRunTimeline runs={runs} />
+      <AgentRunTimeline
+        runs={runs}
+        selectedRunId={selectedRunId}
+        onSelectRun={(runId) => {
+          setSelectedRunId(runId);
+          setSelectedEventId(null);
+        }}
+      />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div
