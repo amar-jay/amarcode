@@ -26,10 +26,7 @@ fn read_http_request(socket: &mut TcpStream) -> Vec<u8> {
             break;
         }
         buffer.extend_from_slice(&chunk[..size]);
-        let Some(header_end) = buffer
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-        else {
+        let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else {
             continue;
         };
         let headers = std::str::from_utf8(&buffer[..header_end]).unwrap_or("");
@@ -503,9 +500,7 @@ fn transcript_executes_tool_and_returns_result_to_model() {
         .collect::<Vec<_>>();
     let think = updates
         .iter()
-        .find(|update| {
-            update["sessionUpdate"] == "tool_call" && update["kind"] == "think"
-        })
+        .find(|update| update["sessionUpdate"] == "tool_call" && update["kind"] == "think")
         .expect("think tool start");
     assert_eq!(
         think["content"][0]["content"]["text"],
@@ -537,6 +532,89 @@ fn transcript_executes_tool_and_returns_result_to_model() {
     assert!(second_request.contains("hello from tool"));
     assert!(second_request.contains("\"reasoning_details\""));
     assert!(second_request.contains("I should inspect the file."));
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn transcript_reports_file_edits_as_acp_diffs() {
+    let listener = match TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping socket transcript test: sandbox forbids loopback listeners");
+            return;
+        }
+        Err(error) => panic!("bind provider: {error}"),
+    };
+    let address = listener.local_addr().expect("provider address");
+    thread::spawn(move || {
+        for body in [
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-edit\",\"type\":\"function\",\"function\":{\"name\":\"edit_file\",\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\",\\\"old_text\\\":\\\"old\\\",\\\"new_text\\\":\\\"new\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Edited the file.\"}}]}\n\ndata: [DONE]\n\n",
+        ] {
+            let (mut socket, _) = listener.accept().expect("provider connection");
+            let _ = read_http_request(&mut socket);
+            write_sse(&mut socket, body);
+        }
+    });
+
+    let workspace = std::env::temp_dir().join(format!("amarcode-edit-{}", Uuid::new_v4()));
+    fs::create_dir(&workspace).expect("create workspace");
+    let path = workspace.join("note.txt");
+    fs::write(&path, "before old after\n").expect("write fixture");
+
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session_id = new_session(&mut agent, 2, workspace.to_str().expect("workspace path"));
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "session/set_config_option",
+        "params": { "sessionId": session_id, "configId": "mode", "value": "code" }
+    }));
+    agent.response(3);
+    agent.send(json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "session/prompt",
+        "params": {
+            "sessionId": session_id,
+            "prompt": [{ "type": "text", "text": "Replace old with new in note.txt" }]
+        }
+    }));
+
+    let mut completed_diff = None;
+    loop {
+        let message = agent.output.recv_timeout(TIMEOUT).expect("ACP message");
+        if message.get("id").and_then(Value::as_u64) == Some(4) {
+            assert_eq!(message["result"]["stopReason"], "end_turn");
+            break;
+        }
+        if message["method"] == "session/request_permission" {
+            let id = message["id"].clone();
+            agent.send(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": { "outcome": { "outcome": "selected", "optionId": "allow-once" } }
+            }));
+            continue;
+        }
+        let Some(update) = message.pointer("/params/update") else {
+            continue;
+        };
+        if update["toolCallId"] == "call-edit" && update["status"] == "completed" {
+            completed_diff = update.pointer("/content/0").cloned();
+        }
+    }
+
+    let diff = completed_diff.expect("completed edit diff");
+    assert_eq!(diff["type"], "diff");
+    assert_eq!(diff["path"], path.to_string_lossy().as_ref());
+    assert_eq!(diff["oldText"], "before old after\n");
+    assert_eq!(diff["newText"], "before new after\n");
+    assert_eq!(
+        fs::read_to_string(&path).expect("read edited file"),
+        "before new after\n"
+    );
     let _ = fs::remove_dir_all(workspace);
 }
 

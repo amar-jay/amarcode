@@ -3,8 +3,8 @@ import { useAtomValue, useSetAtom } from "jotai";
 import {
   ChevronDown,
   ChevronUp,
-	RotateCwFadingClock,
   LoaderCircle,
+  RotateCwFadingClock,
   Search,
   X,
 } from "lucide-react";
@@ -27,7 +27,6 @@ import { Input } from "@/components/ui/input";
 import { Toggle } from "@/components/ui/toggle";
 import AppPromptInput from "./main-prompt-input";
 import { ActivityView } from "./activity/activity-view";
-import { ChatStateIndicators } from "./chat-state-indicators";
 import { LiveChatFailureBanner } from "./live-chat-failure-banner";
 import { PendingAgentRequestCard } from "./pending-agent-request";
 import {
@@ -376,52 +375,42 @@ export function LiveChatScreen() {
           </div>
         ) : (
           <>
-            <h1 className="min-w-0 truncate text-sm font-medium w-2xl">
+            <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
               {live.detail?.chat.title ?? session.chat.title ?? "Loading chat"}
             </h1>
-            <ChatStateIndicators
-              loading={live.loading}
-              isWorking={isWorking}
-              contextRestoration={live.contextRestoration}
-              runStatus={live.runStatus}
-            />
+            <div className="ml-auto flex">
+              <Toggle
+                size="sm"
+                pressed={conversationView === "activity"}
+                onPressedChange={(pressed) => {
+                  closeSearch();
+                  setConversationView(pressed ? "activity" : "chat");
+                }}
+                aria-label={
+                  conversationView === "activity"
+                    ? "Show conversation"
+                    : "Show activity"
+                }
+                title={
+                  conversationView === "activity"
+                    ? "Show conversation"
+                    : "Show activity"
+                }
+              >
+                <RotateCwFadingClock className="size-4" />
+              </Toggle>
 
-						<div className="ml-auto">
-            <Toggle
-              size="sm"
-              className="ml-auto"
-              pressed={conversationView === "activity"}
-              onPressedChange={(pressed) => {
-                closeSearch();
-                setConversationView(pressed ? "activity" : "chat");
-              }}
-              aria-label={
-                conversationView === "activity"
-                  ? "Show conversation"
-                  : "Show activity"
-              }
-              title={
-                conversationView === "activity"
-                  ? "Show conversation"
-                  : "Show activity"
-              }
-            >
-              <RotateCwFadingClock className="size-4" />
-              {/* <span className="hidden sm:inline">Activity</span> */}
-            </Toggle>
-
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Find in chat"
-              title="Find in chat (Ctrl+F)"
-              onClick={openSearch}
-              className="ml-auto"
-            >
-              <Search className="size-4" />
-            </Button>
-						</div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Find in chat"
+                title="Find in chat (Ctrl+F)"
+                onClick={openSearch}
+              >
+                <Search className="size-4" />
+              </Button>
+            </div>
           </>
         )}
       </header>

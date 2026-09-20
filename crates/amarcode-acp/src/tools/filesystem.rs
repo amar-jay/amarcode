@@ -7,6 +7,14 @@ use super::{required_str, truncate, MAX_OUTPUT};
 
 const DEFAULT_READ_LIMIT: usize = 60 * 1024;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FileChange {
+    pub path: PathBuf,
+    pub old_text: Option<String>,
+    pub new_text: String,
+    pub summary: String,
+}
+
 pub(super) fn read_file(workspace: &Path, args: &Value) -> Result<String, String> {
     let path = existing_path(workspace, required_str(args, "path")?)?;
     let contents = std::fs::read_to_string(&path)
@@ -113,7 +121,7 @@ pub(super) fn search_text(workspace: &Path, args: &Value) -> Result<String, Stri
     })
 }
 
-pub(super) fn write_file(workspace: &Path, args: &Value) -> Result<String, String> {
+pub(super) fn write_file(workspace: &Path, args: &Value) -> Result<FileChange, String> {
     let relative = safe_relative(required_str(args, "path")?)?;
     let path = workspace.join(relative);
     let parent = path.parent().ok_or_else(|| "invalid path".to_string())?;
@@ -134,17 +142,26 @@ pub(super) fn write_file(workspace: &Path, args: &Value) -> Result<String, Strin
             return Err("path escapes workspace".into());
         }
     }
-    let content = required_str(args, "content")?;
-    std::fs::write(&path, content)
+    let old_text = if path.exists() {
+        Some(
+            std::fs::read_to_string(&path)
+                .map_err(|e| format!("failed to read {}: {e}", path.display()))?,
+        )
+    } else {
+        None
+    };
+    let content = required_str(args, "content")?.to_owned();
+    std::fs::write(&path, &content)
         .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
-    Ok(format!(
-        "Wrote {} bytes to {}",
-        content.len(),
-        path.display()
-    ))
+    Ok(FileChange {
+        path: path.clone(),
+        old_text,
+        new_text: content.clone(),
+        summary: format!("Wrote {} bytes to {}", content.len(), path.display()),
+    })
 }
 
-pub(super) fn edit_file(workspace: &Path, args: &Value) -> Result<String, String> {
+pub(super) fn edit_file(workspace: &Path, args: &Value) -> Result<FileChange, String> {
     let path = existing_path(workspace, required_str(args, "path")?)?;
     if !path.is_file() {
         return Err(format!("not a file: {}", path.display()));
@@ -168,12 +185,17 @@ pub(super) fn edit_file(workspace: &Path, args: &Value) -> Result<String, String
     let updated = contents.replacen(old_text, new_text, 1);
     std::fs::write(&path, updated.as_bytes())
         .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
-    Ok(format!(
-        "Replaced {} bytes with {} bytes in {}",
-        old_text.len(),
-        new_text.len(),
-        path.display()
-    ))
+    Ok(FileChange {
+        path: path.clone(),
+        old_text: Some(contents),
+        new_text: updated,
+        summary: format!(
+            "Replaced {} bytes with {} bytes in {}",
+            old_text.len(),
+            new_text.len(),
+            path.display()
+        ),
+    })
 }
 
 pub(super) fn move_file(workspace: &Path, args: &Value) -> Result<String, String> {

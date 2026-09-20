@@ -50,8 +50,8 @@ struct ReasoningToolCall {
     id: String,
 }
 
-pub fn tool_definitions() -> Vec<Value> {
-    vec![
+pub fn tool_definitions(mode: &str) -> Vec<Value> {
+    let mut tools = vec![
         function_tool(
             "read_file",
             "Read a page of a UTF-8 text file inside the workspace. offset and limit are byte counts; use the exact next_offset returned by a partial read to continue.",
@@ -138,7 +138,16 @@ pub fn tool_definitions() -> Vec<Value> {
                 "additionalProperties": false
             }),
         ),
-    ]
+    ];
+    if mode != "code" {
+        tools.retain(|tool| {
+            matches!(
+                tool.pointer("/function/name").and_then(Value::as_str),
+                Some("read_file" | "list_directory" | "search_text")
+            )
+        });
+    }
+    tools
 }
 
 fn function_tool(name: &str, description: &str, parameters: Value) -> Value {
@@ -158,7 +167,7 @@ pub async fn stream_completion(
     let mut request_body = json!({
         "model": config.provider.model,
         "messages": model_messages(history, mode),
-        "tools": tool_definitions(),
+        "tools": tool_definitions(mode),
         "tool_choice": "auto",
         "stream": true
     });
@@ -279,10 +288,10 @@ fn reasoning_request(config: &ProviderConfig) -> Option<Value> {
 fn model_messages(history: &[Value], mode: &str) -> Vec<Value> {
     let mode_instruction = match mode {
         "code" => {
-            "You may use every provided tool, including tools that modify files or run commands."
+            "CURRENT MODE: CODE. You may use every provided tool, including tools that modify files or run commands. This current mode supersedes any read-only restriction or planning constraint mentioned in earlier conversation turns. When the user asks for a change, perform it with the provided tools."
         }
-        "plan" => "Inspect with read-only tools as needed. Do not modify files or run commands.",
-        _ => "Inspect with read-only tools as needed. Do not modify files or run commands.",
+        "plan" => "CURRENT MODE: PLAN. Inspect with the provided read-only tools and produce an implementation plan. Do not modify files or run commands.",
+        _ => "CURRENT MODE: ASK. Inspect with the provided read-only tools as needed and answer the question. Do not modify files or run commands.",
     };
     let system = format!(
         "You are a workspace coding agent. Use the provided tools proactively whenever they help answer or complete the user's request. If the user asks you to inspect files, list a directory, search, or use an installed CLI, invoke the appropriate tool immediately. Never ask for confirmation before invoking a tool and never offer to invoke it later. The host application performs any required approval after the tool call, so do not request approval in chat. Do not claim that an executable is unavailable merely because it is not a named tool; use run_command for installed workspace commands when the current mode permits it. {mode_instruction}"
@@ -636,6 +645,7 @@ mod tests {
         assert!(policy.contains("Never ask for confirmation"));
         assert!(policy.contains("host application performs any required approval"));
         assert!(policy.contains("use run_command"));
+        assert!(policy.contains("CURRENT MODE: CODE"));
         assert_eq!(messages[1]["content"], "use gog");
     }
 
@@ -643,7 +653,28 @@ mod tests {
     fn non_code_modes_forbid_mutating_tools_without_discouraging_inspection() {
         let messages = model_messages(&[], "ask");
         let policy = messages[0]["content"].as_str().expect("system policy");
-        assert!(policy.contains("Inspect with read-only tools as needed"));
+        assert!(policy.contains("CURRENT MODE: ASK"));
+        assert!(policy.contains("provided read-only tools"));
         assert!(policy.contains("Do not modify files or run commands"));
+    }
+
+    #[test]
+    fn non_code_modes_only_advertise_read_only_tools() {
+        let names = tool_definitions("plan")
+            .into_iter()
+            .filter_map(|tool| tool.pointer("/function/name")?.as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["read_file", "list_directory", "search_text"]);
+    }
+
+    #[test]
+    fn code_mode_advertises_mutating_and_terminal_tools() {
+        let names = tool_definitions("code")
+            .into_iter()
+            .filter_map(|tool| tool.pointer("/function/name")?.as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"edit_file".to_owned()));
+        assert!(names.contains(&"write_file".to_owned()));
+        assert!(names.contains(&"run_command".to_owned()));
     }
 }

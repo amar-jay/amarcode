@@ -126,7 +126,7 @@ impl Runtime {
             .agent_capabilities(
                 AgentCapabilities::new()
                     .load_session(self.store.is_some())
-                    .prompt_capabilities(PromptCapabilities::new())
+                    .prompt_capabilities(PromptCapabilities::new().image(true))
                     .session_capabilities(session_capabilities),
             )
             .agent_info(
@@ -164,6 +164,13 @@ impl Runtime {
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| Error::invalid_params().data("unknown session"))?;
+        if session.mode != mode {
+            for message in &mut session.history {
+                if let Some(message) = message.as_object_mut() {
+                    message.remove("reasoning_details");
+                }
+            }
+        }
         session.mode = mode.to_owned();
         self.persist(session_id, session);
         Ok(())
@@ -312,10 +319,7 @@ impl Runtime {
         Arc<crate::tools::PermissionState>,
         watch::Receiver<bool>,
     )> {
-        let prompt = extract_prompt_text(&request.prompt);
-        if prompt.is_empty() {
-            return Err(Error::invalid_params().data("prompt must contain text"));
-        }
+        let prompt = provider_prompt_content(&request.prompt)?;
         let mut sessions = self.sessions.lock().await;
         let session = sessions
             .get_mut(&request.session_id)
@@ -729,6 +733,52 @@ fn extract_prompt_text(prompt: &[ContentBlock]) -> String {
         .collect()
 }
 
+fn provider_prompt_content(
+    prompt: &[ContentBlock],
+) -> agent_client_protocol::Result<serde_json::Value> {
+    let has_image = prompt
+        .iter()
+        .any(|block| matches!(block, ContentBlock::Image(_)));
+    if !has_image {
+        let text = extract_prompt_text(prompt);
+        if text.is_empty() {
+            return Err(Error::invalid_params().data("prompt must contain text or an image"));
+        }
+        return Ok(serde_json::Value::String(text));
+    }
+    let mut content = Vec::new();
+    for block in prompt {
+        match block {
+            ContentBlock::Text(text) if !text.text.is_empty() => {
+                content.push(serde_json::json!({ "type": "text", "text": text.text }));
+            }
+            ContentBlock::Image(image) => {
+                if !matches!(
+                    image.mime_type.as_str(),
+                    "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+                ) {
+                    return Err(Error::invalid_params()
+                        .data(format!("unsupported image MIME type: {}", image.mime_type)));
+                }
+                if image.data.trim().is_empty() {
+                    return Err(Error::invalid_params().data("image data must not be empty"));
+                }
+                content.push(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:{};base64,{}", image.mime_type, image.data),
+                    },
+                }));
+            }
+            _ => {}
+        }
+    }
+    if content.is_empty() {
+        return Err(Error::invalid_params().data("prompt must contain text or an image"));
+    }
+    Ok(serde_json::Value::Array(content))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -779,6 +829,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn changing_mode_discards_stale_reasoning_constraints() {
+        let runtime = runtime();
+        let created = runtime
+            .new_session(NewSessionRequest::new("/workspace"))
+            .await;
+        {
+            let mut sessions = runtime.sessions.lock().await;
+            sessions
+                .get_mut(&created.session_id)
+                .expect("session")
+                .history
+                .push(serde_json::json!({
+                    "role": "assistant",
+                    "content": "I cannot edit in ask mode.",
+                    "reasoning_details": [{ "type": "reasoning.text", "text": "read-only" }],
+                }));
+        }
+
+        runtime
+            .set_mode(&created.session_id, "code")
+            .await
+            .expect("switch to code mode");
+
+        let sessions = runtime.sessions.lock().await;
+        let session = sessions.get(&created.session_id).expect("session");
+        assert_eq!(session.mode, "code");
+        assert!(session.history[0].get("reasoning_details").is_none());
+    }
+
+    #[tokio::test]
     async fn cancel_targets_only_the_requested_session() {
         let runtime = runtime();
         let first = runtime.new_session(NewSessionRequest::new("/one")).await;
@@ -810,6 +890,7 @@ mod tests {
             .initialize(InitializeRequest::new(ProtocolVersion::V1))
             .await;
         assert!(!response.agent_capabilities.load_session);
+        assert!(response.agent_capabilities.prompt_capabilities.image);
         let capabilities = response.agent_capabilities.session_capabilities;
         assert!(capabilities.close.is_some());
         assert!(capabilities.list.is_none());
@@ -870,5 +951,39 @@ mod tests {
     fn extracts_text_from_typed_content_blocks() {
         let prompt = vec!["hello ".into(), "world".into()];
         assert_eq!(extract_prompt_text(&prompt), "hello world");
+    }
+
+    #[test]
+    fn converts_acp_images_to_openai_image_urls() {
+        let prompt = vec![
+            ContentBlock::Text(TextContent::new("describe this")),
+            ContentBlock::Image(agent_client_protocol::schema::v1::ImageContent::new(
+                "AQID",
+                "image/png",
+            )),
+        ];
+        let content = provider_prompt_content(&prompt).expect("multimodal prompt");
+        assert_eq!(
+            content[0],
+            serde_json::json!({
+                "type": "text",
+                "text": "describe this",
+            })
+        );
+        assert_eq!(
+            content[1],
+            serde_json::json!({
+                "type": "image_url",
+                "image_url": { "url": "data:image/png;base64,AQID" },
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_image_mime_types() {
+        let prompt = vec![ContentBlock::Image(
+            agent_client_protocol::schema::v1::ImageContent::new("AQID", "image/svg+xml"),
+        )];
+        assert!(provider_prompt_content(&prompt).is_err());
     }
 }

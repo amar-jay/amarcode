@@ -114,25 +114,50 @@ pub fn with_stderr_detail(failure: ClassifiedFailure, stderr_tail: &str) -> Clas
 }
 
 fn classify_remote(code: Option<i64>, message: &str, data: Option<&Value>) -> ClassifiedFailure {
-    let lower = message.to_ascii_lowercase();
+    let detail = remote_error_detail(data);
+    let display_message = match detail.as_deref() {
+        Some(detail) if !message.contains(detail) => format!("{message}: {detail}"),
+        _ => message.to_owned(),
+    };
+    let lower = display_message.to_ascii_lowercase();
     if looks_like_auth(&lower, data) || code == Some(-32000) && lower.contains("auth") {
         return ClassifiedFailure {
             kind: AgentFailureKind::AuthRequired,
-            message: humanize_auth(message),
+            message: humanize_auth(&display_message),
             auth_methods: data.cloned(),
         };
     }
     if looks_like_unavailable(&lower) {
         return ClassifiedFailure {
             kind: AgentFailureKind::Unavailable,
-            message: humanize_unavailable(message),
+            message: humanize_unavailable(&display_message),
             auth_methods: None,
         };
     }
     ClassifiedFailure {
         kind: AgentFailureKind::Error,
-        message: format!("ACP remote error {code:?}: {message}"),
+        message: format!("ACP remote error {code:?}: {display_message}"),
         auth_methods: None,
+    }
+}
+
+fn remote_error_detail(data: Option<&Value>) -> Option<String> {
+    let data = data?;
+    match data {
+        Value::Null => None,
+        Value::String(detail) => {
+            let detail = detail.trim();
+            (!detail.is_empty()).then(|| detail.to_owned())
+        }
+        Value::Object(map) => map
+            .get("message")
+            .or_else(|| map.get("error"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|detail| !detail.is_empty())
+            .map(str::to_owned)
+            .or_else(|| serde_json::to_string(data).ok()),
+        _ => serde_json::to_string(data).ok(),
     }
 }
 
@@ -140,6 +165,8 @@ fn looks_like_auth(lower: &str, data: Option<&Value>) -> bool {
     if lower.contains("auth_required")
         || lower.contains("authentication required")
         || lower.contains("not authenticated")
+        || lower.contains("unauthorized")
+        || lower.contains("api key")
         || lower.contains("sign in")
         || lower.contains("login required")
     {
@@ -175,6 +202,8 @@ fn looks_like_unavailable(lower: &str) -> bool {
         || lower.contains("command not found")
         || lower.contains("executable not found")
         || lower.contains("is not installed")
+        || lower.contains("unavailable")
+        || lower.contains("not available")
         || lower.contains("no such binary")
         || lower.contains("unable to locate")
         || lower.contains("cannot find")
@@ -223,6 +252,28 @@ mod tests {
             data: None,
         });
         assert_eq!(failure.kind, AgentFailureKind::Unavailable);
+    }
+
+    #[test]
+    fn includes_string_remote_error_data_in_failure_message() {
+        let failure = classify_acp_failure(&AcpError::Remote {
+            code: Some(-32603),
+            message: "Internal error".into(),
+            data: Some(json!("provider returned 401 Unauthorized: invalid API key")),
+        });
+        assert_eq!(failure.kind, AgentFailureKind::AuthRequired);
+        assert!(failure.message.contains("invalid API key"));
+    }
+
+    #[test]
+    fn includes_structured_remote_error_data_in_failure_message() {
+        let failure = classify_acp_failure(&AcpError::Remote {
+            code: Some(-32603),
+            message: "Internal error".into(),
+            data: Some(json!({ "message": "requested model is unavailable" })),
+        });
+        assert_eq!(failure.kind, AgentFailureKind::Unavailable);
+        assert!(failure.message.contains("requested model is unavailable"));
     }
 
     #[test]

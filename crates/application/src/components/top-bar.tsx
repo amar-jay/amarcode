@@ -4,11 +4,19 @@ import { Minus, PanelRightOpen, Square, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { daemonApi } from "@/api";
-import { sidePanelOpenAtom, workspacePathAtom } from "@/state";
+import { ChatStateIndicators } from "@/components/chat-state-indicators";
+import {
+  liveChatAtom,
+  liveChatIsWorkingAtom,
+  sidePanelOpenAtom,
+  workspacePathAtom,
+} from "@/state";
 
 export function TopBar() {
   const [, setSheetOpen] = useAtom(sidePanelOpenAtom);
   const workspacePath = useAtomValue(workspacePathAtom);
+  const live = useAtomValue(liveChatAtom);
+  const isWorking = useAtomValue(liveChatIsWorkingAtom);
   const [isOpeningSheet, setIsOpeningSheet] = useState(false);
 
   const openWorkspacePanel = async () => {
@@ -37,7 +45,7 @@ export function TopBar() {
   };
   return (
     <>
-      <div className="z-60 flex h-9 shrink-0 items-center border-b border-border bg-sidebar">
+      <div className="relative z-60 flex h-9 shrink-0 items-center border-b border-border bg-sidebar">
         <div
           data-tauri-drag-region
           className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 select-none"
@@ -45,6 +53,16 @@ export function TopBar() {
           <img src="/acp-mark.svg" alt="" className="size-4" />
           <span className="text-xs font-medium border-r pr-2">AMARCODE</span>
         </div>
+        {live && (
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center select-none">
+            <ChatStateIndicators
+              loading={live.loading}
+              isWorking={isWorking}
+              contextRestoration={live.contextRestoration}
+              runStatus={live.runStatus}
+            />
+          </div>
+        )}
         <div className="flex h-full">
           <button
             type="button"

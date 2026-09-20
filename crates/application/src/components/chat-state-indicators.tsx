@@ -61,9 +61,9 @@ export function ChatStateIndicators({
     if (!status) return null;
 
   return (
-      <span className="ml-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-        <status.Icon className={status.className} aria-hidden="true" />
-        {status.label}
-      </span>
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+      <status.Icon className={status.className} aria-hidden="true" />
+      {status.label}
+    </span>
   );
 }

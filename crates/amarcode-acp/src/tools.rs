@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path, sync::Mutex};
 use crate::provider::ModelToolCall;
 use agent_client_protocol::{
     schema::v1::{
-        ContentBlock, CreateTerminalRequest, KillTerminalRequest, PermissionOption,
+        ContentBlock, CreateTerminalRequest, Diff, KillTerminalRequest, PermissionOption,
         PermissionOptionKind, ReleaseTerminalRequest, RequestPermissionOutcome,
         RequestPermissionRequest, SessionId, SessionNotification, SessionUpdate, Terminal,
         TerminalOutputRequest, ToolCall as AcpToolCall, ToolCallContent, ToolCallStatus,
@@ -18,7 +18,7 @@ mod filesystem;
 
 use filesystem::{
     delete_file, edit_file, existing_path, list_directory, move_file, read_file, search_text,
-    write_file,
+    write_file, FileChange,
 };
 
 const MAX_OUTPUT: usize = 64 * 1024;
@@ -232,17 +232,63 @@ pub async fn execute(
         )
         .await;
     }
+    if call.name == "edit_file" {
+        return finish_file_change(
+            connection,
+            session_id,
+            call,
+            edit_file(workspace, &arguments),
+        );
+    }
+    if call.name == "write_file" {
+        return finish_file_change(
+            connection,
+            session_id,
+            call,
+            write_file(workspace, &arguments),
+        );
+    }
     let result = match call.name.as_str() {
         "read_file" => read_file(workspace, &arguments),
         "list_directory" => list_directory(workspace, &arguments),
         "search_text" => search_text(workspace, &arguments),
-        "edit_file" => edit_file(workspace, &arguments),
-        "write_file" => write_file(workspace, &arguments),
         "move_file" => move_file(workspace, &arguments),
         "delete_file" => delete_file(workspace, &arguments),
         other => Err(format!("unknown tool: {other}")),
     };
     finish(connection, session_id, call, result)
+}
+
+fn finish_file_change(
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+    call: &ModelToolCall,
+    result: Result<FileChange, String>,
+) -> String {
+    match result {
+        Ok(change) => {
+            let diff = Diff::new(change.path, change.new_text).old_text(change.old_text);
+            let fields = ToolCallUpdateFields::new()
+                .status(ToolCallStatus::Completed)
+                .content(vec![ToolCallContent::Diff(diff)])
+                .raw_output(json!({ "text": change.summary }));
+            let _ = connection.send_notification(SessionNotification::new(
+                session_id.clone(),
+                SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(call.id.clone(), fields)),
+            ));
+            change.summary
+        }
+        Err(error) => {
+            update(
+                connection,
+                session_id,
+                call,
+                ToolCallStatus::Failed,
+                Some(&error),
+            );
+            format!("Error: {error}")
+        }
+    }
 }
 
 fn permission_key(call: &ModelToolCall, arguments: &Value) -> Option<PermissionKey> {
@@ -684,7 +730,13 @@ mod tests {
         )
         .expect("edit file");
 
-        assert!(result.contains("Replaced 9 bytes with 9 bytes"));
+        assert!(result.summary.contains("Replaced 9 bytes with 9 bytes"));
+        assert_eq!(result.path, path);
+        assert_eq!(
+            result.old_text.as_deref(),
+            Some("before\nold block\nafter\n")
+        );
+        assert_eq!(result.new_text, "before\nnew block\nafter\n");
         assert_eq!(
             std::fs::read_to_string(&path).expect("read result"),
             "before\nnew block\nafter\n"
