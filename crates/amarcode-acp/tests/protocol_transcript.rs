@@ -608,7 +608,8 @@ fn transcript_reports_file_edits_as_acp_diffs() {
 
     let diff = completed_diff.expect("completed edit diff");
     assert_eq!(diff["type"], "diff");
-    assert_eq!(diff["path"], path.to_string_lossy().as_ref());
+    let canonical_path = path.canonicalize().expect("canonicalize edited path");
+    assert_eq!(diff["path"], canonical_path.to_string_lossy().as_ref());
     assert_eq!(diff["oldText"], "before old after\n");
     assert_eq!(diff["newText"], "before new after\n");
     assert_eq!(
