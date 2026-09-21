@@ -30,6 +30,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30", features = ["signal"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security_Authentication_Identity"] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
 uuid = { version = "1", features = ["v4"] }

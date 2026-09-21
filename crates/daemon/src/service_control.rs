@@ -96,6 +96,16 @@ fn checked(command: &mut Command, operation: &str) -> Result<Output> {
     }))
 }
 
+#[cfg(any(target_os = "windows", test))]
+fn utf16le_with_bom(value: &str) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(2 + value.len() * 2);
+    encoded.extend_from_slice(&[0xff, 0xfe]);
+    for unit in value.encode_utf16() {
+        encoded.extend_from_slice(&unit.to_le_bytes());
+    }
+    encoded
+}
+
 #[cfg(unix)]
 fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
     let parent = path
@@ -448,20 +458,18 @@ mod platform {
 #[cfg(target_os = "windows")]
 mod platform {
     use super::*;
+    use windows_sys::Win32::Security::Authentication::Identity::{
+        GetUserNameExW, NameSamCompatible,
+    };
 
     const TASK_NAME: &str = "Amarcode Daemon";
 
     pub fn install(executable: &Path, _agent_path: Option<&OsStr>) -> Result<()> {
-        let user_output = checked(
-            &mut Command::new("whoami.exe"),
-            "resolve the current Windows user",
-        )?;
-        let user = String::from_utf8(user_output.stdout)
-            .map_err(|_| Error::msg("current Windows user was not valid UTF-8"))?;
-        let task = task_xml(executable, user.trim())?;
+        let user = current_user()?;
+        let task = task_xml(executable, &user)?;
         let task_file =
             std::env::temp_dir().join(format!("amarcode-daemon-task-{}.xml", std::process::id()));
-        fs::write(&task_file, task).map_err(|error| {
+        fs::write(&task_file, utf16le_with_bom(&task)).map_err(|error| {
             Error::msg(format!("failed to write {}: {error}", task_file.display()))
         })?;
 
@@ -478,6 +486,32 @@ mod platform {
         let _ = fs::remove_file(&task_file);
         registration?;
         Ok(())
+    }
+
+    fn current_user() -> Result<String> {
+        let mut buffer = vec![0_u16; 256];
+        loop {
+            let mut length = buffer.len() as u32;
+            // SAFETY: `buffer` is writable for `length` UTF-16 code units, and
+            // `length` remains valid for the duration of the call.
+            let succeeded =
+                unsafe { GetUserNameExW(NameSamCompatible, buffer.as_mut_ptr(), &mut length) };
+            if succeeded {
+                return String::from_utf16(&buffer[..length as usize]).map_err(|error| {
+                    Error::msg(format!(
+                        "current Windows user name was not valid UTF-16: {error}"
+                    ))
+                });
+            }
+            if length as usize > buffer.len() {
+                buffer.resize(length as usize, 0);
+                continue;
+            }
+            return Err(Error::msg(format!(
+                "failed to resolve the current Windows user: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
     }
 
     pub fn uninstall() -> Result<()> {
@@ -590,7 +624,7 @@ mod platform {
             .to_str()
             .ok_or_else(|| Error::msg("daemon service paths must contain valid UTF-8"))?;
         Ok(format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+            "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n\
              <Task version=\"1.4\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\
              <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{}</UserId></LogonTrigger></Triggers>\
              <Principals><Principal id=\"Author\"><UserId>{}</UserId>\
@@ -622,6 +656,29 @@ mod platform {
             .replace('>', "&gt;")
             .replace('"', "&quot;")
             .replace('\'', "&apos;")
+    }
+}
+
+#[cfg(test)]
+mod encoding_tests {
+    use super::utf16le_with_bom;
+
+    #[test]
+    fn encodes_windows_task_xml_as_utf16le_with_bom() {
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-16\"?><Task>José 🚀</Task>";
+        let encoded = utf16le_with_bom(xml);
+
+        assert_eq!(&encoded[..2], &[0xff, 0xfe]);
+        assert_eq!(encoded.len(), 2 + xml.encode_utf16().count() * 2);
+
+        let decoded = String::from_utf16(
+            &encoded[2..]
+                .chunks_exact(2)
+                .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert_eq!(decoded, xml);
     }
 }
 
