@@ -1,6 +1,6 @@
 [package]
 name = "amarcode-acp"
-version = "0.1.5"
+version = "0.1.6"
 description = "ACP adapter for OpenAI-compatible chat completion APIs"
 edition = "2021"
 
