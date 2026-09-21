@@ -731,7 +731,10 @@ mod tests {
         .expect("edit file");
 
         assert!(result.summary.contains("Replaced 9 bytes with 9 bytes"));
-        assert_eq!(result.path, path);
+        assert_eq!(
+            result.path,
+            path.canonicalize().expect("canonicalize edited path")
+        );
         assert_eq!(
             result.old_text.as_deref(),
             Some("before\nold block\nafter\n")
