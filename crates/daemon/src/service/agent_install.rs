@@ -372,14 +372,30 @@ fn extract_archive(archive: &Path, destination: &Path) -> Result<()> {
         .unwrap_or_default()
         .to_ascii_lowercase();
     if name.ends_with(".zip") {
-        let status = run_timed(
-            Command::new("unzip")
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("tar");
+            command
+                .args(["-xf"])
+                .arg(archive)
+                .arg("-C")
+                .arg(destination);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = Command::new("unzip");
+            command
                 .args(["-qo"])
                 .arg(archive)
                 .arg("-d")
-                .arg(destination),
+                .arg(destination);
+            command
+        };
+        let status = run_timed(
+            &mut command,
             INSTALL_TIMEOUT,
-            "unzip archive",
+            "extract zip archive",
         )?;
         return if status.success() {
             Ok(())
