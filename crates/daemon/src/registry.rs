@@ -278,7 +278,7 @@ async fn run_git<const N: usize>(arguments: [&str; N]) -> Result<()> {
 }
 
 fn git_command() -> Command {
-    let mut command = Command::new("git");
+    let command = Command::new("git");
     #[cfg(windows)]
     {
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
