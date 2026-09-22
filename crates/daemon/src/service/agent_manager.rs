@@ -150,11 +150,12 @@ impl AgentManager {
         }
         let command = find_command(&self.tools_dir, agent)
             .ok_or_else(|| Error::msg(unavailable_reason(&self.tools_dir, agent)))?;
+        let arguments = resolved_arguments(agent, &command);
         Ok(ResolvedAgent {
             agent_id: agent.id.clone(),
             name: agent.name.clone(),
             command,
-            arguments: agent.arguments.clone(),
+            arguments,
             environment: agent.environment.clone(),
         })
     }
@@ -264,8 +265,30 @@ fn find_command(tools_dir: &Path, agent: &AgentDefinition) -> Option<PathBuf> {
     let search_path = environment_value(&agent.environment, "PATH")
         .map(OsString::from)
         .or_else(|| std::env::var_os("PATH"))?;
-    std::env::split_paths(&search_path)
-        .find_map(|directory| executable_path(&directory.join(&as_path), &agent.environment))
+    let directories = std::env::split_paths(&search_path).collect::<Vec<_>>();
+    let found = directories
+        .iter()
+        .find_map(|directory| executable_path(&directory.join(&as_path), &agent.environment));
+    if found.is_some() || command != "bunx" {
+        return found;
+    }
+    directories
+        .iter()
+        .find_map(|directory| executable_path(&directory.join("bun"), &agent.environment))
+}
+
+fn command_is_bun(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("bun"))
+}
+
+fn resolved_arguments(agent: &AgentDefinition, command: &Path) -> Vec<String> {
+    let mut arguments = agent.arguments.clone();
+    if agent.command.trim() == "bunx" && command_is_bun(command) {
+        arguments.insert(0, "x".into());
+    }
+    arguments
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -603,6 +626,31 @@ mod tests {
         let definition = agent("path-agent", environment);
 
         assert_eq!(find_command(&tools, &definition), Some(expected));
+        std::fs::remove_dir_all(tools).expect("remove tools directory");
+        std::fs::remove_dir_all(bin).expect("remove bin directory");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bunx_falls_back_to_winget_style_bun_executable() {
+        let tools = test_directory();
+        let bin = test_directory();
+        let expected = create_test_command(&bin, "bun");
+        let mut definition = agent(
+            "bunx",
+            vec![
+                ("PATH".into(), bin.to_string_lossy().into_owned()),
+                ("PATHEXT".into(), ".COM;.EXE;.BAT;.CMD".into()),
+            ],
+        );
+        definition.arguments = vec!["codex-acp@latest".into()];
+
+        let resolved = find_command(&tools, &definition).expect("resolve bun fallback");
+        assert_eq!(resolved, expected);
+        assert_eq!(
+            resolved_arguments(&definition, &resolved),
+            ["x", "codex-acp@latest"]
+        );
         std::fs::remove_dir_all(tools).expect("remove tools directory");
         std::fs::remove_dir_all(bin).expect("remove bin directory");
     }
