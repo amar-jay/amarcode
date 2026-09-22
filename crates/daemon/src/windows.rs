@@ -60,10 +60,38 @@ pub fn prepare_environment() -> Result<()> {
             }
         }
     }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        extend_winget_bun_paths(
+            &mut paths,
+            &PathBuf::from(local).join("Microsoft/WinGet/Packages"),
+        );
+    }
     let path = std::env::join_paths(paths)
         .map_err(|error| Error::msg(format!("invalid daemon tool PATH: {error}")))?;
     std::env::set_var("PATH", path);
     Ok(())
+}
+
+fn extend_winget_bun_paths(paths: &mut Vec<PathBuf>, packages: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(packages) else {
+        return;
+    };
+    for package in entries.flatten().filter(|entry| {
+        entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("Oven-sh.Bun_")
+    }) {
+        let Ok(architectures) = std::fs::read_dir(package.path()) else {
+            continue;
+        };
+        for architecture in architectures.flatten() {
+            let path = architecture.path();
+            if path.is_dir() && !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
 }
 
 pub fn attach_parent_console() {
@@ -87,5 +115,29 @@ pub fn attach_parent_console() {
                 SetStdHandle(kind, handle);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extend_winget_bun_paths;
+
+    #[test]
+    fn discovers_bun_installed_by_winget() {
+        let root = std::env::temp_dir().join(format!(
+            "amarcode-winget-bun-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let bun = root
+            .join("Oven-sh.Bun_Microsoft.Winget.Source_test")
+            .join("bun-windows-x64");
+        std::fs::create_dir_all(&bun).unwrap();
+        std::fs::create_dir_all(root.join("Unrelated.Package").join("bin")).unwrap();
+
+        let mut paths = Vec::new();
+        extend_winget_bun_paths(&mut paths, &root);
+
+        assert_eq!(paths, vec![bun]);
+        let _ = std::fs::remove_dir_all(root);
     }
 }

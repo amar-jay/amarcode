@@ -401,9 +401,9 @@ attaches to an existing console, and `status --json` retains redirected output.
 Agent commands capture output without opening separate terminal windows.
 
 The Windows task persists the installing application's tool PATH beside the
-data directory as `service-path.json`. The daemon also checks common Git, Bun,
-Cargo, and uv installation directories. Git is required to download the agent
-catalog. Windows health checks are available before that download finishes;
+data directory as `service-path.json`. The daemon also checks common Git, Bun
+(including WinGet packages), Cargo, and uv installation directories. Git is
+required to download the agent catalog. Windows health checks are available before that download finishes;
 the first agent-list request waits for the catalog and reports download errors
 when no cached catalog exists.
 
