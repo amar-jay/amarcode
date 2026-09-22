@@ -62,8 +62,14 @@ fn resolve_daemon_service_executable() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     #[cfg(debug_assertions)]
     let candidates = [
-        manifest_dir.join("../../../target/debug/amarcode-daemon"),
-        manifest_dir.join("../../target/debug/amarcode-daemon"),
+        manifest_dir.join(format!(
+            "../../../target/debug/amarcode-daemon{}",
+            std::env::consts::EXE_SUFFIX
+        )),
+        manifest_dir.join(format!(
+            "../../target/debug/amarcode-daemon{}",
+            std::env::consts::EXE_SUFFIX
+        )),
     ];
 
     #[cfg(debug_assertions)]

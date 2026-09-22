@@ -34,6 +34,8 @@ pub struct App {
     pub agents: AgentManager,
     pub chats: ChatManager,
     pub sessions: SessionManager,
+    #[cfg(windows)]
+    registry_ready: tokio::sync::OnceCell<()>,
     // Declared after the database-backed fields so they are dropped before
     // process ownership is released.
     _instance_lock: InstanceLock,
@@ -67,6 +69,9 @@ impl App {
         }
 
         let registry_path = crate::registry::checkout_path(&config.app_dir);
+        // On Windows, the desktop waits only briefly for service health.
+        // Defer network synchronization until an agent RPC, after TCP is bound.
+        #[cfg(not(windows))]
         if let Some(source) = config.acp_registry_source.as_deref() {
             match crate::registry::synchronize(&config.app_dir, source).await {
                 Ok(path) => info!(path = %path.display(), "ACP registry synchronized"),
@@ -111,8 +116,35 @@ impl App {
             agents,
             chats,
             sessions,
+            #[cfg(windows)]
+            registry_ready: tokio::sync::OnceCell::new(),
             _instance_lock: instance_lock,
         })
+    }
+
+    #[cfg(windows)]
+    pub(crate) async fn ensure_registry_ready(&self) -> Result<()> {
+        self.registry_ready
+            .get_or_try_init(|| async {
+                if let Some(source) = self.config.acp_registry_source.as_deref() {
+                    if let Err(error) =
+                        crate::registry::synchronize(&self.config.app_dir, source).await
+                    {
+                        // Preserve offline operation if a catalog already exists.
+                        if self.store.agents()?.is_empty() {
+                            return Err(error);
+                        }
+                        warn!(%error, "ACP registry synchronization failed; retaining stored catalog");
+                        return Ok(());
+                    }
+                    let path = crate::registry::checkout_path(&self.config.app_dir);
+                    self.store
+                        .sync_presets(&crate::registry::load_agents(&path)?)?;
+                }
+                Ok(())
+            })
+            .await?;
+        Ok(())
     }
 
     /// Bind TCP and serve until shutdown.
@@ -139,6 +171,40 @@ mod tests {
         store::{AgentRun, Chat},
         App, Config,
     };
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn missing_registry_does_not_prevent_health_or_silently_return_an_empty_catalog() {
+        use crate::{
+            protocol::rpc::methods,
+            rpc::handler::{dispatch, DispatchOutcome},
+        };
+        use serde_json::json;
+
+        let root = std::env::temp_dir().join(format!(
+            "amarcode-registry-health-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let app = App::new(Config {
+            db_path: root.join("workspace.sqlite3"),
+            app_dir: root.clone(),
+            daemon_addr: "127.0.0.1:0".into(),
+            acp_registry_source: Some(
+                root.join("missing-repository").to_string_lossy().into_owned(),
+            ),
+        })
+        .await
+        .expect("start daemon without waiting for registry");
+        let health = dispatch(&app, methods::HEALTH, json!({})).await.unwrap();
+        assert!(matches!(health, DispatchOutcome::Result(value) if value["status"] == "ok"));
+        assert!(dispatch(&app, methods::LIST_AGENTS, json!({}))
+            .await
+            .is_err());
+        // A catalog failure must not make the existing service unusable.
+        assert!(dispatch(&app, methods::HEALTH, json!({})).await.is_ok());
+        drop(app);
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[tokio::test]
     async fn second_app_cannot_stop_runs_owned_by_the_first_app() {

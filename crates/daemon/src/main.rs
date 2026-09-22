@@ -6,6 +6,10 @@
 //! 3. build `App`
 //! 4. run until shutdown signal
 
+// Task Scheduler launches this binary directly. Do not allocate a console;
+// explicit CLI invocations can still attach to their existing parent console.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::path::PathBuf;
 
 use amarcode_daemon::{
@@ -53,9 +57,23 @@ enum LifecycleCommand {
     },
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    #[cfg(windows)]
+    amarcode_daemon::windows::attach_parent_console();
     let command = Cli::parse().command.unwrap_or(LifecycleCommand::Run);
+    // Set the service environment before Tokio creates any worker threads.
+    #[cfg(windows)]
+    if command == LifecycleCommand::Run {
+        if let Err(error) = amarcode_daemon::windows::prepare_environment() {
+            eprintln!("amarcode-daemon: {error}");
+            std::process::exit(1);
+        }
+    }
+    async_main(command);
+}
+
+#[tokio::main]
+async fn async_main(command: LifecycleCommand) {
     if command != LifecycleCommand::Run {
         if let Err(error) = run_lifecycle_command(command) {
             eprintln!("amarcode-daemon: {error}");

@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 fn main() {
     // WebKitGTK's DMA-BUF renderer can silently skip backdrop-filter effects on
     // some Linux/Wayland GPU stacks. Select its fallback renderer before the

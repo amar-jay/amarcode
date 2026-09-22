@@ -72,6 +72,10 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace
 
+      - name: Test Windows task state queries
+        if: matrix.platform == 'windows-latest'
+        run: powershell -NoProfile -File scripts/test-windows-task-status.ps1
+
       - name: Build and publish signed desktop release
         uses: tauri-apps/tauri-action@v1
         env:

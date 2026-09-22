@@ -464,7 +464,14 @@ mod platform {
 
     const TASK_NAME: &str = "Amarcode Daemon";
 
-    pub fn install(executable: &Path, _agent_path: Option<&OsStr>) -> Result<()> {
+    fn command(program: &str) -> Command {
+        use std::os::windows::process::CommandExt;
+        let mut command = Command::new(program);
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        command
+    }
+
+    pub fn install(executable: &Path, agent_path: Option<&OsStr>) -> Result<()> {
         let user = current_user()?;
         let task = task_xml(executable, &user)?;
         let task_file =
@@ -473,11 +480,12 @@ mod platform {
             Error::msg(format!("failed to write {}: {error}", task_file.display()))
         })?;
 
-        let _ = Command::new("schtasks.exe")
+        crate::windows::save_service_path(agent_path)?;
+        let _ = command("schtasks.exe")
             .args(["/End", "/TN", TASK_NAME])
             .output();
         let registration = checked(
-            Command::new("schtasks.exe")
+            command("schtasks.exe")
                 .args(["/Create", "/TN", TASK_NAME, "/XML"])
                 .arg(&task_file)
                 .arg("/F"),
@@ -521,10 +529,10 @@ mod platform {
                     "amarcode-daemon.exe is still running without a registered scheduled task",
                 ))
             } else {
-                Ok(())
+                crate::windows::clear_service_path()
             };
         }
-        let _ = Command::new("schtasks.exe")
+        let _ = command("schtasks.exe")
             .args(["/End", "/TN", TASK_NAME])
             .output();
         for _ in 0..20 {
@@ -539,14 +547,14 @@ mod platform {
             ));
         }
         checked(
-            Command::new("schtasks.exe").args(["/Delete", "/TN", TASK_NAME, "/F"]),
+            command("schtasks.exe").args(["/Delete", "/TN", TASK_NAME, "/F"]),
             "remove the Amarcode logon task",
         )?;
-        Ok(())
+        crate::windows::clear_service_path()
     }
 
     fn daemon_process_running() -> Result<bool> {
-        let output = Command::new("tasklist.exe")
+        let output = command("tasklist.exe")
             .args([
                 "/FI",
                 "IMAGENAME eq amarcode-daemon.exe",
@@ -568,22 +576,35 @@ mod platform {
     }
 
     pub fn start() -> Result<()> {
+        if status()?.state == ServiceState::Running {
+            return Ok(());
+        }
         checked(
-            Command::new("schtasks.exe").args(["/Run", "/TN", TASK_NAME]),
+            command("schtasks.exe").args(["/Run", "/TN", TASK_NAME]),
             "start the Amarcode logon task",
         )?;
         Ok(())
     }
 
     pub fn stop() -> Result<()> {
-        if !status()?.installed {
+        let current = status()?;
+        if !current.installed || current.state == ServiceState::Stopped {
             return Ok(());
         }
         checked(
-            Command::new("schtasks.exe").args(["/End", "/TN", TASK_NAME]),
+            command("schtasks.exe").args(["/End", "/TN", TASK_NAME]),
             "stop the Amarcode logon task",
         )?;
-        Ok(())
+        // /End acknowledges a stop request before the task necessarily exits.
+        // Wait before restart's idempotent start checks whether it is running.
+        for _ in 0..20 {
+            let current = status()?;
+            if !current.installed || current.state == ServiceState::Stopped {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        Err(Error::msg("Amarcode logon task did not stop"))
     }
 
     pub fn restart() -> Result<()> {
@@ -592,27 +613,60 @@ mod platform {
     }
 
     pub fn status() -> Result<ServiceStatus> {
-        let output = Command::new("schtasks.exe")
-            .args(["/Query", "/TN", TASK_NAME, "/FO", "LIST", "/V"])
-            .output()
-            .map_err(|error| Error::msg(format!("failed to query Amarcode logon task: {error}")))?;
-        if !output.status.success() {
-            return Ok(ServiceStatus {
-                installed: false,
-                state: ServiceState::NotInstalled,
-                definition_path: None,
-            });
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
+        // schtasks /Query is localized. Use the scheduler's numeric COM state
+        // and distinguish a missing task from access/COM failures.
+        let output = checked(
+            command("powershell.exe").args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                include_str!("windows_task_status.ps1"),
+            ]),
+            "query Amarcode logon task state",
+        )?;
+        task_status_from_output(&String::from_utf8_lossy(&output.stdout))
+    }
+
+    fn task_status_from_output(output: &str) -> Result<ServiceStatus> {
+        let state = match output.trim() {
+            "-1" => ServiceState::NotInstalled,
+            "0" | "2" => ServiceState::Unknown,
+            "1" | "3" => ServiceState::Stopped,
+            "4" => ServiceState::Running,
+            value => {
+                return Err(Error::msg(format!("invalid Windows task state: {value}")))
+            }
+        };
         Ok(ServiceStatus {
-            installed: true,
-            state: if text.lines().any(|line| line.contains("Running")) {
-                ServiceState::Running
-            } else {
-                ServiceState::Stopped
-            },
+            installed: state != ServiceState::NotInstalled,
+            state,
             definition_path: None,
         })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn scheduler_states_are_not_localized() {
+            for (output, installed, state) in [
+                ("-1\r\n", false, ServiceState::NotInstalled),
+                ("0", true, ServiceState::Unknown),
+                ("1", true, ServiceState::Stopped),
+                ("2", true, ServiceState::Unknown),
+                ("3", true, ServiceState::Stopped),
+                ("4\r\n", true, ServiceState::Running),
+            ] {
+                let status = task_status_from_output(output).unwrap();
+                assert_eq!(status.installed, installed);
+                assert_eq!(status.state, state);
+            }
+            for invalid in ["", "Running", "En cours", "5", "access denied"] {
+                assert!(task_status_from_output(invalid).is_err());
+            }
+        }
     }
 
     fn task_xml(executable: &Path, user: &str) -> Result<String> {

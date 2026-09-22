@@ -43,8 +43,16 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::SUBSCRIBE_EVENTS => Ok(DispatchOutcome::Subscribe(parse_params(params)?)),
 
         // agents (read / install)
-        methods::LIST_AGENTS => Ok(DispatchOutcome::Result(list_agents(app)?)),
-        methods::INSTALL_AGENT => Ok(DispatchOutcome::Result(install_agent(app, params).await?)),
+        methods::LIST_AGENTS => {
+            #[cfg(windows)]
+            app.ensure_registry_ready().await?;
+            Ok(DispatchOutcome::Result(list_agents(app)?))
+        }
+        methods::INSTALL_AGENT => {
+            #[cfg(windows)]
+            app.ensure_registry_ready().await?;
+            Ok(DispatchOutcome::Result(install_agent(app, params).await?))
+        }
         methods::AUTHENTICATE_AGENT => Ok(DispatchOutcome::Result(
             authenticate_agent(app, params).await?,
         )),

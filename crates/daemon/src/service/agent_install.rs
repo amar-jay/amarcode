@@ -449,6 +449,11 @@ fn run_timed(
     timeout: Duration,
     label: &str,
 ) -> Result<std::process::ExitStatus> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
     let mut child = command
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

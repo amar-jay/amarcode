@@ -245,6 +245,11 @@ impl TerminalManager {
         self.consume_permission(run_id, chat_id, &root, &cwd, &request)?;
 
         let mut command = Command::new(&request.command);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
         command
             .args(&request.args)
             .current_dir(&cwd)
@@ -654,6 +659,48 @@ mod tests {
             )
             .expect("release terminal");
         assert!(manager.process("run", &terminal.to_string()).is_err());
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_terminal_captures_output_without_allocating_a_console() {
+        let workspace = temp_workspace();
+        let manager = TerminalManager::default();
+        // Check the terminal process itself, rather than its window title.
+        // A normal console-subsystem process would report a non-null HWND.
+        let script = "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class ConsoleProbe { [DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow(); }'; if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 1 }; [Console]::Out.Write('terminal-ok')";
+        let args = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script];
+        allow(&manager, "powershell.exe", &args);
+        let session = SessionId::new("session");
+        let terminal = manager
+            .create(
+                "run",
+                "chat",
+                &workspace,
+                CreateTerminalRequest::new(session.clone(), "powershell.exe")
+                    .args(args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>())
+                    .cwd(workspace.clone()),
+            )
+            .expect("create hidden Windows terminal")
+            .terminal_id;
+        let exit = manager
+            .wait(
+                "run",
+                WaitForTerminalExitRequest::new(session.clone(), terminal.clone()),
+            )
+            .expect("wait for hidden terminal");
+        assert_eq!(exit.exit_status.exit_code, Some(0));
+        let output = manager
+            .output(
+                "run",
+                TerminalOutputRequest::new(session.clone(), terminal.clone()),
+            )
+            .expect("read captured output");
+        assert_eq!(output.output, "terminal-ok");
+        manager
+            .release("run", ReleaseTerminalRequest::new(session, terminal))
+            .expect("release hidden terminal");
         let _ = std::fs::remove_dir_all(workspace);
     }
 

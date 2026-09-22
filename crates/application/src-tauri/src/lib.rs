@@ -425,7 +425,13 @@ struct WorkspaceDiff {
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
-    Command::new("git")
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    command
         .arg("-C")
         .arg(root)
         .args(args)
@@ -654,12 +660,7 @@ fn get_workspace_info(workspace_path: String) -> Result<WorkspaceInfo, String> {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or(workspace_path);
 
-    let is_git_repository = Command::new("git")
-        .arg("-C")
-        .arg(&path)
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .output()
-        .map_err(|error| format!("Could not check the workspace Git status: {error}"))?
+    let is_git_repository = git_output(&path, &["rev-parse", "--is-inside-work-tree"])?
         .status
         .success();
 

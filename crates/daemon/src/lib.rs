@@ -16,6 +16,8 @@ pub mod rpc;
 pub mod service;
 pub mod service_control;
 pub mod store;
+#[cfg(windows)]
+pub mod windows;
 
 pub use app::App;
 pub use config::Config;

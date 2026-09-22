@@ -187,6 +187,11 @@ impl AcpClient {
         cwd: Option<&Path>,
     ) -> AcpResult<(Self, Receiver<AcpInbound>)> {
         let mut process = Command::new(command);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            process.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
         process
             .args(arguments)
             .stdin(Stdio::piped())

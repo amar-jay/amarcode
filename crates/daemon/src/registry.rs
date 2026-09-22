@@ -228,12 +228,17 @@ fn path_text(path: &Path) -> Result<&str> {
 }
 
 async fn ensure_git_available() -> Result<()> {
-    let output = Command::new("git")
+    let output = git_command()
         .arg("--version")
         .kill_on_drop(true)
         .output()
         .await
-        .map_err(|_| Error::msg("git is not available"))?;
+        .map_err(|error| {
+            Error::msg(format!(
+                "Git is required to load the agent catalog but could not be started: {error}. \
+                 Install Git and restart the Amarcode background service."
+            ))
+        })?;
 
     if !output.status.success() {
         return Err(Error::msg("git invocation failed"));
@@ -245,7 +250,7 @@ async fn ensure_git_available() -> Result<()> {
 async fn run_git<const N: usize>(arguments: [&str; N]) -> Result<()> {
     let output = timeout(
         GIT_TIMEOUT,
-        Command::new("git")
+        git_command()
             .args(arguments)
             .kill_on_drop(true)
             .output(),
@@ -270,6 +275,16 @@ async fn run_git<const N: usize>(arguments: [&str; N]) -> Result<()> {
     } else {
         format!("failed to synchronize ACP registry: {detail}")
     }))
+}
+
+fn git_command() -> Command {
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        command.env("GIT_TERMINAL_PROMPT", "0");
+    }
+    command
 }
 
 fn validate_checkout(checkout: &Path) -> Result<()> {

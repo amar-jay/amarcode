@@ -395,6 +395,26 @@ amarcode-daemon uninstall # preserves SQLite and other user data
 amarcode-daemon purge --confirm-data-loss # unregisters service and deletes daemon data
 ```
 
+On Windows, Task Scheduler owns the daemon independently of desktop windows.
+The daemon does not allocate a console when the task starts; command-line use
+attaches to an existing console, and `status --json` retains redirected output.
+Agent commands capture output without opening separate terminal windows.
+
+The Windows task persists the installing application's tool PATH beside the
+data directory as `service-path.json`. The daemon also checks common Git, Bun,
+Cargo, and uv installation directories. Git is required to download the agent
+catalog. Windows health checks are available before that download finishes;
+the first agent-list request waits for the catalog and reports download errors
+when no cached catalog exists.
+
+Windows fixes in this crate require a new daemon release as well as a desktop
+build: rebuilding the desktop alone still downloads the previously published
+daemon. To validate on Windows, run `cargo test -p amarcode-daemon` and
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-windows-task-status.ps1`
+from the repository root. Then verify that reopening the desktop leaves the
+running scheduled task and daemon PID intact, and agent output appears in the
+app without a console window.
+
 `purge` is intentionally narrower than `uninstall`. It validates the
 platform-default daemon data directory, refuses relative, redirected, or
 symlinked targets, unregisters and verifies the service first, and only then
