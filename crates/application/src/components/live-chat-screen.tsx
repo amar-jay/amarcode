@@ -16,11 +16,7 @@ import {
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import type {
-  AcpEvent,
-  AgentRun,
-  PromptAttachment,
-} from "@/types";
+import type { AcpEvent, AgentRun, PromptAttachment } from "@/types";
 import { daemonApi } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -492,6 +488,7 @@ export function LiveChatScreen() {
           onAgentSelected={(next) => bindAgent(next)}
           onSendPrompt={submit}
           sessionConfig={live.sessionConfig}
+          sessionConfigAgentId={live.sessionConfigAgentId}
           contextUsage={live.contextUsage}
           onSessionConfigChange={(configId, value) =>
             changeSessionConfig({ configId, value })

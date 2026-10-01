@@ -102,6 +102,7 @@ interface AppPromptInputProps {
   isWorking?: boolean;
   onStop?: () => void;
   sessionConfig?: SessionConfigOption[];
+  sessionConfigAgentId?: string | null;
   onSessionConfigChange?: (
     configId: string,
     value: SessionConfigValue,
@@ -120,6 +121,7 @@ function AppPromptInput({
   isWorking = false,
   onStop,
   sessionConfig,
+  sessionConfigAgentId,
   onSessionConfigChange,
   contextUsage,
 }: AppPromptInputProps) {
@@ -131,12 +133,13 @@ function AppPromptInput({
   const lastKnown = loadLastSessionConfig(selectedAgentId);
   const pendingOptions =
     pendingConfig.agentId === selectedAgentId ? pendingConfig.options : [];
-  const options =
-    sessionConfig !== undefined
-      ? sessionConfig
-      : pendingOptions.length
-        ? pendingOptions
-        : lastKnown;
+  const usesLiveSessionConfig =
+    sessionConfig !== undefined && sessionConfigAgentId === selectedAgentId;
+  const options = usesLiveSessionConfig
+    ? sessionConfig
+    : pendingOptions.length
+      ? pendingOptions
+      : lastKnown;
   const showPermissionFallback = !hasAcpSessionMode(options);
 
   const openDirectory = async () => {
@@ -219,7 +222,7 @@ function AppPromptInput({
     if (agent) onAgentSelected?.(agent);
   };
   const selectConfig = async (configId: string, value: SessionConfigValue) => {
-    if (onSessionConfigChange) {
+    if (onSessionConfigChange && usesLiveSessionConfig) {
       await onSessionConfigChange(configId, value);
       return;
     }
@@ -298,7 +301,10 @@ function AppPromptInput({
             />
           )}
           {contextUsage && contextUsage.size > 0 && (
-            <Context usedTokens={contextUsage.used} maxTokens={contextUsage.size}>
+            <Context
+              usedTokens={contextUsage.used}
+              maxTokens={contextUsage.size}
+            >
               <ContextTrigger />
               <ContextContent>
                 <ContextContentHeader />

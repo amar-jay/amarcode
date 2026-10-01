@@ -17,6 +17,7 @@ import {
   applyLiveChatEventAtom,
   failStartedPromptAtom,
   liveChatAtom,
+  setLiveSessionConfigOptionAtom,
   type LiveChatState,
 } from "./live-chat";
 
@@ -58,6 +59,7 @@ describe("failed home-composer prompts", () => {
       contextRestoration: null,
       contextUsage: null,
       sessionConfig: [],
+      sessionConfigAgentId: null,
       loading: true,
       error: null,
       errorKind: null,
@@ -90,6 +92,7 @@ describe("ACP context usage", () => {
       contextRestoration: null,
       contextUsage: null,
       sessionConfig: [],
+      sessionConfigAgentId: null,
       loading: false,
       error: null,
       errorKind: null,
@@ -114,5 +117,67 @@ describe("ACP context usage", () => {
       size: 200_000,
       cost: { amount: 0.42, currency: "USD" },
     });
+  });
+});
+
+describe("agent-owned session configuration", () => {
+  it("does not modify the previous agent's live options after switching agents", async () => {
+    const store = createStore();
+    store.set(activeSessionAtom, {
+      chat,
+      agent: {
+        id: "agent-2",
+        name: "Agent 2",
+        icon: null,
+        command: "agent-2",
+        arguments: [],
+        environment: [],
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        available: true,
+        resolved_command: "agent-2",
+        unavailable_reason: null,
+      },
+      initialRunId: null,
+      initialTurnActive: false,
+    });
+    store.set(liveChatAtom, {
+      chatId: chat.id,
+      detail: null,
+      runId: "run-1",
+      runStatus: "running",
+      turnStatus: "completed",
+      pendingRequest: null,
+      contextRestoration: null,
+      contextUsage: null,
+      sessionConfig: [
+        {
+          id: "model",
+          name: "Previous model",
+          description: null,
+          category: null,
+          type: "select",
+          current_value: "old-model",
+          options: [
+            { value: "old-model", name: "Old model", description: null },
+          ],
+        },
+      ],
+      sessionConfigAgentId: "agent-1",
+      loading: false,
+      error: null,
+      errorKind: null,
+      authRequired: null,
+    });
+
+    await store.set(setLiveSessionConfigOptionAtom, {
+      configId: "model",
+      value: { type: "id", value: "new-model" },
+    });
+
+    expect(store.get(liveChatAtom)?.sessionConfig[0].current_value).toBe(
+      "old-model",
+    );
+    expect(store.get(liveChatAtom)?.sessionConfigAgentId).toBe("agent-1");
   });
 });

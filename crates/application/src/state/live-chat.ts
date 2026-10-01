@@ -39,6 +39,7 @@ export type LiveChatState = {
   contextRestoration: string | null;
   contextUsage: ContextUsage | null;
   sessionConfig: SessionConfigOption[];
+  sessionConfigAgentId: string | null;
   loading: boolean;
   error: string | null;
   errorKind: AgentFailureKind | null;
@@ -62,6 +63,7 @@ const emptyLiveChat = (
   contextRestoration: null,
   contextUsage: null,
   sessionConfig: [],
+  sessionConfigAgentId: null,
   loading: true,
   error: null,
   errorKind: null,
@@ -201,10 +203,18 @@ export const loadLiveChatAtom = atom(
       // Ignore stale responses after navigation away.
       if (!current || current.chatId !== id) return;
       if (isChatDetail(result)) {
+        const configAgentId = [...result.messages]
+          .reverse()
+          .find((message) => message.agent_id)?.agent_id;
         set(liveChatAtom, {
           ...current,
           detail: result,
           sessionConfig: result.session_config ?? current.sessionConfig,
+          sessionConfigAgentId:
+            configAgentId ??
+            current.sessionConfigAgentId ??
+            get(activeSessionAtom)?.agent?.id ??
+            null,
           contextUsage: result.context_usage ?? current.contextUsage,
           loading: false,
           error: null,
@@ -285,7 +295,11 @@ export const applyLiveChatEventAtom = atom(
       const options = event.payload.options;
       const session = get(activeSessionAtom);
       if (session?.agent?.id) rememberSessionConfig(session.agent.id, options);
-      set(liveChatAtom, { ...live, sessionConfig: options });
+      set(liveChatAtom, {
+        ...live,
+        sessionConfig: options,
+        sessionConfigAgentId: session?.agent?.id ?? live.sessionConfigAgentId,
+      });
       return;
     }
 
@@ -464,6 +478,10 @@ export const setLiveSessionConfigOptionAtom = atom(
   async (get, set, input: { configId: string; value: SessionConfigValue }) => {
     const live = get(liveChatAtom);
     if (!live) return;
+    const session = get(activeSessionAtom);
+    if (!session?.agent?.id || live.sessionConfigAgentId !== session.agent.id) {
+      return;
+    }
     const optimistic = live.sessionConfig.map((option) =>
       option.id === input.configId
         ? {
@@ -476,10 +494,7 @@ export const setLiveSessionConfigOptionAtom = atom(
         : option,
     );
     set(liveChatAtom, { ...live, sessionConfig: optimistic });
-    const session = get(activeSessionAtom);
-    if (session?.agent?.id) {
-      rememberSessionConfig(session.agent.id, optimistic);
-    }
+    rememberSessionConfig(session.agent.id, optimistic);
     try {
       const result = await daemonApi.setSessionConfigOption(
         live.chatId,
@@ -488,11 +503,12 @@ export const setLiveSessionConfigOptionAtom = atom(
       );
       const current = get(liveChatAtom);
       if (!current || current.chatId !== live.chatId) return;
-      set(liveChatAtom, { ...current, sessionConfig: result.options });
-      const activeSession = get(activeSessionAtom);
-      if (activeSession?.agent?.id) {
-        rememberSessionConfig(activeSession.agent.id, result.options);
-      }
+      set(liveChatAtom, {
+        ...current,
+        sessionConfig: result.options,
+        sessionConfigAgentId: session.agent.id,
+      });
+      rememberSessionConfig(session.agent.id, result.options);
     } catch (cause) {
       console.info("Session config will apply when this chat starts:", cause);
     }
