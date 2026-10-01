@@ -100,25 +100,49 @@ impl Store {
         Ok(())
     }
 
-    /// Set the first title supplied by ACP session metadata. This is an atomic
-    /// claim: prompt echoes do not count, and once an agent has supplied a
-    /// generated title, later sessions cannot rename the chat. Returns whether
-    /// this call claimed the title.
-    pub fn claim_agent_title(&self, id: &str, title: &str) -> Result<bool> {
+    /// Set the first title supplied by the chat's original ACP session. This is
+    /// an atomic claim: prompt echoes do not count, and sessions created while
+    /// switching agents or hydrating history cannot rename the chat. A later
+    /// run may claim the title only when it resumes the original agent's exact
+    /// ACP session. Returns whether this call claimed the title.
+    pub fn claim_agent_title(&self, id: &str, run_id: &str, title: &str) -> Result<bool> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction().map_err(to_error)?;
-        let current: Option<(String, bool)> = transaction
+        let current: Option<(String, bool, bool)> = transaction
             .query_row(
-                "SELECT title, agent_title_set FROM chats WHERE id=?1",
-                params![id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                "SELECT c.title, c.agent_title_set,
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_runs candidate
+                            JOIN agent_runs original
+                              ON original.id = (
+                                  SELECT first_run.id
+                                  FROM agent_runs first_run
+                                  WHERE first_run.chat_id=c.id
+                                  ORDER BY first_run.started_at ASC, first_run.rowid ASC
+                                  LIMIT 1
+                              )
+                            WHERE candidate.id=?2
+                              AND candidate.chat_id=c.id
+                              AND (
+                                  candidate.id=original.id
+                                  OR (
+                                      candidate.agent_id=original.agent_id
+                                      AND candidate.acp_session_id IS NOT NULL
+                                      AND candidate.acp_session_id=original.acp_session_id
+                                  )
+                              )
+                        )
+                 FROM chats c WHERE c.id=?1",
+                params![id, run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()
             .map_err(to_error)?;
-        let Some((fallback, already_claimed)) = current else {
+        let Some((fallback, already_claimed, session_owns_title)) = current else {
             return Ok(false);
         };
-        if already_claimed || is_prompt_title_echo(&fallback, title) {
+        if already_claimed || !session_owns_title || is_prompt_title_echo(&fallback, title) {
             return Ok(false);
         }
 

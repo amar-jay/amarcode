@@ -111,6 +111,16 @@ impl ProviderConfig {
     pub fn endpoint(&self) -> String {
         format!("{}/chat/completions", self.base_url)
     }
+
+    pub fn models_endpoint(&self) -> String {
+        format!("{}/models", self.base_url)
+    }
+
+    pub fn is_openrouter(&self) -> bool {
+        reqwest::Url::parse(&self.base_url)
+            .ok()
+            .is_some_and(|url| url.host_str() == Some("openrouter.ai"))
+    }
 }
 
 fn valid_agent_name(name: &str) -> bool {

@@ -51,12 +51,19 @@ remain opt-in. Streamed `reasoning_details`, `reasoning`, and
 Reasoning is presented through an ACP tool-call lifecycle with `kind: "think"`,
 including cumulative streamed content and a final completed status.
 
+For `openrouter.ai` providers, the adapter fetches available models from the
+provider's `/models` endpoint and exposes them in the ACP session model
+selector. Results are cached for one hour. `provider.model` remains the default
+and is the fallback if discovery fails. Model selections are scoped to each
+session and persisted with it.
+
 Session persistence is enabled by default with a 24-hour TTL. Unless `path` is
 configured, sessions are stored beside the configuration file by replacing its
 extension with `.sessions.json`. Relative paths are resolved from the
 configuration file's directory. The store contains conversation history,
-workspace paths, mode, and timestamps, but never the provider API key or tool
-permission decisions. Set `persistence.enabled` to `false` to disable it.
+workspace paths, selected model, and timestamps, but never the provider
+API key or tool permission decisions. Set `persistence.enabled` to `false` to
+disable it.
 
 ## Protocol behavior
 
@@ -85,8 +92,8 @@ partial reads return the exact `next_offset` needed to continue. All paths are
 restricted to the session workspace, symlink
 escapes are rejected, and output is bounded. Moving never overwrites an existing
 destination, and deletion accepts files only. `edit_file`, `write_file`,
-`move_file`, `delete_file`, and `run_command` are available only in code mode and require approval through
-ACP `session/request_permission`. Permission prompts offer allow/reject once and
+`move_file`, `delete_file`, and `run_command` require approval through ACP
+`session/request_permission`. Permission prompts offer allow/reject once and
 allow/reject for the session. Remembered decisions use exact operation keys:
 the target path for writes, and the executable, full argument vector, and
 working directory for commands. They are discarded when the ACP session closes.

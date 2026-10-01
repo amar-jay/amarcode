@@ -16,7 +16,8 @@ pub struct PersistedSession {
     pub session_id: String,
     pub cwd: PathBuf,
     pub history: Vec<Value>,
-    pub mode: String,
+    #[serde(default)]
+    pub model: String,
     pub updated_at: u64,
 }
 
@@ -172,13 +173,13 @@ mod tests {
                 session_id: id.to_string(),
                 cwd: PathBuf::from("/workspace"),
                 history: vec![json!({ "role": "user", "content": "hello" })],
-                mode: "code".into(),
+                model: "test-model".into(),
                 updated_at: 0,
             })
             .expect("persist session");
 
         let loaded = store.load().expect("load sessions");
-        assert_eq!(loaded[&id].mode, "code");
+        assert_eq!(loaded[&id].model, "test-model");
         assert_eq!(loaded[&id].history[0]["content"], "hello");
         assert!(store.delete(&id).expect("delete session"));
         assert!(store.load().expect("reload sessions").is_empty());
@@ -194,7 +195,7 @@ mod tests {
                 session_id: "expired".into(),
                 cwd: PathBuf::from("/workspace"),
                 history: Vec::new(),
-                mode: "ask".into(),
+                model: "test-model".into(),
                 updated_at: now_seconds().saturating_sub(2),
             }],
         };

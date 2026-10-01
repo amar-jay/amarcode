@@ -187,30 +187,6 @@ fn transcript_advertises_truthful_capabilities_and_routes_by_session_id() {
     assert_ne!(first, second);
     Uuid::parse_str(&first).expect("first UUID session id");
     Uuid::parse_str(&second).expect("second UUID session id");
-
-    agent.send(json!({
-        "jsonrpc": "2.0",
-        "id": 4,
-        "method": "session/set_config_option",
-        "params": { "sessionId": first, "configId": "mode", "value": "code" }
-    }));
-    let first_options = agent.response(4);
-    assert_eq!(
-        first_options["result"]["configOptions"][0]["currentValue"],
-        "code"
-    );
-
-    agent.send(json!({
-        "jsonrpc": "2.0",
-        "id": 5,
-        "method": "session/set_config_option",
-        "params": { "sessionId": second, "configId": "mode", "value": "plan" }
-    }));
-    let second_options = agent.response(5);
-    assert_eq!(
-        second_options["result"]["configOptions"][0]["currentValue"],
-        "plan"
-    );
 }
 
 #[test]
@@ -218,14 +194,6 @@ fn transcript_lists_resumes_and_deletes_persisted_sessions() {
     let mut agent = AgentProcess::spawn("http://127.0.0.1:9/v1");
     initialize(&mut agent);
     let session_id = new_session(&mut agent, 2, "/persistent-workspace");
-    agent.send(json!({
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "session/set_config_option",
-        "params": { "sessionId": session_id, "configId": "mode", "value": "code" }
-    }));
-    agent.response(3);
-
     agent.send(json!({
         "jsonrpc": "2.0",
         "id": 4,
@@ -255,7 +223,7 @@ fn transcript_lists_resumes_and_deletes_persisted_sessions() {
     let resumed = agent.response(6);
     assert_eq!(
         resumed["result"]["configOptions"][0]["currentValue"],
-        "code"
+        "test-model"
     );
 
     agent.send(json!({
@@ -567,13 +535,6 @@ fn transcript_reports_file_edits_as_acp_diffs() {
     let session_id = new_session(&mut agent, 2, workspace.to_str().expect("workspace path"));
     agent.send(json!({
         "jsonrpc": "2.0",
-        "id": 3,
-        "method": "session/set_config_option",
-        "params": { "sessionId": session_id, "configId": "mode", "value": "code" }
-    }));
-    agent.response(3);
-    agent.send(json!({
-        "jsonrpc": "2.0",
         "id": 4,
         "method": "session/prompt",
         "params": {
@@ -651,13 +612,6 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
     let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
     initialize(&mut agent);
     let session_id = new_session(&mut agent, 2, workspace.to_str().expect("workspace path"));
-    agent.send(json!({
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "session/set_config_option",
-        "params": { "sessionId": session_id, "configId": "mode", "value": "code" }
-    }));
-    let _ = agent.response(3);
     agent.send(json!({
         "jsonrpc": "2.0",
         "id": 4,

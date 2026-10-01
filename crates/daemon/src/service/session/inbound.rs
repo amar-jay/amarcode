@@ -489,7 +489,7 @@ fn apply_session_update(
             );
         }
         "session_info_update" => {
-            apply_session_title(inner, chat_id, update)?;
+            apply_session_title(inner, run_id, chat_id, update)?;
         }
         "usage_update" => {}
         "available_commands_update"
@@ -518,6 +518,7 @@ fn apply_session_update(
 /// Missing, null, and blank titles leave the existing fallback untouched.
 pub(super) fn apply_session_title(
     inner: &SessionInner,
+    run_id: &str,
     chat_id: &str,
     session_info: &Value,
 ) -> Result<()> {
@@ -529,7 +530,7 @@ pub(super) fn apply_session_title(
     else {
         return Ok(());
     };
-    if !inner.store.claim_agent_title(chat_id, title)? {
+    if !inner.store.claim_agent_title(chat_id, run_id, title)? {
         return Ok(());
     }
     emit(
@@ -818,6 +819,33 @@ mod tests {
                 archived_at: None,
             })
             .expect("create chat");
+        for (id, name) in [("agent-1", "Original agent"), ("agent-2", "Switched agent")] {
+            store
+                .save_agent(&crate::protocol::AgentDefinition {
+                    id: id.into(),
+                    name: name.into(),
+                    command: id.into(),
+                    arguments: vec![],
+                    environment: vec![],
+                    available: true,
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                    updated_at: "2026-01-01T00:00:00Z".into(),
+                })
+                .expect("create agent");
+        }
+        store
+            .create_run(&crate::store::AgentRun {
+                id: "run-1".into(),
+                chat_id: "chat-1".into(),
+                agent_id: "agent-1".into(),
+                acp_session_id: Some("session-1".into()),
+                status: crate::protocol::RunStatus::Running,
+                started_at: "2026-01-01T00:00:00Z".into(),
+                finished_at: None,
+                error_message: None,
+                context_usage: None,
+            })
+            .expect("create original run");
         let (events, mut receiver) = tokio::sync::broadcast::channel(4);
         let inner = SessionInner {
             store: std::sync::Arc::clone(&store),
@@ -847,9 +875,54 @@ mod tests {
         );
         assert!(receiver.try_recv().is_err());
 
+        store
+            .create_run(&crate::store::AgentRun {
+                id: "run-2".into(),
+                chat_id: "chat-1".into(),
+                agent_id: "agent-2".into(),
+                acp_session_id: Some("session-2".into()),
+                status: crate::protocol::RunStatus::Running,
+                started_at: "2026-01-02T00:00:00Z".into(),
+                finished_at: None,
+                error_message: None,
+                context_usage: None,
+            })
+            .expect("create switched run");
         apply_session_update(
             &inner,
-            "run-1",
+            "run-2",
+            "chat-1",
+            &json!({
+                "sessionId": "session-2",
+                "update": {
+                    "sessionUpdate": "session_info_update",
+                    "title": "The following transcript is the conversation history for this chat"
+                }
+            }),
+        )
+        .expect("ignore switched-agent hydration title");
+        assert_eq!(
+            store.get_chat("chat-1").expect("read chat").unwrap().title,
+            "first prompt fallback"
+        );
+        assert!(receiver.try_recv().is_err());
+
+        store
+            .create_run(&crate::store::AgentRun {
+                id: "run-3".into(),
+                chat_id: "chat-1".into(),
+                agent_id: "agent-1".into(),
+                acp_session_id: Some("session-1".into()),
+                status: crate::protocol::RunStatus::Running,
+                started_at: "2026-01-03T00:00:00Z".into(),
+                finished_at: None,
+                error_message: None,
+                context_usage: None,
+            })
+            .expect("create resumed original run");
+        apply_session_update(
+            &inner,
+            "run-3",
             "chat-1",
             &json!({
                 "sessionId": "session-1",
@@ -859,7 +932,7 @@ mod tests {
                 }
             }),
         )
-        .expect("apply title");
+        .expect("apply title from resumed original session");
 
         assert_eq!(
             store.get_chat("chat-1").expect("read chat").unwrap().title,
@@ -872,6 +945,7 @@ mod tests {
 
         apply_session_title(
             &inner,
+            "run-2",
             "chat-1",
             &json!({ "title": "A later agent's title" }),
         )
@@ -882,7 +956,7 @@ mod tests {
         );
         assert!(receiver.try_recv().is_err());
 
-        apply_session_title(&inner, "chat-1", &json!({ "title": "  " }))
+        apply_session_title(&inner, "run-2", "chat-1", &json!({ "title": "  " }))
             .expect("ignore blank title");
         assert_eq!(
             store.get_chat("chat-1").expect("read chat").unwrap().title,

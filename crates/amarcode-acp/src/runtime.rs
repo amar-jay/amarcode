@@ -1,4 +1,9 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use agent_client_protocol::{
     schema::{
@@ -12,8 +17,7 @@ use agent_client_protocol::{
             SessionCloseCapabilities, SessionConfigOption, SessionConfigOptionCategory,
             SessionConfigOptionValue, SessionDeleteCapabilities, SessionId, SessionInfo,
             SessionListCapabilities, SessionNotification, SessionResumeCapabilities, SessionUpdate,
-            SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-            SetSessionModeResponse, StopReason, TextContent,
+            SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason, TextContent,
         },
         ProtocolVersion,
     },
@@ -35,22 +39,34 @@ struct Runtime {
     http: HttpClient,
     sessions: Arc<Mutex<HashMap<SessionId, Session>>>,
     store: Option<Arc<SessionStore>>,
+    models: Arc<Mutex<ModelCache>>,
+}
+
+#[derive(Default)]
+struct ModelCache {
+    fetched_at: Option<Instant>,
+    ids: Vec<String>,
 }
 
 struct Session {
     cwd: PathBuf,
     history: Vec<serde_json::Value>,
-    mode: String,
+    model: String,
     active_turn: Option<ActiveTurn>,
     permissions: Arc<crate::tools::PermissionState>,
 }
 
 impl Session {
-    fn from_persisted(saved: PersistedSession) -> Self {
+    fn from_persisted(saved: PersistedSession, default_model: &str) -> Self {
+        let model = if saved.model.trim().is_empty() {
+            default_model.to_owned()
+        } else {
+            saved.model
+        };
         Self {
             cwd: saved.cwd,
             history: saved.history,
-            mode: saved.mode,
+            model,
             active_turn: None,
             permissions: Arc::new(crate::tools::PermissionState::default()),
         }
@@ -61,7 +77,7 @@ impl Session {
             session_id: session_id.to_string(),
             cwd: self.cwd.clone(),
             history: self.history.clone(),
-            mode: self.mode.clone(),
+            model: self.model.clone(),
             updated_at: crate::persistence::now_seconds(),
         }
     }
@@ -99,13 +115,17 @@ impl Runtime {
             .unwrap_or_default();
         let sessions = saved
             .into_iter()
-            .map(|(id, saved)| (id, Session::from_persisted(saved)))
+            .map(|(id, saved)| {
+                let session = Session::from_persisted(saved, &config.provider.model);
+                (id, session)
+            })
             .collect();
         Self {
             config: Arc::new(config),
             http: HttpClient::new(),
             sessions: Arc::new(Mutex::new(sessions)),
             store,
+            models: Arc::new(Mutex::new(ModelCache::default())),
         }
     }
 
@@ -140,7 +160,7 @@ impl Runtime {
         let session = Session {
             cwd: request.cwd,
             history: Vec::new(),
-            mode: "ask".into(),
+            model: self.config.provider.model.clone(),
             active_turn: None,
             permissions: Arc::new(crate::tools::PermissionState::default()),
         };
@@ -149,31 +169,9 @@ impl Runtime {
             .lock()
             .await
             .insert(session_id.clone(), session);
-        NewSessionResponse::new(session_id).config_options(self.config_options("ask"))
-    }
-
-    async fn set_mode(
-        &self,
-        session_id: &SessionId,
-        mode: &str,
-    ) -> agent_client_protocol::Result<()> {
-        if !matches!(mode, "ask" | "code" | "plan") {
-            return Err(Error::invalid_params().data("unsupported session mode"));
-        }
-        let mut sessions = self.sessions.lock().await;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| Error::invalid_params().data("unknown session"))?;
-        if session.mode != mode {
-            for message in &mut session.history {
-                if let Some(message) = message.as_object_mut() {
-                    message.remove("reasoning_details");
-                }
-            }
-        }
-        session.mode = mode.to_owned();
-        self.persist(session_id, session);
-        Ok(())
+        let models = self.available_models().await;
+        NewSessionResponse::new(session_id)
+            .config_options(self.config_options(&self.config.provider.model, &models))
     }
 
     async fn cancel(&self, session_id: &SessionId) {
@@ -214,12 +212,16 @@ impl Runtime {
         if saved.cwd != cwd {
             return Err(Error::invalid_params().data("session working directory does not match"));
         }
-        let mode = saved.mode.clone();
-        self.sessions
-            .lock()
-            .await
-            .insert(session_id.clone(), Session::from_persisted(saved));
-        Ok(mode)
+        let model = if saved.model.trim().is_empty() {
+            self.config.provider.model.clone()
+        } else {
+            saved.model.clone()
+        };
+        self.sessions.lock().await.insert(
+            session_id.clone(),
+            Session::from_persisted(saved, &self.config.provider.model),
+        );
+        Ok(model)
     }
 
     async fn list_sessions(
@@ -276,36 +278,88 @@ impl Runtime {
         }
     }
 
-    fn config_options(&self, mode: &str) -> Vec<SessionConfigOption> {
-        vec![
-            SessionConfigOption::select(
-                "mode",
-                "Session mode",
-                mode.to_owned(),
-                vec![
-                    agent_client_protocol::schema::v1::SessionConfigSelectOption::new("ask", "Ask"),
+    fn config_options(&self, model: &str, models: &[String]) -> Vec<SessionConfigOption> {
+        vec![SessionConfigOption::select(
+            "model",
+            "Model",
+            model.to_owned(),
+            models
+                .iter()
+                .map(|id| {
                     agent_client_protocol::schema::v1::SessionConfigSelectOption::new(
-                        "code", "Code",
-                    ),
-                    agent_client_protocol::schema::v1::SessionConfigSelectOption::new(
-                        "plan", "Plan",
-                    ),
-                ],
-            )
-            .category(SessionConfigOptionCategory::Mode),
-            SessionConfigOption::select(
-                "model",
-                "Model",
-                self.config.provider.model.clone(),
-                vec![
-                    agent_client_protocol::schema::v1::SessionConfigSelectOption::new(
-                        self.config.provider.model.clone(),
-                        self.config.provider.model.clone(),
-                    ),
-                ],
-            )
-            .category(SessionConfigOptionCategory::Model),
-        ]
+                        id.clone(),
+                        id.clone(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+        .category(SessionConfigOptionCategory::Model)]
+    }
+
+    async fn available_models(&self) -> Vec<String> {
+        const MODEL_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
+        let mut cache = self.models.lock().await;
+        if cache
+            .fetched_at
+            .is_some_and(|at| at.elapsed() < MODEL_CACHE_TTL)
+            && !cache.ids.is_empty()
+        {
+            return cache.ids.clone();
+        }
+        let fallback = vec![self.config.provider.model.clone()];
+        let mut models = if self.config.provider.is_openrouter() {
+            match provider::fetch_models(&self.http, &self.config).await {
+                Ok(models) => models,
+                Err(error) => {
+                    eprintln!("amarcode-acp: {error}; using configured model");
+                    fallback.clone()
+                }
+            }
+        } else {
+            fallback.clone()
+        };
+        if !models.contains(&self.config.provider.model) {
+            models.insert(0, self.config.provider.model.clone());
+        }
+        cache.fetched_at = Some(Instant::now());
+        cache.ids = models.clone();
+        models
+    }
+
+    async fn set_model(
+        &self,
+        session_id: &SessionId,
+        model: &str,
+    ) -> agent_client_protocol::Result<()> {
+        if model.trim().is_empty() {
+            return Err(Error::invalid_params().data("model must not be empty"));
+        }
+        let models = self.available_models().await;
+        if !models.iter().any(|available| available == model) {
+            return Err(Error::invalid_params().data("unknown model"));
+        }
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| Error::invalid_params().data("unknown session"))?;
+        session.model = model.to_owned();
+        self.persist(session_id, session);
+        Ok(())
+    }
+
+    async fn session_config_options(
+        &self,
+        session_id: &SessionId,
+    ) -> agent_client_protocol::Result<Vec<SessionConfigOption>> {
+        let model = {
+            let sessions = self.sessions.lock().await;
+            let session = sessions
+                .get(session_id)
+                .ok_or_else(|| Error::invalid_params().data("unknown session"))?;
+            session.model.clone()
+        };
+        let models = self.available_models().await;
+        Ok(self.config_options(&model, &models))
     }
 
     async fn begin_turn(
@@ -342,7 +396,7 @@ impl Runtime {
         Ok((
             turn_id,
             session.cwd.clone(),
-            session.mode.clone(),
+            session.model.clone(),
             history,
             Arc::clone(&session.permissions),
             cancellation,
@@ -383,7 +437,6 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
     let resume_session_runtime = runtime.clone();
     let list_sessions_runtime = runtime.clone();
     let delete_session_runtime = runtime.clone();
-    let set_mode_runtime = runtime.clone();
     let set_config_runtime = runtime.clone();
     let prompt_runtime = runtime.clone();
     let cancel_runtime = runtime.clone();
@@ -409,16 +462,21 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                         responder,
                         connection: ConnectionTo<Client>| {
                 let result = async {
-                    let mode = load_session_runtime
+                    load_session_runtime
                         .restore(&request.session_id, &request.cwd)
                         .await?;
-                    let sessions = load_session_runtime.sessions.lock().await;
-                    let session = sessions.get(&request.session_id).ok_or_else(|| {
-                        Error::internal_error().data("restored session disappeared")
-                    })?;
-                    replay_history(&connection, &request.session_id, &session.history)?;
+                    let history = {
+                        let sessions = load_session_runtime.sessions.lock().await;
+                        sessions.get(&request.session_id).ok_or_else(|| {
+                            Error::internal_error().data("restored session disappeared")
+                        })?.history.clone()
+                    };
+                    replay_history(&connection, &request.session_id, &history)?;
+                    let options = load_session_runtime
+                        .session_config_options(&request.session_id)
+                        .await?;
                     Ok(LoadSessionResponse::new()
-                        .config_options(load_session_runtime.config_options(&mode)))
+                        .config_options(options))
                 }
                 .await;
                 responder.respond_with_result(result)
@@ -427,13 +485,13 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
         )
         .on_receive_request(
             async move |request: ResumeSessionRequest, responder, _connection| {
-                let result = resume_session_runtime
-                    .restore(&request.session_id, &request.cwd)
-                    .await
-                    .map(|mode| {
-                        ResumeSessionResponse::new()
-                            .config_options(resume_session_runtime.config_options(&mode))
-                    });
+                let result = async {
+                    resume_session_runtime.restore(&request.session_id, &request.cwd).await?;
+                    let options = resume_session_runtime
+                        .session_config_options(&request.session_id)
+                        .await?;
+                    Ok(ResumeSessionResponse::new().config_options(options))
+                }.await;
                 responder.respond_with_result(result)
             },
             agent_client_protocol::on_receive_request!(),
@@ -455,42 +513,17 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |request: SetSessionModeRequest, responder, _connection| {
-                let result = set_mode_runtime
-                    .set_mode(&request.session_id, &request.mode_id.to_string())
-                    .await
-                    .map(|()| SetSessionModeResponse::new());
-                responder.respond_with_result(result)
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
             async move |request: SetSessionConfigOptionRequest, responder, _connection| {
                 let result = match (request.config_id.to_string().as_str(), request.value) {
-                    ("mode", SessionConfigOptionValue::ValueId { value }) => {
-                        let mode = value.to_string();
-                        set_config_runtime
-                            .set_mode(&request.session_id, &mode)
-                            .await
-                            .map(|()| {
-                                SetSessionConfigOptionResponse::new(
-                                    set_config_runtime.config_options(&mode),
-                                )
-                            })
-                    }
-                    ("model", SessionConfigOptionValue::ValueId { value })
-                        if value.to_string() == set_config_runtime.config.provider.model =>
-                    {
-                        let sessions = set_config_runtime.sessions.lock().await;
-                        let result = sessions
-                            .get(&request.session_id)
-                            .ok_or_else(|| Error::invalid_params().data("unknown session"))
-                            .map(|session| {
-                                SetSessionConfigOptionResponse::new(
-                                    set_config_runtime.config_options(&session.mode),
-                                )
-                            });
-                        result
+                    ("model", SessionConfigOptionValue::ValueId { value }) => {
+                        let model = value.to_string();
+                        async {
+                            set_config_runtime.set_model(&request.session_id, &model).await?;
+                            let options = set_config_runtime
+                                .session_config_options(&request.session_id)
+                                .await?;
+                            Ok(SetSessionConfigOptionResponse::new(options))
+                        }.await
                     }
                     _ => Err(Error::invalid_params().data("unknown configuration option")),
                 };
@@ -502,7 +535,7 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
             async move |request: PromptRequest,
                         responder: Responder<PromptResponse>,
                         connection: ConnectionTo<Client>| {
-                let (turn_id, cwd, mode, history, permissions, cancellation) =
+                let (turn_id, cwd, model, history, permissions, cancellation) =
                     match prompt_runtime.begin_turn(&request).await {
                         Ok(turn) => turn,
                         Err(error) => return responder.respond_with_error(error),
@@ -515,7 +548,7 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                 connection.clone().spawn(async move {
                     let outcome = tokio::select! {
                         outcome = run_agent_turn(
-                            &runtime, history, cwd, mode, permissions, session_id.clone(), message_id,
+                            &runtime, history, cwd, model, permissions, session_id.clone(), message_id,
                             connection, cancellation,
                         ) => outcome,
                         _ = request_cancellation.cancelled() => {
@@ -572,21 +605,21 @@ async fn run_agent_turn(
     runtime: &Runtime,
     mut history: Vec<serde_json::Value>,
     cwd: PathBuf,
-    mode: String,
+    model: String,
     permissions: Arc<crate::tools::PermissionState>,
     session_id: SessionId,
     mut message_id: agent_client_protocol::schema::v1::MessageId,
     connection: ConnectionTo<Client>,
     cancellation: watch::Receiver<bool>,
 ) -> Result<Completion<Vec<serde_json::Value>>, String> {
-    const MAX_TOOL_ROUNDS: usize = 16;
+    const MAX_TOOL_ROUNDS: usize = 1000;
     let mut search_group: Option<SearchPresentationGroup> = None;
     for _ in 0..MAX_TOOL_ROUNDS {
         let completion = match provider::stream_completion(
             &runtime.http,
             &runtime.config,
+            &model,
             &history,
-            &mode,
             provider::StreamContext {
                 session_id: session_id.clone(),
                 message_id,
@@ -643,7 +676,6 @@ async fn run_agent_turn(
             let output = crate::tools::execute(
                 call,
                 &cwd,
-                &mode,
                 &permissions,
                 &session_id,
                 &connection,
@@ -808,7 +840,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sessions_have_unique_ids_and_independent_modes() {
+    async fn sessions_have_unique_ids_and_workspaces() {
         let runtime = runtime();
         let first = runtime
             .new_session(NewSessionRequest::new("/workspace"))
@@ -818,44 +850,8 @@ mod tests {
             .await;
         assert_ne!(first.session_id, second.session_id);
 
-        runtime
-            .set_mode(&first.session_id, "code")
-            .await
-            .expect("set first mode");
         let sessions = runtime.sessions.lock().await;
-        assert_eq!(sessions[&first.session_id].mode, "code");
-        assert_eq!(sessions[&second.session_id].mode, "ask");
         assert_eq!(sessions[&first.session_id].cwd, PathBuf::from("/workspace"));
-    }
-
-    #[tokio::test]
-    async fn changing_mode_discards_stale_reasoning_constraints() {
-        let runtime = runtime();
-        let created = runtime
-            .new_session(NewSessionRequest::new("/workspace"))
-            .await;
-        {
-            let mut sessions = runtime.sessions.lock().await;
-            sessions
-                .get_mut(&created.session_id)
-                .expect("session")
-                .history
-                .push(serde_json::json!({
-                    "role": "assistant",
-                    "content": "I cannot edit in ask mode.",
-                    "reasoning_details": [{ "type": "reasoning.text", "text": "read-only" }],
-                }));
-        }
-
-        runtime
-            .set_mode(&created.session_id, "code")
-            .await
-            .expect("switch to code mode");
-
-        let sessions = runtime.sessions.lock().await;
-        let session = sessions.get(&created.session_id).expect("session");
-        assert_eq!(session.mode, "code");
-        assert!(session.history[0].get("reasoning_details").is_none());
     }
 
     #[tokio::test]
@@ -881,6 +877,27 @@ mod tests {
         runtime.cancel(&first.session_id).await;
         assert!(*first_cancel.borrow());
         assert!(!*second_cancel.borrow());
+    }
+
+    #[tokio::test]
+    async fn model_selection_is_kept_per_session() {
+        let runtime = runtime();
+        let first = runtime.new_session(NewSessionRequest::new("/one")).await;
+        let second = runtime.new_session(NewSessionRequest::new("/two")).await;
+        {
+            let mut cache = runtime.models.lock().await;
+            cache.fetched_at = Some(Instant::now());
+            cache.ids = vec!["test-model".into(), "other-model".into()];
+        }
+
+        runtime
+            .set_model(&first.session_id, "other-model")
+            .await
+            .expect("select model");
+
+        let sessions = runtime.sessions.lock().await;
+        assert_eq!(sessions[&first.session_id].model, "other-model");
+        assert_eq!(sessions[&second.session_id].model, "test-model");
     }
 
     #[tokio::test]
@@ -915,10 +932,6 @@ mod tests {
         let created = runtime
             .new_session(NewSessionRequest::new("/workspace"))
             .await;
-        runtime
-            .set_mode(&created.session_id, "code")
-            .await
-            .expect("persist mode");
         {
             let mut sessions = runtime.sessions.lock().await;
             let session = sessions.get_mut(&created.session_id).expect("live session");
@@ -932,7 +945,7 @@ mod tests {
         let restored = Runtime::new(config);
         let sessions = restored.sessions.lock().await;
         let session = sessions.get(&created.session_id).expect("restored session");
-        assert_eq!(session.mode, "code");
+        assert_eq!(session.model, "test-model");
         assert_eq!(session.history[0]["content"], "remember me");
         assert!(session.active_turn.is_none());
         drop(sessions);

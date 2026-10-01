@@ -129,7 +129,6 @@ impl PermissionState {
 pub async fn execute(
     call: &ModelToolCall,
     workspace: &Path,
-    mode: &str,
     permissions: &PermissionState,
     session_id: &SessionId,
     connection: &ConnectionTo<Client>,
@@ -158,14 +157,6 @@ pub async fn execute(
     ));
 
     if let Some(permission_key) = permission_key(call, &arguments) {
-        if mode != "code" {
-            return finish(
-                connection,
-                session_id,
-                call,
-                Err(format!("{} is only available in code mode", call.name)),
-            );
-        }
         let allowed = if let Some(allowed) = permissions.decision(&permission_key) {
             allowed
         } else {
