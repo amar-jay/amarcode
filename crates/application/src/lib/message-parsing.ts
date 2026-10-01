@@ -245,6 +245,7 @@ function buildTimeline(
   items: MessageDetail[],
   streaming: boolean,
   verbose: boolean,
+  diffToolCallIds: ReadonlySet<string>,
 ): TimelineStep[] {
   const seenTools = new Set<string>();
   const steps: TimelineStep[] = [];
@@ -269,7 +270,8 @@ function buildTimeline(
         continue;
       }
       const tool = toolSummary(part, verbose);
-      if (!tool || seenTools.has(tool.id)) continue;
+      if (!tool || seenTools.has(tool.id) || diffToolCallIds.has(tool.id))
+        continue;
       seenTools.add(tool.id);
       steps.push({
         key: `${message.id}-tool-${part.ordinal}`,
@@ -369,8 +371,13 @@ export function groupChatBlocks(
         : block.streaming
           ? "streaming"
           : "complete";
-    block.timeline = buildTimeline(block.items, block.streaming, verbose);
     block.diffs = block.items.flatMap((item) => diffArtifacts(item.parts));
+    block.timeline = buildTimeline(
+      block.items,
+      block.streaming,
+      verbose,
+      new Set(block.diffs.map((artifact) => artifact.toolCallId)),
+    );
     block.agentId = block.items.find((item) => item.agent_id)?.agent_id ?? null;
     block.startedAt =
       previous?.kind === "user"

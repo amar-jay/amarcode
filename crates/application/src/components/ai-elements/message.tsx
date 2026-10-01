@@ -11,7 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
+import { createMathPlugin } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
@@ -39,6 +39,7 @@ import {
 } from "@/lib/workspace-link";
 import { notify } from "@/lib/notify";
 import { tauriLinkSafety } from "./tauri-link-safety";
+import { normalizeMathMarkdown } from "@/lib/math-markdown";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -331,7 +332,12 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+const streamdownPlugins = {
+  cjk,
+  code,
+  math: createMathPlugin({ singleDollarTextMath: true }),
+  mermaid,
+};
 
 function WorkspaceAwareLink({
   href = "",
@@ -380,7 +386,7 @@ function WorkspaceAwareLink({
 }
 
 export const MessageResponse = memo(
-  ({ className, components, ...props }: MessageResponseProps) => (
+  ({ className, components, children, ...props }: MessageResponseProps) => (
     <Streamdown
       className={cn(
         "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
@@ -397,7 +403,11 @@ export const MessageResponse = memo(
       lineNumbers
       components={{ ...components, a: WorkspaceAwareLink }}
       {...props}
-    />
+    >
+      {typeof children === "string"
+        ? normalizeMathMarkdown(children)
+        : children}
+    </Streamdown>
   ),
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&

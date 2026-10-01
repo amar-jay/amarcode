@@ -182,6 +182,7 @@ function extractChanges(diff: Record<string, unknown>): DiffChange[] {
 
 export type DiffArtifact = {
   key: string;
+  toolCallId: string;
   title: string;
   changes: DiffChange[];
   patch: string | null;
@@ -218,11 +219,6 @@ export function diffArtifacts(parts: MessagePart[]): DiffArtifact[] {
           : typeof tool.tool_call_id === "string"
             ? tool.tool_call_id
             : `part-${part.ordinal}`;
-      const title =
-        typeof tool.title === "string" && tool.title.trim()
-          ? tool.title
-          : "File changes";
-
       content.forEach((item, index) => {
         const diff = asRecord(item);
         if (!diff || diff.type !== "diff") return;
@@ -242,7 +238,8 @@ export function diffArtifacts(parts: MessagePart[]): DiffArtifact[] {
         const key = `${toolCallId}:${index}`;
         byKey.set(key, {
           key,
-          title,
+          toolCallId,
+          title: "File changes",
           changes,
           patch,
           deferred: tool._deferred === true,

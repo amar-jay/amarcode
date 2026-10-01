@@ -9,7 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
+import { createMathPlugin } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
@@ -25,6 +25,7 @@ import {
 } from "react";
 import { Streamdown } from "streamdown";
 import { tauriLinkSafety } from "./tauri-link-safety";
+import { normalizeMathMarkdown } from "@/lib/math-markdown";
 
 import { Shimmer } from "./shimmer";
 
@@ -205,7 +206,12 @@ export type ReasoningContentProps = ComponentProps<
   children: string;
 };
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+const streamdownPlugins = {
+  cjk,
+  code,
+  math: createMathPlugin({ singleDollarTextMath: true }),
+  mermaid,
+};
 
 export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
@@ -218,7 +224,7 @@ export const ReasoningContent = memo(
       {...props}
     >
       <Streamdown plugins={streamdownPlugins} linkSafety={tauriLinkSafety}>
-        {children}
+        {normalizeMathMarkdown(children)}
       </Streamdown>
     </CollapsibleContent>
   ),
