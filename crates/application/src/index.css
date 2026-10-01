@@ -3,6 +3,7 @@
 @import "@fontsource-variable/roboto";
 @import "@fontsource-variable/space-grotesk";
 @import "@fontsource-variable/noto-serif";
+@import "katex/dist/katex.min.css";
 
 @custom-variant dark (&:is(.dark *));
 /* Tauri's WebView can report no hover-capable primary pointer on desktop.
