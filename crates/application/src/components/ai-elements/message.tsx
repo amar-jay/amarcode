@@ -341,6 +341,7 @@ const streamdownPlugins = {
 
 function WorkspaceAwareLink({
   href = "",
+  className,
   onClick,
   ...props
 }: ComponentProps<"a"> & ExtraProps) {
@@ -351,6 +352,10 @@ function WorkspaceAwareLink({
   return (
     <a
       href={href}
+      className={cn(
+        "underline decoration-foreground/45 underline-offset-2 transition-colors hover:decoration-foreground focus-visible:decoration-foreground",
+        className,
+      )}
       onClick={(event) => {
         if (!looksLikeWorkspaceFileTarget(href)) {
           onClick?.(event);

@@ -223,7 +223,11 @@ export const ReasoningContent = memo(
       )}
       {...props}
     >
-      <Streamdown plugins={streamdownPlugins} linkSafety={tauriLinkSafety}>
+      <Streamdown
+        className="[&_a]:underline [&_a]:decoration-current/45 [&_a]:underline-offset-2 [&_a]:transition-colors [&_a:focus-visible]:decoration-current [&_a:hover]:decoration-current"
+        plugins={streamdownPlugins}
+        linkSafety={tauriLinkSafety}
+      >
         {normalizeMathMarkdown(children)}
       </Streamdown>
     </CollapsibleContent>
