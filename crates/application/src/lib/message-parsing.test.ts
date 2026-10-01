@@ -78,4 +78,41 @@ describe("assistant tool presentation", () => {
     expect(block.diffs[0].patch).toContain("-const value = 1;");
     expect(block.diffs[0].patch).toContain("+const value = 2;");
   });
+
+  it("keeps separate assistant log messages visually divided", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => undefined,
+    });
+    const { groupChatBlocks } = await import("./message-parsing");
+    const message = (id: string, content: string): MessageDetail => ({
+      message: {
+        id,
+        chat_id: "chat-1",
+        agent_run_id: "run-1",
+        role: "assistant",
+        content,
+        status: "complete",
+        created_at: "2026-01-01T00:00:01Z",
+        updated_at: "2026-01-01T00:00:02Z",
+      },
+      agent_id: "agent-1",
+      parts: [],
+    });
+
+    const [block] = groupChatBlocks(
+      [
+        message("progress-1", "Checking the implementation."),
+        message("final-1", "The fix is complete."),
+      ],
+      false,
+      false,
+    );
+
+    expect(block.kind).toBe("assistant");
+    if (block.kind !== "assistant") return;
+    expect(block.content).toBe(
+      "Checking the implementation.\n\n---\n\nThe fix is complete.",
+    );
+  });
 });

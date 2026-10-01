@@ -346,7 +346,7 @@ export function groupChatBlocks(
     block.content = block.items
       .map((item) => item.message.content)
       .filter((text) => text.trim())
-      .join("\n\n");
+      .join("\n\n---\n\n");
     const previous = blocks[index - 1];
     if (
       previous?.kind === "user" &&
