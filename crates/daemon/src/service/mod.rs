@@ -19,6 +19,7 @@
 
 pub mod agent_install;
 pub mod agent_manager;
+pub mod amarcode_acp;
 pub mod attachments;
 pub mod chat_manager;
 pub mod session;

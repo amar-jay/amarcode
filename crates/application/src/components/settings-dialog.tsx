@@ -100,7 +100,7 @@ import {
 } from "@/components/ui/command";
 import type { AgentInfo } from "@/types";
 import { AgentLogo } from "@/components/agent-logo";
-import { installAgentAtom } from "@/state/agents";
+import { installAgentAtom, reloadAgentsAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 
 type SettingsPage = "appearance" | "general" | "agent" | "daemon";
@@ -518,9 +518,64 @@ function AgentDefaultsPanel({
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const installAgent = useSetAtom(installAgentAtom);
+  const reloadAgents = useSetAtom(reloadAgentsAtom);
+  const [acpConfig, setAcpConfig] = useState<{
+    base_url: string;
+    model: string;
+    has_api_key: boolean;
+  } | null>(null);
+  const [acpApiKey, setAcpApiKey] = useState("");
+  const [acpSaving, setAcpSaving] = useState(false);
+  const [acpError, setAcpError] = useState<string | null>(null);
   const selectedAgent = agents.find((agent) => agent.id === defaultAgentId);
   const availableAgents = agents.filter((agent) => agent.available);
   const installableAgents = agents.filter((agent) => !agent.available);
+
+  useEffect(() => {
+    let cancelled = false;
+    void daemonApi
+      .getAmarcodeAcpConfig()
+      .then((value) => {
+        if (!cancelled) setAcpConfig(value);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setAcpError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not load Amarcode provider settings.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveAcpConfig = async () => {
+    if (!acpConfig || acpSaving) return;
+    setAcpSaving(true);
+    setAcpError(null);
+    try {
+      const value = await daemonApi.setAmarcodeAcpConfig(
+        acpConfig.base_url,
+        acpConfig.model,
+        acpApiKey,
+      );
+      setAcpConfig(value);
+      setAcpApiKey("");
+      await reloadAgents();
+      notify("Amarcode provider settings saved", "success");
+    } catch (cause) {
+      setAcpError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not save Amarcode provider settings.",
+      );
+    } finally {
+      setAcpSaving(false);
+    }
+  };
 
   const chooseDefaultWorkspace = async () => {
     try {
@@ -615,7 +670,7 @@ function AgentDefaultsPanel({
     );
   };
   return (
-    <div className="mx-auto w-full max-w-132">
+    <div className="mx-auto h-full w-full max-w-132 overflow-y-auto pr-1">
       <h2 className="text-base font-medium">Agent defaults</h2>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         Choose the agent used for new chats. Session configuration is provided
@@ -623,6 +678,82 @@ function AgentDefaultsPanel({
       </p>
       <Separator className="my-6" />
       <FieldSet className="gap-7">
+        <Field>
+          <FieldContent>
+            <FieldLabel>Amarcode provider</FieldLabel>
+            <FieldDescription>
+              Configure the built-in OpenAI-compatible ACP agent. The API key is
+              stored by the background service and is never returned to the
+              application.
+            </FieldDescription>
+          </FieldContent>
+          {acpConfig === null ? (
+            <div className="grid min-h-9 gap-2">
+              {!acpError && (
+                <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+              )}
+              {acpError && (
+                <p className="text-[11px] text-destructive" role="alert">
+                  {acpError}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              <Input
+                aria-label="Provider base URL"
+                placeholder="https://openrouter.ai/api/v1"
+                value={acpConfig.base_url}
+                onChange={(event) =>
+                  setAcpConfig({ ...acpConfig, base_url: event.target.value })
+                }
+              />
+              <Input
+                aria-label="Provider model"
+                placeholder="Provider model ID"
+                value={acpConfig.model}
+                onChange={(event) =>
+                  setAcpConfig({ ...acpConfig, model: event.target.value })
+                }
+              />
+              <div className="flex gap-2">
+                <Input
+                  aria-label="Provider API key"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={
+                    acpConfig.has_api_key
+                      ? "API key saved — enter to replace"
+                      : "API key"
+                  }
+                  value={acpApiKey}
+                  onChange={(event) => setAcpApiKey(event.target.value)}
+                />
+                <Button
+                  type="button"
+                  disabled={
+                    acpSaving ||
+                    !acpConfig.base_url.trim() ||
+                    !acpConfig.model.trim() ||
+                    (!acpConfig.has_api_key && !acpApiKey.trim())
+                  }
+                  onClick={() => void saveAcpConfig()}
+                >
+                  {acpSaving && (
+                    <LoaderCircle className="size-4 animate-spin" />
+                  )}
+                  Save
+                </Button>
+              </div>
+              {acpError && (
+                <p className="text-[11px] text-destructive" role="alert">
+                  {acpError}
+                </p>
+              )}
+            </div>
+          )}
+        </Field>
+        <Separator />
         <Field>
           <FieldContent>
             <FieldLabel htmlFor="default-acp-agent">

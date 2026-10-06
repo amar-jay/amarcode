@@ -103,6 +103,65 @@ impl AgentManager {
         self.store.save_agent(agent)
     }
 
+    pub fn sync_builtin_preset(&self) -> Result<()> {
+        let existing = self.get(super::amarcode_acp::AGENT_ID)?;
+        let now = timestamp();
+        let executable = existing
+            .as_ref()
+            .map(|agent| agent.command.clone())
+            .filter(|command| Path::new(command).is_file())
+            .unwrap_or_default();
+        let definition = AgentDefinition {
+            id: super::amarcode_acp::AGENT_ID.into(),
+            name: "Amarcode ACP".into(),
+            command: executable,
+            arguments: vec![
+                "--config".into(),
+                self.amarcode_acp_config_path()
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
+            environment: vec![],
+            available: false,
+            created_at: existing
+                .map(|agent| agent.created_at)
+                .unwrap_or_else(|| now.clone()),
+            updated_at: now,
+        };
+        self.store.save_builtin_agent(&definition)
+    }
+
+    pub(crate) fn save_builtin_definition(&self, executable: &Path) -> Result<()> {
+        let existing = self.get(super::amarcode_acp::AGENT_ID)?;
+        let now = timestamp();
+        self.store.save_builtin_agent(&AgentDefinition {
+            id: super::amarcode_acp::AGENT_ID.into(),
+            name: "Amarcode ACP".into(),
+            command: executable.to_string_lossy().into_owned(),
+            arguments: vec![
+                "--config".into(),
+                self.amarcode_acp_config_path()
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
+            environment: vec![],
+            available: false,
+            created_at: existing
+                .map(|agent| agent.created_at)
+                .unwrap_or_else(|| now.clone()),
+            updated_at: now,
+        })
+    }
+
+    pub(crate) fn refresh_builtin_definition(&self) -> Result<()> {
+        if let Some(agent) = self.get(super::amarcode_acp::AGENT_ID)? {
+            if Path::new(&agent.command).is_file() {
+                self.save_builtin_definition(Path::new(&agent.command))?;
+            }
+        }
+        self.refresh_availability()
+    }
+
     /// Create a custom agent with a new id.
     pub fn create(
         &self,
@@ -208,6 +267,16 @@ fn valid_registry_id(id: &str) -> bool {
 }
 
 fn agent_is_available(tools_dir: &Path, agent: &AgentDefinition) -> bool {
+    if agent.id == super::amarcode_acp::AGENT_ID {
+        return find_command(tools_dir, agent).is_some()
+            && agent
+                .arguments
+                .windows(2)
+                .find(|pair| pair[0] == "--config")
+                .is_some_and(|pair| {
+                    super::amarcode_acp::config_file_is_ready(Path::new(&pair[1]))
+                });
+    }
     agent_is_available_with_caches(
         tools_dir,
         agent,
@@ -470,6 +539,16 @@ fn uv_wheels_dir() -> Option<PathBuf> {
 }
 
 fn unavailable_reason(tools_dir: &Path, agent: &AgentDefinition) -> String {
+    if agent.id == super::amarcode_acp::AGENT_ID
+        && find_command(tools_dir, agent).is_some()
+        && !agent
+            .arguments
+            .windows(2)
+            .find(|pair| pair[0] == "--config")
+            .is_some_and(|pair| super::amarcode_acp::config_file_is_ready(Path::new(&pair[1])))
+    {
+        return "Provider configuration is required in Settings".into();
+    }
     if agent.command.trim().is_empty() {
         return "Agent command is empty".into();
     }

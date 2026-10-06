@@ -164,6 +164,26 @@ async fn authenticate_agent(
 }
 
 #[tauri::command]
+async fn get_amarcode_acp_config(
+    state: State<'_, AppState>,
+) -> Result<amarcode_protocol::rpc::AmarcodeAcpConfigResult, String> {
+    state.amarcode_acp_config().await
+}
+
+#[tauri::command]
+async fn set_amarcode_acp_config(
+    state: State<'_, AppState>,
+    base_url: String,
+    model: String,
+    api_key: String,
+    clear_api_key: bool,
+) -> Result<amarcode_protocol::rpc::AmarcodeAcpConfigResult, String> {
+    state
+        .set_amarcode_acp_config(base_url, model, api_key, clear_api_key)
+        .await
+}
+
+#[tauri::command]
 async fn create_chat(
     state: State<'_, AppState>,
     workspace_path: String,
@@ -714,6 +734,8 @@ pub fn run() {
             list_agents,
             install_agent,
             authenticate_agent,
+            get_amarcode_acp_config,
+            set_amarcode_acp_config,
             create_chat,
             list_chats,
             get_chat,

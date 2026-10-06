@@ -58,6 +58,7 @@ impl App {
         // Keep the working installations across registry sync so only agents
         // the user already has are considered for automatic updates.
         let installed_manager = AgentManager::new(Arc::clone(&store), &config.app_dir);
+        installed_manager.sync_builtin_preset()?;
         let installed_agents = store
             .agents()?
             .into_iter()
@@ -108,6 +109,10 @@ impl App {
         if let Err(error) = agents.refresh_availability() {
             warn!(%error, "failed refreshing agent availability");
         }
+        let builtin_update_manager = agents.clone();
+        tokio::task::spawn_blocking(move || {
+            builtin_update_manager.update_amarcode_acp_if_installed();
+        });
         #[cfg(not(windows))]
         if !installed_agents.is_empty() && registry_path.is_dir() {
             let update_manager = agents.clone();
@@ -224,9 +229,10 @@ mod tests {
         .expect("start daemon without waiting for registry");
         let health = dispatch(&app, methods::HEALTH, json!({})).await.unwrap();
         assert!(matches!(health, DispatchOutcome::Result(value) if value["status"] == "ok"));
-        assert!(dispatch(&app, methods::LIST_AGENTS, json!({}))
+        let catalog = dispatch(&app, methods::LIST_AGENTS, json!({}))
             .await
-            .is_err());
+            .expect("built-in catalog remains available");
+        assert!(matches!(catalog, DispatchOutcome::Result(value) if value["agents"][0]["id"] == "amarcode-acp"));
         // A catalog failure must not make the existing service unusable.
         assert!(dispatch(&app, methods::HEALTH, json!({})).await.is_ok());
         drop(app);

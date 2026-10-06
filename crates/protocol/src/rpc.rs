@@ -14,6 +14,8 @@ pub mod methods {
     pub const LIST_AGENTS: &str = "list_agents";
     pub const INSTALL_AGENT: &str = "install_agent";
     pub const AUTHENTICATE_AGENT: &str = "authenticate_agent";
+    pub const GET_AMARCODE_ACP_CONFIG: &str = "get_amarcode_acp_config";
+    pub const SET_AMARCODE_ACP_CONFIG: &str = "set_amarcode_acp_config";
     pub const CREATE_CHAT: &str = "create_chat";
     pub const LIST_CHATS: &str = "list_chats";
     pub const GET_CHAT: &str = "get_chat";
@@ -120,6 +122,24 @@ pub struct AuthenticateAgentParams {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct AuthenticateAgentResult {
     pub ok: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AmarcodeAcpConfigResult {
+    pub base_url: String,
+    pub model: String,
+    pub has_api_key: bool,
+    pub configured: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SetAmarcodeAcpConfigParams {
+    pub base_url: String,
+    pub model: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub clear_api_key: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

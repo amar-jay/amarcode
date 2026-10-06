@@ -22,7 +22,10 @@ async fn main() -> agent_client_protocol::Result<()> {
         Ok(config) => config,
         Err(error) => {
             eprintln!("amarcode-acp: configuration error: {error}");
-            return Ok(());
+            return Err(agent_client_protocol::Error::new(
+                0x14, // 0x14 = 20 = INVALID_ARGUMENT
+                format!("amarcode-acp: configuration error: {error}"),
+            ));
         }
     };
 

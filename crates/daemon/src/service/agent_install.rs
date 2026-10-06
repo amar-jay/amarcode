@@ -71,6 +71,28 @@ impl AgentManager {
 
     /// Materialize a registry agent so it becomes `available`, then probe ACP.
     pub fn install(&self, agent_id: &str) -> Result<InstallAgentResult> {
+        if agent_id == super::amarcode_acp::AGENT_ID {
+            self.install_amarcode_acp()?;
+            self.refresh_availability()?;
+            let updated = self
+                .get(agent_id)?
+                .ok_or_else(|| Error::msg("built-in agent missing after install"))?;
+            if !self.amarcode_acp_configured() {
+                return Ok(InstallAgentResult {
+                    agent: self.agent_info(&updated),
+                    runtime_status: AgentRuntimeStatus::AuthRequired,
+                    runtime_message: Some(
+                        "Add an API key and provider details in Settings → Agent defaults".into(),
+                    ),
+                });
+            }
+            let (runtime_status, runtime_message) = self.probe_runtime(agent_id)?;
+            return Ok(InstallAgentResult {
+                agent: self.agent_info(&updated),
+                runtime_status,
+                runtime_message,
+            });
+        }
         self.materialize_current(agent_id)?;
 
         self.refresh_availability()?;

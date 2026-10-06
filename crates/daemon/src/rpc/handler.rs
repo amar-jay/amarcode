@@ -15,8 +15,9 @@ use crate::{
         GetAttachmentResult, GetChatParams, HealthResult, InstallAgentParams,
         ListAcpEventsForChatParams, ListAcpEventsResult, ListAgentRunsForChatParams,
         ListAgentRunsResult, ListAgentsResult, ListChatsParams, ListChatsResult, PromptParams,
-        PromptResultDto, RespondAgentParams, RespondAgentResult, SetSessionConfigOptionParams,
-        SetSessionConfigOptionResult, SubscribeEventsParams, VersionResult,
+        PromptResultDto, RespondAgentParams, RespondAgentResult, SetAmarcodeAcpConfigParams,
+        SetSessionConfigOptionParams, SetSessionConfigOptionResult, SubscribeEventsParams,
+        VersionResult,
     },
     service::{ChatDetail, MessageDetail, PromptResult},
     App, Error, Result,
@@ -56,6 +57,12 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::AUTHENTICATE_AGENT => Ok(DispatchOutcome::Result(
             authenticate_agent(app, params).await?,
         )),
+        methods::GET_AMARCODE_ACP_CONFIG => Ok(DispatchOutcome::Result(to_value(
+            app.agents.amarcode_acp_config()?,
+        )?)),
+        methods::SET_AMARCODE_ACP_CONFIG => Ok(DispatchOutcome::Result(set_amarcode_acp_config(
+            app, params,
+        )?)),
 
         // chats (read / CRUD)
         methods::CREATE_CHAT => Ok(DispatchOutcome::Result(create_chat(app, params)?)),
@@ -140,6 +147,16 @@ async fn authenticate_agent(app: &App, params: Value) -> Result<Value> {
             .authenticate_agent(&agent_id, method_id.as_deref())
     })?;
     to_value(AuthenticateAgentResult { ok: true })
+}
+
+fn set_amarcode_acp_config(app: &App, params: Value) -> Result<Value> {
+    let params: SetAmarcodeAcpConfigParams = parse_params(params)?;
+    to_value(app.agents.set_amarcode_acp_config(
+        params.base_url,
+        params.model,
+        params.api_key,
+        params.clear_api_key,
+    )?)
 }
 
 // --- chats -----------------------------------------------------------------

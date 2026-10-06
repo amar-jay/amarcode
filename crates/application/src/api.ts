@@ -198,6 +198,29 @@ export const daemonApi = {
     methodId?: string,
   ): Promise<{ ok: boolean }> =>
     invoke("authenticate_agent", { agentId, methodId }),
+  getAmarcodeAcpConfig: (): Promise<{
+    base_url: string;
+    model: string;
+    has_api_key: boolean;
+    configured: boolean;
+  }> => invoke("get_amarcode_acp_config"),
+  setAmarcodeAcpConfig: (
+    baseUrl: string,
+    model: string,
+    apiKey: string,
+    clearApiKey = false,
+  ): Promise<{
+    base_url: string;
+    model: string;
+    has_api_key: boolean;
+    configured: boolean;
+  }> =>
+    invoke("set_amarcode_acp_config", {
+      baseUrl,
+      model,
+      apiKey,
+      clearApiKey,
+    }),
 
   createChat: (workspacePath: string, title?: string): Promise<Chat> =>
     invoke("create_chat", { workspacePath, title }),

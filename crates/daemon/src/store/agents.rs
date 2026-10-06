@@ -31,7 +31,7 @@ impl Store {
 
         let stale_ids = {
             let mut statement = transaction
-                .prepare("SELECT id FROM agents")
+                .prepare("SELECT id FROM agents WHERE source='registry'")
                 .map_err(to_error)?;
             let ids = statement
                 .query_map([], |row| row.get::<_, String>(0))
@@ -58,6 +58,11 @@ impl Store {
         let connection = self.connection()?;
         save_agent_in(&connection, agent)?;
         Ok(())
+    }
+
+    pub fn save_builtin_agent(&self, agent: &AgentDefinition) -> Result<()> {
+        let connection = self.connection()?;
+        save_owned_agent_in(&connection, agent, "builtin")
     }
 
     pub fn set_agent_available(&self, id: &str, available: bool) -> Result<()> {
@@ -128,8 +133,8 @@ impl Store {
 fn save_agent_in(connection: &rusqlite::Connection, agent: &AgentDefinition) -> Result<()> {
     connection
         .execute(
-            "INSERT INTO agents (id,name,command,arguments_json,environment_json,available,created_at,updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+            "INSERT INTO agents (id,name,command,arguments_json,environment_json,available,created_at,updated_at,source)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'custom')
              ON CONFLICT(id) DO UPDATE SET name=excluded.name, command=excluded.command,
              arguments_json=excluded.arguments_json, environment_json=excluded.environment_json,
              updated_at=excluded.updated_at",
@@ -155,8 +160,8 @@ fn save_registry_agent_in(
 ) -> Result<()> {
     connection
         .execute(
-            "INSERT INTO agents (id,name,command,arguments_json,environment_json,available,created_at,updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+            "INSERT INTO agents (id,name,command,arguments_json,environment_json,available,created_at,updated_at,source)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'registry')
              ON CONFLICT(id) DO UPDATE SET
                name=excluded.name,
                command=CASE
@@ -177,6 +182,7 @@ fn save_registry_agent_in(
                  THEN agents.environment_json
                  ELSE excluded.environment_json
                END,
+               source='registry',
                updated_at=excluded.updated_at",
             params![
                 agent.id,
@@ -191,4 +197,68 @@ fn save_registry_agent_in(
         )
         .map_err(to_error)?;
     Ok(())
+}
+
+fn save_owned_agent_in(
+    connection: &rusqlite::Connection,
+    agent: &AgentDefinition,
+    source: &str,
+) -> Result<()> {
+    connection
+        .execute(
+            "INSERT INTO agents (id,name,command,arguments_json,environment_json,available,created_at,updated_at,source)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+             ON CONFLICT(id) DO UPDATE SET name=excluded.name, command=excluded.command,
+             arguments_json=excluded.arguments_json, environment_json=excluded.environment_json,
+             source=excluded.source, updated_at=excluded.updated_at",
+            params![
+                agent.id,
+                agent.name,
+                agent.command,
+                json_string(&agent.arguments)?,
+                json_string(&agent.environment)?,
+                agent.available,
+                agent.created_at,
+                now(),
+                source,
+            ],
+        )
+        .map_err(to_error)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn agent(id: &str) -> AgentDefinition {
+        AgentDefinition {
+            id: id.into(),
+            name: id.into(),
+            command: "example".into(),
+            arguments: vec![],
+            environment: vec![],
+            available: false,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn registry_sync_preserves_builtin_and_custom_agents() {
+        let store = Store::open(Path::new(":memory:")).expect("open store");
+        store.save_agent(&agent("custom-agent")).expect("custom");
+        store
+            .save_builtin_agent(&agent("builtin-agent"))
+            .expect("builtin");
+        store
+            .sync_presets(&[agent("registry-agent")])
+            .expect("first registry sync");
+        store.sync_presets(&[]).expect("empty registry sync");
+
+        assert!(store.get_agent("custom-agent").unwrap().is_some());
+        assert!(store.get_agent("builtin-agent").unwrap().is_some());
+        assert!(store.get_agent("registry-agent").unwrap().is_none());
+    }
 }

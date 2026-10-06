@@ -52,6 +52,8 @@ pub fn typescript_bindings() -> String {
         rpc::InstallAgentParams::decl(&config),
         rpc::AuthenticateAgentParams::decl(&config),
         rpc::AuthenticateAgentResult::decl(&config),
+        rpc::AmarcodeAcpConfigResult::decl(&config),
+        rpc::SetAmarcodeAcpConfigParams::decl(&config),
         rpc::CreateChatParams::decl(&config),
         rpc::ListChatsParams::decl(&config),
         rpc::GetChatParams::decl(&config),

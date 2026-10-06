@@ -29,6 +29,22 @@ resolved against managed tools and PATH, then persisted on each agent row.
 Set `AMARCODE_ACP_REGISTRY_SOURCE` to another Git URL or a local repository for
 development. Set it to an empty value to disable startup synchronization.
 
+## Built-in Amarcode ACP preset
+
+`amarcode-acp` is a daemon-owned preset and does not come from the external ACP
+registry checkout. It is always present in the catalog. Installing it fetches
+the signed manifest from
+`https://updates.amarcode.amarjay.com/v1/acp/latest.json`, verifies its Ed25519
+signature, then verifies the selected binary's byte size and SHA-256 before
+placing it under `{app_dir}/tools/agents/amarcode-acp/<version>/`.
+
+The desktop's Agent defaults settings save the OpenAI-compatible base URL,
+model, and API key through daemon RPC. The daemon writes the complete provider
+configuration to a private file and returns only `has_api_key` to clients; the
+secret is never stored in the agent row or returned by `list_agents`. Set
+`AMARCODE_ACP_RELEASE_URL` to use another manifest endpoint in development. The
+manifest must still be signed by the release key compiled into the daemon.
+
 > [!NOTE]
 > **Scope note for contributors:** the client wire contract lives in the
 > workspace's `amarcode-protocol` crate and is shared with the desktop shell.

@@ -11,11 +11,12 @@ use crate::{
     daemon::{DaemonBridge, EventSubscription},
     protocol::{
         rpc::{
-            methods, AuthenticateAgentResult, CancelResult, DaemonConfigResult, DeleteChatResult,
-            GetAttachmentResult, HealthResult, InstallAgentResult, ListAcpEventsResult,
-            ListAgentRunsResult, ListAgentsResult, ListChatsResult, PromptAttachment,
-            PromptResultDto, RespondAgentParams, RespondAgentResult, SetDaemonConfigParams,
-            SetSessionConfigOptionResult, VacuumDatabaseResult, VersionResult,
+            methods, AmarcodeAcpConfigResult, AuthenticateAgentResult, CancelResult,
+            DaemonConfigResult, DeleteChatResult, GetAttachmentResult, HealthResult,
+            InstallAgentResult, ListAcpEventsResult, ListAgentRunsResult, ListAgentsResult,
+            ListChatsResult, PromptAttachment, PromptResultDto, RespondAgentParams,
+            RespondAgentResult, SetDaemonConfigParams, SetSessionConfigOptionResult,
+            VacuumDatabaseResult, VersionResult,
         },
         AgentInfo, Chat, GetChatResult, MessagePart, SessionConfigAssignment, SessionConfigValue,
     },
@@ -60,6 +61,30 @@ impl AppState {
         self.call(
             methods::AUTHENTICATE_AGENT,
             json!({ "agent_id": agent_id, "method_id": method_id }),
+        )
+        .await
+    }
+
+    pub async fn amarcode_acp_config(&self) -> Result<AmarcodeAcpConfigResult, String> {
+        self.call(methods::GET_AMARCODE_ACP_CONFIG, Value::Null)
+            .await
+    }
+
+    pub async fn set_amarcode_acp_config(
+        &self,
+        base_url: String,
+        model: String,
+        api_key: String,
+        clear_api_key: bool,
+    ) -> Result<AmarcodeAcpConfigResult, String> {
+        self.call(
+            methods::SET_AMARCODE_ACP_CONFIG,
+            json!({
+                "base_url": base_url,
+                "model": model,
+                "api_key": api_key,
+                "clear_api_key": clear_api_key,
+            }),
         )
         .await
     }

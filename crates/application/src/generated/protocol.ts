@@ -69,6 +69,10 @@ export type AuthenticateAgentParams = { agent_id: string, method_id: string | nu
 
 export type AuthenticateAgentResult = { ok: boolean, };
 
+export type AmarcodeAcpConfigResult = { base_url: string, model: string, has_api_key: boolean, configured: boolean, };
+
+export type SetAmarcodeAcpConfigParams = { base_url: string, model: string, api_key: string, clear_api_key: boolean, };
+
 export type CreateChatParams = { workspace_path: string, title: string | null, };
 
 export type ListChatsParams = { workspace_path: string | null, };
