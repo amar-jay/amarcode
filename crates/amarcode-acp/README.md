@@ -55,7 +55,14 @@ For `openrouter.ai` providers, the adapter fetches available models from the
 provider's `/models` endpoint and exposes them in the ACP session model
 selector. Results are cached for one hour. `provider.model` remains the default
 and is the fallback if discovery fails. Model selections are scoped to each
-session and persisted with it.
+session and persisted with it. Discovery also reads each model's `context_length`. Before every provider
+call the adapter estimates prompt size with a bytes/4 heuristic and drops the
+oldest turns from the *request* until the prompt fits that window, keeping
+assistant tool-call groups intact. Session history itself is left intact so a
+later model with a larger window can still see it. Space is reserved for the
+system prompt, tool schemas, and an 8,192-token completion (capped at a
+quarter of the window). When context length is unknown the adapter uses a
+128,000-token default. Truncated requests start with a short omission notice.
 
 Session persistence is enabled by default with a 24-hour TTL. Unless `path` is
 configured, sessions are stored beside the configuration file by replacing its
