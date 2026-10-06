@@ -883,36 +883,39 @@ mod tests {
             std::fs::set_permissions(&legacy_executable, std::fs::Permissions::from_mode(0o755))
                 .expect("make executable");
         }
-        let store = Arc::new(Store::open(&root.join("store.sqlite3")).expect("open store"));
-        let manager = AgentManager::new(store, &root);
+        {
+            let store = Arc::new(Store::open(&root.join("store.sqlite3")).expect("open store"));
+            let manager = AgentManager::new(store, &root);
 
-        manager.sync_builtin_preset().expect("sync preset");
+            manager.sync_builtin_preset().expect("sync preset");
 
-        let executable = root
-            .join("agents")
-            .join(super::super::amarcode_acp::AGENT_ID)
-            .join("0.1.7")
-            .join(executable_name);
-        let preset = manager
-            .get(super::super::amarcode_acp::AGENT_ID)
-            .expect("read preset")
-            .expect("builtin preset");
-        assert_eq!(PathBuf::from(preset.command), executable);
-        assert_eq!(
-            std::fs::read(manager.amarcode_acp_config_path()).expect("migrated config"),
-            b"config"
-        );
-        assert_eq!(
-            std::fs::read(
-                manager
-                    .amarcode_acp_config_path()
-                    .with_extension("sessions.json")
-            )
-            .expect("migrated sessions"),
-            b"sessions"
-        );
-        assert!(!root.join("tools").exists());
-        std::fs::remove_dir_all(root).expect("remove test directory");
+            let executable = root
+                .join("agents")
+                .join(super::super::amarcode_acp::AGENT_ID)
+                .join("0.1.7")
+                .join(executable_name);
+            let preset = manager
+                .get(super::super::amarcode_acp::AGENT_ID)
+                .expect("read preset")
+                .expect("builtin preset");
+            assert_eq!(PathBuf::from(preset.command), executable);
+            assert_eq!(
+                std::fs::read(manager.amarcode_acp_config_path()).expect("migrated config"),
+                b"config"
+            );
+            assert_eq!(
+                std::fs::read(
+                    manager
+                        .amarcode_acp_config_path()
+                        .with_extension("sessions.json")
+                )
+                .expect("migrated sessions"),
+                b"sessions"
+            );
+            assert!(!root.join("tools").exists());
+        }
+        // Drop Store before deleting: Windows keeps the SQLite file locked while open.
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

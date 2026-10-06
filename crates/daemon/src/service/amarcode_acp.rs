@@ -339,51 +339,54 @@ mod tests {
     fn provider_key_is_write_only_and_config_file_is_private() {
         let root =
             std::env::temp_dir().join(format!("amarcode-acp-config-{}", uuid::Uuid::new_v4()));
-        let store = Arc::new(Store::open(&root.join("store.sqlite3")).expect("store"));
-        let manager = AgentManager::new(store, &root);
-        manager.sync_builtin_preset().expect("preset");
-        assert_eq!(
-            manager.amarcode_acp_config().expect("default config").model,
-            DEFAULT_MODEL
-        );
-
-        let result = manager
-            .set_amarcode_acp_config(
-                "https://example.com/v1/".into(),
-                "example/model".into(),
-                "secret-key".into(),
-                false,
-            )
-            .expect("save config");
-        assert_eq!(result.base_url, "https://example.com/v1");
-        assert!(result.has_api_key);
-        assert!(result.configured);
-        assert!(config_file_is_ready(&manager.amarcode_acp_config_path()));
-        let serialized = serde_json::to_string(&result).expect("serialize response");
-        assert!(!serialized.contains("secret-key"));
-
-        #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = manager
-                .amarcode_acp_config_path()
-                .metadata()
-                .expect("config metadata")
-                .permissions()
-                .mode();
-            assert_eq!(mode & 0o077, 0);
-        }
+            let store = Arc::new(Store::open(&root.join("store.sqlite3")).expect("store"));
+            let manager = AgentManager::new(store, &root);
+            manager.sync_builtin_preset().expect("preset");
+            assert_eq!(
+                manager.amarcode_acp_config().expect("default config").model,
+                DEFAULT_MODEL
+            );
 
-        let cleared = manager
-            .set_amarcode_acp_config(
-                "https://example.com/v1".into(),
-                "example/model".into(),
-                String::new(),
-                true,
-            )
-            .expect("clear key");
-        assert!(!cleared.configured);
-        assert!(!config_file_is_ready(&manager.amarcode_acp_config_path()));
-        std::fs::remove_dir_all(root).expect("cleanup");
+            let result = manager
+                .set_amarcode_acp_config(
+                    "https://example.com/v1/".into(),
+                    "example/model".into(),
+                    "secret-key".into(),
+                    false,
+                )
+                .expect("save config");
+            assert_eq!(result.base_url, "https://example.com/v1");
+            assert!(result.has_api_key);
+            assert!(result.configured);
+            assert!(config_file_is_ready(&manager.amarcode_acp_config_path()));
+            let serialized = serde_json::to_string(&result).expect("serialize response");
+            assert!(!serialized.contains("secret-key"));
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = manager
+                    .amarcode_acp_config_path()
+                    .metadata()
+                    .expect("config metadata")
+                    .permissions()
+                    .mode();
+                assert_eq!(mode & 0o077, 0);
+            }
+
+            let cleared = manager
+                .set_amarcode_acp_config(
+                    "https://example.com/v1".into(),
+                    "example/model".into(),
+                    String::new(),
+                    true,
+                )
+                .expect("clear key");
+            assert!(!cleared.configured);
+            assert!(!config_file_is_ready(&manager.amarcode_acp_config_path()));
+        }
+        // Drop Store before deleting: Windows keeps the SQLite file locked while open.
+        let _ = std::fs::remove_dir_all(root);
     }
 }
