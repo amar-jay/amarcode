@@ -30,7 +30,7 @@ use uuid::Uuid;
 use crate::{
     config::Config,
     persistence::{PersistedSession, SessionStore},
-    provider::{self, Completion, ModelTurn},
+    provider::{self, Completion, ModelLimits, ModelTurn},
 };
 
 #[derive(Clone)]
@@ -46,6 +46,8 @@ struct Runtime {
 struct ModelCache {
     fetched_at: Option<Instant>,
     ids: Vec<String>,
+    context_lengths: HashMap<String, u64>,
+    max_completion_tokens: HashMap<String, u64>,
 }
 
 struct Session {
@@ -297,6 +299,24 @@ impl Runtime {
     }
 
     async fn available_models(&self) -> Vec<String> {
+        self.refresh_models().await;
+        self.models.lock().await.ids.clone()
+    }
+
+    async fn model_limits(&self, model: &str) -> ModelLimits {
+        self.refresh_models().await;
+        let cache = self.models.lock().await;
+        ModelLimits {
+            context_length: cache
+                .context_lengths
+                .get(model)
+                .copied()
+                .unwrap_or(provider::DEFAULT_CONTEXT_LENGTH),
+            max_completion_tokens: cache.max_completion_tokens.get(model).copied(),
+        }
+    }
+
+    async fn refresh_models(&self) {
         const MODEL_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
         let mut cache = self.models.lock().await;
         if cache
@@ -304,26 +324,37 @@ impl Runtime {
             .is_some_and(|at| at.elapsed() < MODEL_CACHE_TTL)
             && !cache.ids.is_empty()
         {
-            return cache.ids.clone();
+            return;
         }
-        let fallback = vec![self.config.provider.model.clone()];
-        let mut models = if self.config.provider.is_openrouter() {
+        let configured = self.config.provider.model.clone();
+        let mut ids = vec![configured.clone()];
+        let mut context_lengths = HashMap::new();
+        let mut max_completion_tokens = HashMap::new();
+        if self.config.provider.is_openrouter() {
             match provider::fetch_models(&self.http, &self.config).await {
-                Ok(models) => models,
+                Ok(models) => {
+                    ids = models.iter().map(|model| model.id.clone()).collect();
+                    for model in models {
+                        if let Some(context_length) = model.context_length {
+                            context_lengths.insert(model.id.clone(), context_length);
+                        }
+                        if let Some(max_completion) = model.max_completion_tokens {
+                            max_completion_tokens.insert(model.id.clone(), max_completion);
+                        }
+                    }
+                }
                 Err(error) => {
                     eprintln!("amarcode-acp: {error}; using configured model");
-                    fallback.clone()
                 }
             }
-        } else {
-            fallback.clone()
-        };
-        if !models.contains(&self.config.provider.model) {
-            models.insert(0, self.config.provider.model.clone());
+        }
+        if !ids.iter().any(|id| id == &configured) {
+            ids.insert(0, configured);
         }
         cache.fetched_at = Some(Instant::now());
-        cache.ids = models.clone();
-        models
+        cache.ids = ids;
+        cache.context_lengths = context_lengths;
+        cache.max_completion_tokens = max_completion_tokens;
     }
 
     async fn set_model(
@@ -613,6 +644,7 @@ async fn run_agent_turn(
     cancellation: watch::Receiver<bool>,
 ) -> Result<Completion<Vec<serde_json::Value>>, String> {
     const MAX_TOOL_ROUNDS: usize = 1000;
+    let limits = runtime.model_limits(&model).await;
     let mut search_group: Option<SearchPresentationGroup> = None;
     for _ in 0..MAX_TOOL_ROUNDS {
         let completion = match provider::stream_completion(
@@ -620,6 +652,7 @@ async fn run_agent_turn(
             &runtime.config,
             &model,
             &history,
+            limits,
             provider::StreamContext {
                 session_id: session_id.clone(),
                 message_id,

@@ -15,11 +15,52 @@ use tokio::sync::watch;
 
 use crate::config::{Config, ProviderConfig};
 
+/// Fallback when the provider does not advertise a context window.
+pub const DEFAULT_CONTEXT_LENGTH: u64 = 128_000;
+
+/// Tokens reserved for the model completion when the provider omits a max.
+pub const DEFAULT_OUTPUT_RESERVE: u64 = 8_192;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelToolCall {
     pub id: String,
     pub name: String,
     pub arguments: String,
+}
+
+/// Limits used to keep prompt history inside the model's context window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelLimits {
+    pub context_length: u64,
+    pub max_completion_tokens: Option<u64>,
+}
+
+impl ModelLimits {
+    pub fn with_defaults() -> Self {
+        Self {
+            context_length: DEFAULT_CONTEXT_LENGTH,
+            max_completion_tokens: None,
+        }
+    }
+
+    /// Tokens available for conversation history after system, tools, and output.
+    pub fn history_token_budget(&self) -> usize {
+        // Do not reserve `max_completion_tokens`: some OpenRouter models
+        // advertise a completion cap nearly as large as the full window.
+        let output_reserve = DEFAULT_OUTPUT_RESERVE.min(self.context_length / 4).max(1);
+        let tools = serde_json::to_string(&tool_definitions()).unwrap_or_default();
+        let overhead = estimate_tokens(system_prompt()).saturating_add(estimate_tokens(&tools));
+        self.context_length
+            .saturating_sub(output_reserve)
+            .saturating_sub(overhead as u64) as usize
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredModel {
+    pub id: String,
+    pub context_length: Option<u64>,
+    pub max_completion_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,14 +191,16 @@ pub async fn stream_completion(
     config: &Config,
     model: &str,
     history: &[Value],
+    limits: ModelLimits,
     mut context: StreamContext,
 ) -> Result<Completion, String> {
     if *context.cancellation.borrow() {
         return Ok(Completion::Cancelled);
     }
+    let history = truncate_history_to_fit(history, limits.history_token_budget());
     let mut request_body = json!({
         "model": model,
-        "messages": model_messages(history),
+        "messages": model_messages(&history),
         "tools": tool_definitions(),
         "tool_choice": "auto",
         "stream": true
@@ -266,7 +309,10 @@ pub async fn stream_completion(
     Ok(Completion::Completed(turn))
 }
 
-pub async fn fetch_models(client: &HttpClient, config: &Config) -> Result<Vec<String>, String> {
+pub async fn fetch_models(
+    client: &HttpClient,
+    config: &Config,
+) -> Result<Vec<DiscoveredModel>, String> {
     let response = client
         .get(config.provider.models_endpoint())
         .bearer_auth(&config.provider.api_key)
@@ -289,19 +335,46 @@ pub async fn fetch_models(client: &HttpClient, config: &Config) -> Result<Vec<St
         .get("data")
         .and_then(Value::as_array)
         .ok_or_else(|| "model discovery response is missing data".to_string())?;
-    let mut models = data
-        .iter()
-        .filter_map(|model| model.get("id").and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    models.sort();
-    models.dedup();
+    let mut models = data.iter().filter_map(parse_discovered_model).collect::<Vec<_>>();
+    models.sort_by(|left, right| left.id.cmp(&right.id));
+    models.dedup_by(|left, right| left.id == right.id);
     if models.is_empty() {
         return Err("model discovery returned no models".into());
     }
     Ok(models)
+}
+
+fn parse_discovered_model(model: &Value) -> Option<DiscoveredModel> {
+    let id = model
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?
+        .to_owned();
+    // Prefer the tighter window when both the model and top provider advertise one.
+    let context_length = match (
+        positive_u64(model.get("context_length")),
+        positive_u64(model.pointer("/top_provider/context_length")),
+    ) {
+        (Some(model_len), Some(provider_len)) => Some(model_len.min(provider_len)),
+        (model_len, provider_len) => model_len.or(provider_len),
+    };
+    let max_completion_tokens = positive_u64(model.pointer("/top_provider/max_completion_tokens"))
+        .or_else(|| positive_u64(model.get("max_completion_tokens")));
+    Some(DiscoveredModel {
+        id,
+        context_length,
+        max_completion_tokens,
+    })
+}
+
+fn positive_u64(value: Option<&Value>) -> Option<u64> {
+    value.and_then(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_f64().map(|number| number as u64))
+            .filter(|number| *number > 0)
+    })
 }
 
 fn reasoning_request(config: &ProviderConfig) -> Option<Value> {
@@ -311,11 +384,115 @@ fn reasoning_request(config: &ProviderConfig) -> Option<Value> {
         .or_else(|| config.is_openrouter().then_some(json!({ "enabled": true })))
 }
 
+fn system_prompt() -> &'static str {
+    "You are a workspace coding agent. Answer questions, investigate, plan, and implement changes according to the user's request. Use the provided tools proactively whenever they help answer or complete the request. If the user asks you to inspect files, list a directory, search, or use an installed CLI, invoke the appropriate tool immediately. Never ask for confirmation before invoking a tool and never offer to invoke it later. The host application performs any required approval after the tool call, so do not request approval in chat. Do not claim that an executable is unavailable merely because it is not a named tool; use run_command for installed workspace commands."
+}
+
 fn model_messages(history: &[Value]) -> Vec<Value> {
-    let system = "You are a workspace coding agent. Answer questions, investigate, plan, and implement changes according to the user's request. Use the provided tools proactively whenever they help answer or complete the request. If the user asks you to inspect files, list a directory, search, or use an installed CLI, invoke the appropriate tool immediately. Never ask for confirmation before invoking a tool and never offer to invoke it later. The host application performs any required approval after the tool call, so do not request approval in chat. Do not claim that an executable is unavailable merely because it is not a named tool; use run_command for installed workspace commands.";
-    std::iter::once(json!({ "role": "system", "content": system }))
+    std::iter::once(json!({ "role": "system", "content": system_prompt() }))
         .chain(history.iter().cloned())
         .collect()
+}
+
+const OMISSION_NOTICE: &str =
+    "[Earlier conversation omitted to fit the model context window.]";
+
+/// Approximate token count with the common bytes/4 heuristic used by agents
+/// that do not ship a full tokenizer.
+pub fn estimate_tokens(text: &str) -> usize {
+    text.len().div_ceil(4).saturating_add(1)
+}
+
+fn estimate_message_tokens(message: &Value) -> usize {
+    // Serialize the whole message so tool_calls and ids count toward the budget.
+    estimate_tokens(&message.to_string()).saturating_add(4)
+}
+
+fn omission_notice() -> Value {
+    json!({ "role": "user", "content": OMISSION_NOTICE })
+}
+
+/// Drop oldest history until it fits `token_budget`.
+///
+/// Assistant messages with `tool_calls` stay grouped with their tool results.
+/// Truncation only affects the provider request; callers should keep the full
+/// session history.
+pub fn truncate_history_to_fit(history: &[Value], token_budget: usize) -> Vec<Value> {
+    if history.is_empty() {
+        return Vec::new();
+    }
+    let groups = message_groups(history);
+    let total: usize = groups.iter().map(|group| group_tokens(history, *group)).sum();
+    if total <= token_budget {
+        return history.to_vec();
+    }
+
+    let notice_cost = estimate_message_tokens(&omission_notice());
+    let mut start_group = groups.len();
+    let mut used = 0usize;
+    while start_group > 0 {
+        let next = start_group - 1;
+        let cost = group_tokens(history, groups[next]);
+        let extra = if next > 0 { notice_cost } else { 0 };
+        if used > 0 && used.saturating_add(cost).saturating_add(extra) > token_budget {
+            break;
+        }
+        used = used.saturating_add(cost);
+        start_group = next;
+    }
+
+    while start_group < groups.len() && group_starts_with_tool(history, groups[start_group]) {
+        start_group += 1;
+    }
+    if start_group >= groups.len() {
+        start_group = groups.len().saturating_sub(1);
+    }
+
+    let from = groups[start_group].0;
+    let mut kept = history[from..].to_vec();
+    if start_group > 0 {
+        kept.insert(0, omission_notice());
+    }
+    kept
+}
+
+fn message_groups(history: &[Value]) -> Vec<(usize, usize)> {
+    let mut groups = Vec::new();
+    let mut index = 0;
+    while index < history.len() {
+        let start = index;
+        index += 1;
+        if message_has_tool_calls(&history[start]) {
+            while index < history.len() && message_role(Some(&history[index])) == Some("tool") {
+                index += 1;
+            }
+        }
+        groups.push((start, index));
+    }
+    groups
+}
+
+fn group_tokens(history: &[Value], group: (usize, usize)) -> usize {
+    history[group.0..group.1]
+        .iter()
+        .map(estimate_message_tokens)
+        .sum()
+}
+
+fn group_starts_with_tool(history: &[Value], group: (usize, usize)) -> bool {
+    message_role(history.get(group.0)) == Some("tool")
+}
+
+fn message_has_tool_calls(message: &Value) -> bool {
+    message_role(Some(message)) == Some("assistant")
+        && message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .is_some_and(|calls| !calls.is_empty())
+}
+
+fn message_role(message: Option<&Value>) -> Option<&str> {
+    message.and_then(|message| message.get("role")).and_then(Value::as_str)
 }
 
 fn process_sse_line(
@@ -676,5 +853,99 @@ mod tests {
         assert!(names.contains(&"edit_file".to_owned()));
         assert!(names.contains(&"write_file".to_owned()));
         assert!(names.contains(&"run_command".to_owned()));
+    }
+
+    #[test]
+    fn parses_openrouter_context_length_and_completion_cap() {
+        let model = parse_discovered_model(&json!({
+            "id": "openai/gpt-4",
+            "context_length": 8192,
+            "top_provider": {
+                "context_length": 8192,
+                "max_completion_tokens": 4096
+            }
+        }))
+        .expect("model");
+        assert_eq!(model.id, "openai/gpt-4");
+        assert_eq!(model.context_length, Some(8192));
+        assert_eq!(model.max_completion_tokens, Some(4096));
+
+        let from_top_provider = parse_discovered_model(&json!({
+            "id": "vendor/model",
+            "top_provider": { "context_length": 200_000 }
+        }))
+        .expect("model");
+        assert_eq!(from_top_provider.context_length, Some(200_000));
+    }
+
+    #[test]
+    fn history_budget_ignores_huge_max_completion_caps() {
+        let gemini_shaped = ModelLimits {
+            context_length: 65_536,
+            max_completion_tokens: Some(58_982),
+        };
+        let budget = gemini_shaped.history_token_budget();
+        // A naive reserve of max_completion_tokens would leave ~6k for input.
+        assert!(budget > 20_000);
+        assert!(budget < 65_536 - DEFAULT_OUTPUT_RESERVE as usize);
+
+        let defaults = ModelLimits::with_defaults();
+        assert_eq!(defaults.context_length, DEFAULT_CONTEXT_LENGTH);
+        assert!(defaults.history_token_budget() > 0);
+    }
+
+    #[test]
+    fn truncates_oldest_turns_and_keeps_tool_call_groups() {
+        let history = vec![
+            json!({ "role": "user", "content": "old question" }),
+            json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{ "id": "call-1", "type": "function", "function": { "name": "read_file", "arguments": "{}" } }]
+            }),
+            json!({ "role": "tool", "tool_call_id": "call-1", "name": "read_file", "content": "file contents" }),
+            json!({ "role": "user", "content": "new question" }),
+            json!({ "role": "assistant", "content": "new answer" }),
+        ];
+        let last = estimate_message_tokens(&history[4]);
+        let notice = estimate_message_tokens(&omission_notice());
+        let recent_only = truncate_history_to_fit(&history, last + notice);
+        assert_eq!(recent_only[0]["content"], OMISSION_NOTICE);
+        assert_eq!(recent_only.last().unwrap()["content"], "new answer");
+        assert!(!recent_only.iter().any(|message| message["content"] == "old question"));
+
+        // Tool results stay attached to the assistant that produced them.
+        let tool_group = group_tokens(&history, (1, 3));
+        let tail = group_tokens(&history, (3, 5));
+        let kept = truncate_history_to_fit(&history, tool_group + tail + notice);
+        assert!(kept.iter().any(|message| message.get("tool_calls").is_some()));
+        assert!(kept.iter().any(|message| message["role"] == "tool"));
+        assert_eq!(kept.last().unwrap()["content"], "new answer");
+    }
+
+    #[test]
+    fn truncate_does_not_emit_a_leading_orphan_tool_result() {
+        let history = vec![
+            json!({
+                "role": "assistant",
+                "tool_calls": [{ "id": "call-1", "type": "function", "function": { "name": "read_file", "arguments": "{}" } }]
+            }),
+            json!({ "role": "tool", "tool_call_id": "call-1", "name": "read_file", "content": "huge output" }),
+            json!({ "role": "user", "content": "what next?" }),
+        ];
+        let last = estimate_message_tokens(&history[2]);
+        let kept = truncate_history_to_fit(&history, last + estimate_message_tokens(&omission_notice()));
+        assert_eq!(kept.last().unwrap()["content"], "what next?");
+        assert_ne!(kept.first().and_then(|message| message["role"].as_str()), Some("tool"));
+    }
+
+    #[test]
+    fn truncate_keeps_full_history_when_under_budget() {
+        let history = vec![
+            json!({ "role": "user", "content": "one" }),
+            json!({ "role": "assistant", "content": "two" }),
+        ];
+        let kept = truncate_history_to_fit(&history, usize::MAX);
+        assert_eq!(kept, history);
     }
 }
