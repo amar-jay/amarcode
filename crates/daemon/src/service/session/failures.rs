@@ -161,12 +161,33 @@ fn remote_error_detail(data: Option<&Value>) -> Option<String> {
     }
 }
 
+fn looks_like_provider_credential_failure(lower: &str) -> bool {
+    let mentions_provider_auth = lower.contains("api key")
+        || lower.contains("api_key")
+        || lower.contains("provider returned")
+        || lower.contains("401")
+        || lower.contains("403")
+        || lower.contains("unauthorized")
+        || lower.contains("forbidden");
+    let looks_like_bad_credential = lower.contains("expired")
+        || lower.contains("invalid")
+        || lower.contains("missing")
+        || lower.contains("revoked")
+        || lower.contains("provider returned")
+        || lower.contains("401")
+        || lower.contains("403");
+    mentions_provider_auth && looks_like_bad_credential
+}
+
 fn looks_like_auth(lower: &str, data: Option<&Value>) -> bool {
+    // Provider API-key failures are configuration errors. Mapping them to
+    // auth_required shows a misleading "Sign in" action for amarcode-acp.
+    if looks_like_provider_credential_failure(lower) {
+        return false;
+    }
     if lower.contains("auth_required")
         || lower.contains("authentication required")
         || lower.contains("not authenticated")
-        || lower.contains("unauthorized")
-        || lower.contains("api key")
         || lower.contains("sign in")
         || lower.contains("login required")
     {
@@ -261,8 +282,17 @@ mod tests {
             message: "Internal error".into(),
             data: Some(json!("provider returned 401 Unauthorized: invalid API key")),
         });
-        assert_eq!(failure.kind, AgentFailureKind::AuthRequired);
+        assert_eq!(failure.kind, AgentFailureKind::Error);
         assert!(failure.message.contains("invalid API key"));
+    }
+
+    #[test]
+    fn provider_api_key_expiry_is_not_acp_sign_in() {
+        let failure = classify_message(
+            "Internal error: provider returned 401 Unauthorized: API key expired.",
+        );
+        assert_eq!(failure.kind, AgentFailureKind::Error);
+        assert!(failure.message.contains("API key expired"));
     }
 
     #[test]

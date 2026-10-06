@@ -18,6 +18,7 @@ use crate::{protocol::rpc::AmarcodeAcpConfigResult, Error, Result};
 use super::AgentManager;
 
 pub const AGENT_ID: &str = "amarcode-acp";
+const DEFAULT_MODEL: &str = "openrouter/auto";
 const DEFAULT_RELEASE_URL: &str = "https://updates.amarcode.amarjay.com/v1/acp/latest.json";
 const RELEASE_PUBLIC_KEY_HEX: &str =
     "5ef56cd7772e8c601ca9c5a15378b7088fc558e7edcde73770cbb116d9e255d2";
@@ -53,9 +54,12 @@ struct ProviderConfig {
 
 impl AgentManager {
     pub fn amarcode_acp_config(&self) -> Result<AmarcodeAcpConfigResult> {
-        let provider = read_provider_file(&self.amarcode_acp_config_path())
+        let mut provider = read_provider_file(&self.amarcode_acp_config_path())
             .unwrap_or_default()
             .provider;
+        if provider.model.trim().is_empty() {
+            provider.model = DEFAULT_MODEL.into();
+        }
         Ok(config_result(provider))
     }
 
@@ -103,6 +107,7 @@ impl AgentManager {
     }
 
     pub(crate) fn install_amarcode_acp(&self) -> Result<()> {
+        let _install_guard = self.amarcode_acp_install_guard()?;
         let (manifest, source_url) = fetch_verified_manifest()?;
         let target = release_target()?;
         let artifact = manifest.artifacts.get(target).ok_or_else(|| {
@@ -110,8 +115,7 @@ impl AgentManager {
         })?;
         validate_artifact(target, artifact)?;
         let executable = self
-            .tools_dir()
-            .join("agents")
+            .managed_agents_dir()
             .join(AGENT_ID)
             .join(&manifest.version)
             .join(if cfg!(windows) {
@@ -146,10 +150,7 @@ impl AgentManager {
     }
 
     pub(crate) fn amarcode_acp_config_path(&self) -> PathBuf {
-        self.tools_dir()
-            .join("agents")
-            .join(AGENT_ID)
-            .join("config.json")
+        self.credentials_dir().join(format!("{AGENT_ID}.json"))
     }
 }
 
@@ -181,7 +182,7 @@ fn write_private_json(path: &Path, value: &impl Serialize) -> Result<()> {
         .parent()
         .ok_or_else(|| Error::msg("invalid config path"))?;
     fs::create_dir_all(parent).map_err(|error| Error::msg(error.to_string()))?;
-    let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let temporary = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4()));
     let bytes = serde_json::to_vec_pretty(value).map_err(Error::from)?;
     let mut options = OpenOptions::new();
     options.create(true).truncate(true).write(true);
@@ -341,6 +342,10 @@ mod tests {
         let store = Arc::new(Store::open(&root.join("store.sqlite3")).expect("store"));
         let manager = AgentManager::new(store, &root);
         manager.sync_builtin_preset().expect("preset");
+        assert_eq!(
+            manager.amarcode_acp_config().expect("default config").model,
+            DEFAULT_MODEL
+        );
 
         let result = manager
             .set_amarcode_acp_config(

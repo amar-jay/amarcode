@@ -203,8 +203,8 @@ function AppPromptInput({
             error instanceof Error
               ? error.message
               : "The agent could not start this prompt.";
+          // Toast comes from failStartedPrompt / live-chat failure events.
           onStartedPromptFailed?.(chat.id, message);
-          notify(message, "error");
         });
     } catch (error) {
       console.error("Error submitting prompt:", error);

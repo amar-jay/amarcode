@@ -1,5 +1,5 @@
 import { createStore } from "jotai";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
   const values = new Map<string, string>();
@@ -12,6 +12,35 @@ vi.hoisted(() => {
     },
   });
 });
+
+const notifyMock = vi.fn();
+vi.mock("@/lib/notify", () => ({
+  notify: (...args: unknown[]) => notifyMock(...args),
+  notifyToast: vi.fn(),
+  notifyAttention: vi.fn(),
+}));
+
+vi.mock("@/api", () => ({
+  daemonApi: {
+    getChat: vi.fn(async () => ({
+      chat: {
+        id: "chat-1",
+        workspace_path: "/workspace",
+        title: "Test",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        archived_at: null,
+      },
+      messages: [],
+      session_config: [],
+      context_usage: null,
+    })),
+    setSessionConfigOption: vi.fn(),
+    prompt: vi.fn(),
+    respondPermission: vi.fn(),
+  },
+}));
+
 import { activeSessionAtom } from "./navigation";
 import {
   applyLiveChatEventAtom,
@@ -20,6 +49,10 @@ import {
   setLiveSessionConfigOptionAtom,
   type LiveChatState,
 } from "./live-chat";
+
+beforeEach(() => {
+  notifyMock.mockClear();
+});
 
 const chat = {
   id: "chat-1",
@@ -76,6 +109,57 @@ describe("failed home-composer prompts", () => {
       turnStatus: "failed",
       error: "ACP connection closed",
     });
+  });
+});
+
+describe("agent failure notifications", () => {
+  it("keeps the failure banner and toasts the specific error", () => {
+    const store = createStore();
+    store.set(liveChatAtom, {
+      chatId: chat.id,
+      detail: null,
+      runId: "run-1",
+      runStatus: "running",
+      turnStatus: "started",
+      pendingRequest: null,
+      contextRestoration: null,
+      contextUsage: null,
+      sessionConfig: [],
+      sessionConfigAgentId: null,
+      loading: false,
+      error: null,
+      errorKind: null,
+      authRequired: null,
+    });
+
+    store.set(applyLiveChatEventAtom, {
+      type: "turnUpdated",
+      payload: {
+        chat_id: chat.id,
+        run_id: "run-1",
+        user_message_id: "msg-1",
+        status: "failed",
+        stop_reason: null,
+        error_message:
+          "Internal error: provider returned 401 Unauthorized: API key expired.",
+        error_kind: "error",
+      },
+    });
+
+    expect(store.get(liveChatAtom)).toMatchObject({
+      turnStatus: "failed",
+      error:
+        "Internal error: provider returned 401 Unauthorized: API key expired.",
+      errorKind: "error",
+    });
+    expect(notifyMock).toHaveBeenCalledWith(
+      "Internal error: provider returned 401 Unauthorized: API key expired.",
+      "error",
+      expect.objectContaining({
+        id: "agent-failure:Internal error: provider returned 401 Unauthorized: API key expired.",
+        duration: 12_000,
+      }),
+    );
   });
 });
 

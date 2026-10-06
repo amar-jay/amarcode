@@ -31,8 +31,12 @@ async function sendWhenAppIsUnfocused(title: string, body: string) {
   }
 }
 
-export function notify(message: string, kind: NotificationKind = "info") {
-  toast[kind](message);
+export function notify(
+  message: string,
+  kind: NotificationKind = "info",
+  options?: ExternalToast,
+) {
+  toast[kind](message, options);
   void sendWhenAppIsUnfocused(
     kind === "info" ? "Amarcode" : `Amarcode — ${kind}`,
     message,

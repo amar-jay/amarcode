@@ -14,12 +14,31 @@ import type {
   TurnStatus,
 } from "@/types";
 import type { PendingAgentRequest } from "@/components/pending-agent-request";
+import { notify } from "@/lib/notify";
 import { automaticApprovalResult, shouldAutoApprove } from "./permission-mode";
 import { permissionModeAtom } from "./preferences";
 import { getLatestTurnForChat } from "./daemon-events";
 import { refreshChatsAtom } from "./chats";
 import { activeSessionAtom } from "./navigation";
 import { hasAcpSessionMode, rememberSessionConfig } from "./session-config";
+
+const announcedFailures = new Set<string>();
+
+function announceAgentFailure(message: string | null | undefined) {
+  const text = message?.trim();
+  if (!text) return;
+  if (announcedFailures.has(text)) return;
+  announcedFailures.add(text);
+  // Keep the set bounded for long-lived app sessions.
+  if (announcedFailures.size > 100) {
+    const oldest = announcedFailures.values().next().value;
+    if (oldest) announcedFailures.delete(oldest);
+  }
+  notify(text, "error", {
+    id: `agent-failure:${text}`,
+    duration: 12_000,
+  });
+}
 
 function isChatDetail(value: Chat | ChatDetail): value is ChatDetail {
   return "messages" in value;
@@ -111,6 +130,7 @@ export const openLiveChatAtom = atom(
     const cached = getLatestTurnForChat(chatId);
     const turnStatus =
       cached?.status ?? (seed.initialTurnActive ? "started" : null);
+    const failed = turnStatus === "failed";
     set(
       liveChatAtom,
       emptyLiveChat(chatId, {
@@ -118,6 +138,8 @@ export const openLiveChatAtom = atom(
         runStatus: turnStatus === "started" ? "running" : null,
         // Prefer observed turn status over the navigation "just started" flag.
         turnStatus,
+        error: failed ? (cached?.error_message ?? null) : null,
+        errorKind: failed ? "error" : null,
         loading: true,
       }),
     );
@@ -166,6 +188,7 @@ export const failStartedPromptAtom = atom(
         errorKind: "error",
       });
     }
+    announceAgentFailure(input.error);
   },
 );
 
@@ -217,7 +240,8 @@ export const loadLiveChatAtom = atom(
             null,
           contextUsage: result.context_usage ?? current.contextUsage,
           loading: false,
-          error: null,
+          // Keep failure state across detail reloads. Clearing it here made the
+          // banner flash for ~80ms after turnUpdated(failed) scheduled a refresh.
         });
       } else {
         set(liveChatAtom, { ...current, loading: false });
@@ -260,6 +284,18 @@ export const applyLiveChatEventAtom = atom(
     }
 
     if (event.type === "turnUpdated" && event.payload.chat_id === live.chatId) {
+      const failed = event.payload.status === "failed";
+      const errorKind = failed
+        ? (event.payload.error_kind ?? "error")
+        : event.payload.status === "started"
+          ? null
+          : live.errorKind;
+      const error =
+        failed && event.payload.error_message
+          ? event.payload.error_message
+          : event.payload.status === "started"
+            ? null
+            : live.error;
       const next: LiveChatState = {
         ...live,
         turnStatus: event.payload.status,
@@ -270,20 +306,11 @@ export const applyLiveChatEventAtom = atom(
           event.payload.status !== "started" ? null : live.pendingRequest,
         contextRestoration:
           event.payload.status !== "started" ? null : live.contextRestoration,
-        error:
-          event.payload.status === "failed" && event.payload.error_message
-            ? event.payload.error_message
-            : event.payload.status === "started"
-              ? null
-              : live.error,
-        errorKind:
-          event.payload.status === "failed"
-            ? (event.payload.error_kind ?? "error")
-            : event.payload.status === "started"
-              ? null
-              : live.errorKind,
+        error,
+        errorKind,
       };
       set(liveChatAtom, next);
+      if (failed) announceAgentFailure(error);
       void set(scheduleLiveChatRefreshAtom);
       return;
     }
@@ -346,6 +373,13 @@ export const applyLiveChatEventAtom = atom(
         event.payload.status,
       );
       const failed = event.payload.status === "failed";
+      const error =
+        failed && event.payload.error_message
+          ? event.payload.error_message
+          : live.error;
+      const errorKind = failed
+        ? (event.payload.error_kind ?? live.errorKind ?? "error")
+        : live.errorKind;
       set(liveChatAtom, {
         ...live,
         runStatus: event.payload.status,
@@ -356,14 +390,10 @@ export const applyLiveChatEventAtom = atom(
               ? "cancelled"
               : live.turnStatus,
         pendingRequest: ended ? null : live.pendingRequest,
-        error:
-          failed && event.payload.error_message
-            ? event.payload.error_message
-            : live.error,
-        errorKind: failed
-          ? (event.payload.error_kind ?? live.errorKind ?? "error")
-          : live.errorKind,
+        error,
+        errorKind,
       });
+      if (failed) announceAgentFailure(error);
       void set(scheduleLiveChatRefreshAtom);
       return;
     }
@@ -462,12 +492,15 @@ export const submitLivePromptAtom = atom(
     } catch (cause) {
       const current = get(liveChatAtom);
       if (!current || current.chatId !== live.chatId) return;
+      const error =
+        cause instanceof Error ? cause.message : "Unable to send prompt.";
       set(liveChatAtom, {
         ...current,
         turnStatus: "failed",
-        error:
-          cause instanceof Error ? cause.message : "Unable to send prompt.",
+        error,
+        errorKind: "error",
       });
+      announceAgentFailure(error);
       throw cause;
     }
   },

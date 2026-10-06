@@ -36,12 +36,13 @@ registry checkout. It is always present in the catalog. Installing it fetches
 the signed manifest from
 `https://updates.amarcode.amarjay.com/v1/acp/latest.json`, verifies its Ed25519
 signature, then verifies the selected binary's byte size and SHA-256 before
-placing it under `{app_dir}/tools/agents/amarcode-acp/<version>/`.
+placing it under `{app_dir}/agents/amarcode-acp/<version>/`.
 
 The desktop's Agent defaults settings save the OpenAI-compatible base URL,
 model, and API key through daemon RPC. The daemon writes the complete provider
-configuration to a private file and returns only `has_api_key` to clients; the
-secret is never stored in the agent row or returned by `list_agents`. Set
+configuration to `{app_dir}/credentials/amarcode-acp.json` and returns only
+`has_api_key` to clients; the secret is never stored in the agent row or
+returned by `list_agents`. Set
 `AMARCODE_ACP_RELEASE_URL` to use another manifest endpoint in development. The
 manifest must still be signed by the release key compiled into the daemon.
 

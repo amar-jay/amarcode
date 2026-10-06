@@ -39,7 +39,7 @@ export const paletteAtom = atomWithStorage<Palette>(
 /** Default agent for new chats / home composer. */
 export const defaultAgentIdAtom = atomWithStorage<string>(
   "amarcode-default-agent",
-  "codex-acp",
+  "amarcode-acp",
   undefined,
   { getOnInit: true },
 );
