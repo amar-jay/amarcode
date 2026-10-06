@@ -55,6 +55,14 @@ impl App {
         // it discovers the RPC port is already occupied.
         let instance_lock = InstanceLock::acquire(&config.db_path)?;
         let store = Arc::new(Store::open(&config.db_path)?);
+        // Keep the working installations across registry sync so only agents
+        // the user already has are considered for automatic updates.
+        let installed_manager = AgentManager::new(Arc::clone(&store), &config.app_dir);
+        let installed_agents = store
+            .agents()?
+            .into_iter()
+            .filter(|agent| installed_manager.is_available(agent))
+            .collect::<Vec<_>>();
         let pruned_events = store.prune_acp_events()?;
         if pruned_events > 0 {
             info!(count = pruned_events, "pruned expired ACP events");
@@ -100,6 +108,13 @@ impl App {
         if let Err(error) = agents.refresh_availability() {
             warn!(%error, "failed refreshing agent availability");
         }
+        #[cfg(not(windows))]
+        if !installed_agents.is_empty() && registry_path.is_dir() {
+            let update_manager = agents.clone();
+            tokio::task::spawn_blocking(move || {
+                update_manager.update_installed(&installed_agents);
+            });
+        }
         let chats = ChatManager::new(Arc::clone(&store), events.clone());
         let sessions = SessionManager::new(
             Arc::clone(&store),
@@ -126,6 +141,12 @@ impl App {
     pub(crate) async fn ensure_registry_ready(&self) -> Result<()> {
         self.registry_ready
             .get_or_try_init(|| async {
+                let installed_agents = self
+                    .store
+                    .agents()?
+                    .into_iter()
+                    .filter(|agent| self.agents.is_available(agent))
+                    .collect::<Vec<_>>();
                 if let Some(source) = self.config.acp_registry_source.as_deref() {
                     if let Err(error) =
                         crate::registry::synchronize(&self.config.app_dir, source).await
@@ -140,6 +161,12 @@ impl App {
                     let path = crate::registry::checkout_path(&self.config.app_dir);
                     self.store
                         .sync_presets(&crate::registry::load_agents(&path)?)?;
+                    if !installed_agents.is_empty() {
+                        let update_manager = self.agents.clone();
+                        tokio::task::spawn_blocking(move || {
+                            update_manager.update_installed(&installed_agents);
+                        });
+                    }
                 }
                 Ok(())
             })

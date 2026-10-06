@@ -17,6 +17,7 @@ use crate::{
     protocol::{rpc::InstallAgentResult, AgentRpcMethod, AgentRuntimeStatus},
     registry::{self, BinaryDistribution, PackageDistribution, RegistryAgent},
     service::session::{classify_acp_failure, with_stderr_detail},
+    store::AgentDefinition,
     Error, Result,
 };
 
@@ -26,39 +27,51 @@ const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const RUNTIME_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl AgentManager {
-    /// Materialize a registry agent so it becomes `available`, then probe ACP.
-    pub fn install(&self, agent_id: &str) -> Result<InstallAgentResult> {
-        let agent = self
-            .get(agent_id)?
-            .ok_or_else(|| Error::msg(format!("agent not found: {agent_id}")))?;
-
-        if !self.is_available(&agent) {
-            let manifest = registry::load_agent_manifest(self.registry_dir(), agent_id)?;
-            match install_kind(&manifest)? {
-                InstallKind::Npx(package) => {
-                    ensure_runner("bun", &["bun", "bunx"])?;
-                    prefetch_bun_package(&package.package)?;
-                }
-                InstallKind::Uvx(package) => {
-                    ensure_runner("uv", &["uv", "uvx"])?;
-                    prefetch_uv_package(&package.package)?;
-                }
-                InstallKind::Binary(binary) => {
-                    let executable = install_binary_distribution(
-                        self.tools_dir(),
-                        agent_id,
-                        &manifest.version,
-                        &binary,
-                    )?;
-                    let mut updated = agent.clone();
-                    updated.command = executable.to_string_lossy().into_owned();
-                    updated.arguments = binary.args;
-                    updated.environment = binary.env.into_iter().collect();
-                    updated.available = false;
-                    self.save(&updated)?;
+    /// Bring agents that were installed before registry synchronization up to
+    /// the versions pinned by the current registry checkout.
+    ///
+    /// This is best-effort so an offline package registry never prevents the
+    /// daemon from starting with the last usable versions.
+    pub fn update_installed(&self, installed_agents: &[AgentDefinition]) {
+        for previous in installed_agents {
+            let agent_id = &previous.id;
+            if !self
+                .registry_dir()
+                .join(agent_id)
+                .join("agent.json")
+                .is_file()
+            {
+                continue;
+            }
+            match self.materialize_current(agent_id) {
+                Ok(true) => tracing::info!(%agent_id, "updated installed ACP agent"),
+                Ok(false) => {}
+                Err(error) => {
+                    if let Err(restore_error) = self.save(previous) {
+                        tracing::warn!(
+                            %agent_id,
+                            %error,
+                            %restore_error,
+                            "failed updating ACP agent and restoring its previous definition"
+                        );
+                    } else {
+                        tracing::warn!(
+                            %agent_id,
+                            %error,
+                            "failed updating installed ACP agent; restored previous installation"
+                        );
+                    }
                 }
             }
         }
+        if let Err(error) = self.refresh_availability() {
+            tracing::warn!(%error, "failed refreshing ACP availability after updates");
+        }
+    }
+
+    /// Materialize a registry agent so it becomes `available`, then probe ACP.
+    pub fn install(&self, agent_id: &str) -> Result<InstallAgentResult> {
+        self.materialize_current(agent_id)?;
 
         self.refresh_availability()?;
         let updated = self
@@ -77,6 +90,50 @@ impl AgentManager {
             runtime_status,
             runtime_message,
         })
+    }
+
+    /// Returns whether files or package caches were changed.
+    fn materialize_current(&self, agent_id: &str) -> Result<bool> {
+        let agent = self
+            .get(agent_id)?
+            .ok_or_else(|| Error::msg(format!("agent not found: {agent_id}")))?;
+        let manifest = registry::load_agent_manifest(self.registry_dir(), agent_id)?;
+        match install_kind(&manifest)? {
+            InstallKind::Npx(package) => {
+                if self.is_available(&agent) {
+                    return Ok(false);
+                }
+                ensure_runner("bun", &["bun", "bunx"])?;
+                prefetch_bun_package(&package.package)?;
+            }
+            InstallKind::Uvx(package) => {
+                if self.is_available(&agent) {
+                    return Ok(false);
+                }
+                ensure_runner("uv", &["uv", "uvx"])?;
+                prefetch_uv_package(&package.package)?;
+            }
+            InstallKind::Binary(binary) => {
+                let expected =
+                    binary_executable_path(self.tools_dir(), agent_id, &manifest.version, &binary);
+                if Path::new(&agent.command) == expected && expected.is_file() {
+                    return Ok(false);
+                }
+                let executable = install_binary_distribution(
+                    self.tools_dir(),
+                    agent_id,
+                    &manifest.version,
+                    &binary,
+                )?;
+                let mut updated = agent;
+                updated.command = executable.to_string_lossy().into_owned();
+                updated.arguments = binary.args;
+                updated.environment = binary.env.into_iter().collect();
+                updated.available = false;
+                self.save(&updated)?;
+            }
+        }
+        Ok(true)
     }
 
     fn probe_runtime(&self, agent_id: &str) -> Result<(AgentRuntimeStatus, Option<String>)> {
@@ -282,13 +339,7 @@ fn install_binary_distribution(
     extract_archive(&archive_path, &dest)?;
     let _ = fs::remove_file(&archive_path);
 
-    let command = PathBuf::from(binary.cmd.trim());
-    let relative = command.strip_prefix("./").unwrap_or(&command);
-    let executable = if command.is_absolute() {
-        command
-    } else {
-        dest.join(relative)
-    };
+    let executable = binary_executable_path(tools_dir, agent_id, version, binary);
     if !executable.is_file() {
         return Err(Error::msg(format!(
             "installed archive for {agent_id} is missing executable {}",
@@ -307,6 +358,24 @@ fn install_binary_distribution(
             .map_err(|error| Error::msg(error.to_string()))?;
     }
     Ok(executable)
+}
+
+fn binary_executable_path(
+    tools_dir: &Path,
+    agent_id: &str,
+    version: &str,
+    binary: &BinaryDistribution,
+) -> PathBuf {
+    let command = PathBuf::from(binary.cmd.trim());
+    if command.is_absolute() {
+        command
+    } else {
+        tools_dir
+            .join("agents")
+            .join(agent_id)
+            .join(version)
+            .join(command.strip_prefix("./").unwrap_or(&command))
+    }
 }
 
 fn archive_file_name(url: &str) -> String {
