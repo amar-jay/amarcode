@@ -19,6 +19,8 @@ pub struct PersistedSession {
     #[serde(default)]
     pub model: String,
     pub updated_at: u64,
+    #[serde(default)]
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -175,6 +177,7 @@ mod tests {
                 history: vec![json!({ "role": "user", "content": "hello" })],
                 model: "test-model".into(),
                 updated_at: 0,
+                cost_usd: 0.0,
             })
             .expect("persist session");
 
@@ -197,6 +200,7 @@ mod tests {
                 history: Vec::new(),
                 model: "test-model".into(),
                 updated_at: now_seconds().saturating_sub(2),
+                cost_usd: 0.0,
             }],
         };
         store.write_unlocked(&file).expect("write expired fixture");

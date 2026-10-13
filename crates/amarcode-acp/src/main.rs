@@ -1,6 +1,7 @@
 use std::{env, path::PathBuf};
 
 mod config;
+mod context;
 mod persistence;
 mod provider;
 mod runtime;

@@ -66,19 +66,22 @@ struct AgentProcess {
 
 impl AgentProcess {
     fn spawn(base_url: &str) -> Self {
+        Self::spawn_with_options(base_url, json!({}))
+    }
+
+    fn spawn_with_options(base_url: &str, options: Value) -> Self {
         let config_path =
             std::env::temp_dir().join(format!("amarcode-acp-transcript-{}.json", Uuid::new_v4()));
+        let mut config = json!({
+            "name": "transcript-agent",
+            "provider": { "base_url": base_url, "api_key": "test-key", "model": "test-model" }
+        });
+        for (key, value) in options.as_object().expect("config options object") {
+            config[key] = value.clone();
+        }
         fs::write(
             &config_path,
-            serde_json::to_vec(&json!({
-                "name": "transcript-agent",
-                "provider": {
-                    "base_url": base_url,
-                    "api_key": "test-key",
-                    "model": "test-model"
-                }
-            }))
-            .expect("serialize config"),
+            serde_json::to_vec(&config).expect("serialize config"),
         )
         .expect("write config");
 
@@ -708,4 +711,554 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
     assert!(third_request.contains("call-command-again"));
     assert!(third_request.matches("exit code 0").count() >= 2);
     let _ = fs::remove_dir_all(workspace);
+}
+
+fn provider_listener() -> Option<TcpListener> {
+    match TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => Some(listener),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping socket transcript test: sandbox forbids loopback listeners");
+            None
+        }
+        Err(error) => panic!("bind provider: {error}"),
+    }
+}
+
+fn provider_request(socket: &mut TcpStream) -> Value {
+    let bytes = read_http_request(socket);
+    let start = bytes
+        .windows(4)
+        .position(|part| part == b"\r\n\r\n")
+        .unwrap()
+        + 4;
+    serde_json::from_slice(&bytes[start..]).expect("provider JSON")
+}
+
+fn write_json_response(socket: &mut TcpStream, status: &str, headers: &str, body: Value) {
+    let body = body.to_string();
+    write!(socket, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n{body}", body.len()).unwrap();
+    socket.flush().unwrap();
+}
+
+fn prompt(agent: &mut AgentProcess, id: u64, session: &str, text: &str) {
+    agent.send(json!({"jsonrpc":"2.0","id":id,"method":"session/prompt",
+        "params":{"sessionId":session,"prompt":[{"type":"text","text":text}]}}));
+}
+
+fn tool_sse(calls: Vec<Value>) -> String {
+    format!(
+        "data: {}\n\ndata: [DONE]\n\n",
+        json!({"choices":[{"delta":{"tool_calls":calls}}]})
+    )
+}
+
+fn read_call(id: &str, path: &str) -> Value {
+    json!({"index":0,"id":id,"type":"function","function":{"name":"read_file","arguments":json!({"path":path}).to_string()}})
+}
+
+#[test]
+fn transcript_retries_transient_statuses_and_reports_usage() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for status in ["429 Too Many Requests", "503 Service Unavailable", "200 OK"] {
+            let (mut socket, _) = listener.accept().unwrap();
+            requests.push(provider_request(&mut socket));
+            if status == "200 OK" {
+                write_sse(
+                    &mut socket,
+                    &format!(
+                        "data: {}\n\ndata: [DONE]\n\n",
+                        json!({"choices":[{"delta":{"content":"recovered"}}],"usage":{"prompt_tokens":123,"completion_tokens":7,"cost":0.01}})
+                    ),
+                );
+            } else {
+                write_json_response(
+                    &mut socket,
+                    status,
+                    "Retry-After: 0\r\n",
+                    json!({"error":{"message":"retry"}}),
+                );
+            }
+        }
+        requests
+    });
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "retry safely");
+    let (response, messages) = agent.response_with_messages(3);
+    assert_eq!(response["result"]["stopReason"], "end_turn");
+    let usage = messages
+        .iter()
+        .find(|message| message["params"]["update"]["sessionUpdate"] == "usage_update")
+        .unwrap();
+    assert_eq!(usage["params"]["update"]["used"], 123);
+    assert_eq!(usage["params"]["update"]["cost"]["amount"], 0.01);
+    assert_eq!(
+        usage["params"]["update"]["_meta"]["amarcode"]["turn_tokens"],
+        130
+    );
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests.windows(2).all(|pair| pair[0] == pair[1]));
+    assert!(requests[0]["max_tokens"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn transcript_cancels_during_retry_after_backoff() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let (ready_tx, ready_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        provider_request(&mut socket);
+        write_json_response(
+            &mut socket,
+            "429 Too Many Requests",
+            "Retry-After: 3600\r\n",
+            json!({"error":{"message":"wait"}}),
+        );
+        ready_tx.send(()).unwrap();
+    });
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "wait");
+    ready_rx.recv_timeout(TIMEOUT).unwrap();
+    agent.send(json!({"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":session}}));
+    assert_eq!(agent.response(3)["result"]["stopReason"], "cancelled");
+}
+
+#[test]
+fn transcript_falls_back_only_after_explicit_streaming_rejection() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        assert_eq!(provider_request(&mut socket)["stream"], true);
+        write_json_response(
+            &mut socket,
+            "400 Bad Request",
+            "",
+            json!({"error":{"message":"stream is unsupported"}}),
+        );
+        let (mut socket, _) = listener.accept().unwrap();
+        let request = provider_request(&mut socket);
+        assert_eq!(request["stream"], false);
+        assert!(request.get("stream_options").is_none());
+        write_json_response(
+            &mut socket,
+            "200 OK",
+            "",
+            json!({"choices":[{"message":{"role":"assistant","content":"fallback succeeded"}}]}),
+        );
+    });
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "fallback");
+    let (response, messages) = agent.response_with_messages(3);
+    assert_eq!(response["result"]["stopReason"], "end_turn");
+    assert!(messages
+        .iter()
+        .any(|message| message["params"]["update"]["content"]["text"] == "fallback succeeded"));
+    assert!(messages
+        .iter()
+        .any(|message| message["params"]["update"]["_meta"]["amarcode"]["estimated"] == true));
+    server.join().unwrap();
+}
+
+#[test]
+fn transcript_does_not_retry_auth_errors_or_execute_truncated_tool_calls() {
+    for auth_error in [true, false] {
+        let Some(listener) = provider_listener() else {
+            return;
+        };
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            provider_request(&mut socket);
+            if auth_error {
+                write_json_response(
+                    &mut socket,
+                    "401 Unauthorized",
+                    "",
+                    json!({"error":{"message":"bad credentials"}}),
+                );
+            } else {
+                let body = format!(
+                    "data: {}\n\n",
+                    json!({"choices":[{"delta":{"tool_calls":[read_call("partial", "never-read")]}}]})
+                );
+                write_sse(&mut socket, &body);
+            }
+        });
+        let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+        initialize(&mut agent);
+        let session = new_session(&mut agent, 2, "/workspace");
+        prompt(&mut agent, 3, &session, "fail safely");
+        let (response, messages) = agent.response_with_messages(3);
+        assert!(response.get("error").is_some(), "{response}");
+        assert!(!messages
+            .iter()
+            .any(|message| message["params"]["update"]["sessionUpdate"] == "tool_call"));
+        assert!(response.to_string().contains(if auth_error {
+            "401"
+        } else {
+            "before a finish reason"
+        }));
+    }
+}
+
+#[test]
+fn transcript_stops_on_round_call_and_repetition_limits_and_keeps_balanced_history() {
+    for (options, rounds, expected_text) in [
+        (
+            json!({"agent":{"max_tool_rounds":2}}),
+            2,
+            "tool-round limit",
+        ),
+        (json!({"agent":{"max_tool_calls":1}}), 1, "tool-call limit"),
+        (
+            json!({"agent":{"repeated_tool_limit":3}}),
+            3,
+            "no new results",
+        ),
+    ] {
+        let Some(listener) = provider_listener() else {
+            return;
+        };
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for index in 0..rounds {
+                let (mut socket, _) = listener.accept().unwrap();
+                provider_request(&mut socket);
+                let mut calls = vec![read_call(&format!("call-{index}"), "missing-file")];
+                if rounds == 1 {
+                    let mut second = read_call("second", "other-file");
+                    second["index"] = json!(1);
+                    calls.push(second);
+                }
+                write_sse(&mut socket, &tool_sse(calls));
+            }
+        });
+        let mut agent = AgentProcess::spawn_with_options(&format!("http://{address}/v1"), options);
+        initialize(&mut agent);
+        let session = new_session(&mut agent, 2, "/workspace");
+        prompt(&mut agent, 3, &session, "bounded work");
+        let (response, messages) = agent.response_with_messages(3);
+        assert_eq!(
+            response["result"]["stopReason"], "max_turn_requests",
+            "{response}"
+        );
+        assert!(messages
+            .iter()
+            .any(|message| message["params"]["update"]["content"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains(expected_text))));
+        let saved: Value =
+            serde_json::from_slice(&fs::read(&agent.session_store_path).unwrap()).unwrap();
+        let history = saved["sessions"][0]["history"].as_array().unwrap();
+        assert_eq!(history[0]["content"], "bounded work");
+        for (index, message) in history.iter().enumerate() {
+            if let Some(calls) = message["tool_calls"].as_array() {
+                for (offset, call) in calls.iter().enumerate() {
+                    assert_eq!(history[index + offset + 1]["tool_call_id"], call["id"]);
+                }
+            }
+        }
+        server.join().unwrap();
+    }
+}
+
+#[test]
+fn transcript_time_budget_and_idle_timeout_interrupt_a_stalled_stream() {
+    for time_budget in [true, false] {
+        let Some(listener) = provider_listener() else {
+            return;
+        };
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            provider_request(&mut socket);
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").unwrap();
+            socket.flush().unwrap();
+            thread::sleep(Duration::from_secs(3));
+        });
+        let options = if time_budget {
+            json!({"agent":{"max_turn_seconds":1}})
+        } else {
+            json!({"reliability":{"stream_idle_timeout_seconds":1}})
+        };
+        let mut agent = AgentProcess::spawn_with_options(&format!("http://{address}/v1"), options);
+        initialize(&mut agent);
+        let session = new_session(&mut agent, 2, "/workspace");
+        prompt(&mut agent, 3, &session, "stalled stream");
+        let response = agent.response(3);
+        if time_budget {
+            assert_eq!(
+                response["result"]["stopReason"], "max_turn_requests",
+                "{response}"
+            );
+        } else {
+            assert!(response.to_string().contains("idle timeout"), "{response}");
+        }
+    }
+}
+
+#[test]
+fn transcript_token_budget_stops_before_a_provider_request() {
+    let mut agent = AgentProcess::spawn_with_options(
+        "http://127.0.0.1:9/v1",
+        json!({"agent":{"max_turn_tokens":1}}),
+    );
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "small budget");
+    assert_eq!(agent.response(3)["result"]["stopReason"], "max_tokens");
+}
+
+#[test]
+fn transcript_compacts_old_exchanges_and_injects_workspace_instructions() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let workspace = std::env::temp_dir().join(format!("amarcode-context-{}", Uuid::new_v4()));
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        workspace.join("AGENTS.md"),
+        "Always preserve project-specific invariant ZEBRA.",
+    )
+    .unwrap();
+    let server = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let first = provider_request(&mut socket);
+        assert!(first["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("ZEBRA"));
+        let old = "obsolete detail ".repeat(2000);
+        write_sse(
+            &mut socket,
+            &format!(
+                "data: {}\n\ndata: [DONE]\n\n",
+                json!({"choices":[{"delta":{"content":old}}]})
+            ),
+        );
+        let (mut socket, _) = listener.accept().unwrap();
+        let summary = provider_request(&mut socket);
+        assert_eq!(summary["stream"], false);
+        assert!(summary.get("tools").is_none());
+        write_json_response(
+            &mut socket,
+            "200 OK",
+            "",
+            json!({"choices":[{"message":{"content":"Preserved decision: use ZEBRA; verification pending."}}]}),
+        );
+        let (mut socket, _) = listener.accept().unwrap();
+        let request = provider_request(&mut socket);
+        let text = request["messages"].to_string();
+        assert!(
+            text.contains("original objective")
+                && text.contains("current follow-up")
+                && text.contains("Preserved decision")
+        );
+        assert!(!text.contains("obsolete detail"));
+        write_sse(
+            &mut socket,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"continued\"}}]}\n\ndata: [DONE]\n\n",
+        );
+    });
+    let mut agent = AgentProcess::spawn_with_options(
+        &format!("http://{address}/v1"),
+        json!({"context":{"context_length":8192}}),
+    );
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, workspace.to_str().unwrap());
+    prompt(&mut agent, 3, &session, "original objective");
+    assert_eq!(agent.response(3)["result"]["stopReason"], "end_turn");
+    prompt(&mut agent, 4, &session, "current follow-up");
+    assert_eq!(agent.response(4)["result"]["stopReason"], "end_turn");
+    let saved: Value =
+        serde_json::from_slice(&fs::read(&agent.session_store_path).unwrap()).unwrap();
+    assert!(saved.to_string().contains("Preserved decision"));
+    assert!(!saved.to_string().contains("obsolete detail"));
+    server.join().unwrap();
+    fs::remove_dir_all(workspace).unwrap();
+}
+
+#[test]
+fn transcript_time_budget_kills_and_releases_an_active_terminal() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        provider_request(&mut socket);
+        write_sse(
+            &mut socket,
+            &tool_sse(vec![
+                json!({"index":0,"id":"command","function":{"name":"run_command","arguments":json!({"command":"sleep","args":["300"]}).to_string()}}),
+            ]),
+        );
+    });
+    let workspace = std::env::temp_dir().join(format!("amarcode-deadline-{}", Uuid::new_v4()));
+    fs::create_dir_all(&workspace).unwrap();
+    let mut agent = AgentProcess::spawn_with_options(
+        &format!("http://{address}/v1"),
+        json!({"agent":{"max_turn_seconds":1}}),
+    );
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, workspace.to_str().unwrap());
+    prompt(&mut agent, 3, &session, "run a long command");
+    let mut methods = Vec::new();
+    loop {
+        let message = agent.output.recv_timeout(TIMEOUT).unwrap();
+        if message["id"] == 3 {
+            assert_eq!(
+                message["result"]["stopReason"], "max_turn_requests",
+                "{message}"
+            );
+            break;
+        }
+        let Some(method) = message["method"].as_str() else {
+            continue;
+        };
+        if method == "session/update" || method == "$/cancel_request" {
+            continue;
+        }
+        methods.push(method.to_owned());
+        if method == "terminal/wait_for_exit" {
+            continue;
+        }
+        let result = match method {
+            "session/request_permission" => {
+                json!({"outcome":{"outcome":"selected","optionId":"allow-once"}})
+            }
+            "terminal/create" => json!({"terminalId":"long-running"}),
+            "terminal/output" => {
+                json!({"output":"","truncated":false,"exitStatus":{"exitCode":143}})
+            }
+            "terminal/kill" | "terminal/release" => json!({}),
+            other => panic!("unexpected request: {other}"),
+        };
+        agent.send(json!({"jsonrpc":"2.0","id":message["id"],"result":result}));
+    }
+    assert_eq!(
+        methods,
+        [
+            "session/request_permission",
+            "terminal/create",
+            "terminal/wait_for_exit",
+            "terminal/kill",
+            "terminal/output",
+            "terminal/release"
+        ]
+    );
+    fs::remove_dir_all(workspace).unwrap();
+}
+
+#[test]
+fn transcript_cost_budget_stops_requests_and_persists_reported_session_cost() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        provider_request(&mut socket);
+        let body = json!({"choices":[{"delta":{"tool_calls":[read_call("cost", "missing-file")]}}],
+            "usage":{"prompt_tokens":100,"completion_tokens":5,"cost":0.02}});
+        write_sse(&mut socket, &format!("data: {body}\n\ndata: [DONE]\n\n"));
+    });
+    let mut agent = AgentProcess::spawn_with_options(
+        &format!("http://{address}/v1"),
+        json!({"agent":{"max_cost_usd":0.01}}),
+    );
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "respect cost budget");
+    let (response, messages) = agent.response_with_messages(3);
+    assert_eq!(
+        response["result"]["stopReason"], "max_turn_requests",
+        "{response}"
+    );
+    assert!(messages
+        .iter()
+        .any(|message| message["params"]["update"]["content"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("cost budget"))));
+    let saved: Value =
+        serde_json::from_slice(&fs::read(&agent.session_store_path).unwrap()).unwrap();
+    assert_eq!(saved["sessions"][0]["cost_usd"], 0.02);
+}
+
+#[test]
+fn transcript_model_output_limit_reports_max_tokens_without_executing_calls() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        provider_request(&mut socket);
+        write_sse(
+            &mut socket,
+            &format!(
+                "data: {}\n\ndata: [DONE]\n\n",
+                json!({"choices":[{"delta":{"tool_calls":[read_call("limited", "never-read")]},"finish_reason":"length"}]})
+            ),
+        );
+    });
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "output limit");
+    let (response, messages) = agent.response_with_messages(3);
+    assert_eq!(response["result"]["stopReason"], "max_tokens");
+    assert!(!messages
+        .iter()
+        .any(|message| message["params"]["update"]["sessionUpdate"] == "tool_call"));
+}
+
+#[test]
+fn transcript_preserves_split_utf8_and_finishes_at_done_without_waiting_for_eof() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        provider_request(&mut socket);
+        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"").unwrap();
+        socket.write_all(&[0xc3]).unwrap();
+        socket.flush().unwrap();
+        thread::sleep(Duration::from_millis(50));
+        socket.write_all(&[0xb6]).unwrap();
+        socket.write_all(b"\"}}]}\n\ndata: [DONE]\n\n").unwrap();
+        socket.flush().unwrap();
+        thread::sleep(Duration::from_secs(2));
+    });
+    let mut agent = AgentProcess::spawn_with_options(
+        &format!("http://{address}/v1"),
+        json!({"reliability":{"stream_idle_timeout_seconds":1}}),
+    );
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "UTF-8 stream");
+    let (response, messages) = agent.response_with_messages(3);
+    assert_eq!(response["result"]["stopReason"], "end_turn", "{response}");
+    assert!(messages
+        .iter()
+        .any(|message| message["params"]["update"]["content"]["text"] == "ö"));
 }

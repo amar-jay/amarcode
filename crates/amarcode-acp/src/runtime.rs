@@ -9,7 +9,7 @@ use agent_client_protocol::{
     schema::{
         v1::{
             AgentCapabilities, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-            ContentBlock, ContentChunk, DeleteSessionRequest, DeleteSessionResponse,
+            ContentBlock, ContentChunk, Cost, DeleteSessionRequest, DeleteSessionResponse,
             Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
             ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, MessageId,
             NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest,
@@ -18,6 +18,7 @@ use agent_client_protocol::{
             SessionConfigOptionValue, SessionDeleteCapabilities, SessionId, SessionInfo,
             SessionListCapabilities, SessionNotification, SessionResumeCapabilities, SessionUpdate,
             SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason, TextContent,
+            UsageUpdate,
         },
         ProtocolVersion,
     },
@@ -56,6 +57,7 @@ struct Session {
     model: String,
     active_turn: Option<ActiveTurn>,
     permissions: Arc<crate::tools::PermissionState>,
+    cost_usd: f64,
 }
 
 impl Session {
@@ -71,6 +73,7 @@ impl Session {
             model,
             active_turn: None,
             permissions: Arc::new(crate::tools::PermissionState::default()),
+            cost_usd: saved.cost_usd,
         }
     }
 
@@ -81,6 +84,7 @@ impl Session {
             history: self.history.clone(),
             model: self.model.clone(),
             updated_at: crate::persistence::now_seconds(),
+            cost_usd: self.cost_usd,
         }
     }
 }
@@ -92,13 +96,23 @@ struct ActiveTurn {
 }
 
 pub async fn serve(config: Config) -> agent_client_protocol::Result<()> {
-    build_agent(Runtime::new(config))
+    build_agent(Runtime::new(config).map_err(|error| Error::internal_error().data(error))?)
         .connect_to(Stdio::new())
         .await
 }
 
 impl Runtime {
-    fn new(config: Config) -> Self {
+    fn new(config: Config) -> Result<Self, String> {
+        let http = HttpClient::builder()
+            .connect_timeout(Duration::from_secs(
+                config.reliability.connect_timeout_seconds,
+            ))
+            .timeout(Duration::from_secs(
+                config.reliability.request_timeout_seconds,
+            ))
+            .retry(reqwest::retry::never())
+            .build()
+            .map_err(|error| format!("failed to build provider HTTP client: {error}"))?;
         let store = config.persistence.enabled.then(|| {
             Arc::new(SessionStore::new(
                 config.session_store_path(),
@@ -122,13 +136,13 @@ impl Runtime {
                 (id, session)
             })
             .collect();
-        Self {
+        Ok(Self {
             config: Arc::new(config),
-            http: HttpClient::new(),
+            http,
             sessions: Arc::new(Mutex::new(sessions)),
             store,
             models: Arc::new(Mutex::new(ModelCache::default())),
-        }
+        })
     }
 
     async fn initialize(&self, request: InitializeRequest) -> InitializeResponse {
@@ -165,6 +179,7 @@ impl Runtime {
             model: self.config.provider.model.clone(),
             active_turn: None,
             permissions: Arc::new(crate::tools::PermissionState::default()),
+            cost_usd: 0.0,
         };
         self.persist(&session_id, &session);
         self.sessions
@@ -307,10 +322,11 @@ impl Runtime {
         self.refresh_models().await;
         let cache = self.models.lock().await;
         ModelLimits {
-            context_length: cache
-                .context_lengths
-                .get(model)
-                .copied()
+            context_length: self
+                .config
+                .context
+                .context_length
+                .or_else(|| cache.context_lengths.get(model).copied())
                 .unwrap_or(provider::DEFAULT_CONTEXT_LENGTH),
             max_completion_tokens: cache.max_completion_tokens.get(model).copied(),
         }
@@ -318,7 +334,7 @@ impl Runtime {
 
     async fn refresh_models(&self) {
         const MODEL_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
-        let mut cache = self.models.lock().await;
+        let cache = self.models.lock().await;
         if cache
             .fetched_at
             .is_some_and(|at| at.elapsed() < MODEL_CACHE_TTL)
@@ -327,6 +343,8 @@ impl Runtime {
             return;
         }
         let configured = self.config.provider.model.clone();
+        // Network I/O must not hold the shared cache lock across sessions.
+        drop(cache);
         let mut ids = vec![configured.clone()];
         let mut context_lengths = HashMap::new();
         let mut max_completion_tokens = HashMap::new();
@@ -351,6 +369,7 @@ impl Runtime {
         if !ids.iter().any(|id| id == &configured) {
             ids.insert(0, configured);
         }
+        let mut cache = self.models.lock().await;
         cache.fetched_at = Some(Instant::now());
         cache.ids = ids;
         cache.context_lengths = context_lengths;
@@ -457,7 +476,39 @@ impl Runtime {
             self.persist(session_id, session);
         } else {
             session.history.truncate(active.history_len);
+            self.persist(session_id, session);
         }
+    }
+
+    async fn publish_usage(
+        &self,
+        session_id: &SessionId,
+        connection: &ConnectionTo<Client>,
+        usage: &provider::ProviderUsage,
+        limits: ModelLimits,
+        turn_tokens: u64,
+    ) {
+        let cost = {
+            let mut sessions = self.sessions.lock().await;
+            let Some(session) = sessions.get_mut(session_id) else {
+                return;
+            };
+            if let Some(cost) = usage.cost_usd {
+                session.cost_usd += cost;
+            }
+            session.cost_usd
+        };
+        let mut update = UsageUpdate::new(usage.input_tokens, limits.context_length).meta(serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(serde_json::json!({
+            "amarcode": { "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens,
+                "turn_tokens": turn_tokens, "estimated": !usage.reported }
+        })).expect("usage metadata is an object"));
+        if cost > 0.0 || usage.cost_usd.is_some() {
+            update = update.cost(Cost::new(cost, "USD"));
+        }
+        let _ = connection.send_notification(SessionNotification::new(
+            session_id.clone(),
+            SessionUpdate::UsageUpdate(update),
+        ));
     }
 }
 
@@ -589,11 +640,11 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                         }
                     };
                     match outcome {
-                        Ok(Completion::Completed(history)) => {
+                        Ok(Completion::Completed(outcome)) => {
                             runtime
-                                .finish_turn(&session_id, turn_id, Some(history))
+                                .finish_turn(&session_id, turn_id, Some(outcome.history))
                                 .await;
-                            responder.respond(PromptResponse::new(StopReason::EndTurn))
+                            responder.respond(PromptResponse::new(outcome.stop_reason))
                         }
                         Ok(Completion::Cancelled) => {
                             runtime.finish_turn(&session_id, turn_id, None).await;
@@ -642,22 +693,228 @@ async fn run_agent_turn(
     mut message_id: agent_client_protocol::schema::v1::MessageId,
     connection: ConnectionTo<Client>,
     cancellation: watch::Receiver<bool>,
-) -> Result<Completion<Vec<serde_json::Value>>, String> {
-    const MAX_TOOL_ROUNDS: usize = 1000;
-    let limits = runtime.model_limits(&model).await;
+) -> Result<Completion<TurnOutcome>, String> {
+    let settings = &runtime.config.agent;
+    let deadline = tokio::time::Instant::now()
+        .checked_add(Duration::from_secs(settings.max_turn_seconds))
+        .ok_or("agent.max_turn_seconds exceeds the supported clock range")?;
+    let expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (cancel, mut execution_cancellation) = watch::channel(false);
+    let relay_cancel = cancel.clone();
+    let relay_expired = expired.clone();
+    let cancellation_observer = cancellation.clone();
+    let mut external_cancellation = cancellation;
+    let _relay = CancellationRelay(tokio::spawn(async move {
+        if !*external_cancellation.borrow() {
+            tokio::select! {
+                biased;
+                _ = external_cancellation.changed() => {},
+                _ = tokio::time::sleep_until(deadline) => { relay_expired.store(true, std::sync::atomic::Ordering::Relaxed); },
+            }
+        }
+        let _ = relay_cancel.send(true);
+    }));
+    let limits = tokio::select! {
+        limits = runtime.model_limits(&model) => limits,
+        _ = execution_cancellation.changed() => {
+            return cancelled_or_limited(history, &expired, &cancellation_observer, &connection, &session_id);
+        }
+    };
+    let context_cwd = cwd.clone();
+    let workspace_bytes = runtime
+        .config
+        .context
+        .max_workspace_bytes
+        .min((limits.history_token_budget() / 4).saturating_mul(4));
+    let workspace = tokio::select! {
+        context = tokio::task::spawn_blocking(move || crate::context::workspace_context(&context_cwd, workspace_bytes)) => context.map_err(|error| format!("workspace context failed: {error}"))?,
+        _ = execution_cancellation.changed() => { return cancelled_or_limited(history, &expired, &cancellation_observer, &connection, &session_id); }
+    };
+    let history_budget = limits
+        .history_token_budget()
+        .saturating_sub(provider::estimate_tokens(&workspace));
+    let mut used_tokens = 0_u64;
+    let mut used_cost = 0_f64;
+    let mut tool_calls = 0;
+    let mut progress = ProgressTracker::default();
     let mut search_group: Option<SearchPresentationGroup> = None;
-    for _ in 0..MAX_TOOL_ROUNDS {
+    for round in 0..=settings.max_tool_rounds {
+        if *execution_cancellation.borrow() {
+            finish_active_search_group(&connection, &session_id, search_group.take(), true);
+            return cancelled_or_limited(
+                history,
+                &expired,
+                &cancellation_observer,
+                &connection,
+                &session_id,
+            );
+        }
+        if round == settings.max_tool_rounds {
+            finish_active_search_group(&connection, &session_id, search_group.take(), true);
+            return limited_turn(
+                history,
+                StopReason::MaxTurnRequests,
+                "tool-round limit reached",
+                &connection,
+                &session_id,
+            );
+        }
+        if settings
+            .max_cost_usd
+            .is_some_and(|limit| used_cost >= limit)
+        {
+            finish_active_search_group(&connection, &session_id, search_group.take(), true);
+            return limited_turn(
+                history,
+                StopReason::MaxTurnRequests,
+                "reported provider cost budget reached",
+                &connection,
+                &session_id,
+            );
+        }
+        let pruned = crate::context::prune_tool_results(
+            &history,
+            runtime.config.context.max_tool_result_bytes,
+        );
+        if let Some(plan) = crate::context::compaction_plan(
+            &pruned,
+            history_budget,
+            runtime.config.context.summary_tokens,
+        )? {
+            let mut summary = String::new();
+            let summary_batches = provider::summary_batches(
+                &plan.older,
+                history_budget
+                    .saturating_sub(plan.summary_budget)
+                    .saturating_sub(512),
+            );
+            for batch in summary_batches {
+                let summary_input = provider::estimate_tokens(
+                    &provider::summary_messages(&summary, &batch).to_string(),
+                ) as u64;
+                if used_tokens
+                    .saturating_add(summary_input)
+                    .saturating_add(plan.summary_budget as u64)
+                    > settings.max_turn_tokens
+                {
+                    finish_active_search_group(&connection, &session_id, search_group.take(), true);
+                    return limited_turn(
+                        history,
+                        StopReason::MaxTokens,
+                        "token budget cannot cover context compaction",
+                        &connection,
+                        &session_id,
+                    );
+                }
+                let completion = match provider::summarize_batch(
+                    &runtime.http,
+                    &runtime.config,
+                    &model,
+                    &batch,
+                    &summary,
+                    plan.summary_budget as u64,
+                    &mut execution_cancellation,
+                )
+                .await
+                {
+                    Ok(completion) => completion,
+                    Err(error) => {
+                        finish_active_search_group(
+                            &connection,
+                            &session_id,
+                            search_group.take(),
+                            true,
+                        );
+                        if *execution_cancellation.borrow() {
+                            return cancelled_or_limited(
+                                history,
+                                &expired,
+                                &cancellation_observer,
+                                &connection,
+                                &session_id,
+                            );
+                        }
+                        return Err(error);
+                    }
+                };
+                let Completion::Completed((next_summary, usage)) = completion else {
+                    finish_active_search_group(&connection, &session_id, search_group.take(), true);
+                    return cancelled_or_limited(
+                        history,
+                        &expired,
+                        &cancellation_observer,
+                        &connection,
+                        &session_id,
+                    );
+                };
+                summary = next_summary;
+                used_tokens = used_tokens.saturating_add(usage.total_tokens());
+                used_cost += usage.cost_usd.unwrap_or(0.0);
+                runtime
+                    .publish_usage(&session_id, &connection, &usage, limits, used_tokens)
+                    .await;
+                if settings
+                    .max_cost_usd
+                    .is_some_and(|limit| used_cost >= limit)
+                {
+                    finish_active_search_group(&connection, &session_id, search_group.take(), true);
+                    return limited_turn(
+                        history,
+                        StopReason::MaxTurnRequests,
+                        "reported provider cost budget reached",
+                        &connection,
+                        &session_id,
+                    );
+                }
+            }
+            history = plan.finish(&summary);
+        }
+        let request_history = crate::context::prune_tool_results(
+            &history,
+            runtime.config.context.max_tool_result_bytes,
+        );
+        let input_tokens = crate::context::history_tokens(&request_history)
+            .saturating_add(provider::estimate_tokens(&workspace))
+            as u64
+            + (limits
+                .context_length
+                .saturating_sub(limits.history_token_budget() as u64)
+                .saturating_sub(
+                    provider::DEFAULT_OUTPUT_RESERVE
+                        .min(limits.context_length / 4)
+                        .max(1),
+                ));
+        let remaining = settings
+            .max_turn_tokens
+            .saturating_sub(used_tokens)
+            .saturating_sub(input_tokens);
+        if remaining == 0 {
+            finish_active_search_group(&connection, &session_id, search_group.take(), true);
+            return limited_turn(
+                history,
+                StopReason::MaxTokens,
+                "turn token budget reached",
+                &connection,
+                &session_id,
+            );
+        }
+        let max_output = provider::DEFAULT_OUTPUT_RESERVE
+            .min(limits.context_length / 4)
+            .max(1)
+            .min(limits.max_completion_tokens.unwrap_or(u64::MAX))
+            .min(remaining);
         let completion = match provider::stream_completion(
             &runtime.http,
             &runtime.config,
             &model,
-            &history,
-            limits,
+            &request_history,
+            &workspace,
+            max_output,
             provider::StreamContext {
                 session_id: session_id.clone(),
                 message_id,
                 connection: connection.clone(),
-                cancellation: cancellation.clone(),
+                cancellation: execution_cancellation.clone(),
             },
         )
         .await
@@ -665,24 +922,74 @@ async fn run_agent_turn(
             Ok(completion) => completion,
             Err(error) => {
                 finish_active_search_group(&connection, &session_id, search_group.take(), true);
+                if *execution_cancellation.borrow() {
+                    return cancelled_or_limited(
+                        history,
+                        &expired,
+                        &cancellation_observer,
+                        &connection,
+                        &session_id,
+                    );
+                }
                 return Err(error);
             }
         };
         let Completion::Completed(mut turn) = completion else {
             finish_active_search_group(&connection, &session_id, search_group.take(), true);
-            return Ok(Completion::Cancelled);
+            return cancelled_or_limited(
+                history,
+                &expired,
+                &cancellation_observer,
+                &connection,
+                &session_id,
+            );
         };
+        used_tokens = used_tokens.saturating_add(turn.usage.total_tokens());
+        used_cost += turn.usage.cost_usd.unwrap_or(0.0);
+        runtime
+            .publish_usage(&session_id, &connection, &turn.usage, limits, used_tokens)
+            .await;
         normalize_tool_ids(&mut turn);
         history.push(provider::assistant_message(&turn));
+        let token_stop = turn.finish_reason.as_deref() == Some("length")
+            || (!turn.tool_calls.is_empty() && used_tokens >= settings.max_turn_tokens);
+        if token_stop {
+            for call in &turn.tool_calls {
+                history.push(provider::tool_message(
+                    call,
+                    "Error: tool not executed because the model token limit was reached",
+                ));
+            }
+            finish_active_search_group(&connection, &session_id, search_group.take(), true);
+            return limited_turn(
+                history,
+                StopReason::MaxTokens,
+                "model or turn token limit reached",
+                &connection,
+                &session_id,
+            );
+        }
         if turn.tool_calls.is_empty() {
             finish_active_search_group(&connection, &session_id, search_group.take(), false);
-            return Ok(Completion::Completed(history));
+            return Ok(Completion::Completed(TurnOutcome {
+                history,
+                stop_reason: StopReason::EndTurn,
+            }));
         }
+        let mut round_results = Vec::new();
+        let mut call_limit_reached = false;
         for call in &turn.tool_calls {
-            if *cancellation.borrow() {
-                finish_active_search_group(&connection, &session_id, search_group.take(), true);
-                return Ok(Completion::Cancelled);
+            // Fill every result, even on a budget stop, to avoid leaving orphan
+            // tool calls in the history saved for the next user turn.
+            if tool_calls >= settings.max_tool_calls || *execution_cancellation.borrow() {
+                call_limit_reached |= tool_calls >= settings.max_tool_calls;
+                history.push(provider::tool_message(
+                    call,
+                    "Error: tool not executed because the turn was stopped",
+                ));
+                continue;
             }
+            tool_calls += 1;
             if crate::tools::is_search_tool(call) {
                 if search_group.is_none() {
                     let group_id = format!("search-group-{}", Uuid::new_v4());
@@ -703,24 +1010,155 @@ async fn run_agent_turn(
                     }
                 };
                 history.push(provider::tool_message(call, &output));
+                round_results.push(tool_fingerprint(call, &output));
                 continue;
             }
             finish_active_search_group(&connection, &session_id, search_group.take(), false);
-            let output = crate::tools::execute(
-                call,
-                &cwd,
-                &permissions,
-                &session_id,
-                &connection,
-                cancellation.clone(),
+            let output = tokio::time::timeout_at(
+                deadline + Duration::from_secs(5),
+                crate::tools::execute(
+                    call,
+                    &cwd,
+                    &permissions,
+                    &session_id,
+                    &connection,
+                    execution_cancellation.clone(),
+                ),
             )
-            .await;
+            .await
+            .unwrap_or_else(|_| "Error: turn deadline reached; terminal cleanup timed out".into());
             history.push(provider::tool_message(call, &output));
+            round_results.push(tool_fingerprint(call, &output));
+        }
+        if *execution_cancellation.borrow() {
+            finish_active_search_group(&connection, &session_id, search_group.take(), true);
+            return cancelled_or_limited(
+                history,
+                &expired,
+                &cancellation_observer,
+                &connection,
+                &session_id,
+            );
+        }
+        if call_limit_reached {
+            finish_active_search_group(&connection, &session_id, search_group.take(), true);
+            return limited_turn(
+                history,
+                StopReason::MaxTurnRequests,
+                "tool-call limit reached",
+                &connection,
+                &session_id,
+            );
+        }
+        if progress.record(round_results, settings.repeated_tool_limit) {
+            finish_active_search_group(&connection, &session_id, search_group.take(), true);
+            return limited_turn(
+                history,
+                StopReason::MaxTurnRequests,
+                "repeated tool calls produced no new results",
+                &connection,
+                &session_id,
+            );
         }
         message_id = agent_client_protocol::schema::v1::MessageId::new(Uuid::new_v4().to_string());
     }
     finish_active_search_group(&connection, &session_id, search_group.take(), true);
-    Err("maximum tool-call rounds exceeded".into())
+    unreachable!("bounded agent loop always stops")
+}
+
+struct TurnOutcome {
+    history: Vec<serde_json::Value>,
+    stop_reason: StopReason,
+}
+
+struct CancellationRelay(tokio::task::JoinHandle<()>);
+impl Drop for CancellationRelay {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+fn cancelled_or_limited(
+    history: Vec<serde_json::Value>,
+    expired: &std::sync::atomic::AtomicBool,
+    external_cancellation: &watch::Receiver<bool>,
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+) -> Result<Completion<TurnOutcome>, String> {
+    if *external_cancellation.borrow() {
+        return Ok(Completion::Cancelled);
+    }
+    if expired.load(std::sync::atomic::Ordering::Relaxed) {
+        limited_turn(
+            history,
+            StopReason::MaxTurnRequests,
+            "turn time budget reached",
+            connection,
+            session_id,
+        )
+    } else {
+        Ok(Completion::Cancelled)
+    }
+}
+
+fn limited_turn(
+    mut history: Vec<serde_json::Value>,
+    reason: StopReason,
+    message: &str,
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+) -> Result<Completion<TurnOutcome>, String> {
+    let text = format!("Stopped: {message}. Completed tool results are retained; review any changes before continuing.");
+    connection
+        .send_notification(SessionNotification::new(
+            session_id.clone(),
+            SessionUpdate::AgentMessageChunk(
+                ContentChunk::new(ContentBlock::Text(TextContent::new(&text)))
+                    .message_id(MessageId::new(Uuid::new_v4().to_string())),
+            ),
+        ))
+        .map_err(|error| format!("ACP write failed: {error}"))?;
+    history.push(serde_json::json!({"role":"assistant", "content":text}));
+    Ok(Completion::Completed(TurnOutcome {
+        history,
+        stop_reason: reason,
+    }))
+}
+
+fn tool_fingerprint(call: &provider::ModelToolCall, output: &str) -> String {
+    let arguments = serde_json::from_str::<serde_json::Value>(&call.arguments)
+        .map(|mut value| {
+            value.sort_all_objects();
+            value.to_string()
+        })
+        .unwrap_or_else(|_| call.arguments.clone());
+    // Hash results to keep loop-detection memory independent of tool output size.
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    (call.name.as_str(), arguments.as_str(), output).hash(&mut hash);
+    format!("{:x}", hash.finish())
+}
+
+#[derive(Default)]
+struct ProgressTracker {
+    recent: std::collections::VecDeque<Vec<String>>,
+}
+impl ProgressTracker {
+    fn record(&mut self, round: Vec<String>, limit: usize) -> bool {
+        self.recent.push_back(round);
+        while self.recent.len() > limit.saturating_mul(2) {
+            self.recent.pop_front();
+        }
+        // Detect both identical rounds and alternating A/B rounds, ignoring
+        // provider-generated call IDs and JSON argument formatting.
+        (1..=2).any(|period| {
+            self.recent.len() >= limit.saturating_mul(period)
+                && (1..limit.saturating_mul(period)).all(|offset| {
+                    self.recent[self.recent.len() - 1 - offset]
+                        == self.recent[self.recent.len() - 1 - offset % period]
+                })
+        })
+    }
 }
 
 struct SearchPresentationGroup {
@@ -848,6 +1286,42 @@ fn provider_prompt_content(
 mod tests {
     use super::*;
 
+    #[test]
+    fn detects_identical_and_alternating_tool_loops_but_allows_progress() {
+        let mut tracker = ProgressTracker::default();
+        assert!(!tracker.record(vec!["a".into()], 3));
+        assert!(!tracker.record(vec!["a".into()], 3));
+        assert!(tracker.record(vec!["a".into()], 3));
+        let mut tracker = ProgressTracker::default();
+        for signature in ["a", "b", "a", "b", "a"] {
+            assert!(!tracker.record(vec![signature.into()], 3));
+        }
+        assert!(tracker.record(vec!["b".into()], 3));
+        let mut tracker = ProgressTracker::default();
+        for index in 0..20 {
+            assert!(!tracker.record(vec![index.to_string()], 3));
+        }
+    }
+
+    #[test]
+    fn progress_detection_ignores_call_ids_and_argument_key_order() {
+        let a = provider::ModelToolCall {
+            id: "a".into(),
+            name: "read_file".into(),
+            arguments: r#"{"path":"x","limit":10}"#.into(),
+        };
+        let b = provider::ModelToolCall {
+            id: "b".into(),
+            arguments: r#"{ "limit": 10, "path": "x" }"#.into(),
+            ..a.clone()
+        };
+        assert_eq!(tool_fingerprint(&a, "same"), tool_fingerprint(&b, "same"));
+        assert_ne!(
+            tool_fingerprint(&a, "same"),
+            tool_fingerprint(&b, "new result")
+        );
+    }
+
     fn config(persistence: crate::config::PersistenceConfig, source_path: PathBuf) -> Config {
         Config {
             name: "test-agent".into(),
@@ -858,6 +1332,9 @@ mod tests {
                 reasoning: None,
             },
             persistence,
+            agent: Default::default(),
+            reliability: Default::default(),
+            context: Default::default(),
             source_path,
         }
     }
@@ -870,6 +1347,7 @@ mod tests {
             },
             PathBuf::from("test-config.json"),
         ))
+        .expect("runtime")
     }
 
     #[tokio::test]
@@ -961,7 +1439,7 @@ mod tests {
             path: Some(path.clone()),
         };
         let config = config(persistence, PathBuf::from("test-config.json"));
-        let runtime = Runtime::new(config.clone());
+        let runtime = Runtime::new(config.clone()).expect("runtime");
         let created = runtime
             .new_session(NewSessionRequest::new("/workspace"))
             .await;
@@ -975,7 +1453,7 @@ mod tests {
         }
         drop(runtime);
 
-        let restored = Runtime::new(config);
+        let restored = Runtime::new(config).expect("runtime");
         let sessions = restored.sessions.lock().await;
         let session = sessions.get(&created.session_id).expect("restored session");
         assert_eq!(session.model, "test-model");

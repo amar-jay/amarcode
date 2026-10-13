@@ -10,8 +10,7 @@ Run it with an explicit configuration file:
 amarcode-acp --config /path/to/amarcode-acp.json
 ```
 
-If `--config` is omitted, it reads `amarcode-acp.json` from the current
-directory.
+`--config` is required.
 
 Configuration:
 
@@ -28,6 +27,26 @@ Configuration:
     "enabled": true,
     "ttl_seconds": 86400,
     "path": "amarcode-acp.sessions.json"
+  },
+  "agent": {
+    "max_tool_rounds": 30,
+    "max_tool_calls": 120,
+    "max_turn_tokens": 200000,
+    "max_turn_seconds": 900,
+    "repeated_tool_limit": 3
+  },
+  "reliability": {
+    "connect_timeout_seconds": 10,
+    "request_timeout_seconds": 180,
+    "stream_idle_timeout_seconds": 45,
+    "max_retries": 3,
+    "retry_base_ms": 250,
+    "retry_max_ms": 10000
+  },
+  "context": {
+    "max_tool_result_bytes": 16384,
+    "max_workspace_bytes": 24576,
+    "summary_tokens": 1024
   }
 }
 ```
@@ -56,13 +75,62 @@ provider's `/models` endpoint and exposes them in the ACP session model
 selector. Results are cached for one hour. `provider.model` remains the default
 and is the fallback if discovery fails. Model selections are scoped to each
 session and persisted with it. Discovery also reads each model's `context_length`. Before every provider
-call the adapter estimates prompt size with a bytes/4 heuristic and drops the
-oldest turns from the *request* until the prompt fits that window, keeping
-assistant tool-call groups intact. Session history itself is left intact so a
-later model with a larger window can still see it. Space is reserved for the
+call the adapter estimates prompt size with a bytes/4 heuristic, prunes large
+tool results while retaining their beginning and end, then summarizes older
+exchanges if necessary. The original request and latest user request stay
+pinned, and retained assistant/tool groups remain intact. Summaries include
+decisions, changes, verification evidence, and remaining work. Summary requests
+are bounded and batched for large histories; individual oversized transcript
+messages are explicitly pruned. A failed summary reports an error instead of
+silently forgetting earlier work. Successful compaction is persisted with the
+session, replacing the summarized exchanges. Space is reserved for the
 system prompt, tool schemas, and an 8,192-token completion (capped at a
 quarter of the window). When context length is unknown the adapter uses a
-128,000-token default. Truncated requests start with a short omission notice.
+128,000-token default. Set `context.context_length` to override discovery or
+configure a provider that does not advertise its window. Oversized pinned user
+requests report an error instead of being discarded. Token estimates are
+approximate; model-specific tokenizers are not bundled. Images use an estimated
+4,096-token allowance instead of counting base64 transfer bytes as text tokens.
+
+Every turn discovers bounded workspace context on a blocking worker: root
+`AGENTS.md`, README/contribution excerpts, a depth-two file tree, Git HEAD when
+available, OS, shell, and UTC timestamp. The policy instructs the agent to read
+nested instructions, inspect git status/diffs through the permissioned terminal,
+preserve user changes, use targeted edits, and run relevant verification.
+
+## Limits and provider reliability
+
+The `agent`, `reliability`, and `context` sections are optional; partial sections
+inherit the defaults shown above. Invalid zero limits/timeouts are rejected at
+startup. `repeated_tool_limit` must be at least two and `max_retries` at most ten.
+
+Turn limits cover tool rounds, individual calls (including calls in a batch),
+tokens across model and summary requests, and elapsed time. Provider-reported
+token usage replaces estimates when available; each completion's `max_tokens`
+is capped by the remaining budget and model output reserve. Identical rounds
+and alternating two-round loops stop when the configured repetition threshold
+is reached with the same arguments and results. Budget stops publish the reason,
+return `max_tokens` or `max_turn_requests`, and save completed tool results with
+balanced call/result pairs so the next prompt can continue. A time stop signals
+cancellation to active terminals and permits up to five seconds for cleanup.
+
+Optionally set `agent.max_cost_usd` to a positive USD amount. This stops further
+model requests after reported turn cost reaches the budget. It requires a
+provider that supplies `usage.cost`, includes summary cost, and may overshoot by
+the last request; it is not a prepaid spending cap. ACP `usage_update` events
+carry context usage and cumulative reported session cost. Token totals and the
+estimate flag are available under `_meta.amarcode`. Unreported spend, including
+requests interrupted before usage arrives, cannot be measured.
+
+Provider requests have connection and total request timeouts plus a stream idle
+timeout. Rate limits (429), server errors, and transient request failures are
+retried up to `max_retries` times using exponential backoff with jitter. Numeric
+and HTTP-date `Retry-After` values are honored; cancellation and the turn
+deadline interrupt backoff. Authentication/other client errors are not retried.
+If the provider explicitly rejects streaming, a non-streaming request is used.
+Published partial streams are never replayed. Streams ending without a finish
+reason or `[DONE]` fail before any returned tool calls execute. SSE parsing
+preserves UTF-8 characters split across network chunks.
 
 Session persistence is enabled by default with a 24-hour TTL. Unless `path` is
 configured, sessions are stored beside the configuration file by replacing its
@@ -84,8 +152,8 @@ With persistence enabled, the adapter advertises ACP session load, resume, list,
 delete, and close capabilities. Loading replays stored user and assistant text;
 resuming restores context without replay. Closing detaches the live session but
 keeps it available until its TTL expires, while deleting removes it immediately.
-Authentication, images, audio, embedded context, and MCP capabilities are not
-advertised because they are not yet implemented.
+Image prompts are advertised and translated to OpenAI-compatible image content.
+Authentication, audio, embedded context, and MCP capabilities are not advertised.
 
 ## Tools
 
@@ -115,6 +183,6 @@ and workspace-relative working directory before it starts a process; an
 
 Tool calls are streamed to the client using typed ACP `tool_call` and
 `tool_call_update` events. Calls and results remain structured in provider
-history so the model can continue after each tool execution. A turn is limited
-to 16 tool-call rounds and remains cancellable while waiting for the provider or
-for permission.
+history so the model can continue after each tool execution. A turn defaults to
+30 tool-call rounds and remains cancellable while waiting for the provider,
+retry backoff, compaction, terminal execution, or permission.
