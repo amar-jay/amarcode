@@ -1,4 +1,5 @@
 mod app_update;
+mod clipboard_files;
 mod config;
 mod daemon;
 mod protocol;
@@ -129,6 +130,13 @@ async fn prepare_application_uninstall(
 #[tauri::command]
 fn exit_application(app: AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+async fn read_pasted_files(paths: Vec<String>) -> Result<clipboard_files::PastedFiles, String> {
+    tauri::async_runtime::spawn_blocking(move || clipboard_files::read_pasted_files(paths))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -729,6 +737,7 @@ pub fn run() {
             app_install_update,
             prepare_application_uninstall,
             exit_application,
+            read_pasted_files,
             daemon_health,
             daemon_version,
             list_agents,

@@ -40,6 +40,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import {
+  clipboardFilePaths,
+  readClipboardAttachments,
+} from "@/lib/clipboard-files";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {
   CornerDownLeftIcon,
@@ -1088,10 +1092,42 @@ export const PromptInputTextarea = ({
         return;
       }
 
-      // WebKitGTK does not consistently expose native clipboard images as
-      // DOM File objects. Preserve normal text paste, but use Tauri's native
-      // clipboard reader when the clipboard has no plain-text payload.
       const pastedText = event.clipboardData?.getData("text/plain") ?? "";
+      const paths = clipboardFilePaths(
+        (format) => event.clipboardData?.getData(format) ?? "",
+      );
+      // A file-manager copy may contain a path/URI rather than image bytes.
+      // Check this before the normal text-paste branch.
+      if (isTauri() && (paths.length > 0 || !pastedText)) {
+        event.preventDefault();
+        const textarea = event.currentTarget;
+        const originalValue = textarea.value;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        void readClipboardAttachments(paths, readNativeClipboardImage)
+          .then(({ files: pastedFiles, fallbackPaths }) => {
+            if (!textarea.isConnected) return;
+            if (pastedFiles.length) attachments.add(pastedFiles);
+            if (fallbackPaths.length) {
+              // Keep missing/unsupported files usable as paths. If the user has
+              // typed while the native read was pending, use the current cursor.
+              const unchanged = textarea.value === originalValue;
+              textarea.setRangeText(
+                fallbackPaths.join("\n"),
+                unchanged ? start : textarea.selectionStart,
+                unchanged ? end : textarea.selectionEnd,
+                "end",
+              );
+              controller?.textInput.setInput(textarea.value);
+              textarea.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          })
+          .catch((error: unknown) => {
+            console.warn("Unable to read an image from the clipboard:", error);
+          });
+        return;
+      }
+
       if (pastedText) {
         const byteLength = new Blob([pastedText]).size;
         if (byteLength > PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES) {
@@ -1109,18 +1145,8 @@ export const PromptInputTextarea = ({
         }
         return;
       }
-      if (!isTauri()) return;
-
-      event.preventDefault();
-      void readNativeClipboardImage()
-        .then((file) => {
-          if (file) attachments.add([file]);
-        })
-        .catch((error: unknown) => {
-          console.warn("Unable to read an image from the clipboard:", error);
-        });
     },
-    [attachments],
+    [attachments, controller],
   );
 
   const handleCompositionEnd = useCallback(() => setIsComposing(false), []);
