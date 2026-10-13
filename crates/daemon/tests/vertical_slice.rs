@@ -617,3 +617,157 @@ fn chrono_now() -> String {
     // RFC3339-ish; only used for agent row timestamps in the test insert.
     format!("2020-01-01T00:00:00Z+{secs}")
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn client_terminals_stream_persist_and_survive_release_and_compaction() {
+    let app_dir = std::env::temp_dir().join(format!("amarcode-terminal-slice-{}", uuid_simple()));
+    let workspace = app_dir.join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let address = {
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        socket.local_addr().unwrap().to_string()
+    };
+    let child = Command::new(env_bin("amarcode-daemon"))
+        .env("AMARCODE_APPDIR", &app_dir)
+        .env("AMARCODE_DAEMON_ADDR", &address)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    struct Cleanup {
+        child: std::process::Child,
+        path: PathBuf,
+    }
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+    let _cleanup = Cleanup {
+        child,
+        path: app_dir.clone(),
+    };
+    wait_for_tcp(&address, Duration::from_secs(5))
+        .await
+        .unwrap();
+    rpc(&address, json!({"method":"health"})).await.unwrap();
+    insert_mock_agent_with_environment(
+        &app_dir,
+        &env_bin("mock-acp-agent"),
+        &chrono_now(),
+        vec![("AMARCODE_MOCK_TERMINAL".into(), "1".into())],
+    );
+    let store = amarcode_daemon::store::Store::open(&app_dir.join("workspace.sqlite3")).unwrap();
+    let mut sub = TcpStream::connect(&address).await.unwrap();
+    write_rpc(&mut sub, json!({"method":"subscribe_events","params":{}})).await;
+    read_rpc(&mut sub).await.unwrap();
+    let mut events = BufReader::new(sub).lines();
+    let created = rpc(&address, json!({"method":"create_chat","params":{"workspace_path":workspace.to_string_lossy(),"title":"terminal"}})).await.unwrap();
+    let chat_id = created["result"]["id"].as_str().unwrap().to_owned();
+    let prompt_addr = address.clone();
+    let prompt_chat = chat_id.clone();
+    let prompt = tokio::spawn(async move {
+        rpc(&prompt_addr, json!({"method":"prompt","params":{"chat_id":prompt_chat,"agent_id":AGENT_ID,"text":"Run test command"}})).await
+    });
+    let mut approved = false;
+    let mut saw_live_output = false;
+    loop {
+        let line = timeout(Duration::from_secs(10), events.next_line())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let event: Value = serde_json::from_str(&line).unwrap();
+        let event = &event["event"];
+        if event["type"] == "approvalRequired" {
+            assert!(
+                !approved,
+                "terminal RPCs must not become extra approval prompts"
+            );
+            let response = rpc(&address, json!({"method":"respond_permission","params":{"request_id":event["payload"]["request_id"],"result":{"allow":true}}})).await.unwrap();
+            assert!(response.get("error").is_none(), "{response}");
+            approved = true;
+        }
+        if event["type"] == "messagePartAdded" {
+            let message = event["payload"]["message_id"].as_str().unwrap();
+            for part in store.message_parts(message).unwrap() {
+                let value: Value = serde_json::from_str(&part.content_json).unwrap();
+                if let Some(output) = value
+                    .pointer("/_meta/terminal_output/data")
+                    .and_then(Value::as_str)
+                {
+                    saw_live_output |=
+                        output.contains("first output") && !output.contains("last output");
+                }
+            }
+        }
+        if event["type"] == "turnUpdated" && event["payload"]["status"] == "completed" {
+            break;
+        }
+    }
+    let response = prompt.await.unwrap().unwrap();
+    assert!(response.get("error").is_none(), "{response}");
+    assert!(
+        approved && saw_live_output,
+        "command must have approval and visible output before exit"
+    );
+    let messages = store.messages(&chat_id).unwrap();
+    let mut snapshots = Vec::new();
+    for message in &messages {
+        for part in store.message_parts(&message.id).unwrap() {
+            let value: Value = serde_json::from_str(&part.content_json).unwrap();
+            if value.pointer("/_meta/amarcode_terminal_snapshot").is_some() {
+                snapshots.push(value);
+            }
+        }
+    }
+    assert_eq!(
+        snapshots.len(),
+        1,
+        "output is coalesced, not appended indefinitely"
+    );
+    assert_eq!(snapshots[0]["_meta"]["terminal_exit"]["exit_code"], 0);
+    assert_eq!(
+        snapshots[0]["_meta"]["terminal_output"]["data"],
+        "first output\nlast output\n"
+    );
+    let compact = rpc(
+        &address,
+        json!({"method":"get_chat","params":{"chat_id":chat_id,"include_tool_content":false}}),
+    )
+    .await
+    .unwrap();
+    let parts: Vec<Value> = compact["result"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|message| message["parts"].as_array().unwrap().iter())
+        .map(|part| serde_json::from_str(part["content_json"].as_str().unwrap()).unwrap())
+        .collect();
+    let terminal = parts
+        .iter()
+        .find(|value| value.pointer("/_meta/terminal_info/terminal_id").is_some())
+        .expect("compact terminal summary");
+    assert_eq!(terminal["_deferred"], true);
+    assert_eq!(terminal["_meta"]["terminal_exit"]["exit_code"], 0);
+    assert!(terminal.pointer("/_meta/terminal_output/data").is_none());
+    let ids: Vec<_> = messages.iter().map(|message| &message.id).collect();
+    let full = rpc(
+        &address,
+        json!({"method":"get_message_parts","params":{"message_ids":ids}}),
+    )
+    .await
+    .unwrap();
+    assert!(
+        full["result"].as_array().unwrap().iter().any(|part| {
+            serde_json::from_str::<Value>(part["content_json"].as_str().unwrap())
+                .unwrap()
+                .pointer("/_meta/terminal_output/data")
+                .and_then(Value::as_str)
+                == Some("first output\nlast output\n")
+        }),
+        "full output is recoverable after release"
+    );
+}

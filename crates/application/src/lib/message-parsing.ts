@@ -14,6 +14,10 @@ import {
   ListTree,
 } from "lucide-react";
 import { exactCommand } from "@/lib/command-display";
+import {
+  terminalArtifacts,
+  type TerminalArtifact,
+} from "@/lib/terminal-artifacts";
 
 const TOOL_KIND_ICONS = {
   read: FileText,
@@ -115,6 +119,7 @@ export type ChatBlock =
       status: string;
       timeline: TimelineStep[];
       diffs: DiffArtifact[];
+      terminals: TerminalArtifact[];
       agentId: string | null;
       startedAt: string;
       completedAt: string;
@@ -334,6 +339,7 @@ export function groupChatBlocks(
       status: item.message.status,
       timeline: [],
       diffs: [],
+      terminals: [],
       agentId: item.agent_id,
       startedAt: item.message.created_at,
       completedAt: item.message.updated_at,
@@ -372,11 +378,15 @@ export function groupChatBlocks(
           ? "streaming"
           : "complete";
     block.diffs = block.items.flatMap((item) => diffArtifacts(item.parts));
+    block.terminals = terminalArtifacts(block.items, block.streaming);
     block.timeline = buildTimeline(
       block.items,
       block.streaming,
       verbose,
-      new Set(block.diffs.map((artifact) => artifact.toolCallId)),
+      new Set([
+        ...block.diffs.map((artifact) => artifact.toolCallId),
+        ...block.terminals.map((terminal) => terminal.toolCallId),
+      ]),
     );
     block.agentId = block.items.find((item) => item.agent_id)?.agent_id ?? null;
     block.startedAt =

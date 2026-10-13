@@ -262,7 +262,20 @@ fn compact_tool_parts(detail: &mut ChatDetail) {
                         .entry(id)
                         .or_insert_with(|| (index, serde_json::Map::new()));
                     merged.0 = index;
-                    merged.1.extend(value);
+                    for (key, value) in value {
+                        if key == "_meta" {
+                            // Agent metadata must not erase client-owned
+                            // terminal state needed to restore the chat.
+                            if let Value::Object(metadata) = value {
+                                let target = merged.1.entry(key).or_insert_with(|| json!({}));
+                                if let Value::Object(target) = target {
+                                    target.extend(metadata);
+                                }
+                            }
+                        } else {
+                            merged.1.insert(key, value);
+                        }
+                    }
                 }
             }
         }
@@ -306,7 +319,20 @@ fn compact_tool_value(value: &mut Value) {
     object.remove("raw_output");
     // ACP terminal deltas duplicate command output under `_meta`; the full
     // payload remains available through get_message_parts on expansion.
-    object.remove("_meta");
+    if let Some(Value::Object(mut metadata)) = object.remove("_meta") {
+        metadata.retain(|key, _| {
+            matches!(
+                key.as_str(),
+                "terminal_info" | "terminal_exit" | "terminal_output"
+            )
+        });
+        if let Some(Value::Object(output)) = metadata.get_mut("terminal_output") {
+            output.remove("data");
+        }
+        if !metadata.is_empty() {
+            object.insert("_meta".into(), Value::Object(metadata));
+        }
+    }
     object.insert("_deferred".into(), Value::Bool(true));
     for key in ["rawInput", "raw_input"] {
         if let Some(Value::Object(input)) = object.get_mut(key) {
@@ -318,6 +344,9 @@ fn compact_tool_value(value: &mut Value) {
             let Some(diff) = item.as_object_mut() else {
                 return false;
             };
+            if diff.get("type").and_then(Value::as_str) == Some("terminal") {
+                return true;
+            }
             if diff.get("type").and_then(Value::as_str) != Some("diff") {
                 return false;
             }

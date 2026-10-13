@@ -29,10 +29,57 @@ pub(super) fn append_tool_part(
         content_json: payload.to_string(),
     });
     inner.store.replace_message_parts(&message_id, &parts)?;
+    inner.terminals.bind_tool(run_id, &message_id, payload);
     emit(
         inner,
         EditorEvent::MessagePartAdded {
             message_id,
+            ordinal,
+            kind: MessagePartKind::ToolCall,
+        },
+    );
+    Ok(())
+}
+
+/// Coalesce output snapshots into one durable part per terminal. Updates arrive
+/// on the inbound worker, preserving ordering with agent tool/text messages.
+pub(super) fn upsert_terminal_part(
+    inner: &SessionInner,
+    message_id: &str,
+    payload: &Value,
+) -> Result<()> {
+    let terminal_id = payload
+        .pointer("/_meta/terminal_info/terminal_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::msg("terminal snapshot is missing terminal id"))?;
+    let mut parts = inner.store.message_parts(message_id)?;
+    let ordinal = if let Some(part) = parts.iter_mut().find(|part| {
+        serde_json::from_str::<Value>(&part.content_json)
+            .ok()
+            .is_some_and(|value| {
+                value
+                    .pointer("/_meta/amarcode_terminal_snapshot")
+                    .and_then(Value::as_str)
+                    == Some(terminal_id)
+            })
+    }) {
+        part.content_json = payload.to_string();
+        part.ordinal
+    } else {
+        let ordinal = parts.iter().map(|part| part.ordinal).max().unwrap_or(-1) + 1;
+        parts.push(MessagePart {
+            message_id: message_id.to_owned(),
+            ordinal,
+            kind: MessagePartKind::ToolCall,
+            content_json: payload.to_string(),
+        });
+        ordinal
+    };
+    inner.store.replace_message_parts(message_id, &parts)?;
+    emit(
+        inner,
+        EditorEvent::MessagePartAdded {
+            message_id: message_id.to_owned(),
             ordinal,
             kind: MessagePartKind::ToolCall,
         },

@@ -221,6 +221,14 @@ fn handle_inbound(
         AcpInbound::Barrier(acknowledge) => {
             let _ = acknowledge.send(());
         }
+        AcpInbound::LocalToolUpdate {
+            message_id,
+            payload,
+        } => {
+            if run_owns_chat(inner, run_id, chat_id)? {
+                super::messages::upsert_terminal_part(inner, &message_id, &payload)?;
+            }
+        }
     }
     Ok(())
 }

@@ -151,6 +151,12 @@ pub enum AcpInbound {
     /// Internal queue barrier used to wait until all preceding inbound traffic
     /// has been handled by the session worker.
     Barrier(Sender<()>),
+    /// Client-owned terminal state, serialized through the same worker as ACP
+    /// tool updates. This is product state, not a synthetic wire notification.
+    LocalToolUpdate {
+        message_id: String,
+        payload: Value,
+    },
 }
 
 enum PendingEvent {
@@ -351,6 +357,26 @@ impl AcpClient {
             mpsc::RecvTimeoutError::Timeout => AcpError::Protocol("inbound sync timed out".into()),
             mpsc::RecvTimeoutError::Disconnected => AcpError::ConnectionClosed,
         })
+    }
+
+    pub(crate) fn publish_local_tool_update(
+        &self,
+        message_id: String,
+        payload: Value,
+    ) -> AcpResult<()> {
+        // Output from a client-owned command is meaningful prompt activity
+        // even while the agent is blocked on terminal/wait_for_exit.
+        if let Ok(waiting) = self.pending.lock() {
+            for sender in waiting.values() {
+                let _ = sender.send(PendingEvent::Activity(Instant::now()));
+            }
+        }
+        self.inbound_sender
+            .send(AcpInbound::LocalToolUpdate {
+                message_id,
+                payload,
+            })
+            .map_err(|_| AcpError::ConnectionClosed)
     }
 
     fn write_message(&self, message: &Value) -> AcpResult<()> {

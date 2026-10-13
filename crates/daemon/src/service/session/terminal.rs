@@ -5,7 +5,10 @@ use std::{
     io::Read,
     path::Path,
     process::{Child, Command, ExitStatus, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, Weak,
+    },
     thread,
     time::Duration,
 };
@@ -15,9 +18,12 @@ use agent_client_protocol::schema::v1::{
     ReleaseTerminalRequest, ReleaseTerminalResponse, TerminalExitStatus, TerminalOutputRequest,
     TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 
-use crate::{acp::RpcId, Error, Result};
+use crate::{
+    acp::{AcpClient, RpcId},
+    Error, Result,
+};
 
 use super::types::SessionInner;
 
@@ -31,11 +37,29 @@ pub(super) struct TerminalManager {
 }
 
 struct TerminalProcess {
+    terminal_id: String,
     run_id: String,
     session_id: String,
     child: Mutex<Child>,
     output: Arc<Mutex<CapturedOutput>>,
     readers: Mutex<Vec<thread::JoinHandle<()>>>,
+    command: String,
+    args: Vec<String>,
+    cwd: String,
+    events: Mutex<TerminalEvents>,
+    released: AtomicBool,
+}
+
+#[derive(Default)]
+struct TerminalEvents {
+    binding: Option<ToolBinding>,
+    client: Option<Weak<AcpClient>>,
+    last_snapshot: Option<Value>,
+}
+
+struct ToolBinding {
+    message_id: String,
+    tool_call_id: String,
 }
 
 #[derive(Default)]
@@ -83,8 +107,16 @@ pub(super) fn spawn_terminal_request(
                     .map(|live| Arc::clone(&live.client))
             });
             let Some(client) = client else {
+                inner.terminals.release_run(&run_id);
                 return;
             };
+            if method == "terminal/create" {
+                if let Ok(value) = &response {
+                    if let Some(id) = value.get("terminalId").and_then(Value::as_str) {
+                        inner.terminals.observe(&run_id, id, &client);
+                    }
+                }
+            }
             match response {
                 Ok(value) => {
                     let _ = client.respond(id, value);
@@ -285,17 +317,75 @@ impl TerminalManager {
 
         let terminal_id = uuid::Uuid::new_v4().to_string();
         let process = Arc::new(TerminalProcess {
+            terminal_id: terminal_id.clone(),
             run_id: run_id.to_owned(),
             session_id: request.session_id.to_string(),
             child: Mutex::new(child),
             output,
             readers: Mutex::new(readers),
+            command: request.command.clone(),
+            args: request.args.clone(),
+            cwd: cwd.to_string_lossy().into_owned(),
+            events: Mutex::new(TerminalEvents::default()),
+            released: AtomicBool::new(false),
         });
         self.processes
             .lock()
             .map_err(|_| Error::msg("terminal lock poisoned"))?
             .insert(terminal_id.clone(), process);
         Ok(CreateTerminalResponse::new(terminal_id))
+    }
+
+    /// Link the client-owned terminal reference to the exact assistant message
+    /// and tool call, including commands that finished before this update.
+    pub(super) fn bind_tool(&self, run_id: &str, message_id: &str, update: &Value) {
+        let Some(tool_call_id) = update.get("toolCallId").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(content) = update.get("content").and_then(Value::as_array) else {
+            return;
+        };
+        for terminal_id in content
+            .iter()
+            .filter(|item| item["type"] == "terminal")
+            .filter_map(|item| item.get("terminalId").and_then(Value::as_str))
+        {
+            let Ok(process) = self.process(run_id, terminal_id) else {
+                continue;
+            };
+            if let Ok(mut events) = process.events.lock() {
+                if events.binding.is_none() {
+                    events.binding = Some(ToolBinding {
+                        message_id: message_id.to_owned(),
+                        tool_call_id: tool_call_id.to_owned(),
+                    });
+                }
+            }
+            let _ = publish_snapshot(&process);
+        }
+    }
+
+    fn observe(&self, run_id: &str, terminal_id: &str, client: &Arc<AcpClient>) {
+        let Ok(process) = self.process(run_id, terminal_id) else {
+            return;
+        };
+        if let Ok(mut events) = process.events.lock() {
+            events.client = Some(Arc::downgrade(client));
+        }
+        let process = Arc::downgrade(&process);
+        thread::spawn(move || {
+            while let Some(process) = process.upgrade() {
+                if process.released.load(Ordering::Acquire) {
+                    break;
+                }
+                match publish_snapshot(&process) {
+                    Ok(true) | Err(_) => break,
+                    Ok(false) => {}
+                }
+                drop(process);
+                thread::sleep(Duration::from_millis(100));
+            }
+        });
     }
 
     fn consume_permission(
@@ -394,6 +484,7 @@ impl TerminalManager {
                 .map_err(|error| Error::msg(format!("failed waiting for terminal: {error}")))?;
             if let Some(status) = status {
                 join_readers(&process);
+                publish_snapshot(&process)?;
                 return Ok(WaitForTerminalExitResponse::new(exit_status(status)));
             }
             thread::sleep(Duration::from_millis(25));
@@ -411,11 +502,15 @@ impl TerminalManager {
         let process = self.process(run_id, &id)?;
         require_session(&request.session_id.to_string(), &process.session_id)?;
         let _ = kill_process(&process);
+        let _ = process.child.lock().map(|mut child| child.wait());
+        join_readers(&process);
+        let snapshot_result = publish_snapshot(&process);
+        process.released.store(true, Ordering::Release);
         self.processes
             .lock()
             .map_err(|_| Error::msg("terminal lock poisoned"))?
             .remove(&id);
-        Ok(())
+        snapshot_result.map(|_| ())
     }
 
     pub(super) fn release_run(&self, run_id: &str) {
@@ -436,8 +531,64 @@ impl TerminalManager {
         };
         for process in removed {
             let _ = kill_process(&process);
+            let _ = process.child.lock().map(|mut child| child.wait());
+            let _ = publish_snapshot(&process);
+            process.released.store(true, Ordering::Release);
         }
     }
+}
+
+/// Publish only changed, bounded snapshots. The inbound worker persists them
+/// before notifying the editor; no invented ACP events are sent to the agent.
+fn publish_snapshot(process: &TerminalProcess) -> Result<bool> {
+    let mut events = process
+        .events
+        .lock()
+        .map_err(|_| Error::msg("terminal event lock poisoned"))?;
+    let Some(binding) = events.binding.as_ref() else {
+        return Ok(false);
+    };
+    let Some(client) = events.client.as_ref().and_then(Weak::upgrade) else {
+        return Ok(false);
+    };
+    let output = process
+        .output
+        .lock()
+        .map_err(|_| Error::msg("terminal output lock poisoned"))?;
+    let text = String::from_utf8_lossy(&output.bytes).into_owned();
+    let truncated = output.truncated;
+    drop(output);
+    let exit = process
+        .child
+        .lock()
+        .map_err(|_| Error::msg("terminal process lock poisoned"))?
+        .try_wait()
+        .map_err(|error| Error::msg(format!("failed checking terminal: {error}")))?
+        .map(exit_status);
+    let mut metadata = json!({
+        "amarcode_terminal_snapshot": process.terminal_id,
+        "terminal_info": { "terminal_id":process.terminal_id, "cwd":process.cwd },
+        "terminal_output": { "terminal_id":process.terminal_id, "data":text, "truncated":truncated },
+    });
+    if let Some(exit) = &exit {
+        metadata["terminal_exit"] = json!({ "terminal_id":process.terminal_id, "exit_code":exit.exit_code, "signal":exit.signal });
+    }
+    let payload = json!({ "sessionUpdate":"tool_call_update", "toolCallId":binding.tool_call_id,
+        "kind":"execute", "title":process.command,
+        "rawInput":{"command":process.command,"args":process.args,"cwd":process.cwd},
+        "content":[{"type":"terminal","terminalId":process.terminal_id}], "_meta":metadata });
+    if events.last_snapshot.as_ref() != Some(&payload) {
+        client
+            .publish_local_tool_update(binding.message_id.clone(), payload.clone())
+            .map_err(|error| Error::msg(error.to_string()))?;
+        events.last_snapshot = Some(payload);
+    }
+    Ok(exit.is_some()
+        && process
+            .readers
+            .lock()
+            .map(|readers| readers.iter().all(thread::JoinHandle::is_finished))
+            .unwrap_or(false))
 }
 
 fn drain_output(
@@ -480,13 +631,10 @@ fn kill_process(process: &TerminalProcess) -> Result<()> {
         .child
         .lock()
         .map_err(|_| Error::msg("terminal process lock poisoned"))?;
-    if child
+    let exited = child
         .try_wait()
         .map_err(|error| Error::msg(format!("failed checking terminal: {error}")))?
-        .is_some()
-    {
-        return Ok(());
-    }
+        .is_some();
     #[cfg(unix)]
     {
         use nix::{
@@ -494,6 +642,9 @@ fn kill_process(process: &TerminalProcess) -> Result<()> {
             unistd::Pid,
         };
         let _ = killpg(Pid::from_raw(child.id() as i32), Signal::SIGKILL);
+    }
+    if exited {
+        return Ok(());
     }
     child
         .kill()
@@ -670,7 +821,13 @@ mod tests {
         // Check the terminal process itself, rather than its window title.
         // A normal console-subsystem process would report a non-null HWND.
         let script = "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class ConsoleProbe { [DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow(); }'; if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 1 }; [Console]::Out.Write('terminal-ok')";
-        let args = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script];
+        let args = [
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ];
         allow(&manager, "powershell.exe", &args);
         let session = SessionId::new("session");
         let terminal = manager

@@ -24,6 +24,7 @@ import { Shimmer } from "./ai-elements/shimmer";
 import { AttachedFiles, AttachedImages } from "./attached-image";
 import { DiffArtifactCard } from "./diff-artifact-card";
 import { StreamingCaret } from "./streaming-caret";
+import { TerminalArtifactCard } from "./terminal-artifact-card";
 
 const messageTimeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
@@ -226,6 +227,7 @@ export function UserMessage({
             onExpand={loadDetails}
           />
         ))}
+        {displayedBlock.terminals.map((terminal) => <TerminalArtifactCard key={terminal.key} terminal={terminal} onExpand={loadDetails} />)}
         {leadingWarning && (
           <div className="flex gap-2 rounded-md py-2 text-xs text-amber-700 dark:text-amber-300">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />

@@ -18,8 +18,10 @@ fn main() {
     let mut brave_mode = false;
     let mut model = String::from("capable");
     let mut thought_level = String::from("balanced");
+    let mut cwd = String::new();
+    let mut input = stdin.lock().lines();
 
-    for line in stdin.lock().lines() {
+    while let Some(line) = input.next() {
         let line = match line {
             Ok(l) => l,
             Err(err) => {
@@ -45,6 +47,12 @@ fn main() {
 
         match method {
             Some("initialize") => {
+                if std::env::var("AMARCODE_MOCK_TERMINAL").is_ok() {
+                    assert_eq!(
+                        params.pointer("/clientCapabilities/terminal"),
+                        Some(&json!(true))
+                    );
+                }
                 let supports_images =
                     std::env::var("AMARCODE_MOCK_IMAGE_SUPPORT").is_ok_and(|value| value == "1");
                 if let Some(delay_ms) = std::env::var("AMARCODE_MOCK_INITIALIZE_DELAY_MS")
@@ -72,8 +80,9 @@ fn main() {
                 );
             }
             Some("session/new") => {
-                if let Some(cwd) = params.get("cwd").and_then(|v| v.as_str()) {
-                    session_id = format!("mock-session-{}", simple_hash(cwd));
+                if let Some(path) = params.get("cwd").and_then(|v| v.as_str()) {
+                    session_id = format!("mock-session-{}", simple_hash(path));
+                    cwd = path.to_owned();
                 }
                 reply(
                     &mut stdout,
@@ -156,6 +165,13 @@ fn main() {
                 );
             }
             Some("session/prompt") => {
+                if std::env::var("AMARCODE_MOCK_TERMINAL").is_ok() {
+                    match run_terminal(&mut stdout, &mut input, &session_id, &cwd) {
+                        Ok(()) => reply(&mut stdout, id, json!({"stopReason":"end_turn"})),
+                        Err(error) => reply_error(&mut stdout, id, -32603, &error),
+                    }
+                    continue;
+                }
                 let text = extract_prompt_text(&params);
                 let reply_text = format!("mock echo: {text}");
 
@@ -349,4 +365,125 @@ fn write_line(stdout: &mut impl Write, value: &Value) {
 fn simple_hash(s: &str) -> u32 {
     s.bytes()
         .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32))
+}
+
+fn client_request(
+    output: &mut impl Write,
+    input: &mut impl Iterator<Item = io::Result<String>>,
+    id: &str,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
+    writeln!(
+        output,
+        "{}",
+        json!({"jsonrpc":"2.0","id":id,"method":method,"params":params})
+    )
+    .map_err(|error| error.to_string())?;
+    output.flush().map_err(|error| error.to_string())?;
+    for line in input {
+        let line = line.map_err(|error| error.to_string())?;
+        let value: Value = serde_json::from_str(&line).map_err(|error| error.to_string())?;
+        if value["id"] != id {
+            continue;
+        }
+        if let Some(error) = value.get("error") {
+            return Err(error.to_string());
+        }
+        return Ok(value["result"].clone());
+    }
+    Err("client disconnected".into())
+}
+
+fn run_terminal(
+    output: &mut impl Write,
+    input: &mut impl Iterator<Item = io::Result<String>>,
+    session: &str,
+    cwd: &str,
+) -> Result<(), String> {
+    #[cfg(unix)]
+    let (command, args) = (
+        "/bin/sh",
+        vec![
+            "-c",
+            "printf 'first output\n'; sleep 0.5; printf 'last output\n'",
+        ],
+    );
+    #[cfg(windows)]
+    let (command, args) = ("powershell.exe", vec!["-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.WriteLine('first output'); Start-Sleep -Milliseconds 500; [Console]::Out.WriteLine('last output')"]);
+    let raw_input = json!({"command":command,"args":args,"cwd":"."});
+    notify(
+        output,
+        "session/update",
+        json!({"sessionId":session,"update":{
+        "sessionUpdate":"tool_call","toolCallId":"terminal-command","title":"Run test command","kind":"execute","status":"pending","rawInput":raw_input}}),
+    );
+    let permission = client_request(
+        output,
+        input,
+        "permission-terminal",
+        "session/request_permission",
+        json!({
+        "sessionId":session,"toolCall":{"toolCallId":"terminal-command","rawInput":raw_input},
+        "options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"}]}),
+    )?;
+    if permission.pointer("/outcome/optionId") != Some(&json!("allow-once")) {
+        return Err("terminal permission denied".into());
+    }
+    let terminal = client_request(
+        output,
+        input,
+        "create-terminal",
+        "terminal/create",
+        json!({"sessionId":session,"command":command,"args":args,"cwd":cwd,"outputByteLimit":4096}),
+    )?;
+    let terminal_id = &terminal["terminalId"];
+    notify(
+        output,
+        "session/update",
+        json!({"sessionId":session,"update":{
+        "sessionUpdate":"tool_call_update","toolCallId":"terminal-command","status":"in_progress",
+        "content":[{"type":"terminal","terminalId":terminal_id}]}}),
+    );
+    let params = json!({"sessionId":session,"terminalId":terminal_id});
+    client_request(
+        output,
+        input,
+        "wait-terminal",
+        "terminal/wait_for_exit",
+        params.clone(),
+    )?;
+    let captured = client_request(
+        output,
+        input,
+        "output-terminal",
+        "terminal/output",
+        params.clone(),
+    )?;
+    assert!(captured["output"]
+        .as_str()
+        .is_some_and(|output| output.contains("first output") && output.contains("last output")));
+    client_request(
+        output,
+        input,
+        "release-terminal",
+        "terminal/release",
+        params,
+    )?;
+    // Deliberately replace terminal content with text, as real agents do. The
+    // client's captured output must remain visible in compact chat summaries.
+    notify(
+        output,
+        "session/update",
+        json!({"sessionId":session,"update":{
+        "sessionUpdate":"tool_call_update","toolCallId":"terminal-command","status":"completed",
+        "content":[{"type":"content","content":{"type":"text","text":"Command finished"}}],"_meta":{"agent_marker":"finished"}}}),
+    );
+    notify(
+        output,
+        "session/update",
+        json!({"sessionId":session,"update":{
+        "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Terminal command completed."}}}),
+    );
+    Ok(())
 }
