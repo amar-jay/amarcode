@@ -15,6 +15,7 @@ import { useSetAtom } from "jotai";
 import { PromptInputButton } from "@/components/ai-elements/prompt-input";
 import { Check, Download, LoaderCircle } from "lucide-react";
 import { AgentLogo } from "@/components/agent-logo";
+import { Badge } from "@/components/ui/badge";
 import { installAgentAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 
@@ -89,8 +90,13 @@ export function AgentSelectionDialog({
         className="w-full cursor-pointer data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
       >
         <AgentLogo icon={agent.icon} />
-        <span className="min-w-0 flex-1 truncate">
-          {stripAcpSuffix(agent.name)}
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="truncate">{stripAcpSuffix(agent.name)}</span>
+          {agent.id === "amarcode-acp" && (
+            <Badge variant="secondary" title="Included with Amarcode">
+              Built-in
+            </Badge>
+          )}
         </span>
 
         {!agent.available ? (

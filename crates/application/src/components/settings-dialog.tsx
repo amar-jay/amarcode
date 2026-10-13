@@ -101,6 +101,7 @@ import {
 } from "@/components/ui/command";
 import type { AgentInfo } from "@/types";
 import { AgentLogo } from "@/components/agent-logo";
+import { Badge } from "@/components/ui/badge";
 import { installAgentAtom, reloadAgentsAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 
@@ -739,8 +740,15 @@ function AgentDefaultsPanel({
         }}
       >
         <AgentLogo icon={agent.icon} />
-        <span className="min-w-0 truncate">
-          {agent.name.replace(/\s*\bACP\s*$/i, "")}
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">
+            {agent.name.replace(/\s*\bACP\s*$/i, "")}
+          </span>
+          {agent.id === "amarcode-acp" && (
+            <Badge variant="secondary" title="Included with Amarcode">
+              Built-in
+            </Badge>
+          )}
         </span>
         {!agent.available ? (
           <button
