@@ -263,6 +263,14 @@ async fn vacuum_database(state: State<'_, AppState>) -> Result<VacuumDatabaseRes
 }
 
 #[tauri::command]
+async fn transcribe_audio(
+    state: State<'_, AppState>,
+    params: crate::protocol::rpc::TranscribeAudioParams,
+) -> Result<crate::protocol::rpc::TranscribeAudioResult, String> {
+    state.transcribe_audio(params).await
+}
+
+#[tauri::command]
 async fn update_chat(
     state: State<'_, AppState>,
     params: crate::protocol::rpc::UpdateChatParams,
@@ -764,6 +772,7 @@ pub fn run() {
             set_daemon_config,
             vacuum_database,
             get_attachment,
+            transcribe_audio,
             update_chat,
             delete_chat,
             prompt,

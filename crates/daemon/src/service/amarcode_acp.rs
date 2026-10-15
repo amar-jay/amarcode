@@ -143,6 +143,21 @@ impl AgentManager {
         }
     }
 
+    /// OpenAI-compatible provider credentials for daemon-side calls.
+    /// Returns an actionable error when ACP is not set up yet; the API key
+    /// never leaves the daemon.
+    pub(crate) fn openai_compatible_provider(&self) -> Result<(String, String)> {
+        let provider = read_provider_file(&self.amarcode_acp_config_path())
+            .map(|file| file.provider)
+            .unwrap_or_default();
+        if !config_result(provider.clone()).configured {
+            return Err(Error::msg(
+                "Dictation needs Amarcode ACP to be set up first. Add a provider API key in Settings, then try again.",
+            ));
+        }
+        Ok((provider.base_url, provider.api_key))
+    }
+
     pub(crate) fn amarcode_acp_configured(&self) -> bool {
         self.amarcode_acp_config()
             .map(|config| config.configured)

@@ -19,6 +19,7 @@ import type {
   PromptResult,
   PromptAttachment,
   RespondAgentResult,
+  TranscribeAudioResult,
   SessionConfigAssignment,
   SessionConfigOption,
   SessionConfigValue,
@@ -267,6 +268,18 @@ export const daemonApi = {
     changes: { title: string },
   ): Promise<Chat> =>
     invoke("update_chat", { params: { chat_id: chatId, ...changes } }),
+  transcribeAudio: (
+    audioBase64: string,
+    mimeType: string,
+    language?: string,
+  ): Promise<TranscribeAudioResult> =>
+    invoke("transcribe_audio", {
+      params: {
+        audio_base64: audioBase64,
+        mime_type: mimeType,
+        language: language ?? null,
+      },
+    }),
   deleteChat: (chatId: string): Promise<DeleteChatResult> =>
     invoke("delete_chat", { chatId }),
 

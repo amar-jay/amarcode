@@ -78,6 +78,8 @@ pub fn typescript_bindings() -> String {
         rpc::RespondAgentError::decl(&config),
         rpc::RespondAgentParams::decl(&config),
         rpc::RespondAgentResult::decl(&config),
+        rpc::TranscribeAudioParams::decl(&config),
+        rpc::TranscribeAudioResult::decl(&config),
         EditorEvent::decl(&config),
     ];
 

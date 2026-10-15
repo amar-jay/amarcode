@@ -98,8 +98,8 @@ pub fn attach_parent_console() {
     use windows_sys::Win32::{
         Foundation::INVALID_HANDLE_VALUE,
         System::Console::{
-            AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS,
-            STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+            AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE,
+            STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
         },
     };
     // Preserve redirected lifecycle JSON output even if attaching to a CLI
@@ -124,10 +124,8 @@ mod tests {
 
     #[test]
     fn discovers_bun_installed_by_winget() {
-        let root = std::env::temp_dir().join(format!(
-            "amarcode-winget-bun-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("amarcode-winget-bun-{}", uuid::Uuid::new_v4()));
         let bun = root
             .join("Oven-sh.Bun_Microsoft.Winget.Source_test")
             .join("bun-windows-x64");

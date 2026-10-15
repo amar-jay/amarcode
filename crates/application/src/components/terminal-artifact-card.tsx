@@ -47,12 +47,13 @@ export function TerminalArtifactCard({
     <Terminal
       output={terminal.output}
       isStreaming={terminal.status === "running"}
-			status={terminal.status}
     >
       <TerminalHeader
         className={
-          cn("bg-secondary/15",
-						expanded && terminal.status == "failed" ? "bg-red-500/40" : ""
+          cn("bg-secondary/25",
+						expanded && terminal.status == "failed" ? "bg-red-500/20" : "",
+						expanded && terminal.status == "completed" ? "bg-green-500/20" : "",
+						expanded && terminal.status == "cancelled" ? "bg-yellow-500/20" : ""
 					)
         }
       >
@@ -91,11 +92,6 @@ export function TerminalArtifactCard({
             className={`size-3 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`}
           />
         </button>
-        {/* <TerminalCopyButton
-          disabled={terminal.deferred || !terminal.output}
-          className="text-secondary/50 hover:bg-zinc-800 hover:text-zinc-100"
-          aria-label="Copy terminal output"
-        /> */}
       </TerminalHeader>
       {expanded && (
         <>

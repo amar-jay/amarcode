@@ -23,7 +23,9 @@ pub mod amarcode_acp;
 pub mod attachments;
 pub mod chat_manager;
 pub mod session;
+pub mod transcription;
 
 pub use agent_manager::{AgentManager, ResolvedAgent};
 pub use chat_manager::{ChatDetail, ChatManager, MessageDetail};
 pub use session::{ClassifiedFailure, PendingAgentRequest, PromptResult, SessionManager};
+pub use transcription::transcribe_audio;

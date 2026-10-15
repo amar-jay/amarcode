@@ -16,7 +16,7 @@ use crate::{
             InstallAgentResult, ListAcpEventsResult, ListAgentRunsResult, ListAgentsResult,
             ListChatsResult, PromptAttachment, PromptResultDto, RespondAgentParams,
             RespondAgentResult, SetDaemonConfigParams, SetSessionConfigOptionResult,
-            VacuumDatabaseResult, VersionResult,
+            TranscribeAudioParams, TranscribeAudioResult, VacuumDatabaseResult, VersionResult,
         },
         AgentInfo, Chat, GetChatResult, MessagePart, SessionConfigAssignment, SessionConfigValue,
     },
@@ -176,6 +176,17 @@ impl AppState {
         self.call(
             methods::SET_DAEMON_CONFIG,
             serde_json::to_value(params).map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
+    pub async fn transcribe_audio(
+        &self,
+        params: TranscribeAudioParams,
+    ) -> Result<TranscribeAudioResult, String> {
+        self.call(
+            methods::TRANSCRIBE_AUDIO,
+            serde_json::to_value(params).map_err(|e| e.to_string())?,
         )
         .await
     }

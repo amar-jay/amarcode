@@ -33,6 +33,7 @@ pub mod methods {
     pub const CANCEL: &str = "cancel";
     pub const RESPOND_PERMISSION: &str = "respond_permission";
     pub const RESPOND_INPUT: &str = "respond_input";
+    pub const TRANSCRIBE_AUDIO: &str = "transcribe_audio";
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -305,6 +306,22 @@ pub struct CancelParams {
 pub struct CancelResult {
     pub cancelled: bool,
     pub chat_id: String,
+}
+
+/// Audio is sent base64-encoded so it can travel over the JSON-line RPC.
+/// The daemon never persists it; it is forwarded to the configured
+/// OpenAI-compatible provider and dropped.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct TranscribeAudioParams {
+    pub audio_base64: String,
+    pub mime_type: String,
+    #[serde(default)]
+    pub language: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct TranscribeAudioResult {
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

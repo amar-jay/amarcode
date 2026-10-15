@@ -90,12 +90,10 @@ export function AgentSelectionDialog({
         className="w-full cursor-pointer data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
       >
         <AgentLogo icon={agent.icon} />
-        <span className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="flex min-w-0 flex-1 items-center space-x-5">
           <span className="truncate">{stripAcpSuffix(agent.name)}</span>
           {agent.id === "amarcode-acp" && (
-            <Badge variant="secondary" title="Included with Amarcode">
-              Built-in
-            </Badge>
+            <Badge>Preinstalled</Badge>
           )}
         </span>
 

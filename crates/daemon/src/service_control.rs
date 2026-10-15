@@ -634,9 +634,7 @@ mod platform {
             "0" | "2" => ServiceState::Unknown,
             "1" | "3" => ServiceState::Stopped,
             "4" => ServiceState::Running,
-            value => {
-                return Err(Error::msg(format!("invalid Windows task state: {value}")))
-            }
+            value => return Err(Error::msg(format!("invalid Windows task state: {value}"))),
         };
         Ok(ServiceStatus {
             installed: state != ServiceState::NotInstalled,

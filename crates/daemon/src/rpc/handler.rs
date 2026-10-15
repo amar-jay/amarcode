@@ -100,6 +100,9 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::RESPOND_PERMISSION | methods::RESPOND_INPUT => {
             Ok(DispatchOutcome::Result(respond_agent(app, params).await?))
         }
+        methods::TRANSCRIBE_AUDIO => Ok(DispatchOutcome::Result(
+            transcribe_audio_rpc(app, params).await?,
+        )),
 
         _ => Err(Error::msg(format!("unknown method: {method}"))),
     }
@@ -478,6 +481,12 @@ async fn cancel(app: &App, params: Value) -> Result<Value> {
         cancelled: true,
         chat_id: p.chat_id,
     })
+}
+
+async fn transcribe_audio_rpc(app: &App, params: Value) -> Result<Value> {
+    let p: crate::protocol::rpc::TranscribeAudioParams = parse_params(params)?;
+    let text = tokio::task::block_in_place(|| crate::service::transcribe_audio(&app.agents, p))?;
+    to_value(crate::protocol::rpc::TranscribeAudioResult { text })
 }
 
 async fn respond_agent(app: &App, params: Value) -> Result<Value> {

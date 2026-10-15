@@ -483,11 +483,7 @@ fn extract_archive(archive: &Path, destination: &Path) -> Result<()> {
                 .arg(destination);
             command
         };
-        let status = run_timed(
-            &mut command,
-            INSTALL_TIMEOUT,
-            "extract zip archive",
-        )?;
+        let status = run_timed(&mut command, INSTALL_TIMEOUT, "extract zip archive")?;
         return if status.success() {
             Ok(())
         } else {

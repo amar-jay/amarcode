@@ -483,6 +483,7 @@ export function LiveChatScreen() {
           />
         )}
         <AppPromptInput
+          key={chatId}
           workspacePath={workspacePath}
           selectedAgentId={agent?.id ?? ""}
           onAgentSelected={(next) => bindAgent(next)}
