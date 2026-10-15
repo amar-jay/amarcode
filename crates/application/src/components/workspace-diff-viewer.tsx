@@ -186,6 +186,7 @@ function DiffCanvas({
 
 export function WorkspaceDiffViewer({
   selectedPath,
+  comparison,
   selectedLine,
   workspacePath,
   diff,
@@ -193,6 +194,7 @@ export function WorkspaceDiffViewer({
   expanded = false,
 }: {
   selectedPath?: string;
+  comparison?: "staged" | "unstaged";
   selectedLine?: number;
   workspacePath: string;
   diff?: WorkspaceDiff;
@@ -213,7 +215,7 @@ export function WorkspaceDiffViewer({
       setLoading(true);
     });
     void daemonApi
-      .getWorkspaceFileDiff(workspacePath, selectedPath)
+      .getWorkspaceFileDiff(workspacePath, selectedPath, comparison)
       .then((nextDiff) => {
         if (!cancelled) setDiff(nextDiff);
       })
@@ -232,7 +234,7 @@ export function WorkspaceDiffViewer({
     return () => {
       cancelled = true;
     };
-  }, [selectedPath, workspacePath]);
+  }, [selectedPath, workspacePath, comparison]);
 
   return (
     <section

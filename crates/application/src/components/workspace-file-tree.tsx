@@ -264,17 +264,12 @@ export function WorkspaceFileTree({
   );
 }
 
-const changeLabel = (change: WorkspaceChange) => {
-  if (change.staged && change.unstaged) return "staged + unstaged";
-  if (change.staged) return "staged";
-  return "unstaged";
-};
-
 export function WorkspaceChangedFiles({
   changes,
   isLoading,
   searchQuery,
   selectedPath,
+  selectedComparison,
   setSelectedPath,
   onStage,
   onUnstage,
@@ -291,7 +286,8 @@ export function WorkspaceChangedFiles({
   isLoading: boolean;
   searchQuery: string;
   selectedPath?: string;
-  setSelectedPath: (path: string) => void;
+  selectedComparison?: "staged" | "unstaged";
+  setSelectedPath: (path: string, comparison: "staged" | "unstaged") => void;
   onStage: (path: string) => Promise<void>;
   onUnstage: (path: string) => Promise<void>;
   changingStagePath?: string;
@@ -339,86 +335,133 @@ export function WorkspaceChangedFiles({
             No uncommitted changes.
           </p>
         ) : (
-          <div className="flex flex-col gap-0.5" role="tree">
-            {visibleChanges.map((change) => {
-              const separator = change.path.lastIndexOf("/");
-              const name = change.path.slice(separator + 1);
-              const directory =
-                separator === -1
-                  ? "Project root"
-                  : change.path.slice(0, separator);
-              const selected = selectedPath === change.path;
-
+          <div className="flex flex-col">
+            {(["staged", "unstaged"] as const).map((comparison) => {
+              const group = visibleChanges.filter(
+                (change) => change[comparison],
+              );
+              if (!group.length) return null;
               return (
-                <div
-                  key={change.path}
-                  role="treeitem"
-                  aria-selected={selected}
-                  className={cn(
-                    "group flex w-full items-center gap-2 px-2 py-0 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 border-b-1 border-border rounded-none",
-                    selected &&
-                      "bg-accent text-accent-foreground hover:bg-accent",
-                  )}
-                  title={change.path}
+                <section
+                  key={comparison}
+                  aria-label={
+                    comparison === "staged"
+                      ? "Staged changes"
+                      : "Unstaged changes"
+                  }
                 >
-                  <button
-                    type="button"
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
-                    onClick={() =>
-                      setSelectedPath(
-                        selectedPath === change.path ? "" : change.path,
-                      )
+                  <h3 className="flex items-center justify-between border-b bg-secondary px-2 py-0.5 text-xs font-medium text-primary-foreground">
+                    <span>
+                      {comparison === "staged"
+                        ? "Staged changes"
+                        : "Unstaged changes"}
+                    </span>
+                    <span className="font-mono text-[0.65rem]">
+                      {group.length}
+                    </span>
+                  </h3>
+                  <div
+                    role="tree"
+                    aria-label={
+                      comparison === "staged"
+                        ? "Staged files"
+                        : "Unstaged files"
                     }
                   >
-                    <span
-                      className={cn(
-                        "flex size-6 shrink-0 items-center justify-center rounded font-mono text-xs font-bold",
-                        change.status === "D"
-                          ? "text-red-500"
-                          : change.status === "A"
-                            ? "text-emerald-500"
-                            : "text-amber-500",
-                      )}
-                      aria-label={`Status ${change.status}`}
-                    >
-                      {change.status}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-mono text-xs text-foreground">
-                        {name}{" "}
-                        <span className="truncate text-muted-foreground text-[0.65rem]">
-                          {directory}
-                        </span>
-                      </span>
-                    </span>
-                  </button>
-                  {change.unstaged || change.staged ? (
-                    <button
-                      type="button"
-                      className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-70 outline-none transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
-                      disabled={changingStagePath === change.path}
-                      aria-label={`${change.unstaged ? "Stage" : "Unstage"} ${change.path}`}
-                      title={change.unstaged ? "Stage file" : "Unstage file"}
-                      onClick={() =>
-                        void (change.unstaged
-                          ? onStage(change.path)
-                          : onUnstage(change.path))
-                      }
-                    >
-                      {changingStagePath === change.path ? (
-                        <LoaderCircle className="size-3.5 animate-spin" />
-                      ) : change.unstaged ? (
-                        <Plus className="size-4" />
-                      ) : (
-                        <Minus className="size-4" />
-                      )}
-                    </button>
-                  ) : (
-                    <span className="shrink-0 text-[0.6rem] text-muted-foreground opacity-70 group-hover:opacity-100">
-                      {changeLabel(change)}
-                    </span>
-                  )}
-                </div>
+                    {group.map((change) => {
+                      const separator = change.path.lastIndexOf("/");
+                      const name = change.path.slice(separator + 1);
+                      const directory =
+                        separator === -1
+                          ? "Project root"
+                          : change.path.slice(0, separator);
+                      const selected =
+                        selectedPath === change.path &&
+                        (selectedComparison ??
+                          (change.unstaged ? "unstaged" : "staged")) ===
+                          comparison;
+
+                      return (
+                        <div
+                          key={change.path}
+                          role="treeitem"
+                          aria-selected={selected}
+                          className={cn(
+                            "group flex w-full items-center gap-2 px-2 py-0 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 border-b-1 border-border rounded-none",
+                            selected &&
+                              "bg-accent text-accent-foreground hover:bg-accent",
+                          )}
+                          title={change.path}
+                        >
+                          <button
+                            type="button"
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
+                            onClick={() =>
+                              setSelectedPath(
+                                selected ? "" : change.path,
+                                comparison,
+                              )
+                            }
+                          >
+                            <span
+                              className={cn(
+                                "flex size-6 shrink-0 items-center justify-center rounded font-mono text-xs font-bold",
+                                change.status === "D"
+                                  ? "text-red-500"
+                                  : change.status === "A"
+                                    ? "text-emerald-500"
+                                    : "text-amber-500",
+                              )}
+                              aria-label={`Status ${change.status}`}
+                            >
+                              {change.status}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-mono text-xs text-foreground">
+                                {name}{" "}
+                                <span className="truncate text-muted-foreground text-[0.65rem]">
+                                  {directory}
+                                </span>
+                              </span>
+                            </span>
+                          </button>
+                          {comparison === "unstaged" && (
+                            <button
+                              type="button"
+                              className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-70 outline-none transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                              disabled={changingStagePath === change.path}
+                              aria-label={`Stage remaining changes in ${change.path}`}
+                              title="Stage remaining changes"
+                              onClick={() => void onStage(change.path)}
+                            >
+                              {changingStagePath === change.path ? (
+                                <LoaderCircle className="size-3.5 animate-spin" />
+                              ) : (
+                                <Plus className="size-4" />
+                              )}
+                            </button>
+                          )}
+                          {comparison === "staged" && (
+                            <button
+                              type="button"
+                              className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-70 outline-none transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                              disabled={changingStagePath === change.path}
+                              aria-label={`Unstage changes in ${change.path}`}
+                              title="Unstage changes"
+                              onClick={() => void onUnstage(change.path)}
+                            >
+                              {changingStagePath === change.path ? (
+                                <LoaderCircle className="size-3.5 animate-spin" />
+                              ) : (
+                                <Minus className="size-4" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
               );
             })}
           </div>

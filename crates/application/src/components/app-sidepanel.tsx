@@ -49,6 +49,9 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   );
   const [diffExpanded, setDiffExpanded] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
+  const [selectedComparison, setSelectedComparison] = useState<
+    "staged" | "unstaged"
+  >();
   const [selectedLine, setSelectedLine] = useState<number>();
   useEffect(() => {
     if (!workspacePath) {
@@ -93,6 +96,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
             .map((_, index, parts) => parts.slice(0, index + 1).join("/")),
         ),
       );
+      setSelectedComparison(undefined);
       setSelectedLine(fileOpenRequest.line);
       setNavigatorView("files");
       setFileSearchQuery("");
@@ -100,17 +104,32 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     });
   }, [fileOpenRequest, setFileOpenRequest, workspacePath]);
 
-  const selectPath: typeof workspaceFileTree.setSelectedPath = useCallback(
-    (path) => {
+  const selectPath = useCallback(
+    (
+      value: Parameters<typeof workspaceFileTree.setSelectedPath>[0],
+      comparison?: "staged" | "unstaged",
+    ) => {
+      const path =
+        typeof value === "function"
+          ? value(workspaceFileTree.selectedPath)
+          : value;
+      setSelectedComparison(comparison);
       setSelectedLine(undefined);
       setDiffExpanded(false);
-      if (workspaceFileTree.selectedPath === path) {
+      if (
+        workspaceFileTree.selectedPath === path &&
+        selectedComparison === comparison
+      ) {
         workspaceFileTree.setSelectedPath(undefined);
         return;
       }
       workspaceFileTree.setSelectedPath(path);
     },
-    [workspaceFileTree.setSelectedPath, workspaceFileTree.selectedPath],
+    [
+      workspaceFileTree.setSelectedPath,
+      workspaceFileTree.selectedPath,
+      selectedComparison,
+    ],
   );
   const refreshChanges = useCallback(async () => {
     if (!workspacePath) {
@@ -145,7 +164,10 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         await daemonApi.stageWorkspaceFile(workspacePath, path);
         await refreshChanges();
         if (workspaceFileTree.selectedPath === path) {
-          setDiff(await daemonApi.getWorkspaceFileDiff(workspacePath, path));
+          setSelectedComparison("staged");
+          setDiff(
+            await daemonApi.getWorkspaceFileDiff(workspacePath, path, "staged"),
+          );
         }
       } catch (cause) {
         toast.error(
@@ -155,7 +177,12 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         setChangingStagePath(undefined);
       }
     },
-    [refreshChanges, workspaceFileTree.selectedPath, workspacePath],
+    [
+      refreshChanges,
+      workspaceFileTree.selectedPath,
+      workspacePath,
+      selectedComparison,
+    ],
   );
 
   const unstageFile = useCallback(
@@ -165,7 +192,14 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         await daemonApi.unstageWorkspaceFile(workspacePath, path);
         await refreshChanges();
         if (workspaceFileTree.selectedPath === path) {
-          setDiff(await daemonApi.getWorkspaceFileDiff(workspacePath, path));
+          setSelectedComparison("unstaged");
+          setDiff(
+            await daemonApi.getWorkspaceFileDiff(
+              workspacePath,
+              path,
+              "unstaged",
+            ),
+          );
         }
       } catch (cause) {
         toast.error(
@@ -175,7 +209,12 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         setChangingStagePath(undefined);
       }
     },
-    [refreshChanges, workspaceFileTree.selectedPath, workspacePath],
+    [
+      refreshChanges,
+      workspaceFileTree.selectedPath,
+      workspacePath,
+      selectedComparison,
+    ],
   );
 
   const stageAllFiles = useCallback(async () => {
@@ -184,10 +223,12 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
       await daemonApi.stageAllWorkspaceFiles(workspacePath);
       await refreshChanges();
       if (workspaceFileTree.selectedPath) {
+        setSelectedComparison("staged");
         setDiff(
           await daemonApi.getWorkspaceFileDiff(
             workspacePath,
             workspaceFileTree.selectedPath,
+            "staged",
           ),
         );
       }
@@ -198,7 +239,12 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     } finally {
       setStagingAll(false);
     }
-  }, [refreshChanges, workspaceFileTree.selectedPath, workspacePath]);
+  }, [
+    refreshChanges,
+    workspaceFileTree.selectedPath,
+    workspacePath,
+    selectedComparison,
+  ]);
 
   const commitChanges = useCallback(async () => {
     const message = commitMessage.trim();
@@ -214,8 +260,13 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         selectedPath &&
         nextChanges.some((change) => change.path === selectedPath)
       ) {
+        setSelectedComparison("unstaged");
         setDiff(
-          await daemonApi.getWorkspaceFileDiff(workspacePath, selectedPath),
+          await daemonApi.getWorkspaceFileDiff(
+            workspacePath,
+            selectedPath,
+            "unstaged",
+          ),
         );
       } else {
         workspaceFileTree.setSelectedPath(undefined);
@@ -229,7 +280,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     } finally {
       setCommitting(false);
     }
-  }, [commitMessage, workspaceFileTree, workspacePath]);
+  }, [commitMessage, workspaceFileTree, workspacePath, selectedComparison]);
 
   return (
     <Sheet open={sheetOpen} onOpenChange={setSheetOpen} modal={false}>
@@ -389,6 +440,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                   isLoading={changesLoading}
                   searchQuery={fileSearchQuery}
                   selectedPath={workspaceFileTree.selectedPath}
+                  selectedComparison={selectedComparison}
                   setSelectedPath={selectPath}
                   onStage={stageFile}
                   onUnstage={unstageFile}
@@ -409,6 +461,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
             <ResizablePanel minSize="0px" className="min-h-0 overflow-hidden">
               <WorkspaceDiffViewer
                 selectedPath={workspaceFileTree.selectedPath}
+                comparison={selectedComparison}
                 selectedLine={selectedLine}
                 workspacePath={workspacePath}
                 setDiff={setDiff}

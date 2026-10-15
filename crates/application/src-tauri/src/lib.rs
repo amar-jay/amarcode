@@ -633,6 +633,7 @@ fn commit_workspace_changes(workspace_path: String, message: String) -> Result<(
 fn get_workspace_file_diff(
     workspace_path: String,
     relative_path: String,
+    staged: Option<bool>,
 ) -> Result<WorkspaceDiff, String> {
     let root = PathBuf::from(workspace_path);
     let full_path = workspace_relative_path(&root, &relative_path)?;
@@ -652,7 +653,7 @@ fn get_workspace_file_diff(
     }
     let change = change.expect("checked above");
 
-    let (before, after, comparison) = if change.unstaged {
+    let (before, after, comparison) = if !staged.unwrap_or(!change.unstaged) {
         let before = text_content(git_blob(&root, "", &relative_path)?.unwrap_or_default())?;
         let after = match fs::read(&full_path) {
             Ok(contents) => text_content(contents)?,
@@ -777,4 +778,66 @@ pub fn run() {
     // The native service manager exclusively owns the daemon lifecycle. The
     // desktop application has no daemon child process to stop on exit.
     app.run(|_, _| {});
+}
+
+#[cfg(test)]
+mod workspace_diff_tests {
+    use super::*;
+
+    #[test]
+    fn partially_staged_file_has_distinct_diffs() {
+        let root = std::env::temp_dir().join(format!(
+            "amarcode-diff-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = git_output(&root, args).unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        fs::write(root.join("file.txt"), "committed\n").unwrap();
+        git(&["add", "file.txt"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "initial",
+        ]);
+        fs::write(root.join("file.txt"), "staged\n").unwrap();
+        git(&["add", "file.txt"]);
+        fs::write(root.join("file.txt"), "working\n").unwrap();
+        let path = root.to_string_lossy().into_owned();
+        let changes = workspace_changes(&root).unwrap();
+        assert!(changes[0].staged && changes[0].unstaged);
+        let staged = get_workspace_file_diff(path.clone(), "file.txt".into(), Some(true)).unwrap();
+        assert_eq!(
+            (staged.before.as_str(), staged.after.as_str()),
+            ("committed\n", "staged\n")
+        );
+        assert_eq!(staged.comparison, "Staged");
+        let unstaged =
+            get_workspace_file_diff(path.clone(), "file.txt".into(), Some(false)).unwrap();
+        assert_eq!(
+            (unstaged.before.as_str(), unstaged.after.as_str()),
+            ("staged\n", "working\n")
+        );
+        assert_eq!(unstaged.comparison, "Unstaged");
+        let automatic = get_workspace_file_diff(path, "file.txt".into(), None).unwrap();
+        assert_eq!(automatic.after, unstaged.after);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

@@ -182,8 +182,13 @@ export const daemonApi = {
   getWorkspaceFileDiff: (
     workspacePath: string,
     relativePath: string,
+    comparison?: "staged" | "unstaged",
   ): Promise<WorkspaceDiff> =>
-    invoke("get_workspace_file_diff", { workspacePath, relativePath }),
+    invoke("get_workspace_file_diff", {
+      workspacePath,
+      relativePath,
+      staged: comparison === undefined ? undefined : comparison === "staged",
+    }),
 
   listAgents: (): Promise<AgentInfo[]> => invoke("list_agents"),
   installAgent: (
