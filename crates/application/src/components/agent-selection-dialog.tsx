@@ -129,10 +129,10 @@ export function AgentSelectionDialog({
       <PromptInputButton
         tooltip="Select agent"
         onClick={() => setOpen(true)}
-        className="w-fit"
+        className="w-fit max-w-36"
       >
         <AgentLogo icon={selectedIcon} />
-        {stripAcpSuffix(selectedName)}
+        <span className="truncate">{stripAcpSuffix(selectedName)}</span>
       </PromptInputButton>
 
       <CommandDialog open={open} onOpenChange={setOpen}>

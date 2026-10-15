@@ -29,20 +29,20 @@ export function ChatStateIndicators({
         : runStatus === "failed"
           ? CircleX
           : LoaderCircle;
-    const status = contextRestoration
-      ? {
-          Icon: RotateCcwClock,
-          label: `${contextRestoration}`,
-          className:
-            "size-3.5 animate-[spin_2.5s_linear_infinite] motion-reduce:animate-none",
-        }
-      : isWorking
+    const status = isWorking
         ? {
             Icon: Pickaxe,
             label: "Building response",
             className:
               "size-4 origin-bottom animate-[pickaxe_0.45s_ease-in-out_infinite] motion-reduce:animate-none",
           }
+				: contextRestoration
+		      ? {
+		          Icon: RotateCcwClock,
+		          label: `${contextRestoration}`,
+		          className:
+		            "size-3.5 animate-[spin_2.5s_linear_infinite] motion-reduce:animate-none",
+		        }
         : loading
           ? {
               Icon: LoaderCircle,

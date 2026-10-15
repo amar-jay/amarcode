@@ -19,9 +19,7 @@ import {
   ContextTrigger,
 } from "@/components/ai-elements/context";
 
-import {
-  FolderOpen,
-} from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
@@ -230,7 +228,7 @@ function AppPromptInput({
   };
   return (
     <div
-      className="w-full min-w-0"
+      className="@container/prompt w-full min-w-0"
       ref={composerRef}
       onSubmitCapture={dictation.cancel}
     >
@@ -247,7 +245,7 @@ function AppPromptInput({
           <PromptInputTextarea />
         </PromptInputBody>
         <PromptInputFooter>
-          <PromptInputTools>
+          <PromptInputTools className="flex-1">
             {isChatComposer && (
               <>
                 <SessionConfigControls
@@ -270,12 +268,12 @@ function AppPromptInput({
               tooltip={workspacePath || "Choose a project folder"}
               disabled={isChatComposer}
               onClick={openDirectory}
-              className="max-w-40"
+              className="max-w-40 min-w-0 @max-[480px]/prompt:max-w-7"
               title={workspacePath || ""}
             >
               <FolderOpen size={16} />
               {workspacePath && (
-                <span className="min-w-0 truncate text-left [direction:rtl]">
+                <span className="min-w-0 truncate text-left [direction:rtl] @max-[480px]/prompt:hidden">
                   {workspacePath}
                 </span>
               )}
@@ -299,7 +297,9 @@ function AppPromptInput({
                   <ContextContentHeader />
                   {contextUsage.cost && (
                     <ContextContentFooter>
-                    <span className="text-muted-foreground">Session cost</span>
+                      <span className="text-muted-foreground">
+                        Session cost
+                      </span>
                       <span>
                         {new Intl.NumberFormat(undefined, {
                           style: "currency",

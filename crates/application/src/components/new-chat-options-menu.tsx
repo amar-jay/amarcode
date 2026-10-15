@@ -6,7 +6,6 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuSub,
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
@@ -20,8 +19,10 @@ function NewChatOptionsMenu({
   options,
   showPermissionFallback,
   onConfigChange,
+  disabled,
 }: {
   options: SessionConfigOption[];
+  disabled?: boolean;
   showPermissionFallback: boolean;
   onConfigChange: (configId: string, value: SessionConfigValue) => void;
 }) {
@@ -32,12 +33,15 @@ function NewChatOptionsMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <PromptInputButton tooltip="More options" aria-label="More options">
+        <PromptInputButton
+          tooltip="More options"
+          aria-label="More options"
+          disabled={disabled}
+        >
           <Ellipsis className="size-4" />
         </PromptInputButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
-        {/* <DropdownMenuLabel>New chat options</DropdownMenuLabel> */}
         {showPermissionFallback && (
           <PermissionFallbackMenuSub visibleOptions={visibleOptions} />
         )}
