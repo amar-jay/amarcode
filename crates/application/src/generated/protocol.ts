@@ -35,7 +35,7 @@ export type AgentDefinition = { id: string, name: string, command: string, argum
  */
 available: boolean, created_at: string, updated_at: string, };
 
-export type AgentInfo = { id: string, name: string, icon: string | null, command: string, arguments: Array<string>, environment: Array<[string, string]>, created_at: string, updated_at: string, available: boolean, resolved_command: string | null, unavailable_reason: string | null, };
+export type AgentInfo = { is_builtin: boolean, id: string, name: string, icon: string | null, command: string, arguments: Array<string>, environment: Array<[string, string]>, created_at: string, updated_at: string, available: boolean, resolved_command: string | null, unavailable_reason: string | null, };
 
 export type SessionConfigSelectChoice = { value: string, name: string, description?: string | null, };
 

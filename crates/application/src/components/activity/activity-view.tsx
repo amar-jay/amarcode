@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { buildAgentRunTimeline } from "@/lib/agent-run-timeline";
+import { buildAgentRunTimeline } from "@/lib/agent";
 
 type DirectionFilter = "all" | RawActivityEvent["direction"];
 

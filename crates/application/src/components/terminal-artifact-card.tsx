@@ -10,7 +10,6 @@ import type { TerminalArtifact } from "@/lib/terminal-artifacts";
 import {
   Terminal,
   TerminalContent,
-  TerminalCopyButton,
   TerminalHeader,
   TerminalTitle,
 } from "@/components/ai-elements/terminal";

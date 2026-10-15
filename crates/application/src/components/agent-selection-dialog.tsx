@@ -92,9 +92,7 @@ export function AgentSelectionDialog({
         <AgentLogo icon={agent.icon} />
         <span className="flex min-w-0 flex-1 items-center space-x-5">
           <span className="truncate">{stripAcpSuffix(agent.name)}</span>
-          {agent.id === "amarcode-acp" && (
-            <Badge>Preinstalled</Badge>
-          )}
+          {agent.is_builtin && <Badge>Built-in</Badge>}
         </span>
 
         {!agent.available ? (

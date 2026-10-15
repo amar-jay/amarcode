@@ -164,6 +164,9 @@ pub struct AgentDefinition {
 /// computed at list time for diagnostics.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct AgentInfo {
+    // Catalog ownership loaded from the daemon database.
+    #[serde(default)]
+    pub is_builtin: bool,
     pub id: String,
     pub name: String,
     pub icon: Option<String>,

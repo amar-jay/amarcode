@@ -77,18 +77,17 @@ impl AgentManager {
     }
 
     /// Build the UI-facing info row for one stored agent (after availability refresh).
-    pub fn agent_info(&self, agent: &AgentDefinition) -> AgentInfo {
+    pub fn agent_info(&self, agent: &AgentDefinition) -> Result<AgentInfo> {
         self.info(agent)
     }
 
     pub fn list(&self) -> Result<Vec<AgentInfo>> {
         self.refresh_availability()?;
-        Ok(self
-            .store
+        self.store
             .agents()?
             .into_iter()
             .map(|agent| self.info(&agent))
-            .collect())
+            .collect()
     }
 
     /// Resolve each agent command on this host and persist `available`.
@@ -299,10 +298,11 @@ impl AgentManager {
         })
     }
 
-    fn info(&self, agent: &AgentDefinition) -> AgentInfo {
+    fn info(&self, agent: &AgentDefinition) -> Result<AgentInfo> {
         let resolved = find_command(&self.tools_dir, agent);
         let available = agent.available;
-        AgentInfo {
+        Ok(AgentInfo {
+            is_builtin: self.store.is_builtin_agent(&agent.id)?,
             id: agent.id.clone(),
             name: agent.name.clone(),
             icon: self.registry_icon(agent),
@@ -317,7 +317,7 @@ impl AgentManager {
                 .filter(|_| available)
                 .map(|path| path.to_string_lossy().into_owned()),
             unavailable_reason: (!available).then(|| unavailable_reason(&self.tools_dir, agent)),
-        }
+        })
     }
 
     fn registry_icon(&self, agent: &AgentDefinition) -> Option<String> {
@@ -898,6 +898,7 @@ mod tests {
                 .get(super::super::amarcode_acp::AGENT_ID)
                 .expect("read preset")
                 .expect("builtin preset");
+            assert!(manager.agent_info(&preset).expect("preset info").is_builtin);
             assert_eq!(PathBuf::from(preset.command), executable);
             assert_eq!(
                 std::fs::read(manager.amarcode_acp_config_path()).expect("migrated config"),

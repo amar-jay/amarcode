@@ -1,4 +1,5 @@
 import type { AgentRun } from "@/types";
+import type { AgentInfo } from "@/types";
 
 export type TimelineRun = {
   run: AgentRun;
@@ -98,4 +99,13 @@ export function buildAgentRunTimeline(runs: AgentRun[], now: number) {
     lanes: [...lanes.entries()],
     breaks,
   };
+}
+
+/** Honor an available preference, then prefer an available built-in from the catalog. */
+export function getPreferredAgent(agents: AgentInfo[], preferredId: string) {
+  return (
+    agents.find((agent) => agent.id === preferredId && agent.available) ??
+    agents.find((agent) => agent.is_builtin && agent.available) ??
+    agents.find((agent) => agent.available)
+  );
 }

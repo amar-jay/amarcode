@@ -1,3 +1,4 @@
+import { getPreferredAgent } from "@/lib/agent";
 import { useEffect, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -553,9 +554,13 @@ function AcpProviderPanel() {
       setConfig(value);
       setApiKey("");
       const agents = await reloadAgents();
-      const amarcodeAgent = agents.find((agent) => agent.id === "amarcode-acp");
-      if (!amarcodeAgent?.available) {
-        await installAgent("amarcode-acp");
+      const amarcodeAgent = agents.find((agent) => agent.is_builtin);
+      if (!amarcodeAgent)
+        throw new Error(
+          "The built-in agent is missing from the daemon catalog.",
+        );
+      if (!amarcodeAgent.available) {
+        await installAgent(amarcodeAgent.id);
       }
       await reloadAgents();
       notify("Amarcode provider settings saved", "success");
@@ -674,7 +679,7 @@ function AgentDefaultsPanel({
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const installAgent = useSetAtom(installAgentAtom);
-  const selectedAgent = agents.find((agent) => agent.id === defaultAgentId);
+  const selectedAgent = getPreferredAgent(agents, defaultAgentId);
   const availableAgents = agents.filter((agent) => agent.available);
   const installableAgents = agents.filter((agent) => !agent.available);
 
@@ -744,7 +749,7 @@ function AgentDefaultsPanel({
           <span className="truncate">
             {agent.name.replace(/\s*\bACP\s*$/i, "")}
           </span>
-          {agent.id === "amarcode-acp" && (
+          {agent.is_builtin && (
             <Badge variant="secondary" title="Included with Amarcode">
               Built-in
             </Badge>
@@ -771,7 +776,7 @@ function AgentDefaultsPanel({
           </button>
         ) : (
           <Check
-            className={`size-4 justify-self-end ${agent.id === defaultAgentId ? "opacity-100" : "opacity-0"}`}
+            className={`size-4 justify-self-end ${agent.id === selectedAgent?.id ? "opacity-100" : "opacity-0"}`}
           />
         )}
       </CommandItem>

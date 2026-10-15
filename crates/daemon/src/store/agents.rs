@@ -75,6 +75,16 @@ impl Store {
         Ok(())
     }
 
+    pub fn is_builtin_agent(&self, id: &str) -> Result<bool> {
+        self.connection()?
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM agents WHERE id=?1 AND source='builtin')",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(to_error)
+    }
+
     pub fn agents(&self) -> Result<Vec<AgentDefinition>> {
         let connection = self.connection()?;
         let mut statement = connection
@@ -255,6 +265,15 @@ mod tests {
         store
             .sync_presets(&[agent("registry-agent")])
             .expect("first registry sync");
+        assert!(store.is_builtin_agent("builtin-agent").unwrap());
+        assert!(!store.is_builtin_agent("registry-agent").unwrap());
+        assert!(!store.is_builtin_agent("custom-agent").unwrap());
+        assert!(!store.is_builtin_agent("missing").unwrap());
+        // A familiar ID alone must not confer built-in ownership.
+        store
+            .save_agent(&agent("amarcode-acp"))
+            .expect("custom with familiar ID");
+        assert!(!store.is_builtin_agent("amarcode-acp").unwrap());
         store.sync_presets(&[]).expect("empty registry sync");
 
         assert!(store.get_agent("custom-agent").unwrap().is_some());

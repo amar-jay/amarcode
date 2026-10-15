@@ -219,6 +219,7 @@ describe("agent-owned session configuration", () => {
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-01T00:00:00Z",
         available: true,
+        is_builtin: false,
         resolved_command: "agent-2",
         unavailable_reason: null,
       },

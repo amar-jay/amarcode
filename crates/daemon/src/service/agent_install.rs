@@ -79,7 +79,7 @@ impl AgentManager {
                 .ok_or_else(|| Error::msg("built-in agent missing after install"))?;
             if !self.amarcode_acp_configured() {
                 return Ok(InstallAgentResult {
-                    agent: self.agent_info(&updated),
+                    agent: self.agent_info(&updated)?,
                     runtime_status: AgentRuntimeStatus::AuthRequired,
                     runtime_message: Some(
                         "Add an API key and provider details in Settings → Agent defaults".into(),
@@ -88,7 +88,7 @@ impl AgentManager {
             }
             let (runtime_status, runtime_message) = self.probe_runtime(agent_id)?;
             return Ok(InstallAgentResult {
-                agent: self.agent_info(&updated),
+                agent: self.agent_info(&updated)?,
                 runtime_status,
                 runtime_message,
             });
@@ -108,7 +108,7 @@ impl AgentManager {
 
         let (runtime_status, runtime_message) = self.probe_runtime(&updated.id)?;
         Ok(InstallAgentResult {
-            agent: self.agent_info(&updated),
+            agent: self.agent_info(&updated)?,
             runtime_status,
             runtime_message,
         })

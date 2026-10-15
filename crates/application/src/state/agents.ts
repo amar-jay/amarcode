@@ -1,3 +1,4 @@
+import { getPreferredAgent } from "@/lib/agent";
 import { atom } from "jotai";
 import { daemonApi } from "@/api";
 import type { AgentInfo } from "@/types";
@@ -69,10 +70,7 @@ export const selectedAgentAtom = atom((get) => {
   const agents = get(agentsAtom);
   if (!agents.length) return undefined;
   const preferred = get(selectedAgentIdAtom) ?? get(defaultAgentIdAtom);
-  return (
-    agents.find((agent) => agent.id === preferred && agent.available) ??
-    agents.find((agent) => agent.available)
-  );
+  return getPreferredAgent(agents, preferred);
 });
 
 /** Set selection by agent id (no-op if unknown). */
