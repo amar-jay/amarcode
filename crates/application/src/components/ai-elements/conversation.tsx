@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { UIMessage } from "ai";
 import { ArrowDownIcon, DownloadIcon } from "lucide-react";
@@ -85,16 +85,16 @@ export const ConversationScrollButton = ({
     !isAtBottom && (
       <Button
         className={cn(
-          "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full dark:bg-background dark:hover:bg-muted",
+					buttonVariants({variant: "secondary"}),
+          "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full opacity-80 border border-border",
           className,
         )}
         onClick={handleScrollToBottom}
         size="icon"
         type="button"
-        variant="outline"
         {...props}
       >
-        <ArrowDownIcon className="size-4" />
+        <ArrowDownIcon className="size-4 text-primary-foreground"/>
       </Button>
     )
   );

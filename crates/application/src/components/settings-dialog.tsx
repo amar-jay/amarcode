@@ -1052,7 +1052,7 @@ function GeneralPanel({
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         Set the defaults for starting and reviewing agent sessions.
       </p>
-      <Separator className="my-5" />
+      <Separator className="my-1" />
       <div className="divide-y divide-border rounded-xl border border-border">
         <PreferenceRow
           title="Restore recent workspace"
@@ -1073,7 +1073,7 @@ function GeneralPanel({
           onCheckedChange={setVerboseReasoning}
         />
       </div>
-      <div className="mt-4 flex items-center justify-between">
+      <div className="mt-4 flex items-center justify-between border-y border-border py-1 mb-4">
         <p className="text-[11px] text-muted-foreground">
           Reset these workspace preferences.
         </p>
@@ -1090,17 +1090,16 @@ function GeneralPanel({
           Restore defaults
         </Button>
       </div>
-      <Separator className="my-5" />
       <section aria-labelledby="danger-zone-title">
         <div className="rounded-xl border border-destructive/35 bg-destructive/3 p-3">
           <div className="flex items-center gap-3">
-            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-destructive/10 text-destructive">
+            {/* <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-destructive/10 text-destructive">
               <Trash2 className="size-4" />
-            </span>
+            </span> */}
             <div className="min-w-0 flex-1">
               <h3
                 id="danger-zone-title"
-                className="text-sm font-medium text-destructive"
+                className="text-xs font-medium text-destructive"
               >
                 Remove Amarcode data
               </h3>
@@ -1120,7 +1119,7 @@ function GeneralPanel({
                 setCleanupOpen(true);
               }}
             >
-              Remove data
+              <Trash2 className="size-4" />
             </Button>
           </div>
         </div>
