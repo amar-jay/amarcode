@@ -1,9 +1,11 @@
 import { useAtom } from "jotai";
 import {
   FileDiff,
+  FoldVertical,
   GitBranch,
   ListFilter,
   RefreshCw,
+  UnfoldVertical,
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -45,6 +47,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [navigatorView, setNavigatorView] = useState<"files" | "changes">(
     "files",
   );
+  const [diffExpanded, setDiffExpanded] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
   const [selectedLine, setSelectedLine] = useState<number>();
   useEffect(() => {
@@ -100,6 +103,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const selectPath: typeof workspaceFileTree.setSelectedPath = useCallback(
     (path) => {
       setSelectedLine(undefined);
+      setDiffExpanded(false);
       if (workspaceFileTree.selectedPath === path) {
         workspaceFileTree.setSelectedPath(undefined);
         return;
@@ -241,7 +245,13 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         )}
         showCloseButton={false}
       >
-        <SheetHeader className="relative flex-row items-center gap-2 px-3 py-1 select-none">
+        <SheetHeader
+          className={cn(
+            "relative flex-row items-center gap-2 px-3 py-1 select-none",
+            workspaceFileTree.selectedPath &&
+              "grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)]",
+          )}
+        >
           <SheetTitle className="flex min-w-0 flex-1 flex-row items-center gap-1 overflow-hidden text-xs font-bold">
             <span className="truncate">{dirName || ""}</span>
             {branchName && (
@@ -255,7 +265,10 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
             )}
           </SheetTitle>
           {workspaceFileTree.selectedPath && (
-            <div className="flex min-w-0 flex-1 items-center gap-1">
+            <div
+              className="flex min-w-0 items-center justify-center gap-1"
+              title={workspaceFileTree.selectedPath}
+            >
               <FileDiff
                 className={cn(
                   "size-4 shrink-0 text-muted-foreground",
@@ -269,6 +282,25 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
               <span className="min-w-0 truncate font-mono text-xs">
                 {workspaceFileTree.selectedPath || ""}
               </span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-6 shrink-0"
+                onClick={() => setDiffExpanded((expanded) => !expanded)}
+                aria-pressed={diffExpanded}
+                aria-label={
+                  diffExpanded ? "Collapse unchanged lines" : "Show entire file"
+                }
+                title={
+                  diffExpanded ? "Collapse unchanged lines" : "Show entire file"
+                }
+              >
+                {diffExpanded ? (
+                  <FoldVertical className="size-3.5" />
+                ) : (
+                  <UnfoldVertical className="size-3.5" />
+                )}
+              </Button>
             </div>
           )}
           <div className="ml-auto flex shrink-0 items-center">
@@ -381,6 +413,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                 workspacePath={workspacePath}
                 setDiff={setDiff}
                 diff={diff}
+                expanded={diffExpanded}
               />
             </ResizablePanel>
           )}

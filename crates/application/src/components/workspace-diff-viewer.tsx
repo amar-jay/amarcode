@@ -76,6 +76,35 @@ const readOnlyExtensions = (path: string): Extension[] => [
         color: "var(--muted-foreground)",
       },
       ".cm-activeLineGutter": { backgroundColor: "transparent" },
+      ".cm-collapsedLines": {
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        // Block widget heights exclude vertical margins, which offsets gutters.
+        margin: "0",
+        padding: "4px 8px",
+        border: "none",
+        borderRadius: "0",
+        background: "color-mix(in oklab, var(--primary) 50%, transparent)",
+        color: "var(--foreground)",
+        fontFamily: "var(--font-sans)",
+        fontSize: "11px",
+        fontWeight: "500",
+        lineHeight: "18px",
+        userSelect: "none",
+      },
+      ".cm-collapsedLines::before": {
+        content: '"↕"',
+        margin: "0",
+        fontSize: "14px",
+      },
+      ".cm-collapsedLines::after": {
+        content: "none",
+      },
+      ".cm-collapsedLines:hover": {
+        background: "color-mix(in oklab, var(--primary) 60%, transparent)",
+        color: "var(--foreground)",
+      },
     },
     { dark: true },
   ),
@@ -84,9 +113,11 @@ const readOnlyExtensions = (path: string): Extension[] => [
 function DiffCanvas({
   diff,
   selectedLine,
+  expanded,
 }: {
   diff: WorkspaceDiff;
   selectedLine?: number;
+  expanded: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
 
@@ -102,7 +133,9 @@ function DiffCanvas({
             ? []
             : unifiedMergeView({
                 allowInlineDiffs: true,
-                collapseUnchanged: { margin: 3, minSize: 8 },
+                collapseUnchanged: expanded
+                  ? undefined
+                  : { margin: 3, minSize: 8 },
                 gutter: true,
                 highlightChanges: true,
                 mergeControls: false,
@@ -140,7 +173,7 @@ function DiffCanvas({
       window.cancelAnimationFrame(animationFrame);
       editor.destroy();
     };
-  }, [diff, selectedLine]);
+  }, [diff, selectedLine, expanded]);
 
   return (
     <div
@@ -157,12 +190,14 @@ export function WorkspaceDiffViewer({
   workspacePath,
   diff,
   setDiff,
+  expanded = false,
 }: {
   selectedPath?: string;
   selectedLine?: number;
   workspacePath: string;
   diff?: WorkspaceDiff;
   setDiff: (diff?: WorkspaceDiff) => void;
+  expanded?: boolean;
 }) {
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
@@ -224,6 +259,7 @@ export function WorkspaceDiffViewer({
           key={`${diff.path}:${selectedLine ?? ""}`}
           diff={diff}
           selectedLine={selectedLine}
+          expanded={expanded}
         />
       ) : (
         <div className="flex flex-1 items-center justify-center px-8 text-center text-xs text-muted-foreground">
