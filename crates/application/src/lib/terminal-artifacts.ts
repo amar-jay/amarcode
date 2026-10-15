@@ -16,6 +16,8 @@ export type TerminalArtifact = {
 };
 
 type ToolState = {
+  kind?: string;
+  name?: string;
   title?: string;
   input?: Record<string, unknown>;
   status?: string;
@@ -48,6 +50,8 @@ export function terminalArtifacts(
       const toolCallId = text(update.toolCallId);
       if (!toolCallId) continue;
       const tool = tools.get(toolCallId) ?? { terminals: new Set<string>() };
+      tool.kind = text(update.kind) ?? tool.kind;
+      tool.name = text(update.name) ?? text(update.toolName) ?? tool.name;
       tool.title = text(update.title) ?? text(update.name) ?? tool.title;
       tool.input = record(update.rawInput) ?? tool.input;
       tool.status = text(update.status) ?? tool.status;
@@ -128,5 +132,30 @@ export function terminalArtifacts(
       }
     }
   }
-  return [...terminals.values()];
+  // Some agents attach terminal metadata to non-command tools. Their semantic
+  // kind still belongs in reasoning, regardless of how the agent ran the tool.
+  const reasoningTools = new Set([
+    "read",
+    "read_file",
+    "list_dir",
+    "search",
+    "search_replace",
+    "grep",
+    "edit",
+    "write_file",
+    "delete",
+    "move",
+    "fetch",
+    "web_search",
+    "thinking",
+    "think",
+  ]);
+  return [...terminals.values()].filter((terminal) => {
+    const tool = tools.get(terminal.toolCallId);
+    return ![tool?.kind, tool?.name].some(
+      (value) =>
+        value &&
+        reasoningTools.has(value.trim().toLowerCase().replaceAll(" ", "_")),
+    );
+  });
 }

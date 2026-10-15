@@ -118,6 +118,7 @@ export type ChatBlock =
       streaming: boolean;
       status: string;
       timeline: TimelineStep[];
+      entries: AssistantEntry[];
       diffs: DiffArtifact[];
       terminals: TerminalArtifact[];
       agentId: string | null;
@@ -133,6 +134,78 @@ type TimelineStep = {
   icon?: LucideIcon;
   status: "complete" | "active";
 };
+
+export type AssistantEntry =
+  | { kind: "reasoning"; key: string; steps: TimelineStep[] }
+  | { kind: "diff"; key: string; artifact: DiffArtifact }
+  | { kind: "terminal"; key: string; terminal: TerminalArtifact }
+  | { kind: "text"; key: string; content: string };
+
+/** Place tool snapshots at their first occurrence, rather than at completion. */
+function orderedEntries(
+  block: Extract<ChatBlock, { kind: "assistant" }>,
+  prompt: string,
+): AssistantEntry[] {
+  const entries: AssistantEntry[] = [];
+  const seenTools = new Set<string>();
+  const steps = new Map(block.timeline.map((step) => [step.key, step]));
+  let leadingText = true;
+  const addText = (key: string, content: string) => {
+    if (leadingText) content = removeLeadingPromptEcho(content, prompt);
+    if (!content.trim()) return;
+    leadingText = false;
+    entries.push({ kind: "text", key, content });
+  };
+  for (const { message, parts } of block.items) {
+    for (const part of [...parts].sort((a, b) => a.ordinal - b.ordinal)) {
+      const key = `${message.id}-${part.kind === "thinking" ? "thinking" : "tool"}-${part.ordinal}`;
+      if (part.kind === "text") {
+        addText(`${message.id}-text-${part.ordinal}`, partText(part) ?? "");
+        continue;
+      }
+      if (part.kind === "tool_call") {
+        let toolId: string;
+        try {
+          const value = JSON.parse(part.content_json);
+          toolId =
+            value.toolCallId ?? value.tool_call_id ?? `part-${part.ordinal}`;
+        } catch {
+          continue;
+        }
+        if (seenTools.has(toolId)) continue;
+        const diffs = block.diffs.filter((diff) => diff.toolCallId === toolId);
+        const terminals = block.terminals.filter(
+          (terminal) => terminal.toolCallId === toolId,
+        );
+        if (diffs.length || terminals.length) {
+          seenTools.add(toolId);
+          for (const artifact of diffs)
+            entries.push({
+              kind: "diff",
+              key: `diff-${artifact.key}`,
+              artifact,
+            });
+          for (const terminal of terminals)
+            entries.push({
+              kind: "terminal",
+              key: `terminal-${terminal.key}`,
+              terminal,
+            });
+          continue;
+        }
+      }
+      const step = steps.get(key);
+      if (!step) continue;
+      const previous = entries.at(-1);
+      if (previous?.kind === "reasoning") previous.steps.push(step);
+      else entries.push({ kind: "reasoning", key: step.key, steps: [step] });
+    }
+    // Older messages may have only the aggregate content and no text parts.
+    if (!parts.some((part) => part.kind === "text"))
+      addText(`${message.id}-text`, message.content);
+  }
+  return entries;
+}
 
 function partText(part: MessagePart): string | null {
   try {
@@ -338,6 +411,7 @@ export function groupChatBlocks(
       streaming: false,
       status: item.message.status,
       timeline: [],
+      entries: [],
       diffs: [],
       terminals: [],
       agentId: item.agent_id,
@@ -387,6 +461,14 @@ export function groupChatBlocks(
         ...block.diffs.map((artifact) => artifact.toolCallId),
         ...block.terminals.map((terminal) => terminal.toolCallId),
       ]),
+    );
+    block.entries = orderedEntries(
+      block,
+      previous?.kind === "user" &&
+        previous.item.message.agent_run_id ===
+          block.items[0]?.message.agent_run_id
+        ? previous.item.message.content
+        : "",
     );
     block.agentId = block.items.find((item) => item.agent_id)?.agent_id ?? null;
     block.startedAt =

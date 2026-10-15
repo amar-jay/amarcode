@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, LoaderCircle } from "lucide-react";
+import {
+  CheckCircle,
+  ChevronDown,
+  CircleStop,
+  CircleX,
+  LoaderCircle,
+} from "lucide-react";
 import type { TerminalArtifact } from "@/lib/terminal-artifacts";
 import {
   Terminal,
@@ -8,6 +14,7 @@ import {
   TerminalHeader,
   TerminalTitle,
 } from "@/components/ai-elements/terminal";
+import { cn } from "@/lib/utils";
 
 export function TerminalArtifactCard({
   terminal,
@@ -16,7 +23,8 @@ export function TerminalArtifactCard({
   terminal: TerminalArtifact;
   onExpand: () => Promise<void>;
 }) {
-  const [expanded, setExpanded] = useState(terminal.status === "running");
+  const [userExpanded, setUserExpanded] = useState<boolean>();
+  const expanded = userExpanded ?? terminal.status === "running";
   const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => {
     if (expanded && terminal.deferred) {
@@ -25,48 +33,77 @@ export function TerminalArtifactCard({
   }, [expanded, terminal.deferred, onExpand]);
   const toggle = () => {
     setLoadFailed(false);
-    setExpanded(!expanded);
+    setUserExpanded(!expanded);
   };
+  const StatusIcon =
+    terminal.status === "completed"
+      ? CheckCircle
+      : terminal.status === "failed"
+        ? CircleX
+        : terminal.status === "cancelled"
+          ? CircleStop
+          : LoaderCircle;
   return (
     <Terminal
       output={terminal.output}
       isStreaming={terminal.status === "running"}
+			status={terminal.status}
     >
-      <TerminalHeader>
+      <TerminalHeader
+        className={
+          cn("bg-secondary/15",
+						expanded && terminal.status == "failed" ? "bg-red-500/40" : ""
+					)
+        }
+      >
         <button
           type="button"
           onClick={toggle}
           aria-expanded={expanded}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
-          <TerminalTitle className="min-w-0">
+          <TerminalTitle className="min-w-0 flex-1 text-zinc-300 [&>svg]:shrink-0">
             <span
-              className="truncate font-mono text-xs"
+              className="min-w-0 truncate font-mono text-xs mr-4"
               title={terminal.command}
             >
               {terminal.command}
             </span>
           </TerminalTitle>
-          <span className="shrink-0 text-xs text-zinc-400">
-            {terminal.exitCode !== undefined
-              ? `Exit ${terminal.exitCode}`
-              : terminal.signal
-                ? `Signal ${terminal.signal}`
-                : terminal.status}
+					
+          <span
+            className="shrink-0 text-zinc-400"
+            title={terminal.status}
+            aria-label={terminal.status}
+          >
+            <StatusIcon
+              className={cn(
+                "size-3.5",
+                terminal.status === "running" && "animate-spin",
+                terminal.status === "completed" && "text-green-500",
+                terminal.status === "failed" && "text-red-500",
+                terminal.status === "cancelled" && "text-yellow-500",
+              )}
+              aria-hidden="true"
+            />
           </span>
           <ChevronDown
             className={`size-3 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`}
           />
         </button>
-        <TerminalCopyButton disabled={terminal.deferred || !terminal.output} />
+        {/* <TerminalCopyButton
+          disabled={terminal.deferred || !terminal.output}
+          className="text-secondary/50 hover:bg-zinc-800 hover:text-zinc-100"
+          aria-label="Copy terminal output"
+        /> */}
       </TerminalHeader>
       {expanded && (
         <>
-          {terminal.cwd && (
-            <div className="px-4 pt-2 font-mono text-[10px] text-zinc-500">
-              {terminal.cwd}
-            </div>
-          )}
+          <div className="border-b border-zinc-800 px-4 py-3">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed [overflow-wrap:anywhere]">
+              {terminal.command}
+            </pre>
+          </div>
           {loadFailed ? (
             <div className="p-4 text-xs text-zinc-400">
               Could not load output. Collapse and expand to retry.

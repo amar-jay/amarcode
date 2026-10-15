@@ -150,4 +150,31 @@ describe("terminal artifacts", () => {
       terminalArtifacts([message([start], "interrupted")], false)[0].status,
     ).toBe("cancelled");
   });
+  it.each(["read", "read_file", "search", "edit", "fetch", "list_dir"])(
+    "keeps %s tools out of terminal cards even with terminal metadata",
+    (kind) => {
+      expect(
+        terminalArtifacts(
+          [
+            message([
+              { ...start, kind, title: "Read file" },
+              update({
+                terminal_output: { terminal_id: "terminal", data: "contents" },
+              }),
+            ]),
+          ],
+          true,
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it("honors a non-command kind received in a later update", () => {
+    expect(
+      terminalArtifacts(
+        [message([start, { toolCallId: "command", kind: "read" }])],
+        false,
+      ),
+    ).toEqual([]);
+  });
 });

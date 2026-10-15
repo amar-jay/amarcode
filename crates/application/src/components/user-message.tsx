@@ -60,11 +60,12 @@ function reasoningLabel(
   return (
     <div className="whitespace-pre-wrap space-x-2 space-y-2 mt-1">
       {kind && <span className="font-bold">{kind.replaceAll("_", " ")}</span>}
-      {showToolTitle && <>
-				<br/>
-				<span className="text-xs font-mono">{toolTitle}</span>
-			</>
-			}
+      {showToolTitle && (
+        <>
+          <br />
+          <span className="text-xs font-mono">{toolTitle}</span>
+        </>
+      )}
       {kind === "execute" && verbose && (
         <>
           <br />
@@ -80,6 +81,49 @@ function reasoningLabel(
     </div>
   );
 }
+function AssistantText({
+  content,
+  streaming,
+}: {
+  content: string;
+  streaming: boolean;
+}) {
+  const warning = splitLeadingWarning(content);
+  const response = warning?.response ?? content;
+  const tone = assistantMessageTone(response);
+  return (
+    <>
+      {warning && (
+        <div className="flex gap-2 rounded-md py-2 text-xs text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <MessageResponse>{warning.warning}</MessageResponse>
+        </div>
+      )}
+      {tone ? (
+        <div
+          className={
+            tone === "error"
+              ? "flex gap-2 rounded-md px-3 py-2 text-xs text-destructive"
+              : "flex gap-2 rounded-md py-2 text-xs text-amber-700 dark:text-amber-300"
+          }
+        >
+          {tone === "error" ? (
+            <CircleX className="mt-0.5 size-4 shrink-0" />
+          ) : (
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          )}
+          <MessageResponse>{response}</MessageResponse>
+        </div>
+      ) : (
+        <div>
+          <MessageResponse>{response}</MessageResponse>
+          {streaming && <StreamingCaret />}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function UserMessage({
   block,
   verboseReasoning,
@@ -91,6 +135,9 @@ export function UserMessage({
   waitingLabel: string;
   agentNames: Map<string, string>;
 }) {
+  const [reasoningOpen, setReasoningOpen] = useState<Record<string, boolean>>(
+    {},
+  );
   const [detailedBlock, setDetailedBlock] = useState<ChatBlock | null>(null);
   const detailRequest = useRef<Promise<void> | null>(null);
 
@@ -168,10 +215,9 @@ export function UserMessage({
     );
   }
 
-  const leadingWarning = splitLeadingWarning(displayedBlock.content);
-  const responseContent = leadingWarning?.response ?? displayedBlock.content;
-  const tone = assistantMessageTone(responseContent);
-  const hasVisibleContent = Boolean(responseContent.trim());
+  const hasVisibleContent = displayedBlock.entries.some(
+    (entry) => entry.kind === "text" && entry.content.trim(),
+  );
   const interruption =
     displayedBlock.status === "failed"
       ? "Response failed before completion."
@@ -182,75 +228,83 @@ export function UserMessage({
   return (
     <Message from="assistant" key={block.key} className="space-between">
       <MessageContent className="w-full space-y-2">
-        {displayedBlock.timeline.length > 0 && (
-          <ChainOfThought
-            // Controlled while streaming so the panel stays open for the whole turn.
-            open={displayedBlock.streaming ? true : undefined}
-            defaultOpen={false}
-            onOpenChange={(open) => {
-              if (open) void loadDetails().catch(() => {});
-            }}
-            className="space-y-0"
-          >
-            <ChainOfThoughtHeader className="py-1">
-              {displayedBlock.streaming ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <LoaderCircle className="size-3 animate-spin" />
-                  Reasoning…
-                </span>
-              ) : (
-                "Reasoning"
-              )}
-            </ChainOfThoughtHeader>
-            <ChainOfThoughtContent className="mt-0 space-y-1">
-              {displayedBlock.timeline.map((step) => (
-                <ChainOfThoughtStep
-                  key={step.key}
-                  icon={step.icon}
-                  kind={step.kind}
-                  label={reasoningLabel(
-                    step.label,
-                    step.kind,
-                    verboseReasoning,
+        {displayedBlock.entries.map((entry, index) => (
+          <div key={entry.key}>
+            {entry.kind === "reasoning" && (
+              <ChainOfThought
+                open={
+                  reasoningOpen[entry.key] ??
+                  (displayedBlock.streaming &&
+                    index === displayedBlock.entries.length - 1)
+                }
+                defaultOpen={false}
+                onOpenChange={(open) => {
+                  setReasoningOpen((current) => ({
+                    ...current,
+                    [entry.key]: open,
+                  }));
+                  if (open) void loadDetails().catch(() => {});
+                }}
+                className="space-y-0"
+              >
+                <ChainOfThoughtHeader className="py-1">
+                  {displayedBlock.streaming &&
+                  index === displayedBlock.entries.length - 1 ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <LoaderCircle className="size-3 animate-spin" />
+                      Reasoning…
+                    </span>
+                  ) : (
+                    "Reasoning"
                   )}
-                  description={step.description}
-                  status={step.status}
-                />
-              ))}
-            </ChainOfThoughtContent>
-          </ChainOfThought>
-        )}
-        {displayedBlock.diffs.map((artifact) => (
-          <DiffArtifactCard
-            key={artifact.key}
-            artifact={artifact}
-            onExpand={loadDetails}
-          />
-        ))}
-        {displayedBlock.terminals.map((terminal) => <TerminalArtifactCard key={terminal.key} terminal={terminal} onExpand={loadDetails} />)}
-        {leadingWarning && (
-          <div className="flex gap-2 rounded-md py-2 text-xs text-amber-700 dark:text-amber-300">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            <MessageResponse>{leadingWarning.warning}</MessageResponse>
+                </ChainOfThoughtHeader>
+                <ChainOfThoughtContent className="mt-0 space-y-1">
+                  {entry.steps.map((step, stepIndex) => (
+                    <ChainOfThoughtStep
+                      key={step.key}
+                      icon={step.icon}
+                      kind={step.kind}
+                      label={reasoningLabel(
+                        step.label,
+                        step.kind,
+                        verboseReasoning,
+                      )}
+                      description={step.description}
+                      status={
+                        displayedBlock.streaming &&
+                        index === displayedBlock.entries.length - 1 &&
+                        stepIndex === entry.steps.length - 1
+                          ? "active"
+                          : "complete"
+                      }
+                    />
+                  ))}
+                </ChainOfThoughtContent>
+              </ChainOfThought>
+            )}
+            {entry.kind === "diff" && (
+              <DiffArtifactCard
+                artifact={entry.artifact}
+                onExpand={loadDetails}
+              />
+            )}
+            {entry.kind === "terminal" && (
+              <TerminalArtifactCard
+                terminal={entry.terminal}
+                onExpand={loadDetails}
+              />
+            )}
+            {entry.kind === "text" && (
+              <AssistantText
+                content={entry.content}
+                streaming={
+                  displayedBlock.streaming &&
+                  index === displayedBlock.entries.length - 1
+                }
+              />
+            )}
           </div>
-        )}
-        {hasVisibleContent &&
-          (tone === "error" ? (
-            <div className="flex gap-2 rounded-md px-3 py-2 text-xs text-destructive">
-              <CircleX className="mt-0.5 size-4 shrink-0" />
-              <MessageResponse>{responseContent}</MessageResponse>
-            </div>
-          ) : tone === "warning" ? (
-            <div className="flex gap-2 rounded-md py-2 text-xs text-amber-700 dark:text-amber-300">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <MessageResponse>{responseContent}</MessageResponse>
-            </div>
-          ) : (
-            <div>
-              <MessageResponse>{responseContent}</MessageResponse>
-              {displayedBlock.streaming && <StreamingCaret />}
-            </div>
-          ))}
+        ))}
         {!hasVisibleContent && displayedBlock.streaming && (
           <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
             <LoaderCircle className="size-3.5 shrink-0 animate-spin" />

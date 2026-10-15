@@ -262,35 +262,21 @@ pub(super) fn take_streaming_messages_from_live(live: &mut LiveRun) -> Vec<Strin
 }
 
 pub(super) fn append_text_delta(inner: &SessionInner, message_id: &str, delta: &str) -> Result<()> {
-    // Load current content from messages list is heavy; update by reading via store messages filter.
-    // Simpler: get all messages for chat is not available by id — we only have messages(chat_id).
-    // Use replace on content via update_message with accumulated: need current content.
-    // Store doesn't have get_message — add lightweight approach: only append via parts + update content from parts rebuild is heavy.
-    // Minimal: update_message replaces full content — fetch via listing is wrong.
-    // For now append by reading message_parts text parts or use a SQL get.
-    // Quick fix: store message content update using parts + content field:
-    // We'll get content by scanning is not ideal. Add get via update that concatenates:
-    // Actually create_message stores empty; we can keep content in parts only and set content to previous+delta by...
-    // Use replace: load parts, find text part, append, also set content field.
-
     let mut parts = inner.store.message_parts(message_id)?;
-    if let Some(text_part) = parts.iter_mut().find(|p| p.kind == MessagePartKind::Text) {
-        let mut obj: Value = serde_json::from_str(&text_part.content_json).unwrap_or(json!({}));
-        let existing = obj
+    let mut added_ordinal = None;
+    // Only consecutive text deltas belong together. A tool or thought marks
+    // a boundary that the chat renderer must be able to preserve.
+    if let Some(part) = parts
+        .last_mut()
+        .filter(|part| part.kind == MessagePartKind::Text)
+    {
+        let value: Value = serde_json::from_str(&part.content_json).unwrap_or(json!({}));
+        let existing = value
             .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_owned();
-        let combined = format!("{existing}{delta}");
-        obj = json!({ "text": combined });
-        text_part.content_json = obj.to_string();
-        inner
-            .store
-            .update_message(message_id, &combined, MessageStatus::Streaming)?;
-        inner.store.replace_message_parts(message_id, &parts)?;
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        part.content_json = json!({ "text": format!("{existing}{delta}") }).to_string();
     } else {
-        // Thought/tool parts may already occupy ordinal 0 (Grok streams
-        // `agent_thought_chunk` before the visible answer).
         let ordinal = parts.iter().map(|part| part.ordinal).max().unwrap_or(-1) + 1;
         parts.push(MessagePart {
             message_id: message_id.to_owned(),
@@ -298,10 +284,22 @@ pub(super) fn append_text_delta(inner: &SessionInner, message_id: &str, delta: &
             kind: MessagePartKind::Text,
             content_json: json!({ "text": delta }).to_string(),
         });
-        inner
-            .store
-            .update_message(message_id, delta, MessageStatus::Streaming)?;
-        inner.store.replace_message_parts(message_id, &parts)?;
+        added_ordinal = Some(ordinal);
+    }
+    let content = parts
+        .iter()
+        .filter(|part| part.kind == MessagePartKind::Text)
+        .filter_map(|part| {
+            serde_json::from_str::<Value>(&part.content_json)
+                .ok()
+                .and_then(|value| value.get("text")?.as_str().map(str::to_owned))
+        })
+        .collect::<String>();
+    inner
+        .store
+        .update_message(message_id, &content, MessageStatus::Streaming)?;
+    inner.store.replace_message_parts(message_id, &parts)?;
+    if let Some(ordinal) = added_ordinal {
         emit(
             inner,
             EditorEvent::MessagePartAdded {
@@ -506,6 +504,43 @@ mod append_tests {
             terminals: Default::default(),
         };
         (inner, "msg-1".to_owned())
+    }
+
+    #[test]
+    fn text_keeps_boundaries_around_activity() {
+        let (inner, message_id) = inner_with_assistant_message();
+        append_text_delta(&inner, &message_id, "Before. ").unwrap();
+        append_thinking_delta(&inner, &message_id, "Check the file.").unwrap();
+        append_text_delta(&inner, &message_id, "After ").unwrap();
+        append_text_delta(&inner, &message_id, "activity.").unwrap();
+        let parts = inner.store.message_parts(&message_id).unwrap();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].kind, MessagePartKind::Text);
+        assert_eq!(parts[1].kind, MessagePartKind::Thinking);
+        assert_eq!(parts[2].kind, MessagePartKind::Text);
+        assert_eq!(
+            serde_json::from_str::<Value>(&parts[2].content_json).unwrap()["text"],
+            "After activity."
+        );
+        assert_eq!(
+            inner
+                .store
+                .get_message(&message_id)
+                .unwrap()
+                .unwrap()
+                .content,
+            "Before. After activity."
+        );
+        finalize_message(&inner, &message_id, MessageStatus::Complete).unwrap();
+        assert_eq!(
+            inner
+                .store
+                .get_message(&message_id)
+                .unwrap()
+                .unwrap()
+                .content,
+            "Before. After activity."
+        );
     }
 
     #[test]
