@@ -105,6 +105,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-updater",
  "tokio",
+ "webkit2gtk",
 ]
 
 [[package]]

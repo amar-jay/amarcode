@@ -2,6 +2,8 @@ mod app_update;
 mod clipboard_files;
 mod config;
 mod daemon;
+#[cfg(target_os = "linux")]
+mod microphone;
 mod protocol;
 mod state;
 mod window;
@@ -740,6 +742,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            #[cfg(target_os = "linux")]
+            microphone::configure(app)?;
             window::fit_main_window(app)?;
             Ok(())
         })
