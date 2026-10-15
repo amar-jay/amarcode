@@ -115,7 +115,6 @@ impl AgentManager {
     }
 
     pub fn sync_builtin_preset(&self) -> Result<()> {
-        self.migrate_amarcode_acp_layout()?;
         let existing = self.get(super::amarcode_acp::AGENT_ID)?;
         let now = timestamp();
         let executable = existing
@@ -204,41 +203,6 @@ impl AgentManager {
             })
             .max_by_key(|(modified, _)| *modified)
             .map(|(_, executable)| executable)
-    }
-
-    fn migrate_amarcode_acp_layout(&self) -> Result<()> {
-        let old_root = self
-            .tools_dir
-            .join("agents")
-            .join(super::amarcode_acp::AGENT_ID);
-        if !old_root.is_dir() {
-            return Ok(());
-        }
-
-        move_if_missing(
-            &old_root.join("config.json"),
-            &self.amarcode_acp_config_path(),
-        )?;
-        move_if_missing(
-            &old_root.join("config.sessions.json"),
-            &self
-                .amarcode_acp_config_path()
-                .with_extension("sessions.json"),
-        )?;
-
-        let install_root = self
-            .managed_agents_dir()
-            .join(super::amarcode_acp::AGENT_ID);
-        for entry in std::fs::read_dir(&old_root).map_err(|error| Error::msg(error.to_string()))? {
-            let entry = entry.map_err(|error| Error::msg(error.to_string()))?;
-            if entry.path().is_dir() {
-                move_if_missing(&entry.path(), &install_root.join(entry.file_name()))?;
-            }
-        }
-        remove_if_empty(&old_root)?;
-        remove_if_empty(&self.tools_dir.join("agents"))?;
-        remove_if_empty(&self.tools_dir)?;
-        Ok(())
     }
 
     /// Create a custom agent with a new id.
@@ -344,35 +308,6 @@ fn valid_registry_id(id: &str) -> bool {
                 || byte.is_ascii_digit() && index > 0
                 || byte == b'-' && index > 0
         })
-}
-
-fn move_if_missing(source: &Path, destination: &Path) -> Result<()> {
-    if !source.exists() || destination.exists() {
-        return Ok(());
-    }
-    let parent = destination
-        .parent()
-        .ok_or_else(|| Error::msg("invalid migration destination"))?;
-    std::fs::create_dir_all(parent).map_err(|error| Error::msg(error.to_string()))?;
-    std::fs::rename(source, destination).map_err(|error| {
-        Error::msg(format!(
-            "failed moving {} to {}: {error}",
-            source.display(),
-            destination.display()
-        ))
-    })
-}
-
-fn remove_if_empty(path: &Path) -> Result<()> {
-    if path.is_dir()
-        && std::fs::read_dir(path)
-            .map_err(|error| Error::msg(error.to_string()))?
-            .next()
-            .is_none()
-    {
-        std::fs::remove_dir(path).map_err(|error| Error::msg(error.to_string()))?;
-    }
-    Ok(())
 }
 
 fn agent_is_available(tools_dir: &Path, agent: &AgentDefinition) -> bool {
@@ -861,27 +796,26 @@ mod tests {
     #[test]
     fn builtin_preset_recovers_an_installed_executable() {
         let root = test_directory();
-        let legacy_root = root
-            .join("tools")
+        let install_root = root
             .join("agents")
             .join(super::super::amarcode_acp::AGENT_ID);
-        let executable_directory = legacy_root.join("0.1.7");
+        let executable_directory = install_root.join("0.1.7");
         std::fs::create_dir_all(&executable_directory).expect("create install directory");
         let executable_name = if cfg!(windows) {
             "amarcode-acp.exe"
         } else {
             "amarcode-acp"
         };
-        let legacy_executable = executable_directory.join(executable_name);
-        std::fs::write(&legacy_executable, b"test executable").expect("write executable");
-        std::fs::write(&legacy_root.join("config.json"), b"config").expect("write config");
-        std::fs::write(&legacy_root.join("config.sessions.json"), b"sessions")
-            .expect("write sessions");
+        let installed_executable = executable_directory.join(executable_name);
+        std::fs::write(&installed_executable, b"test executable").expect("write executable");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&legacy_executable, std::fs::Permissions::from_mode(0o755))
-                .expect("make executable");
+            std::fs::set_permissions(
+                &installed_executable,
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .expect("make executable");
         }
         {
             let store = Arc::new(Store::open(&root.join("store.sqlite3")).expect("open store"));
@@ -900,20 +834,6 @@ mod tests {
                 .expect("builtin preset");
             assert!(manager.agent_info(&preset).expect("preset info").is_builtin);
             assert_eq!(PathBuf::from(preset.command), executable);
-            assert_eq!(
-                std::fs::read(manager.amarcode_acp_config_path()).expect("migrated config"),
-                b"config"
-            );
-            assert_eq!(
-                std::fs::read(
-                    manager
-                        .amarcode_acp_config_path()
-                        .with_extension("sessions.json")
-                )
-                .expect("migrated sessions"),
-                b"sessions"
-            );
-            assert!(!root.join("tools").exists());
         }
         // Drop Store before deleting: Windows keeps the SQLite file locked while open.
         let _ = std::fs::remove_dir_all(root);

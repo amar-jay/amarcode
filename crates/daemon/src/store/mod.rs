@@ -225,11 +225,6 @@ fn apply_migrations(connection: &Connection) -> Result<()> {
         )
         .map_err(to_error)?;
 
-    // Existing databases created before migration tracking already ran 0001.
-    if table_exists(connection, "agents")? && !migration_applied(connection, "0001_initial")? {
-        record_migration(connection, "0001_initial")?;
-    }
-
     for &(id, sql) in MIGRATIONS {
         if migration_applied(connection, id)? {
             continue;
@@ -238,17 +233,6 @@ fn apply_migrations(connection: &Connection) -> Result<()> {
         record_migration(connection, id)?;
     }
     Ok(())
-}
-
-fn table_exists(connection: &Connection, name: &str) -> Result<bool> {
-    let exists: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-            [name],
-            |row| row.get(0),
-        )
-        .map_err(to_error)?;
-    Ok(exists > 0)
 }
 
 fn migration_applied(connection: &Connection, id: &str) -> Result<bool> {

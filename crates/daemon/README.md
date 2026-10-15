@@ -503,3 +503,97 @@ daemon-test-cli repl
 5. **Migrations are append-only**; do not rewrite applied SQL in place for prod DBs.
 6. **No SQL or agent spawn in `rpc`.**
 7. When something looks duplicated, check [Related concepts](#related-concepts-not-duplicates) before adding another type.
+
+## RPC transport selection
+
+Use the single Clap flag `--transport tcp|websocket` to select the listener.
+The single `daemon_addr` setting comes from `AMARCODE_DAEMON_ADDR`. When unset,
+it defaults to `127.0.0.1:43821` for TCP and `127.0.0.1:43822` for WebSockets.
+In WebSocket mode, only the WS/WSS listener runs, serving the same RPC methods and event
+subscriptions at `/rpc`. The desktop application currently uses TCP, so keep
+TCP mode for its local daemon. WebSocket addresses, TLS, and origins are
+configured only through environment variables; there are no flags for those
+settings. TCP mode ignores WebSocket-specific environment variables.
+
+For a remote listener, supply a PEM certificate chain (leaf certificate first)
+and its matching unencrypted PEM private key. Use a certificate valid for the
+hostname clients will connect to, issued by a CA they trust. Existing ACME or
+organization-managed certificates work; certificate issuance and renewal are
+managed outside the daemon.
+
+```sh
+chmod 600 /path/to/privkey.pem
+AMARCODE_DAEMON_ADDR=0.0.0.0:43822 \
+AMARCODE_WS_TLS_CERT=/path/to/fullchain.pem \
+AMARCODE_WS_TLS_KEY=/path/to/privkey.pem \
+AMARCODE_WS_ALLOW_ORIGIN=https://app.example.com \
+amarcode-daemon run --transport websocket
+```
+
+Connect to `wss://your-daemon-host:43822/rpc`. Permit that port through the host's
+firewall for the intended clients. TLS uses Rustls's safe protocol defaults
+(TLS 1.2/1.3); clients must verify the certificate and hostname. Certificate/key
+changes take effect on daemon restart. On Unix, private key
+files must not be readable or writable by group/other users. On Windows,
+restrict the key's filesystem ACLs to the service account and administrators.
+
+For local development only, a loopback listener may omit TLS:
+
+```sh
+amarcode-daemon run --transport websocket
+```
+
+Override the default address with `AMARCODE_DAEMON_ADDR`. Non-loopback
+WebSocket binds require both TLS certificate and key paths. There is no automatic
+certificate generation, plaintext remote fallback, or certificate-verification
+bypass. IPv6 bind syntax is supported, e.g. `[::1]:43822` for local development.
+
+WebSocket fields live directly on `Config`. `Config::get(transport)` loads and
+validates the selected transport once per process through `OnceLock`; changes
+require a restart.
+WebSocket configuration is loaded only from environment variables:
+
+| Environment variable | Purpose |
+| --- | --- |
+| `AMARCODE_DAEMON_ADDR` | Optional shared listener address override; defaults depend on transport. |
+| `AMARCODE_WS_TLS_CERT` | PEM certificate chain path. |
+| `AMARCODE_WS_TLS_KEY` | Matching PEM private key path. |
+| `AMARCODE_WS_ALLOW_ORIGIN` | Comma-separated list of allowed browser origins. |
+
+Origins are exact `http(s)://host[:port]` values, with no path, trailing slash,
+wildcard, or `null`. Whitespace around comma-separated entries is ignored.
+Browser connections are rejected unless their Origin is explicitly allowed.
+Non-browser clients may omit Origin. For an installed service, set these
+variables in its systemd user unit / launchd job / Windows service environment
+and restart it. Set its startup command to `run --transport websocket` to select
+WebSocket mode. The flag defaults to TCP when omitted.
+
+### WebSocket protocol
+
+No token or authentication exchange is required. After the WebSocket handshake,
+clients can send RPC requests immediately. Requests and replies use the existing
+TCP RPC shapes, with WebSocket message boundaries replacing newlines:
+
+```json
+{"method":"health"}
+```
+
+RPC is ordered: wait for the reply before sending another request on that
+connection. Use separate connections for long-running prompts,
+cancellation, and subscriptions. `subscribe_events` acknowledges the request,
+then streams the existing `{"event":...}` envelopes with the same filters as
+TCP. That connection is dedicated to events afterward.
+
+The server caps WebSocket messages/frames at 36 MiB (enough for a base64-encoded
+25 MiB audio recording), concurrent WebSocket clients at 64, TLS/WebSocket
+handshakes at 10 seconds each, and stalled writes at 15 seconds. It sends
+ping frames every 30 seconds and drops peers silent for 90 seconds. Clients must
+handle WebSocket ping/pong; browsers do this automatically.
+
+Browser example:
+
+```js
+const socket = new WebSocket("wss://your-daemon-host:43822/rpc");
+socket.onopen = () => socket.send(JSON.stringify({ method: "health" }));
+socket.onmessage = ({ data }) => console.log(JSON.parse(data));
+```

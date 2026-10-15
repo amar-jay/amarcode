@@ -13,7 +13,9 @@
 use std::path::PathBuf;
 
 use amarcode_daemon::{
-    cleanup, logging,
+    cleanup,
+    config::DaemonTransport,
+    logging,
     service_control::{NativeServiceController, ServiceController},
     App, Config,
 };
@@ -24,7 +26,10 @@ use tracing::{error, info};
 #[command(name = "amarcode-daemon", version, about)]
 #[command(propagate_version = true)]
 struct Cli {
-    /// Defaults to `run` for compatibility with older service definitions.
+    /// RPC transport; WebSocket address and TLS settings are read from the environment.
+    #[arg(long, value_enum, default_value = "tcp", global = true)]
+    transport: DaemonTransport,
+    /// Run in the foreground when no subcommand is supplied.
     #[command(subcommand)]
     command: Option<LifecycleCommand>,
 }
@@ -60,7 +65,8 @@ enum LifecycleCommand {
 fn main() {
     #[cfg(windows)]
     amarcode_daemon::windows::attach_parent_console();
-    let command = Cli::parse().command.unwrap_or(LifecycleCommand::Run);
+    let cli = Cli::parse();
+    let command = cli.command.unwrap_or(LifecycleCommand::Run);
     // Set the service environment before Tokio creates any worker threads.
     #[cfg(windows)]
     if command == LifecycleCommand::Run {
@@ -69,11 +75,11 @@ fn main() {
             std::process::exit(1);
         }
     }
-    async_main(command);
+    async_main(command, cli.transport);
 }
 
 #[tokio::main]
-async fn async_main(command: LifecycleCommand) {
+async fn async_main(command: LifecycleCommand, transport: DaemonTransport) {
     if command != LifecycleCommand::Run {
         if let Err(error) = run_lifecycle_command(command) {
             eprintln!("amarcode-daemon: {error}");
@@ -84,7 +90,7 @@ async fn async_main(command: LifecycleCommand) {
 
     // Config before logging so we know where to write daemon.log.
     // Failures here go to stderr because the subscriber is not up yet.
-    let config = match Config::from_env() {
+    let config = match Config::get(transport) {
         Ok(config) => config,
         Err(err) => {
             eprintln!("amarcode-daemon: failed to load config: {err}");
@@ -92,7 +98,7 @@ async fn async_main(command: LifecycleCommand) {
         }
     };
 
-    if let Err(err) = logging::init(&config) {
+    if let Err(err) = logging::init(config) {
         eprintln!("amarcode-daemon: failed to initialize logging: {err}");
         std::process::exit(1);
     }
@@ -100,6 +106,7 @@ async fn async_main(command: LifecycleCommand) {
     info!(
         service = "amarcode-daemon",
         version = env!("CARGO_PKG_VERSION"),
+        transport = ?config.transport,
         addr = %config.daemon_addr,
         app_dir = %config.app_dir.display(),
         db_path = %config.db_path.display(),
@@ -107,7 +114,7 @@ async fn async_main(command: LifecycleCommand) {
         "starting"
     );
 
-    if let Err(err) = run(config).await {
+    if let Err(err) = run(config.clone()).await {
         error!(error = %err, "daemon exited with error");
         std::process::exit(1);
     }
@@ -228,7 +235,28 @@ mod tests {
     }
 
     #[test]
-    fn missing_command_preserves_legacy_run_behavior() {
+    fn transport_flag_defaults_to_tcp_and_accepts_websocket() {
+        use amarcode_daemon::config::DaemonTransport;
+        assert_eq!(
+            Cli::try_parse_from(["amarcode-daemon", "run"])
+                .unwrap()
+                .transport,
+            DaemonTransport::Tcp
+        );
+        for args in [
+            vec!["amarcode-daemon", "run", "--transport", "websocket"],
+            vec!["amarcode-daemon", "--transport", "websocket", "run"],
+        ] {
+            assert_eq!(
+                Cli::try_parse_from(args).unwrap().transport,
+                DaemonTransport::WebSocket
+            );
+        }
+        assert!(Cli::try_parse_from(["amarcode-daemon", "run", "--transport", "udp"]).is_err());
+    }
+
+    #[test]
+    fn missing_command_defaults_to_run() {
         assert_eq!(
             Cli::try_parse_from(["amarcode-daemon"]).unwrap().command,
             None

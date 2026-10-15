@@ -641,7 +641,8 @@ async fn subscribe_for(addr: &str, params: Value, max: Duration) -> Result<(), S
 }
 
 fn register_agent(id: &str, name: &str, command: &std::path::Path) -> Result<(), String> {
-    let config = Config::from_env().map_err(|e| e.to_string())?;
+    let config =
+        Config::get(amarcode_daemon::config::DaemonTransport::Tcp).map_err(|e| e.to_string())?;
     let store = Store::open(&config.db_path).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     store

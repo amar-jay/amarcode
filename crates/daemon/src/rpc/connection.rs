@@ -35,7 +35,21 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    let (reader, mut writer) = stream.into_split();
+    let (reader, writer) = stream.into_split();
+    handle_io(reader, writer, app, &peer).await
+}
+
+/// Shared JSON-line engine, also used by the WebSocket frame adapter.
+pub(super) async fn handle_io<R, W>(
+    reader: R,
+    mut writer: W,
+    app: Arc<App>,
+    peer: &str,
+) -> Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
     let mut lines = BufReader::new(reader).lines();
 
     while let Some(line) = lines.next_line().await? {

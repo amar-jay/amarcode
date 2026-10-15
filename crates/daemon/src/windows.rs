@@ -5,8 +5,6 @@ use std::{ffi::OsStr, path::PathBuf};
 use crate::{Error, Result};
 
 fn service_path_file() -> Result<PathBuf> {
-    // Keep this beside `data`, so installing a task does not create `data`
-    // prematurely and prevent Config's migration of a legacy database.
     Ok(crate::config::resolve_default()?.with_file_name("service-path.json"))
 }
 

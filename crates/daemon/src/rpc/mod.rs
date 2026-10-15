@@ -1,4 +1,4 @@
-//! TCP JSON-line transport for clients.
+//! Selectable TCP JSON-line and WS/WSS transports for clients.
 //!
 //! Intentionally thin: accept connections, parse one JSON object per line,
 //! dispatch methods, write results/errors, stream subscription events.
@@ -13,3 +13,5 @@
 pub mod connection;
 pub mod handler;
 pub mod server;
+
+pub mod websocket;

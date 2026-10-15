@@ -4,7 +4,7 @@
 //! - `Config` / app data directory
 //! - `store` (SQLite)
 //! - `service` managers (agents, chats, sessions)
-//! - `rpc::server` (TCP listener)
+//! - `rpc::server` (the selected TCP or WebSocket listener)
 //!
 //! `run` binds the listener, accepts connections, and shuts down cleanly on
 //! signal. Business logic stays in `service` and `store`, not here.
@@ -44,6 +44,7 @@ pub struct App {
 impl App {
     /// Open the store, refresh registry agents, and construct managers.
     pub async fn new(config: Config) -> Result<Self> {
+        config.validate()?;
         info!(
             app_dir = %config.app_dir.display(),
             db_path = %config.db_path.display(),
@@ -179,18 +180,23 @@ impl App {
         Ok(())
     }
 
-    /// Bind TCP and serve until shutdown.
+    /// Serve the configured transport until shutdown.
     pub async fn run(self) -> Result<()> {
-        let addr = self.config.daemon_addr.clone();
-        info!(%addr, "run starting");
-
-        let listener = TcpListener::bind(&addr).await.map_err(|err| {
-            crate::Error::msg(format!("failed to bind rpc listener on {addr}: {err}"))
-        })?;
-
-        let app = Arc::new(self);
-        rpc::server::run(app, listener).await?;
-
+        self.config.validate()?;
+        let addr = &self.config.daemon_addr;
+        info!(%addr, transport = ?self.config.transport, "run starting");
+        let listener = match self.config.transport {
+            crate::config::DaemonTransport::Tcp => {
+                let socket = TcpListener::bind(addr).await.map_err(|error| {
+                    crate::Error::msg(format!("failed to bind rpc listener on {addr}: {error}"))
+                })?;
+                rpc::server::Listener::Tcp(socket)
+            }
+            crate::config::DaemonTransport::WebSocket => {
+								rpc::server::Listener::WebSocket(rpc::websocket::Listener::bind(&self.config).await?)
+						}
+        };
+        rpc::server::run(Arc::new(self), listener).await?;
         info!("run finished");
         Ok(())
     }
@@ -213,16 +219,20 @@ mod tests {
         };
         use serde_json::json;
 
-        let root = std::env::temp_dir().join(format!(
-            "amarcode-registry-health-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("amarcode-registry-health-{}", uuid::Uuid::new_v4()));
         let app = App::new(Config {
             db_path: root.join("workspace.sqlite3"),
             app_dir: root.clone(),
+            transport: Default::default(),
+            ws_tls_cert: None,
+            ws_tls_key: None,
+            ws_allowed_origins: Vec::new(),
             daemon_addr: "127.0.0.1:0".into(),
             acp_registry_source: Some(
-                root.join("missing-repository").to_string_lossy().into_owned(),
+                root.join("missing-repository")
+                    .to_string_lossy()
+                    .into_owned(),
             ),
         })
         .await
@@ -232,7 +242,9 @@ mod tests {
         let catalog = dispatch(&app, methods::LIST_AGENTS, json!({}))
             .await
             .expect("built-in catalog remains available");
-        assert!(matches!(catalog, DispatchOutcome::Result(value) if value["agents"][0]["id"] == "amarcode-acp"));
+        assert!(
+            matches!(catalog, DispatchOutcome::Result(value) if value["agents"][0]["id"] == "amarcode-acp")
+        );
         // A catalog failure must not make the existing service unusable.
         assert!(dispatch(&app, methods::HEALTH, json!({})).await.is_ok());
         drop(app);
@@ -248,6 +260,10 @@ mod tests {
         let config = Config {
             db_path: app_dir.join("workspace.sqlite3"),
             app_dir: app_dir.clone(),
+            transport: Default::default(),
+            ws_tls_cert: None,
+            ws_tls_key: None,
+            ws_allowed_origins: Vec::new(),
             daemon_addr: "127.0.0.1:0".to_owned(),
             acp_registry_source: None,
         };
