@@ -70,3 +70,11 @@ export const verboseReasoningAtom = atomWithStorage<boolean>(
   undefined,
   { getOnInit: true },
 );
+
+/** Chat IDs pinned in this client only. Never sent to the daemon. */
+export const pinnedChatIdsAtom = atomWithStorage<string[]>(
+  "amarcode-pinned-chats",
+  [],
+  undefined,
+  { getOnInit: true },
+);

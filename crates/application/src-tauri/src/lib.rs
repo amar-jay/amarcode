@@ -263,6 +263,14 @@ async fn vacuum_database(state: State<'_, AppState>) -> Result<VacuumDatabaseRes
 }
 
 #[tauri::command]
+async fn update_chat(
+    state: State<'_, AppState>,
+    params: crate::protocol::rpc::UpdateChatParams,
+) -> Result<Chat, String> {
+    state.update_chat(params).await
+}
+
+#[tauri::command]
 async fn delete_chat(
     state: State<'_, AppState>,
     chat_id: String,
@@ -756,6 +764,7 @@ pub fn run() {
             set_daemon_config,
             vacuum_database,
             get_attachment,
+            update_chat,
             delete_chat,
             prompt,
             set_session_config_option,

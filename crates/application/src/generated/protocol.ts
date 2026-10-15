@@ -93,6 +93,8 @@ export type ListAcpEventsForChatParams = { chat_id: string, };
 
 export type ListAgentRunsForChatParams = { chat_id: string, };
 
+export type UpdateChatParams = { chat_id: string, title: string, };
+
 export type DeleteChatParams = { chat_id: string, };
 
 export type DeleteChatResult = { deleted: boolean, };

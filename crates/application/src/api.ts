@@ -262,6 +262,11 @@ export const daemonApi = {
     attachmentId: string,
   ): Promise<GetAttachmentResult> =>
     invoke("get_attachment", { chatId, attachmentId }),
+  updateChat: (
+    chatId: string,
+    changes: { title: string },
+  ): Promise<Chat> =>
+    invoke("update_chat", { params: { chat_id: chatId, ...changes } }),
   deleteChat: (chatId: string): Promise<DeleteChatResult> =>
     invoke("delete_chat", { chatId }),
 

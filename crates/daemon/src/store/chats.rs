@@ -90,6 +90,20 @@ impl Store {
         }
     }
 
+    pub fn update_chat(&self, id: &str, title: &str) -> Result<()> {
+        let changed = self
+            .connection()?
+            .execute(
+                "UPDATE chats SET title=?2, agent_title_set=1 WHERE id=?1",
+                params![id, title],
+            )
+            .map_err(to_error)?;
+        if changed == 0 {
+            return Err(crate::Error::msg(format!("chat not found: {id}")));
+        }
+        Ok(())
+    }
+
     pub fn update_title(&self, id: &str, title: &str) -> Result<()> {
         self.connection()?
             .execute(
@@ -221,6 +235,42 @@ fn is_prompt_title_echo(fallback: &str, candidate: &str) -> bool {
 mod tests {
     use super::*;
     use crate::protocol::{MessageRole, MessageStatus};
+
+    #[test]
+    fn chat_edits_persist_and_preserve_activity_time() {
+        let directory =
+            std::env::temp_dir().join(format!("amarcode-chat-edits-{}", uuid::Uuid::new_v4()));
+        let path = directory.join("store.sqlite3");
+        let store = Store::open(&path).expect("open store");
+        let chat = Chat {
+            id: "editable-chat".into(),
+            workspace_path: "/tmp/workspace".into(),
+            title: "Original".into(),
+            created_at: "2026-01-01".into(),
+            updated_at: "2026-01-01".into(),
+            archived_at: None,
+        };
+        store.create_chat(&chat).expect("create chat");
+        store.update_chat(&chat.id, "My title").expect("rename");
+        drop(store);
+        let store = Store::open(&path).expect("reopen store");
+        let edited = store.chats(None).expect("list chats").pop().expect("chat");
+        assert_eq!(edited.title, "My title");
+        assert_eq!(edited.updated_at, chat.updated_at);
+        let title_claimed: bool = store
+            .connection()
+            .expect("connection")
+            .query_row(
+                "SELECT agent_title_set FROM chats WHERE id=?1",
+                params![chat.id],
+                |row| row.get(0),
+            )
+            .expect("manual title is protected");
+        assert!(title_claimed);
+        assert!(store.update_chat("missing", "Title").is_err());
+        drop(store);
+        std::fs::remove_dir_all(directory).expect("cleanup");
+    }
 
     #[test]
     fn prompt_title_echo_matches_exact_and_truncated_fallbacks() {

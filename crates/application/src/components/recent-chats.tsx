@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { LoaderCircle, Search, Trash2, X } from "lucide-react";
+import {
+  LoaderCircle,
+  Pencil,
+  Pin,
+  PinOff,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -8,6 +16,13 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/ui/context-menu";
 import type { Chat } from "@/types";
 
 const MINUTE = 60 * 1000;
@@ -44,16 +59,22 @@ type RecentChatsProps = {
   activeChatId: string | null;
   runningChatIds: ReadonlySet<string>;
   chats: Chat[];
+  pinnedChatIds: readonly string[];
   onSelectChat: (chatId: string) => void;
   onDeleteChat: (chat: Chat) => void;
+  onRenameChat: (chat: Chat) => void;
+  onTogglePin: (chat: Chat) => void;
 };
 
 export function RecentChats({
   activeChatId,
   runningChatIds,
   chats,
+  pinnedChatIds,
   onSelectChat,
   onDeleteChat,
+  onRenameChat,
+  onTogglePin,
 }: RecentChatsProps) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -81,8 +102,81 @@ export function RecentChats({
     setSearchQuery("");
   };
 
+  const renderChat = (chat: Chat) => (
+    <ContextMenu key={chat.id}>
+      <ContextMenuTrigger asChild>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            isActive={chat.id === activeChatId}
+            onClick={() => onSelectChat(chat.id)}
+            tooltip={chat.title}
+            className="pr-8 hover:bg-sidebar-accent/50"
+          >
+            <span className="min-w-0 flex-1 truncate">{chat.title}</span>
+          </SidebarMenuButton>
+          {runningChatIds.has(chat.id) ? (
+            <LoaderCircle
+              aria-label="Running"
+              className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 animate-spin text-sidebar-foreground/55 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 group-data-[collapsible=icon]:hidden! motion-reduce:animate-none motion-reduce:transition-none"
+            />
+          ) : (
+            <time
+              dateTime={chat.updated_at}
+              title={formatFullDate(chat.updated_at)}
+              className="pointer-events-none absolute top-1/2 right-1 hidden w-5 -translate-y-1/2 text-center text-[10px] leading-none font-normal tabular-nums text-sidebar-foreground/45 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 group-data-[collapsible=icon]:hidden! md:block motion-reduce:transition-none"
+            >
+              {formatRelativeTime(chat.updated_at, now)}
+            </time>
+          )}
+          <SidebarMenuAction
+            showOnHover
+            aria-label={`Delete ${chat.title}`}
+            title="Delete chat"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDeleteChat(chat);
+            }}
+            className="hover:text-destructive"
+          >
+            <Trash2 />
+          </SidebarMenuAction>
+        </SidebarMenuItem>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onTogglePin(chat)}>
+          {pinnedChatIds.includes(chat.id) ? <PinOff /> : <Pin />}
+          {pinnedChatIds.includes(chat.id) ? "Unpin chat" : "Pin chat"}
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onRenameChat(chat)}>
+          <Pencil /> Rename chat
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          variant="destructive"
+          onSelect={() => onDeleteChat(chat)}
+        >
+          <Trash2 /> Delete chat
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+
+  const pinnedChats = filteredChats.filter((chat) =>
+    pinnedChatIds.includes(chat.id),
+  );
+
   return (
     <SidebarGroup className="p-0">
+      {pinnedChats.length > 0 && (
+        <div className="mb-3">
+          <div className="flex h-8 items-center gap-1.5 pl-2 text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
+            <Pin className="size-3" /> Pinned chats
+          </div>
+          <SidebarGroupContent>
+            <SidebarMenu>{pinnedChats.map(renderChat)}</SidebarMenu>
+          </SidebarGroupContent>
+        </div>
+      )}
       <div className="relative h-8 group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0">
         <div
           className={`absolute inset-0 flex items-center justify-between pl-2 transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none ${
@@ -142,44 +236,9 @@ export function RecentChats({
       </div>
       <SidebarGroupContent>
         <SidebarMenu>
-          {filteredChats.map((chat) => (
-            <SidebarMenuItem key={chat.id}>
-              <SidebarMenuButton
-                isActive={chat.id === activeChatId}
-                onClick={() => onSelectChat(chat.id)}
-                tooltip={chat.title}
-                className="pr-8 hover:bg-sidebar-accent/50"
-              >
-                <span className="min-w-0 flex-1 truncate">{chat.title}</span>
-              </SidebarMenuButton>
-              {runningChatIds.has(chat.id) ? (
-                <LoaderCircle
-                  aria-label="Running"
-                  className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 animate-spin text-sidebar-foreground/55 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 group-data-[collapsible=icon]:hidden! motion-reduce:animate-none motion-reduce:transition-none"
-                />
-              ) : (
-                <time
-                  dateTime={chat.updated_at}
-                  title={formatFullDate(chat.updated_at)}
-                  className="pointer-events-none absolute top-1/2 right-1 hidden w-5 -translate-y-1/2 text-center text-[10px] leading-none font-normal tabular-nums text-sidebar-foreground/45 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 group-data-[collapsible=icon]:hidden! md:block motion-reduce:transition-none"
-                >
-                  {formatRelativeTime(chat.updated_at, now)}
-                </time>
-              )}
-              <SidebarMenuAction
-                showOnHover
-                aria-label={`Delete ${chat.title}`}
-                title="Delete chat"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDeleteChat(chat);
-                }}
-                className="hover:text-destructive"
-              >
-                <Trash2 />
-              </SidebarMenuAction>
-            </SidebarMenuItem>
-          ))}
+          {filteredChats
+            .filter((chat) => !pinnedChatIds.includes(chat.id))
+            .map(renderChat)}
           {!filteredChats.length && (
             <p className="px-2 py-3 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
               {chats.length ? "No chats found." : "No chats yet."}

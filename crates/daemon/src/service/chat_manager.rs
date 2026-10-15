@@ -60,6 +60,17 @@ impl ChatManager {
         Ok(chat)
     }
 
+    pub fn update(&self, id: &str, title: &str) -> Result<Chat> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(Error::msg("Chat title cannot be empty"));
+        }
+        self.store.update_chat(id, title)?;
+        let chat = self.get_required(id)?;
+        self.emit_chat_updated(id);
+        Ok(chat)
+    }
+
     pub fn list(&self, workspace_path: Option<&str>) -> Result<Vec<Chat>> {
         self.store.chats(workspace_path)
     }

@@ -64,6 +64,7 @@ pub fn typescript_bindings() -> String {
         rpc::ListAcpEventsForRunParams::decl(&config),
         rpc::ListAcpEventsForChatParams::decl(&config),
         rpc::ListAgentRunsForChatParams::decl(&config),
+        rpc::UpdateChatParams::decl(&config),
         rpc::DeleteChatParams::decl(&config),
         rpc::DeleteChatResult::decl(&config),
         rpc::GetAttachmentParams::decl(&config),

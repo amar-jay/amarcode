@@ -105,6 +105,10 @@ export default function App() {
           chats={chats}
           onNewChat={() => startNewChat()}
           onSelectChat={(chatId) => selectChat(chatId)}
+          onUpdateChat={async (chatId, changes) => {
+            await daemonApi.updateChat(chatId, changes);
+            await refreshChats();
+          }}
           onDeleteChat={async (chatId) => {
             await daemonApi.deleteChat(chatId);
             if (activeSession?.chat.id === chatId) startNewChat();

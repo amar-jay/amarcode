@@ -180,6 +180,17 @@ impl AppState {
         .await
     }
 
+    pub async fn update_chat(
+        &self,
+        params: crate::protocol::rpc::UpdateChatParams,
+    ) -> Result<Chat, String> {
+        self.call(
+            methods::UPDATE_CHAT,
+            serde_json::to_value(params).map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
     pub async fn delete_chat(&self, chat_id: String) -> Result<DeleteChatResult, String> {
         self.call(methods::DELETE_CHAT, json!({ "chat_id": chat_id }))
             .await

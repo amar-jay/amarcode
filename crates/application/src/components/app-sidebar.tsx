@@ -1,6 +1,18 @@
+import { useAtom } from "jotai";
+import { pinnedChatIdsAtom } from "@/state/preferences";
 import { useState } from "react";
 import { Download, Plus, Settings } from "lucide-react";
 import { notify } from "@/lib/notify";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { RecentChats } from "@/components/recent-chats";
 import {
   AlertDialog,
@@ -32,6 +44,7 @@ type ChatSidebarProps = {
   onNewChat: () => void;
   onSelectChat: (chatId: string) => void;
   onDeleteChat: (chatId: string) => Promise<void>;
+  onUpdateChat: (chatId: string, changes: { title: string }) => Promise<void>;
   onOpenSettings: () => void;
   updateAvailable: boolean;
   onCheckForUpdates: () => void;
@@ -44,18 +57,49 @@ export function AppSidebar({
   onNewChat,
   onSelectChat,
   onDeleteChat,
+  onUpdateChat,
   onOpenSettings,
   updateAvailable,
   onCheckForUpdates,
 }: ChatSidebarProps) {
+  const [pinnedChatIds, setPinnedChatIds] = useAtom(pinnedChatIdsAtom);
   const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [chatToRename, setChatToRename] = useState<Chat | null>(null);
+  const [title, setTitle] = useState("");
+  const [renaming, setRenaming] = useState(false);
+
+  const updateChat = async (chat: Chat, changes: { title: string }) => {
+    try {
+      await onUpdateChat(chat.id, changes);
+      return true;
+    } catch (error) {
+      notify(
+        JSON.stringify(error),
+        // error instanceof Error ? error.message : "Unable to update this chat.",
+        "error",
+      );
+      return false;
+    }
+  };
+
+  const renameChat = async () => {
+    if (!chatToRename || !title.trim() || renaming) return;
+    setRenaming(true);
+    try {
+      if (await updateChat(chatToRename, { title: title.trim() }))
+        setChatToRename(null);
+    } finally {
+      setRenaming(false);
+    }
+  };
 
   const deleteChat = async () => {
     if (!chatToDelete) return;
     setDeleting(true);
     try {
       await onDeleteChat(chatToDelete.id);
+      setPinnedChatIds((ids) => ids.filter((id) => id !== chatToDelete.id));
       setChatToDelete(null);
     } catch (error) {
       console.error("Failed to delete chat:", error);
@@ -97,8 +141,20 @@ export function AppSidebar({
             activeChatId={activeChatId}
             runningChatIds={runningChatIds}
             chats={chats}
+            pinnedChatIds={pinnedChatIds}
             onSelectChat={onSelectChat}
             onDeleteChat={setChatToDelete}
+            onRenameChat={(chat) => {
+              setChatToRename(chat);
+              setTitle(chat.title);
+            }}
+            onTogglePin={(chat) => {
+              setPinnedChatIds((ids) =>
+                ids.includes(chat.id)
+                  ? ids.filter((id) => id !== chat.id)
+                  : [...ids, chat.id],
+              );
+            }}
           />
         </SidebarContent>
         <SidebarFooter className="gap-1 border-t border-sidebar-border p-2">
@@ -132,6 +188,50 @@ export function AppSidebar({
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
+      <Dialog
+        open={chatToRename !== null}
+        onOpenChange={(open) => {
+          if (!open && !renaming) setChatToRename(null);
+        }}
+      >
+        <DialogContent showCloseButton={!renaming}>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void renameChat();
+            }}
+            className="grid gap-4"
+          >
+            <DialogHeader>
+              <DialogTitle>Rename chat</DialogTitle>
+              <DialogDescription>
+                Choose a new name for this chat.
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              aria-label="Chat name"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              disabled={renaming}
+              onFocus={(event) => event.target.select()}
+              autoFocus
+            />
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={renaming}
+                onClick={() => setChatToRename(null)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={renaming || !title.trim()}>
+                {renaming ? "Saving…" : "Save"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       <AlertDialog
         open={chatToDelete !== null}
         onOpenChange={(open) => {

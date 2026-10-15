@@ -26,6 +26,7 @@ pub mod methods {
     pub const SET_DAEMON_CONFIG: &str = "set_daemon_config";
     pub const VACUUM_DATABASE: &str = "vacuum_database";
     pub const GET_ATTACHMENT: &str = "get_attachment";
+    pub const UPDATE_CHAT: &str = "update_chat";
     pub const DELETE_CHAT: &str = "delete_chat";
     pub const PROMPT: &str = "prompt";
     pub const SET_SESSION_CONFIG_OPTION: &str = "set_session_config_option";
@@ -221,6 +222,12 @@ pub struct ListAgentRunsForChatParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListAgentRunsResult {
     pub runs: Vec<AgentRun>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct UpdateChatParams {
+    pub chat_id: String,
+    pub title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

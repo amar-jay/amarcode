@@ -83,6 +83,12 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
             app.store.vacuum_database()?,
         )?)),
         methods::GET_ATTACHMENT => Ok(DispatchOutcome::Result(get_attachment(app, params)?)),
+        methods::UPDATE_CHAT => {
+            let p: crate::protocol::rpc::UpdateChatParams = parse_params(params)?;
+            Ok(DispatchOutcome::Result(to_value(
+                app.chats.update(&p.chat_id, &p.title)?,
+            )?))
+        }
         methods::DELETE_CHAT => Ok(DispatchOutcome::Result(delete_chat(app, params).await?)),
 
         // sessions (ACP — may block; run off the async worker)
