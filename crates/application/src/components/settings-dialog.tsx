@@ -1068,7 +1068,7 @@ function GeneralPanel({
         />
         <PreferenceRow
           title="Verbose reasoning"
-          description="Show full tool commands and untruncated thought steps in the chain of thought."
+          description="Show terminal artifact cards, full tool commands, and untruncated thought steps. When off, terminal cards are hidden."
           checked={verboseReasoning}
           onCheckedChange={setVerboseReasoning}
         />

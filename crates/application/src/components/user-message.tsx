@@ -215,7 +215,10 @@ export function UserMessage({
     );
   }
 
-  const hasVisibleContent = displayedBlock.entries.some(
+  const visibleEntries = displayedBlock.entries.filter(
+    (entry) => verboseReasoning || entry.kind !== "terminal",
+  );
+  const hasVisibleContent = visibleEntries.some(
     (entry) => entry.kind === "text" && entry.content.trim(),
   );
   const interruption =
@@ -228,14 +231,14 @@ export function UserMessage({
   return (
     <Message from="assistant" key={block.key} className="space-between">
       <MessageContent className="w-full space-y-2">
-        {displayedBlock.entries.map((entry, index) => (
+        {visibleEntries.map((entry, index) => (
           <div key={entry.key}>
             {entry.kind === "reasoning" && (
               <ChainOfThought
                 open={
                   reasoningOpen[entry.key] ??
                   (displayedBlock.streaming &&
-                    index === displayedBlock.entries.length - 1)
+                    index === visibleEntries.length - 1)
                 }
                 defaultOpen={false}
                 onOpenChange={(open) => {
@@ -249,7 +252,7 @@ export function UserMessage({
               >
                 <ChainOfThoughtHeader className="py-1">
                   {displayedBlock.streaming &&
-                  index === displayedBlock.entries.length - 1 ? (
+                  index === visibleEntries.length - 1 ? (
                     <span className="inline-flex items-center gap-1.5">
                       <LoaderCircle className="size-3 animate-spin" />
                       Reasoning…
@@ -272,7 +275,7 @@ export function UserMessage({
                       description={step.description}
                       status={
                         displayedBlock.streaming &&
-                        index === displayedBlock.entries.length - 1 &&
+                        index === visibleEntries.length - 1 &&
                         stepIndex === entry.steps.length - 1
                           ? "active"
                           : "complete"
@@ -299,7 +302,7 @@ export function UserMessage({
                 content={entry.content}
                 streaming={
                   displayedBlock.streaming &&
-                  index === displayedBlock.entries.length - 1
+                  index === visibleEntries.length - 1
                 }
               />
             )}
