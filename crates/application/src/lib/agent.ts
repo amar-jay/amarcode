@@ -41,10 +41,7 @@ export function buildAgentRunTimeline(runs: AgentRun[], now: number) {
     (total, window) => total + window.end - window.start,
     0,
   );
-  const elapsedDuration = Math.max(
-    windows.at(-1)!.end - windows[0].start,
-    1,
-  );
+  const elapsedDuration = Math.max(windows.at(-1)!.end - windows[0].start, 1);
   // A pause much longer than a typical run is a resumption, not useful scale.
   const averageRunDuration =
     parsed.reduce((total, item) => total + item.end - item.start, 0) /
@@ -56,8 +53,7 @@ export function buildAgentRunTimeline(runs: AgentRun[], now: number) {
   const visualWindows = windows.map((window, index) => {
     if (index > 0) {
       const actualGap = window.start - windows[index - 1].end;
-      visualCursor +=
-        actualGap > breakThreshold ? compressedGap : actualGap;
+      visualCursor += actualGap > breakThreshold ? compressedGap : actualGap;
     }
     const visualStart = visualCursor;
     visualCursor += window.end - window.start;

@@ -10,7 +10,10 @@ fn gui_subsystem_preserves_redirected_cli_output_and_exit_codes() {
     assert!(help.status.success());
     let stdout = String::from_utf8(help.stdout).unwrap();
     for command in ["install", "start", "stop", "restart", "status"] {
-        assert!(stdout.contains(command), "missing lifecycle command: {command}");
+        assert!(
+            stdout.contains(command),
+            "missing lifecycle command: {command}"
+        );
     }
 
     let invalid = Command::new(executable)

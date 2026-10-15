@@ -250,10 +250,7 @@ async fn ensure_git_available() -> Result<()> {
 async fn run_git<const N: usize>(arguments: [&str; N]) -> Result<()> {
     let output = timeout(
         GIT_TIMEOUT,
-        git_command()
-            .args(arguments)
-            .kill_on_drop(true)
-            .output(),
+        git_command().args(arguments).kill_on_drop(true).output(),
     )
     .await
     .map_err(|_| {
@@ -279,10 +276,14 @@ async fn run_git<const N: usize>(arguments: [&str; N]) -> Result<()> {
 
 fn git_command() -> Command {
     let mut command = Command::new("git");
+    command.env("GIT_TERMINAL_PROMPT", "0");
+
     #[cfg(windows)]
     {
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        command.env("GIT_TERMINAL_PROMPT", "0");
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+        command.creation_flags(CREATE_NO_WINDOW);
     }
     command
 }

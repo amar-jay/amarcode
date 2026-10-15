@@ -298,8 +298,7 @@ export async function interactive(
   }
 
   const versions: Record<BinaryProductId, string> = {
-    daemon:
-      options.versions.daemon ?? packageVersion(binaryProducts.daemon),
+    daemon: options.versions.daemon ?? packageVersion(binaryProducts.daemon),
     acp: options.versions.acp ?? packageVersion(binaryProducts.acp),
   };
   let overwrite = options.overwrite;
@@ -330,8 +329,7 @@ export async function interactive(
       ],
     });
     if (prompts.isCancel(targetSet)) return cancelled(targetSet);
-    targets =
-      targetSet === "host" ? [currentHost] : [...defaultTargets];
+    targets = targetSet === "host" ? [currentHost] : [...defaultTargets];
   }
 
   let appPublication = options.appPublication;
@@ -395,8 +393,7 @@ function finalize(options: ParsedOptions): ReleasePlan {
     throw new Error("select at least one product: daemon, acp, or app");
   }
   const versions: Record<BinaryProductId, string> = {
-    daemon:
-      options.versions.daemon ?? packageVersion(binaryProducts.daemon),
+    daemon: options.versions.daemon ?? packageVersion(binaryProducts.daemon),
     acp: options.versions.acp ?? packageVersion(binaryProducts.acp),
   };
   for (const id of binaryProductIds) {
@@ -428,4 +425,3 @@ function finalize(options: ParsedOptions): ReleasePlan {
       : null,
   };
 }
-

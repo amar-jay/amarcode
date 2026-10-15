@@ -85,7 +85,7 @@ export const ConversationScrollButton = ({
     !isAtBottom && (
       <Button
         className={cn(
-					buttonVariants({variant: "secondary"}),
+          buttonVariants({ variant: "secondary" }),
           "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full opacity-80 border border-border",
           className,
         )}
@@ -94,7 +94,7 @@ export const ConversationScrollButton = ({
         type="button"
         {...props}
       >
-        <ArrowDownIcon className="size-4 text-primary-foreground"/>
+        <ArrowDownIcon className="size-4 text-primary-foreground" />
       </Button>
     )
   );

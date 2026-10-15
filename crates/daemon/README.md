@@ -553,12 +553,12 @@ validates the selected transport once per process through `OnceLock`; changes
 require a restart.
 WebSocket configuration is loaded only from environment variables:
 
-| Environment variable | Purpose |
-| --- | --- |
-| `AMARCODE_DAEMON_ADDR` | Optional shared listener address override; defaults depend on transport. |
-| `AMARCODE_WS_TLS_CERT` | PEM certificate chain path. |
-| `AMARCODE_WS_TLS_KEY` | Matching PEM private key path. |
-| `AMARCODE_WS_ALLOW_ORIGIN` | Comma-separated list of allowed browser origins. |
+| Environment variable       | Purpose                                                                  |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `AMARCODE_DAEMON_ADDR`     | Optional shared listener address override; defaults depend on transport. |
+| `AMARCODE_WS_TLS_CERT`     | PEM certificate chain path.                                              |
+| `AMARCODE_WS_TLS_KEY`      | Matching PEM private key path.                                           |
+| `AMARCODE_WS_ALLOW_ORIGIN` | Comma-separated list of allowed browser origins.                         |
 
 Origins are exact `http(s)://host[:port]` values, with no path, trailing slash,
 wildcard, or `null`. Whitespace around comma-separated entries is ignored.
@@ -567,33 +567,3 @@ Non-browser clients may omit Origin. For an installed service, set these
 variables in its systemd user unit / launchd job / Windows service environment
 and restart it. Set its startup command to `run --transport websocket` to select
 WebSocket mode. The flag defaults to TCP when omitted.
-
-### WebSocket protocol
-
-No token or authentication exchange is required. After the WebSocket handshake,
-clients can send RPC requests immediately. Requests and replies use the existing
-TCP RPC shapes, with WebSocket message boundaries replacing newlines:
-
-```json
-{"method":"health"}
-```
-
-RPC is ordered: wait for the reply before sending another request on that
-connection. Use separate connections for long-running prompts,
-cancellation, and subscriptions. `subscribe_events` acknowledges the request,
-then streams the existing `{"event":...}` envelopes with the same filters as
-TCP. That connection is dedicated to events afterward.
-
-The server caps WebSocket messages/frames at 36 MiB (enough for a base64-encoded
-25 MiB audio recording), concurrent WebSocket clients at 64, TLS/WebSocket
-handshakes at 10 seconds each, and stalled writes at 15 seconds. It sends
-ping frames every 30 seconds and drops peers silent for 90 seconds. Clients must
-handle WebSocket ping/pong; browsers do this automatically.
-
-Browser example:
-
-```js
-const socket = new WebSocket("wss://your-daemon-host:43822/rpc");
-socket.onopen = () => socket.send(JSON.stringify({ method: "health" }));
-socket.onmessage = ({ data }) => console.log(JSON.parse(data));
-```

@@ -263,10 +263,7 @@ export const daemonApi = {
     attachmentId: string,
   ): Promise<GetAttachmentResult> =>
     invoke("get_attachment", { chatId, attachmentId }),
-  updateChat: (
-    chatId: string,
-    changes: { title: string },
-  ): Promise<Chat> =>
+  updateChat: (chatId: string, changes: { title: string }): Promise<Chat> =>
     invoke("update_chat", { params: { chat_id: chatId, ...changes } }),
   transcribeAudio: (
     audioBase64: string,

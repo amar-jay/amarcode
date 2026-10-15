@@ -60,11 +60,14 @@ impl App {
         // the user already has are considered for automatic updates.
         let installed_manager = AgentManager::new(Arc::clone(&store), &config.app_dir);
         installed_manager.sync_builtin_preset()?;
+
+        #[cfg(not(windows))]
         let installed_agents = store
             .agents()?
             .into_iter()
             .filter(|agent| installed_manager.is_available(agent))
             .collect::<Vec<_>>();
+
         let pruned_events = store.prune_acp_events()?;
         if pruned_events > 0 {
             info!(count = pruned_events, "pruned expired ACP events");
@@ -192,9 +195,9 @@ impl App {
                 })?;
                 rpc::server::Listener::Tcp(socket)
             }
-            crate::config::DaemonTransport::WebSocket => {
-								rpc::server::Listener::WebSocket(rpc::websocket::Listener::bind(&self.config).await?)
-						}
+            crate::config::DaemonTransport::WebSocket => rpc::server::Listener::WebSocket(
+                rpc::websocket::Listener::bind(&self.config).await?,
+            ),
         };
         rpc::server::run(Arc::new(self), listener).await?;
         info!("run finished");

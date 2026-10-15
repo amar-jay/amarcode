@@ -170,12 +170,14 @@ async function execute(plan: ReleasePlan) {
       writeFileSync(versionManifestPath, contents);
       const signaturePath = join(temporaryDirectory, `${id}-manifest.json.sig`);
       writeFileSync(signaturePath, `${signManifest(contents)}\n`);
-      console.log(`\n${product.label} ${version ?? "dev"} (proto: v${manifest.protocolVersion ?? "n/a"})`);
+      console.log(
+        `\n${product.label} ${version ?? "dev"} (proto: v${manifest.protocolVersion ?? "n/a"})`,
+      );
       for (const { artifact, binaryPath } of artifacts) {
         console.log(`  ${artifact.target}`);
         console.log(`    binary: ${binaryPath}`);
         console.log(`    size:   ${artifact.size} bytes`);
-				console.log(`    url:    ${artifact.url}`);
+        console.log(`    url:    ${artifact.url}`);
       }
       return {
         id,

@@ -1,4 +1,5 @@
 # Amarcode
+
 <img
   src="./assets/amarcode-theme-split.png"
   alt="Amarcode shown in dark and light themes"
@@ -7,7 +8,6 @@
 <!-- <p align="center">
   <sub>Your coding conversations, carried across agents.</sub>
 </p> -->
-
 
 ## Advantages
 
@@ -35,7 +35,6 @@ In short, Amarcode first uses native ACP resumption when available and uses
 local transcript hydration as the interoperable fallback. This lets one durable
 conversation survive agent restarts and differences in agent session support
 without pretending that opaque native state can be reproduced exactly.
-
 
 ### Guarantees and limitations
 

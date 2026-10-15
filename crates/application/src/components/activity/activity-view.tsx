@@ -130,11 +130,8 @@ function AgentRunTimeline({
                       agentColor(run.agent_id),
                       run.status === "failed" && "bg-red-400",
                       run.status === "running" && "animate-pulse",
-                      selectedRunId &&
-                        selectedRunId !== run.id &&
-                        "opacity-35",
-                      selectedRunId === run.id &&
-                        "z-20 ring-2 ring-foreground",
+                      selectedRunId && selectedRunId !== run.id && "opacity-35",
+                      selectedRunId === run.id && "z-20 ring-2 ring-foreground",
                     )}
                     style={{ left: `${left}%`, width: `max(3px, ${width}%)` }}
                     title={title}

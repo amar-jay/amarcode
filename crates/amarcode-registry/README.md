@@ -26,7 +26,6 @@ route.
 `HEAD` is supported for every route. Binary responses support HTTP byte ranges,
 ETags, and immutable caching.
 
-
 ### Cross-compile Windows from Linux
 
 The daemon can be cross-compiled with Rust's Windows GNU target. Install the

@@ -1,10 +1,4 @@
-import {
-  LoaderCircle,
-  Mic,
-  RotateCcw,
-  Square,
-  X,
-} from "lucide-react";
+import { LoaderCircle, Mic, RotateCcw, Square, X } from "lucide-react";
 import { PromptInputButton } from "@/components/ai-elements/prompt-input";
 import type { useDictation } from "@/hooks/use-dictation";
 import { formatDictationTime } from "@/lib/dictation";
@@ -31,9 +25,7 @@ export function DictationControls({ dictation }: DictationControlsProps) {
                   : "Start dictation"
         }
         className={
-          dictation.status === "recording"
-            ? "text-destructive"
-            : undefined
+          dictation.status === "recording" ? "text-destructive" : undefined
         }
         disabled={
           !dictation.supported ||

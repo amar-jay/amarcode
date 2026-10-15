@@ -48,13 +48,12 @@ export function TerminalArtifactCard({
       isStreaming={terminal.status === "running"}
     >
       <TerminalHeader
-        className={
-          cn("bg-secondary/25",
-						expanded && terminal.status == "failed" ? "bg-red-500/20" : "",
-						expanded && terminal.status == "completed" ? "bg-green-500/20" : "",
-						expanded && terminal.status == "cancelled" ? "bg-yellow-500/20" : ""
-					)
-        }
+        className={cn(
+          "bg-secondary/25",
+          expanded && terminal.status == "failed" ? "bg-red-500/20" : "",
+          expanded && terminal.status == "completed" ? "bg-green-500/20" : "",
+          expanded && terminal.status == "cancelled" ? "bg-yellow-500/20" : "",
+        )}
       >
         <button
           type="button"
@@ -70,7 +69,7 @@ export function TerminalArtifactCard({
               {terminal.command}
             </span>
           </TerminalTitle>
-					
+
           <span
             className="shrink-0 text-zinc-400"
             title={terminal.status}

@@ -29,9 +29,9 @@ describe("parseArgs", () => {
   });
 
   test("rejects shared --version for multiple binary products", () => {
-    expect(() =>
-      parseArgs(["daemon", "acp", "--version", "1.0.0"]),
-    ).toThrow(/--version applies to a single binary product/);
+    expect(() => parseArgs(["daemon", "acp", "--version", "1.0.0"])).toThrow(
+      /--version applies to a single binary product/,
+    );
   });
 
   test("maps --version onto a preset product", () => {
