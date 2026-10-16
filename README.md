@@ -56,15 +56,15 @@ local transcript hydration as the interoperable fallback. This lets one durable
 conversation survive agent restarts and differences in agent session support
 without pretending that opaque native state can be reproduced exactly.
 
+### Guarantees and limitations
+
 > [!IMPORTANT]
 > Semantic continuation is not native state restoration. Hidden reasoning,
 > provider-side conversation state, model caches, permissions, and other
 > vendor proprietary data cannot be reconstructed from ACP messages.
 
 
-> [!NOTE]
-> - Hydration currently includes non-empty user and assistant text. Structured tool calls, tool results, thinking, and prior attachments are retained for Amarcode's UI where applicable but are not replayed into the new agent session as historical turns.
+- Hydration currently includes non-empty user and assistant text. Structured tool calls, tool results, thinking, and prior attachments are retained for Amarcode's UI where applicable but are not replayed into the new agent session as historical turns.
 
-> - Injected history is limited to the context window of the model. Amarcode compresses the oldest turns until the transcript fits.
-
-> - A live prompt can be cancelled, but individual historical messages cannot be mutated or deleted through ACP.
+- Injected history is limited to the context window of the model. Amarcode compresses the oldest turns until the transcript fits.
+- A live prompt can be cancelled, but individual historical messages cannot be mutated or deleted through ACP.
