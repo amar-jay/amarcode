@@ -26,9 +26,14 @@ const features = [
 ];
 const questions = [
   {
+    title: "Can I use Amarcode without the desktop app?",
+    answer:
+      "Yes. The daemon runs as an independent background service and can also run in the foreground for headless integrations. Clients communicate with it over its TCP or WebSocket API. Closing the desktop does not stop the installed service; the daemon has its own start, stop, and status commands.",
+  },
+  {
     title: "What is Amarcode?",
     answer:
-      "Amarcode is a desktop workspace for coding agents. It brings compatible agents into one interface and keeps your visible conversation history independently of their native sessions.",
+      "Amarcode is a workspace for coding agents, powered by an independent headless daemon. The daemon owns agent processes and persistent workspace state; the desktop app is a client that connects to it.",
   },
   {
     title: "Can I continue a conversation with another agent?",

@@ -1,6 +1,7 @@
 import Navigation from "@/components/navigation";
 import CloudHero from "@/components/cloud-hero";
 import AppPreview from "@/components/app-preview";
+import HeadlessDaemon from "@/components/headless-daemon";
 import AgentLogos from "@/components/agent-logos";
 import { Features, Questions, Closing } from "@/components/sections";
 
@@ -19,6 +20,7 @@ export default function App() {
           <CloudHero />
           <AppPreview />
           <Features />
+          <HeadlessDaemon />
           <AgentLogos />
           <Questions />
           <Closing />
