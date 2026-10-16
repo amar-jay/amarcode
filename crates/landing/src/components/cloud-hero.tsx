@@ -57,9 +57,8 @@ export default function CloudHero() {
           </p>
         </div>
       </CloudShader>
-      <div className="flex items-center justify-between gap-5 border-t border-[#bdcdc4] bg-[#edf2ed] px-10 py-[17px] text-[16px] max-[601px]:p-[15px] max-[601px]:text-[14px] max-[601px]:[&>span:nth-child(2)]:hidden">
+      <div className="flex items-center justify-between gap-5 border-t border-[#bdcdc4] bg-[#edf2ed] px-10 py-4.25 text-[16px] max-[601px]:p-[15px] max-[601px]:text-[14px] max-[601px]:[&>span:nth-child(2)]:hidden">
         <span>Amarcode / Desktop workspace</span>
-        <span>Many agents. Your conversation.</span>
         <ArrowDown size={16} aria-hidden="true" />
       </div>
     </section>

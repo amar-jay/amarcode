@@ -38,7 +38,7 @@ Closing-section photograph: [Misty forest covered mountains in soft light](https
 
 The split download button opens an **Other platforms** menu. Both controls share one GitHub latest-release request per page load. Only published installer files are listed (`.exe`, `.msi`, `.AppImage`, `.deb`, `.rpm`, `.dmg`); signatures and updater archives are excluded. Missing installers are labeled unavailable, and **All releases** remains usable if the request fails.
 
-Open Graph and Twitter metadata are included in the built HTML, so link-preview crawlers do not need JavaScript. The default public URL is provisionally `https://amarcode.amarjay.com`, based on the existing registry hostname. Set the actual deployment URL when building:
+Open Graph and Twitter metadata are included in the built HTML, so link-preview crawlers do not need JavaScript. The public URL is `https://amarcode.amarjay.com`, hosted on Vercel. Metadata uses this URL by default. Override it for another deployment when building:
 
 ```sh
 SITE_URL=https://your-domain.example bun run landing:build

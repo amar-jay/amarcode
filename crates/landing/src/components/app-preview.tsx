@@ -81,9 +81,7 @@ export default function AppPreview() {
           />
         </figure>
       </div>
-      <div className="flex justify-between px-[54px] pt-[17px] pb-[37px] text-[16px] text-muted-ink max-[901px]:px-7 max-[601px]:gap-[15px] max-[601px]:px-[15px] max-[601px]:pt-[15px] max-[601px]:pb-[25px] max-[601px]:text-[13px]">
-        <span>A real workspace. A real conversation.</span>
-        <span>Light & dark themes</span>
+      <div className="py-3">
       </div>
     </section>
   );

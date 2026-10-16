@@ -14,7 +14,7 @@ import { RELEASES_URL, useDownload } from "@/hooks/use-download";
 const platforms = ["Windows", "Linux", "macOS"] as const;
 
 export default function DownloadButton() {
-  const { href, label, installers, loading } = useDownload();
+  const { href, label, installers, loading, failed } = useDownload();
   return (
     <div className="inline-flex items-stretch justify-center">
       <Button
@@ -48,6 +48,10 @@ export default function DownloadButton() {
           {loading ? (
             <DropdownMenuItem disabled className="px-3 py-2 text-[16px]">
               Loading downloads…
+            </DropdownMenuItem>
+          ) : failed ? (
+            <DropdownMenuItem disabled className="px-3 py-2 text-[16px]">
+              Downloads unavailable right now
             </DropdownMenuItem>
           ) : (
             platforms.map((os) => {

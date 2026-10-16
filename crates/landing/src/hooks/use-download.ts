@@ -38,15 +38,16 @@ export function useDownload() {
   const [release, setRelease] = useState<{
     assets: ReleaseAsset[];
     loading: boolean;
-  }>({ assets: [], loading: true });
+    failed: boolean;
+  }>({ assets: [], loading: true, failed: false });
   useEffect(() => {
     let active = true;
     fetchReleaseAssets().then(
       (assets) => {
-        if (active) setRelease({ assets, loading: false });
+        if (active) setRelease({ assets, loading: false, failed: false });
       },
       () => {
-        if (active) setRelease({ assets: [], loading: false });
+        if (active) setRelease({ assets: [], loading: false, failed: true });
       },
     );
     return () => {
@@ -57,5 +58,6 @@ export function useDownload() {
     ...(platform ? selectDownload(release.assets, platform) : fallback),
     installers: getInstallers(release.assets),
     loading: release.loading,
+    failed: release.failed,
   };
 }
