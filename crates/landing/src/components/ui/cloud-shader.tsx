@@ -312,11 +312,11 @@ export const CloudShader = ({
       }
       gl.viewport(0, 0, w, h);
       gl.uniform2f(loc.res, w, h);
+      if (reduceMotion) {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(draw);
+      }
     };
-
-    const observer = new ResizeObserver(resize);
-    observer.observe(canvas);
-    resize();
 
     const start = performance.now();
     const draw = (now: number) => {
@@ -336,7 +336,10 @@ export const CloudShader = ({
       if (!reduceMotion) frame = requestAnimationFrame(draw);
     };
 
-    frame = requestAnimationFrame(draw);
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    resize();
+    if (!reduceMotion) frame = requestAnimationFrame(draw);
 
     return () => {
       running = false;

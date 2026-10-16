@@ -3,246 +3,287 @@
     "id": "agoragentic-acp",
     "name": "Agoragentic",
     "icon": "/images/agents/agoragentic-acp.svg",
-    "quarantined": true
+    "quarantined": true,
+    "repository": "https://github.com/rhein1/agoragentic-integrations"
   },
   {
     "id": "amp-acp",
     "name": "Amp",
     "icon": "/images/agents/amp-acp.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/tao12345666333/amp-acp"
   },
   {
     "id": "antigravity-acp",
     "name": "Google Antigravity",
     "icon": "/images/agents/antigravity-acp.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/amar-jay/amarcode"
   },
   {
     "id": "auggie",
     "name": "Auggie CLI",
     "icon": "/images/agents/auggie.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/augmentcode/auggie"
   },
   {
     "id": "autohand",
     "name": "Autohand Code",
     "icon": "/images/agents/autohand.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/autohandai/autohand-acp"
   },
   {
     "id": "claude-acp",
     "name": "Claude Agent",
     "icon": "/images/agents/claude-acp.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/agentclientprotocol/claude-agent-acp"
   },
   {
     "id": "cline",
     "name": "Cline",
     "icon": "/images/agents/cline.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/cline/cline"
   },
   {
     "id": "codebuddy-code",
     "name": "Codebuddy Code",
     "icon": "/images/agents/codebuddy-code.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/amar-jay/amarcode"
   },
   {
     "id": "codex-acp",
     "name": "Codex",
     "icon": "/images/agents/codex-acp.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/agentclientprotocol/codex-acp"
   },
   {
     "id": "cortex-code",
     "name": "Cortex Code",
     "icon": "/images/agents/cortex-code.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code"
   },
   {
     "id": "corust-agent",
     "name": "Corust Agent",
     "icon": "/images/agents/corust-agent.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/Corust-ai/corust-agent-release"
   },
   {
     "id": "crow-cli",
     "name": "crow-cli",
     "icon": "/images/agents/crow-cli.svg",
-    "quarantined": true
+    "quarantined": true,
+    "repository": "https://github.com/crow-cli/crow-cli"
   },
   {
     "id": "cursor",
     "name": "Cursor",
     "icon": "/images/agents/cursor.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/amar-jay/amarcode"
   },
   {
     "id": "deepagents",
     "name": "DeepAgents",
     "icon": "/images/agents/deepagents.svg",
-    "quarantined": true
+    "quarantined": true,
+    "repository": "https://github.com/langchain-ai/deepagentsjs"
   },
   {
     "id": "devin",
     "name": "Devin",
     "icon": "/images/agents/devin.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/CognitionAI/devin-cli"
   },
   {
     "id": "dimcode",
     "name": "DimCode",
     "icon": "/images/agents/dimcode.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/amar-jay/amarcode"
   },
   {
     "id": "dirac",
     "name": "Dirac",
     "icon": "/images/agents/dirac.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/dirac-run/dirac"
   },
   {
     "id": "factory-droid",
     "name": "Factory Droid",
     "icon": "/images/agents/factory-droid.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/amar-jay/amarcode"
   },
   {
     "id": "fast-agent",
     "name": "fast-agent",
     "icon": "/images/agents/fast-agent.svg",
-    "quarantined": true
+    "quarantined": true,
+    "repository": "https://github.com/evalstate/fast-agent"
   },
   {
     "id": "gemini",
     "name": "Gemini CLI",
     "icon": "/images/agents/gemini.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/google-gemini/gemini-cli"
   },
   {
     "id": "github-copilot",
     "name": "GitHub Copilot",
     "icon": "/images/agents/github-copilot.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/github/copilot-language-server-release"
   },
   {
     "id": "github-copilot-cli",
     "name": "GitHub Copilot",
     "icon": "/images/agents/github-copilot-cli.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/github/copilot-cli"
   },
   {
     "id": "glm-acp-agent",
     "name": "GLM Agent",
     "icon": "/images/agents/glm-acp-agent.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/stefandevo/glm-acp-agent"
   },
   {
     "id": "goose",
     "name": "goose",
     "icon": "/images/agents/goose.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/block/goose"
   },
   {
     "id": "grok-build",
     "name": "Grok Build",
     "icon": "/images/agents/grok-build.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/amar-jay/amarcode"
   },
   {
     "id": "harn",
     "name": "Harn",
     "icon": "/images/agents/harn.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/burin-labs/harn"
   },
   {
     "id": "junie",
     "name": "Junie",
     "icon": "/images/agents/junie.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/JetBrains/junie-acp-release"
   },
   {
     "id": "kilo",
     "name": "Kilo",
     "icon": "/images/agents/kilo.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/Kilo-Org/kilocode"
   },
   {
     "id": "kimi",
     "name": "Kimi CLI",
     "icon": "/images/agents/kimi.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/MoonshotAI/kimi-cli"
   },
   {
     "id": "minion-code",
     "name": "Minion Code",
     "icon": "/images/agents/minion-code.svg",
-    "quarantined": true
+    "quarantined": true,
+    "repository": "https://github.com/femto/minion-code"
   },
   {
     "id": "mistral-vibe",
     "name": "Mistral Vibe",
     "icon": "/images/agents/mistral-vibe.svg",
-    "quarantined": true
+    "quarantined": true,
+    "repository": "https://github.com/mistralai/mistral-vibe"
   },
   {
     "id": "muse-code",
     "name": "Muse Code",
     "icon": "/images/agents/muse-code.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/bex-co/muse-code-acp"
   },
   {
     "id": "nova",
     "name": "Nova",
     "icon": "/images/agents/nova.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/Compass-Agentic-Platform/nova"
   },
   {
     "id": "opencode",
     "name": "OpenCode",
     "icon": "/images/agents/opencode.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/anomalyco/opencode"
   },
   {
     "id": "pi-acp",
     "name": "pi ACP",
     "icon": "/images/agents/pi-acp.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/svkozak/pi-acp"
   },
   {
     "id": "poolside",
     "name": "Poolside",
     "icon": "/images/agents/poolside.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/poolsideai/pool"
   },
   {
     "id": "qoder",
     "name": "Qoder CLI",
     "icon": "/images/agents/qoder.svg",
-    "quarantined": true
+    "quarantined": true,
+    "repository": "https://github.com/amar-jay/amarcode"
   },
   {
     "id": "qwen-code",
     "name": "Qwen Code",
     "icon": "/images/agents/qwen-code.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/QwenLM/qwen-code"
   },
   {
     "id": "sigit",
     "name": "siGit Code",
     "icon": "/images/agents/sigit.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/getsigit/sigit"
   },
   {
     "id": "stakpak",
     "name": "Stakpak",
     "icon": "/images/agents/stakpak.svg",
-    "quarantined": false
+    "quarantined": false,
+    "repository": "https://github.com/stakpak/agent"
   },
   {
     "id": "vtcode",
     "name": "VT Code",
     "icon": "/images/agents/vtcode.svg",
-    "quarantined": true
+    "quarantined": true,
+    "repository": "https://github.com/vinhnx/VTCode"
   }
 ]
