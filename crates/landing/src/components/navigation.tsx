@@ -21,8 +21,8 @@ export default function Navigation() {
         aria-label="Main navigation"
       >
         <a href="#app-preview">Workspace</a>
+        <a href="#features">Features</a>
         <a href="#agents">Agents</a>
-        <a href="#questions">Questions</a>
       </nav>
       <a
         className="inline-flex items-center gap-[18px] border-l border-rule pl-7 text-ink no-underline max-[901px]:pl-[15px] max-[601px]:gap-1.5 max-[601px]:border-0 max-[601px]:p-0 max-[601px]:text-[16px]"

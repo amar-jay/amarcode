@@ -57,6 +57,7 @@ export function Features() {
     <section
       className="bg-panel relative border-t border-rule before:pointer-events-none before:absolute before:-top-[5px] before:-left-[5px] before:z-20 before:size-[9px] before:bg-[linear-gradient(var(--color-rule),var(--color-rule)),linear-gradient(var(--color-rule),var(--color-rule))] before:bg-[size:1px_9px,9px_1px] before:bg-center before:bg-no-repeat before:content-['']"
       aria-labelledby="features-title"
+			id="features"
     >
       <div className="grid grid-cols-[1fr_2fr] gap-[30px] px-[54px] pt-[65px] pb-[45px] [&>p]:mt-[13px] [&>div>p]:mb-0 [&>div>p]:max-w-[600px] [&>div>p]:text-[22px] [&>div>p]:leading-[1.4] [&>div>p]:text-muted-ink max-[901px]:grid-cols-1 max-[901px]:gap-1.5 max-[901px]:px-7 max-[901px]:pt-[45px] max-[901px]:pb-8 max-[901px]:[&>p]:mt-0 max-[901px]:[&>p]:mb-2 max-[601px]:px-5 max-[601px]:pt-9 max-[601px]:pb-7 max-[601px]:[&>div>p]:text-[20px]">
         <p className="mb-[22px] flex items-center gap-[9px] text-[16px] tracking-[0.065em] uppercase max-[601px]:text-[13px]">
@@ -135,7 +136,7 @@ export function Questions() {
 export function Closing() {
   return (
     <>
-      <section className="bg-[#e9efeb] bg-[linear-gradient(90deg,transparent_calc(25%_-_0.5px),var(--color-rule)_25%,transparent_calc(25%_+_0.5px),transparent_calc(75%_-_0.5px),var(--color-rule)_75%,transparent_calc(75%_+_0.5px)),linear-gradient(#fafaf6b8,#fafaf69e),url('/images/misty-mountains.webp')] bg-cover bg-center px-[25px] pt-[65px] pb-[70px] text-center [&>p]:justify-center [&>h2]:mb-[30px] [&>h2]:text-[clamp(55px,6vw,82px)] max-[601px]:py-[45px] relative border-t border-rule before:pointer-events-none before:absolute before:-top-[5px] before:-left-[5px] before:z-20 before:size-[9px] before:bg-[linear-gradient(var(--color-rule),var(--color-rule)),linear-gradient(var(--color-rule),var(--color-rule))] before:bg-[size:1px_9px,9px_1px] before:bg-center before:bg-no-repeat before:content-['']">
+      <section className="bg-[#e9efeb] bg-[linear-gradient(90deg,transparent_calc(25%_-_0.5px),var(--color-rule)_25%,transparent_calc(25%_+_0.5px),transparent_calc(75%_-_0.5px),var(--color-rule)_75%,transparent_calc(75%_+_0.5px)),linear-gradient(#fafaf680,#fafaf650),url('/images/misty-mountains.webp')] bg-cover bg-center px-[25px] pt-[65px] pb-[70px] text-center [&>p]:justify-center [&>h2]:mb-[30px] [&>h2]:text-[clamp(55px,6vw,82px)] max-[601px]:py-[45px] relative border-t border-rule before:pointer-events-none before:absolute before:-top-[5px] before:-left-[5px] before:z-20 before:size-[9px] before:bg-[linear-gradient(var(--color-rule),var(--color-rule)),linear-gradient(var(--color-rule),var(--color-rule))] before:bg-[size:1px_9px,9px_1px] before:bg-center before:bg-no-repeat before:content-['']">
         <p className="mb-[22px] flex items-center gap-[9px] text-[16px] tracking-[0.065em] uppercase max-[601px]:text-[13px]">
           Make room for what’s next
         </p>

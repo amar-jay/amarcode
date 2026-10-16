@@ -20,8 +20,8 @@ export default function App() {
           <CloudHero />
           <AppPreview />
           <Features />
-          <HeadlessDaemon />
           <AgentLogos />
+          <HeadlessDaemon />
           <Questions />
           <Closing />
         </main>

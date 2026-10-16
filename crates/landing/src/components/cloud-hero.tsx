@@ -11,16 +11,9 @@ export default function CloudHero() {
     >
       <CloudShader
         className="isolate after:pointer-events-none after:absolute after:inset-0 after:z-[1] after:bg-[url('/images/grain.svg')] after:bg-[size:180px_180px] after:bg-repeat after:opacity-30 after:mix-blend-soft-light after:content-[''] h-full min-h-0 before:pointer-events-none before:absolute before:inset-0 before:z-[1] before:bg-[linear-gradient(90deg,transparent_calc(25%_-_0.5px),#53665f14_25%,transparent_calc(25%_+_0.5px),transparent_calc(75%_-_0.5px),#53665f14_75%,transparent_calc(75%_+_0.5px))] before:content-['']"
-        speed={0.45}
-        // skyTopColor="#b6d2df"
-        // skyBottomColor="#eef3ef"
-        // cloudColor="#fffdf7"
+        speed={0.3}
       >
         <div className="max-[601px]:[@media(max-height:700px)]:py-4 max-[601px]:[@media(max-height:600px)]:py-2! relative max-w-[970px] px-7 py-[clamp(20px,5svh,62px)] text-center max-[601px]:px-[18px]">
-          <p className="max-[601px]:[@media(max-height:700px)]:hidden justify-center max-[601px]:text-[12px] max-[601px]:tracking-[0.04em] mb-[clamp(12px,2.2svh,22px)] flex items-center gap-[9px] text-[16px] tracking-[0.065em] uppercase">
-            <span className="inline-block size-[5px] shrink-0 bg-current" /> A
-            workspace for your coding agents
-          </p>
           <h1
             className="mb-[clamp(14px,2.6svh,26px)] text-[clamp(56px,7.1vw,100px)] leading-[0.99] font-light tracking-[-0.055em] max-[601px]:text-[clamp(46px,11vw,66px)] max-[601px]:[@media(max-height:700px)]:text-[38px] max-[601px]:[@media(max-height:700px)]:mb-3 max-[601px]:[@media(max-height:600px)]:text-[32px]!"
             id="hero-title"
