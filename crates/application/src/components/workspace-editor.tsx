@@ -152,6 +152,39 @@ export function WorkspaceEditor({
                 backgroundColor: "var(--accent)",
                 color: "var(--accent-foreground)",
               },
+              ".cm-panel.cm-search": {
+                display: "grid",
+                gridTemplateColumns: "minmax(8rem, 1fr) repeat(6, max-content)",
+                alignItems: "center",
+                gap: "6px",
+                padding: "8px 28px 8px 8px",
+                overflowX: "auto",
+              },
+              ".cm-search > br": { display: "none" },
+              ".cm-search > input, .cm-search > button, .cm-search > label": {
+                margin: "0",
+              },
+              ".cm-search > .cm-textfield": {
+                width: "100%",
+                minWidth: "0",
+                boxSizing: "border-box",
+              },
+              '.cm-search > input[name="replace"]': {
+                gridRow: "2",
+                gridColumn: "1",
+              },
+              '.cm-search > button[name="replace"]': {
+                gridRow: "2",
+                gridColumn: "2",
+              },
+              '.cm-search > button[name="replaceAll"]': {
+                gridRow: "2",
+                gridColumn: "3 / 5",
+              },
+              '.cm-search > button[name="close"]': {
+                top: "8px",
+                right: "8px",
+              },
               ".cm-textfield, .cm-button": {
                 background: "var(--background)",
                 color: "var(--foreground)",
