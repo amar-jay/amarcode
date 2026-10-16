@@ -27,13 +27,6 @@ export default function AppPreview() {
         </div>
       </div>
       <div className="mx-[54px] border border-rule max-[901px]:mx-7 max-[601px]:mx-3">
-        <div className="flex items-center justify-between gap-3 border-b border-rule bg-panel px-[18px] py-3 text-[17px] max-[601px]:p-2.5 max-[601px]:text-[14px]">
-          <span className="inline-flex items-center gap-[9px]">
-            <span className="inline-block size-[5px] shrink-0 bg-current" />
-            Amarcode in focus
-          </span>
-          <span id="preview-slider-hint">Slide to compare</span>
-        </div>
         <figure
           className="relative m-0 isolate select-none has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-4 has-[:focus-visible]:outline-[#80602a]"
           style={{ "--reveal": `${reveal}%` } as CSSProperties}
