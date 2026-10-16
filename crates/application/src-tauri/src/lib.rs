@@ -7,6 +7,7 @@ mod microphone;
 mod protocol;
 mod state;
 mod window;
+mod workspace_editor;
 
 use std::{
     fs,
@@ -803,6 +804,8 @@ pub fn run() {
             stage_all_workspace_files,
             commit_workspace_changes,
             get_workspace_file_diff,
+            workspace_editor::read_workspace_file,
+            workspace_editor::save_workspace_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building amarcode");

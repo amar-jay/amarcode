@@ -192,6 +192,24 @@ export const daemonApi = {
       staged: comparison === undefined ? undefined : comparison === "staged",
     }),
 
+  readWorkspaceFile: (
+    workspacePath: string,
+    relativePath: string,
+  ): Promise<string> =>
+    invoke("read_workspace_file", { workspacePath, relativePath }),
+  saveWorkspaceFile: (
+    workspacePath: string,
+    relativePath: string,
+    expectedContent: string,
+    content: string,
+  ): Promise<void> =>
+    invoke("save_workspace_file", {
+      workspacePath,
+      relativePath,
+      expectedContent,
+      content,
+    }),
+
   listAgents: (): Promise<AgentInfo[]> => invoke("list_agents"),
   installAgent: (
     agentId: string,

@@ -1,6 +1,8 @@
 import { useAtom } from "jotai";
 import {
   FileDiff,
+  FilePenLine,
+  Files,
   FoldVertical,
   GitBranch,
   ListFilter,
@@ -18,6 +20,8 @@ import {
   WorkspaceChangedFiles,
   WorkspaceFileTree,
 } from "./workspace-file-tree";
+import { useWorkspaceEditor } from "@/hooks/use-workspace-editor";
+import { WorkspaceEditor } from "./workspace-editor";
 import { WorkspaceDiffViewer } from "./workspace-diff-viewer";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
@@ -26,6 +30,14 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "./ui/resizable";
+import { WorkspaceToolbarButton } from "./workspace-toolbar-button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+} from "./ui/dropdown-menu";
 import { WorkspaceFileSearch } from "./workspace-file-search";
 
 interface AppSidePanelProps {
@@ -52,6 +64,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [selectedComparison, setSelectedComparison] = useState<
     "staged" | "unstaged"
   >();
+  const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
   const [selectedLine, setSelectedLine] = useState<number>();
   useEffect(() => {
     if (!workspacePath) {
@@ -82,6 +95,16 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     sheetOpen,
     workspacePath,
     fileSearchQuery,
+  );
+
+  const editor = useWorkspaceEditor(
+    workspacePath,
+    selectedComparison === undefined
+      ? workspaceFileTree.selectedPath
+      : undefined,
+  );
+  const workspaceDrafts = editor.dirtyDocuments.filter(
+    (document) => document.workspace === workspacePath,
   );
 
   useEffect(() => {
@@ -296,14 +319,13 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
         )}
         showCloseButton={false}
       >
-        <SheetHeader
-          className={cn(
-            "relative flex-row items-center gap-2 px-3 py-1 select-none",
-            workspaceFileTree.selectedPath &&
-              "grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)]",
-          )}
-        >
-          <SheetTitle className="flex min-w-0 flex-1 flex-row items-center gap-1 overflow-hidden text-xs font-bold">
+        <SheetHeader className="relative flex-row items-center gap-2 px-3 py-1 select-none">
+          <SheetTitle
+            className={cn(
+              "flex min-w-0 shrink-0 flex-row items-center gap-1 overflow-hidden text-xs font-bold",
+              workspaceFileTree.selectedPath && "max-w-[25%]",
+            )}
+          >
             <span className="truncate">{dirName || ""}</span>
             {branchName && (
               <span
@@ -316,10 +338,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
             )}
           </SheetTitle>
           {workspaceFileTree.selectedPath && (
-            <div
-              className="flex min-w-0 items-center justify-center gap-1"
-              title={workspaceFileTree.selectedPath}
-            >
+            <div className="flex min-w-0 flex-1 items-center justify-center gap-1">
               <FileDiff
                 className={cn(
                   "size-4 shrink-0 text-muted-foreground",
@@ -330,31 +349,108 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                       : "",
                 )}
               />
-              <span className="min-w-0 truncate font-mono text-xs">
+              <span
+                className="min-w-0 truncate font-mono text-xs"
+                title={workspaceFileTree.selectedPath}
+              >
                 {workspaceFileTree.selectedPath || ""}
               </span>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="size-6 shrink-0"
-                onClick={() => setDiffExpanded((expanded) => !expanded)}
-                aria-pressed={diffExpanded}
-                aria-label={
-                  diffExpanded ? "Collapse unchanged lines" : "Show entire file"
+              {editor.dirtyDocuments.some(
+                (document) =>
+                  document.workspace === workspacePath &&
+                  document.path === workspaceFileTree.selectedPath,
+              ) && (
+                <span
+                  className="size-1.5 shrink-0 rounded-full bg-orange-500"
+                  title="Unsaved changes"
+                />
+              )}
+              <WorkspaceToolbarButton
+                label={
+                  selectedComparison === undefined
+                    ? "Show unstaged diff"
+                    : "Edit working file"
                 }
-                title={
-                  diffExpanded ? "Collapse unchanged lines" : "Show entire file"
+                onClick={() =>
+                  setSelectedComparison(
+                    selectedComparison === undefined ? "unstaged" : undefined,
+                  )
                 }
               >
-                {diffExpanded ? (
-                  <FoldVertical className="size-3.5" />
+                {selectedComparison === undefined ? (
+                  <FileDiff className="size-3.5" />
                 ) : (
-                  <UnfoldVertical className="size-3.5" />
+                  <FilePenLine className="size-3.5" />
                 )}
-              </Button>
+              </WorkspaceToolbarButton>
+              {selectedComparison !== undefined && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-6 shrink-0"
+                  onClick={() => setDiffExpanded((expanded) => !expanded)}
+                  aria-pressed={diffExpanded}
+                  aria-label={
+                    diffExpanded
+                      ? "Collapse unchanged lines"
+                      : "Show entire file"
+                  }
+                  title={
+                    diffExpanded
+                      ? "Collapse unchanged lines"
+                      : "Show entire file"
+                  }
+                >
+                  {diffExpanded ? (
+                    <FoldVertical className="size-3.5" />
+                  ) : (
+                    <UnfoldVertical className="size-3.5" />
+                  )}
+                </Button>
+              )}
             </div>
           )}
           <div className="ml-auto flex shrink-0 items-center">
+            {workspaceDrafts.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="gap-1 px-2"
+                    aria-label={`Open unsaved files (${workspaceDrafts.length})`}
+                    title={`Unsaved files (${workspaceDrafts.length})`}
+                  >
+                    <Files className="size-3.5" />
+                    <span className="font-mono text-[0.65rem] tabular-nums">
+                      {workspaceDrafts.length}
+                    </span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-80 max-w-[80vw]">
+                  <DropdownMenuLabel>Unsaved files</DropdownMenuLabel>
+                  {workspaceDrafts.map((document) => (
+                    <DropdownMenuItem
+                      key={document.path}
+                      onSelect={() => {
+                        workspaceFileTree.setSelectedPath(document.path);
+                        setSelectedComparison(undefined);
+                        setSelectedLine(undefined);
+                      }}
+                    >
+                      <span className="size-1.5 shrink-0 rounded-full bg-orange-500" />
+                      <span
+                        className="truncate font-mono"
+                        title={document.path}
+                      >
+                        {document.path}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <div ref={setToolbarHost} className="flex items-center" />
             <Button
               className="gap-1 px-2"
               variant={navigatorView === "changes" ? "secondary" : "ghost"}
@@ -459,15 +555,28 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
           <ResizableHandle withHandle />
           {!!workspaceFileTree.selectedPath && (
             <ResizablePanel minSize="0px" className="min-h-0 overflow-hidden">
-              <WorkspaceDiffViewer
-                selectedPath={workspaceFileTree.selectedPath}
-                comparison={selectedComparison}
-                selectedLine={selectedLine}
-                workspacePath={workspacePath}
-                setDiff={setDiff}
-                diff={diff}
-                expanded={diffExpanded}
-              />
+              {selectedComparison === undefined ? (
+                <WorkspaceEditor
+                  key={`${workspacePath}:${workspaceFileTree.selectedPath}`}
+                  controller={editor}
+                  toolbarHost={toolbarHost}
+                  selectedLine={selectedLine}
+                  onSaved={() => {
+                    void refreshChanges();
+                    void workspaceFileTree.refresh();
+                  }}
+                />
+              ) : (
+                <WorkspaceDiffViewer
+                  selectedPath={workspaceFileTree.selectedPath}
+                  comparison={selectedComparison}
+                  selectedLine={selectedLine}
+                  workspacePath={workspacePath}
+                  setDiff={setDiff}
+                  diff={diff}
+                  expanded={diffExpanded}
+                />
+              )}
             </ResizablePanel>
           )}
         </ResizablePanelGroup>
