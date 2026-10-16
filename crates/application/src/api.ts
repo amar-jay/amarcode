@@ -20,6 +20,7 @@ import type {
   PromptAttachment,
   RespondAgentResult,
   TranscribeAudioResult,
+  SessionCommands,
   SessionConfigAssignment,
   SessionConfigOption,
   SessionConfigValue,
@@ -227,6 +228,12 @@ export const daemonApi = {
       apiKey,
       clearApiKey,
     }),
+
+  discoverCommands: (
+    chatId: string,
+    agentId: string,
+  ): Promise<SessionCommands> =>
+    invoke("discover_commands", { chatId, agentId }),
 
   createChat: (workspacePath: string, title?: string): Promise<Chat> =>
     invoke("create_chat", { workspacePath, title }),

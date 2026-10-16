@@ -247,6 +247,7 @@ One JSON object per line. No HTTP, no length prefixes.
 | `create_chat`        | chats    | `{ workspace_path, title? }` → chat row + `ChatUpdated`                                  |
 | `list_chats`         | chats    | optional `workspace_path` filter                                                         |
 | `get_chat`           | chats    | `{ chat_id, include_messages? }` (messages+parts by default)                             |
+| `discover_commands`  | sessions | `{ chat_id, agent_id }` → start/reuse a session without prompting; return its current command catalog |
 | `prompt`             | sessions | `{ chat_id, agent_id, text }` → store user msg, ACP turn, return run ids                 |
 | `cancel`             | sessions | `{ chat_id }` stop live run                                                              |
 | `respond_permission` | sessions | answer `ApprovalRequired` (`request_id` + `result` or `error`)                           |
@@ -260,6 +261,15 @@ Stable **editor-facing** events (camelCase `type` + `payload`), produced by
 - `chatUpdated`, `runUpdated`, `turnUpdated`, `messageUpdated`, `messagePartAdded`
 - `approvalRequired`, `questionRequired`
 - `workspaceFilesChanged`, `agentConnectionChanged`
+- `sessionCommandsUpdated` — full replacement catalog for a live chat/run, including empty lists
+
+Slash commands follow [ACP command advertisements](https://agentclientprotocol.com/protocol/v1/slash-commands).
+Every `available_commands_update` replaces the session's catalog, descriptions, and input hints.
+Catalogs stay in memory and are included as `session_commands` in chat detail responses;
+stopped sessions return `null`. Clients should subscribe before discovery, keep processing
+updates throughout the session, and refresh chat detail after reconnecting. Catalog revisions
+are scoped to a run. Execute commands using the existing `prompt` method with text such as
+`/plan implement search`; no separate ACP command-execution method is used.
 
 `turnUpdated` is the client signal for “is this prompt still running?”
 (`started` → `completed` | `cancelled` | `failed`). Prefer it over `runUpdated`

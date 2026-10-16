@@ -46,6 +46,8 @@ import {
   applyLiveChatEventAtom,
   failStartedPromptAtom,
   liveChatAtom,
+  openLiveChatAtom,
+  loadLiveChatAtom,
   setLiveSessionConfigOptionAtom,
   type LiveChatState,
 } from "./live-chat";
@@ -91,6 +93,7 @@ describe("failed home-composer prompts", () => {
       pendingRequest: null,
       contextRestoration: null,
       contextUsage: null,
+      sessionCommands: null,
       sessionConfig: [],
       sessionConfigAgentId: null,
       loading: true,
@@ -124,6 +127,7 @@ describe("agent failure notifications", () => {
       pendingRequest: null,
       contextRestoration: null,
       contextUsage: null,
+      sessionCommands: null,
       sessionConfig: [],
       sessionConfigAgentId: null,
       loading: false,
@@ -175,6 +179,7 @@ describe("ACP context usage", () => {
       pendingRequest: null,
       contextRestoration: null,
       contextUsage: null,
+      sessionCommands: null,
       sessionConfig: [],
       sessionConfigAgentId: null,
       loading: false,
@@ -235,6 +240,7 @@ describe("agent-owned session configuration", () => {
       pendingRequest: null,
       contextRestoration: null,
       contextUsage: null,
+      sessionCommands: null,
       sessionConfig: [
         {
           id: "model",
@@ -264,5 +270,83 @@ describe("agent-owned session configuration", () => {
       "old-model",
     );
     expect(store.get(liveChatAtom)?.sessionConfigAgentId).toBe("agent-1");
+  });
+});
+
+describe("dynamic session commands", () => {
+  const catalog = (revision: number, names: string[]) => ({
+    run_id: "command-run",
+    agent_id: "agent-1",
+    revision,
+    commands: names.map((name) => ({
+      name,
+      description: `${name} command`,
+      input: null,
+    })),
+  });
+
+  it("replaces advertisements, ignores old revisions, and honors an empty list", () => {
+    const store = createStore();
+    store.set(openLiveChatAtom, "chat-1");
+    const update = (revision: number, names: string[], chatId = "chat-1") =>
+      store.set(applyLiveChatEventAtom, {
+        type: "sessionCommandsUpdated",
+        payload: { chat_id: chatId, catalog: catalog(revision, names) },
+      });
+    update(1, ["plan", "test"]);
+    update(2, ["review"]);
+    update(1, ["old"]);
+    update(3, ["other-chat"], "chat-2");
+    expect(
+      store
+        .get(liveChatAtom)
+        ?.sessionCommands?.commands.map((command) => command.name),
+    ).toEqual(["review"]);
+    update(3, []);
+    expect(store.get(liveChatAtom)?.sessionCommands?.commands).toEqual([]);
+    store.set(applyLiveChatEventAtom, {
+      type: "runUpdated",
+      payload: {
+        run_id: "command-run",
+        status: "stopped",
+        error_message: null,
+        error_kind: null,
+      },
+    });
+    expect(store.get(liveChatAtom)?.sessionCommands).toBeNull();
+  });
+
+  it("does not overwrite a streamed catalog with a slower detail response", async () => {
+    const { daemonApi } = await import("@/api");
+    const store = createStore();
+    store.set(openLiveChatAtom, "chat-1");
+    let resolve!: (
+      value: Awaited<ReturnType<typeof daemonApi.getChat>>,
+    ) => void;
+    vi.mocked(daemonApi.getChat).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const loading = store.set(loadLiveChatAtom, "chat-1");
+    store.set(applyLiveChatEventAtom, {
+      type: "sessionCommandsUpdated",
+      payload: {
+        chat_id: "chat-1",
+        catalog: catalog(2, ["review"]),
+      },
+    });
+    resolve({
+      chat,
+      messages: [],
+      session_config: [],
+      context_usage: null,
+      session_commands: catalog(1, ["plan"]),
+    });
+    await loading;
+    expect(store.get(liveChatAtom)?.sessionCommands?.commands[0].name).toBe(
+      "review",
+    );
   });
 });

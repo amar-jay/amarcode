@@ -3,12 +3,12 @@
 import { useRef, useState } from "react";
 import {
   PromptInput,
+  PromptInputProvider,
   PromptInputBody,
   PromptInputButton,
   PromptInputFooter,
   PromptInputMessage,
   PromptInputSubmit,
-  PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import {
@@ -29,6 +29,7 @@ import type {
   Chat,
   ContextUsage,
   PromptAttachment,
+  SessionCommands,
   SessionConfigAssignment,
   SessionConfigOption,
   SessionConfigValue,
@@ -40,10 +41,12 @@ import {
   rememberSessionConfig,
 } from "@/state/session-config";
 import { AgentSelectionDialog } from "./agent-selection-dialog";
+import { useCommandDiscovery } from "@/hooks/use-command-discovery";
 import { useDictation } from "@/hooks/use-dictation";
 import { SessionConfigControls } from "./session-config-controls";
 import NewChatOptionsMenu from "./new-chat-options-menu";
 import { DictationControls } from "./dictation-controls";
+import { SlashCommandInput } from "./slash-command-input";
 import { PromptAttachmentPreviews } from "./prompt-attachment-previews";
 
 function toPromptAttachments(
@@ -71,12 +74,14 @@ interface AppPromptInputProps {
     configValues: SessionConfigAssignment[],
   ) => Promise<void>;
   workspacePath: string;
+  chatId?: string;
   onWorkspacePathChange?: (workspacePath: string) => void;
   selectedAgentId: string;
   onAgentSelected?: (agent: AgentInfo) => void;
   isWorking?: boolean;
   onStop?: () => void;
   sessionConfig?: SessionConfigOption[];
+  sessionCommands?: SessionCommands | null;
   sessionConfigAgentId?: string | null;
   onSessionConfigChange?: (
     configId: string,
@@ -90,6 +95,7 @@ function AppPromptInput({
   onStartedPromptFailed,
   onSendPrompt,
   workspacePath,
+  chatId,
   onWorkspacePathChange,
   selectedAgentId,
   onAgentSelected,
@@ -97,6 +103,7 @@ function AppPromptInput({
   onStop,
   sessionConfig,
   sessionConfigAgentId,
+  sessionCommands,
   onSessionConfigChange,
   contextUsage,
 }: AppPromptInputProps) {
@@ -140,6 +147,13 @@ function AppPromptInput({
     onError: (message) => notify(message, "error"),
   });
 
+  const commandDiscovery = useCommandDiscovery({
+    chatId,
+    workspacePath,
+    agentId: selectedAgentId,
+    catalog: sessionCommands,
+  });
+
   const handleSubmit = async (message: PromptInputMessage) => {
     dictation.cancel();
     const text = message.text.trim();
@@ -166,7 +180,10 @@ function AppPromptInput({
         text.length > 48
           ? `${text.slice(0, 48).trimEnd()}…`
           : text || message.files[0]?.filename || "Attachment prompt";
-      const chat = await daemonApi.createChat(workspacePath, title);
+      const preparedChat = await commandDiscovery.preparedChat();
+      const chat = preparedChat
+        ? await daemonApi.updateChat(preparedChat.id, { title })
+        : await daemonApi.createChat(workspacePath, title);
 
       // Transition immediately. The daemon's prompt RPC remains open until the
       // agent turn finishes, while the chat screen renders via the event stream.
@@ -227,102 +244,117 @@ function AppPromptInput({
     });
   };
   return (
-    <div
-      className="@container/prompt w-full min-w-0"
-      ref={composerRef}
-      onSubmitCapture={dictation.cancel}
-    >
-      <PromptInput
-        accept="image/png,image/jpeg,image/webp,image/gif,text/plain"
-        maxFiles={4}
-        maxFileSize={10 * 1024 * 1024}
-        multiple
-        onError={({ message }) => notify(message, "error")}
-        onSubmit={handleSubmit}
+    <PromptInputProvider>
+      <div
+        className="@container/prompt w-full min-w-0"
+        ref={composerRef}
+        onSubmitCapture={dictation.cancel}
       >
-        <PromptInputBody>
-          <PromptAttachmentPreviews />
-          <PromptInputTextarea />
-        </PromptInputBody>
-        <PromptInputFooter>
-          <PromptInputTools className="flex-1">
-            {isChatComposer && (
-              <>
-                <SessionConfigControls
+        <PromptInput
+          className="[&>[data-slot=input-group]]:overflow-visible"
+          accept="image/png,image/jpeg,image/webp,image/gif,text/plain"
+          maxFiles={4}
+          maxFileSize={10 * 1024 * 1024}
+          multiple
+          onError={({ message }) => notify(message, "error")}
+          onSubmit={handleSubmit}
+        >
+          <PromptInputBody>
+            <PromptAttachmentPreviews />
+            <SlashCommandInput
+              commands={commandDiscovery.catalog?.commands ?? []}
+              sessionReady={Boolean(commandDiscovery.catalog)}
+              onDiscover={commandDiscovery.discover}
+              discovering={commandDiscovery.discovering}
+              discoveryError={commandDiscovery.error}
+              onRetry={commandDiscovery.retry}
+              disabled={isWorking}
+            />
+          </PromptInputBody>
+          <PromptInputFooter>
+            <PromptInputTools className="flex-1">
+              {isChatComposer && (
+                <>
+                  <SessionConfigControls
+                    options={options}
+                    disabled={isWorking}
+                    onChange={(configId, value) =>
+                      void selectConfig(configId, value)
+                    }
+                  />
+                </>
+              )}
+              {onAgentSelected && (
+                <AgentSelectionDialog
+                  setSelectedAgent={selectAgent}
+                  selectedAgent={selectedAgentId}
+                  agents={agents}
+                />
+              )}
+              <PromptInputButton
+                tooltip={workspacePath || "Choose a project folder"}
+                disabled={isChatComposer}
+                onClick={openDirectory}
+                className="max-w-40 min-w-0 @max-[480px]/prompt:max-w-7"
+                title={workspacePath || ""}
+              >
+                <FolderOpen size={16} />
+                {workspacePath && (
+                  <span className="min-w-0 truncate text-left [direction:rtl] @max-[480px]/prompt:hidden">
+                    {workspacePath}
+                  </span>
+                )}
+              </PromptInputButton>
+              {!isChatComposer && (
+                <NewChatOptionsMenu
                   options={options}
-                  disabled={isWorking}
-                  onChange={(configId, value) =>
+                  showPermissionFallback={showPermissionFallback}
+                  onConfigChange={(configId, value) =>
                     void selectConfig(configId, value)
                   }
                 />
-              </>
-            )}
-            {onAgentSelected && (
-              <AgentSelectionDialog
-                setSelectedAgent={selectAgent}
-                selectedAgent={selectedAgentId}
-                agents={agents}
-              />
-            )}
-            <PromptInputButton
-              tooltip={workspacePath || "Choose a project folder"}
-              disabled={isChatComposer}
-              onClick={openDirectory}
-              className="max-w-40 min-w-0 @max-[480px]/prompt:max-w-7"
-              title={workspacePath || ""}
-            >
-              <FolderOpen size={16} />
-              {workspacePath && (
-                <span className="min-w-0 truncate text-left [direction:rtl] @max-[480px]/prompt:hidden">
-                  {workspacePath}
-                </span>
               )}
-            </PromptInputButton>
-            {!isChatComposer && (
-              <NewChatOptionsMenu
-                options={options}
-                showPermissionFallback={showPermissionFallback}
-                onConfigChange={(configId, value) =>
-                  void selectConfig(configId, value)
+              {contextUsage && contextUsage.size > 0 && (
+                <Context
+                  usedTokens={contextUsage.used}
+                  maxTokens={contextUsage.size}
+                >
+                  <ContextTrigger />
+                  <ContextContent>
+                    <ContextContentHeader />
+                    {contextUsage.cost && (
+                      <ContextContentFooter>
+                        <span className="text-muted-foreground">
+                          Session cost
+                        </span>
+                        <span>
+                          {new Intl.NumberFormat(undefined, {
+                            style: "currency",
+                            currency: contextUsage.cost.currency,
+                          }).format(contextUsage.cost.amount)}
+                        </span>
+                      </ContextContentFooter>
+                    )}
+                  </ContextContent>
+                </Context>
+              )}
+            </PromptInputTools>
+            <div className="flex shrink-0 items-center gap-1">
+              <DictationControls dictation={dictation} />
+              <PromptInputSubmit
+                disabled={
+                  !selectedAgentId ||
+                  !workspacePath ||
+                  commandDiscovery.discovering
                 }
+                status={isWorking ? "streaming" : "ready"}
+                onStop={onStop}
               />
-            )}
-            {contextUsage && contextUsage.size > 0 && (
-              <Context
-                usedTokens={contextUsage.used}
-                maxTokens={contextUsage.size}
-              >
-                <ContextTrigger />
-                <ContextContent>
-                  <ContextContentHeader />
-                  {contextUsage.cost && (
-                    <ContextContentFooter>
-                      <span className="text-muted-foreground">
-                        Session cost
-                      </span>
-                      <span>
-                        {new Intl.NumberFormat(undefined, {
-                          style: "currency",
-                          currency: contextUsage.cost.currency,
-                        }).format(contextUsage.cost.amount)}
-                      </span>
-                    </ContextContentFooter>
-                  )}
-                </ContextContent>
-              </Context>
-            )}
-          </PromptInputTools>
-          <div className="flex shrink-0 items-center gap-1">
-            <DictationControls dictation={dictation} />
-            <PromptInputSubmit
-              disabled={!selectedAgentId || !workspacePath}
-              status={isWorking ? "streaming" : "ready"}
-              onStop={onStop}
-            />
-          </div>
-        </PromptInputFooter>
-      </PromptInput>
-    </div>
+            </div>
+          </PromptInputFooter>
+        </PromptInput>
+      </div>
+    </PromptInputProvider>
   );
 }
 

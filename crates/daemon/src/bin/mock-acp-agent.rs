@@ -84,6 +84,19 @@ fn main() {
                     session_id = format!("mock-session-{}", simple_hash(path));
                     cwd = path.to_owned();
                 }
+                if std::env::var("AMARCODE_MOCK_COMMANDS").is_ok() {
+                    notify(
+                        &mut stdout,
+                        "session/update",
+                        json!({
+                            "sessionId": session_id,
+                            "update": { "sessionUpdate": "available_commands_update", "availableCommands": [
+                                { "name": "plan", "description": "Plan work", "input": { "hint": "task to plan" } },
+                                { "name": "test", "description": "Run tests" }
+                            ] }
+                        }),
+                    );
+                }
                 reply(
                     &mut stdout,
                     id,
@@ -174,6 +187,21 @@ fn main() {
                 }
                 let text = extract_prompt_text(&params);
                 let reply_text = format!("mock echo: {text}");
+                if std::env::var("AMARCODE_MOCK_COMMANDS").is_ok() {
+                    let commands = if text.starts_with("/review") {
+                        json!([])
+                    } else {
+                        json!([{ "name": "review", "description": "Review the latest changes", "input": { "hint": "files to review" } }])
+                    };
+                    notify(
+                        &mut stdout,
+                        "session/update",
+                        json!({
+                            "sessionId": session_id,
+                            "update": { "sessionUpdate": "available_commands_update", "availableCommands": commands }
+                        }),
+                    );
+                }
 
                 // Some ACP agents echo the prompt as a user-message update.
                 // Clients already persist the submitted prompt, so this must

@@ -43,6 +43,7 @@ import {
   stopLiveChatAtom,
   submitLivePromptAtom,
   subscribeDaemonEvents,
+  daemonEventStreamStateAtom,
   verboseReasoningAtom,
 } from "@/state";
 import { groupChatBlocks, type ChatBlock } from "@/lib/message-parsing";
@@ -95,6 +96,7 @@ export function LiveChatScreen() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const session = useAtomValue(activeSessionAtom);
   const live = useAtomValue(liveChatAtom);
+  const eventStream = useAtomValue(daemonEventStreamStateAtom);
   const isWorking = useAtomValue(liveChatIsWorkingAtom);
   const verboseReasoning = useAtomValue(verboseReasoningAtom);
   const agents = useAtomValue(agentsAtom);
@@ -170,7 +172,7 @@ export function LiveChatScreen() {
   useEffect(() => {
     if (!live?.chatId) return;
     void loadLiveChat(live.chatId);
-  }, [live?.chatId, loadLiveChat]);
+  }, [live?.chatId, loadLiveChat, eventStream.status]);
 
   // Every daemon event → live chat reducer (not just the latest atom value).
   useEffect(() => {
@@ -483,11 +485,13 @@ export function LiveChatScreen() {
           />
         )}
         <AppPromptInput
+          chatId={chatId ?? undefined}
           key={chatId}
           workspacePath={workspacePath}
           selectedAgentId={agent?.id ?? ""}
           onAgentSelected={(next) => bindAgent(next)}
           onSendPrompt={submit}
+          sessionCommands={live.sessionCommands}
           sessionConfig={live.sessionConfig}
           sessionConfigAgentId={live.sessionConfigAgentId}
           contextUsage={live.contextUsage}

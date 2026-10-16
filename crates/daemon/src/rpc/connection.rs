@@ -217,6 +217,10 @@ fn event_matches(
         | EditorEvent::ContextRestoration {
             chat_id, run_id, ..
         }
+        | EditorEvent::SessionCommandsUpdated {
+            chat_id,
+            catalog: crate::protocol::SessionCommands { run_id, .. },
+        }
         | EditorEvent::ContextUsageUpdated {
             chat_id, run_id, ..
         } => EventScope {

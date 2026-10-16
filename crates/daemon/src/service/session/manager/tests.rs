@@ -239,6 +239,12 @@ fn stale_pending_request_cannot_target_replacement_client() {
             acp_session_id: Some("new-session".to_owned()),
             supports_images: false,
             session_configuration: SessionConfiguration::default(),
+            commands: crate::protocol::SessionCommands {
+                run_id: String::new(),
+                agent_id: String::new(),
+                revision: 0,
+                commands: Vec::new(),
+            },
             history_hydration: HistoryHydration::None,
             streaming_message_ids: HashMap::new(),
             last_streaming_message_id: None,
@@ -353,6 +359,12 @@ fn failed_prompt_interrupts_partial_messages() {
             acp_session_id: Some("session-1".to_owned()),
             supports_images: false,
             session_configuration: SessionConfiguration::default(),
+            commands: crate::protocol::SessionCommands {
+                run_id: String::new(),
+                agent_id: String::new(),
+                revision: 0,
+                commands: Vec::new(),
+            },
             history_hydration: HistoryHydration::None,
             streaming_message_ids: HashMap::from([(
                 "upstream".to_owned(),
@@ -484,6 +496,12 @@ fn cancel_interrupts_partial_messages() {
             acp_session_id: Some("session-1".to_owned()),
             supports_images: false,
             session_configuration: SessionConfiguration::default(),
+            commands: crate::protocol::SessionCommands {
+                run_id: String::new(),
+                agent_id: String::new(),
+                revision: 0,
+                commands: Vec::new(),
+            },
             history_hydration: HistoryHydration::None,
             streaming_message_ids: HashMap::from([(
                 "upstream".to_owned(),

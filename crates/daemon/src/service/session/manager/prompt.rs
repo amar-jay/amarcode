@@ -254,18 +254,31 @@ impl SessionManager {
         });
 
         // ACP session/prompt: prompt is an array of content blocks.
+        let slash_command = text.starts_with('/');
         let prompt_text = if !matches!(history_hydration, HistoryHydration::None) {
             self.emit(EditorEvent::ContextRestoration {
                 chat_id: chat_id.to_owned(),
                 run_id: run_id.clone(),
                 source: "Restoring saved chat context".into(),
             });
-            self.hydrated_prompt(chat_id, &user_message.id, text, &history_hydration)?
+            self.hydrated_prompt(
+                chat_id,
+                &user_message.id,
+                if slash_command { "" } else { text },
+                &history_hydration,
+            )?
         } else {
             text.to_owned()
         };
         let mut prompt_blocks = Vec::with_capacity(1 + stored_attachments.len());
-        if !prompt_text.trim().is_empty() {
+        // ACP agents recognize commands at the beginning of a prompt. Keep the
+        // command verbatim in the first block even when restoring chat history.
+        if slash_command {
+            prompt_blocks.push(json!({ "type": "text", "text": text }));
+            if !matches!(history_hydration, HistoryHydration::None) {
+                prompt_blocks.push(json!({ "type": "text", "text": prompt_text }));
+            }
+        } else if !prompt_text.trim().is_empty() {
             prompt_blocks.push(json!({ "type": "text", "text": prompt_text }));
         }
         for stored in &stored_attachments {

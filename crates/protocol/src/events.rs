@@ -85,6 +85,10 @@ pub enum EditorEvent {
         run_id: Option<String>,
         methods: Value,
     },
+    SessionCommandsUpdated {
+        chat_id: String,
+        catalog: crate::SessionCommands,
+    },
     SessionConfigUpdated {
         chat_id: String,
         options: Vec<SessionConfigOption>,

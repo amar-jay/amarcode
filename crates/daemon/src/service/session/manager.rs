@@ -69,6 +69,39 @@ impl SessionManager {
         }
     }
 
+    /// Establish a session for command discovery without submitting a user turn.
+    pub fn discover_commands(
+        &self,
+        chat_id: &str,
+        agent_id: &str,
+    ) -> Result<crate::protocol::SessionCommands> {
+        let prompt_lock = self.prompt_lock(chat_id)?;
+        let _guard = prompt_lock
+            .lock()
+            .map_err(|_| Error::msg("prompt lock poisoned"))?;
+        if !self
+            .live_run_for_chat(chat_id)?
+            .is_some_and(|(_, agent, session)| agent == agent_id && session.is_some())
+        {
+            self.start_run_locked(chat_id, agent_id)?;
+        }
+        self.session_commands(chat_id)?
+            .ok_or_else(|| Error::msg("agent disconnected during command discovery"))
+    }
+
+    /// Return the latest advertised catalog only while its ACP process is live.
+    pub fn session_commands(
+        &self,
+        chat_id: &str,
+    ) -> Result<Option<crate::protocol::SessionCommands>> {
+        let runs = self
+            .inner
+            .by_chat
+            .lock()
+            .map_err(|_| Error::msg("session lock poisoned"))?;
+        Ok(runs.get(chat_id).map(|live| live.commands.clone()))
+    }
+
     pub fn get_attachment(&self, chat_id: &str, attachment_id: &str) -> Result<(String, String)> {
         self.inner
             .store
@@ -157,12 +190,24 @@ impl SessionManager {
                     acp_session_id: None,
                     supports_images: false,
                     session_configuration: SessionConfiguration::default(),
+                    commands: crate::protocol::SessionCommands {
+                        run_id: run.id.clone(),
+                        agent_id: agent_id.to_owned(),
+                        revision: 0,
+                        commands: Vec::new(),
+                    },
                     history_hydration: HistoryHydration::None,
                     streaming_message_ids: HashMap::new(),
                     last_streaming_message_id: None,
                     active_user_message_id: None,
                 },
             );
+        if let Some(catalog) = self.session_commands(chat_id)? {
+            self.emit(EditorEvent::SessionCommandsUpdated {
+                chat_id: chat_id.to_owned(),
+                catalog,
+            });
+        }
         spawn_inbound_worker(
             Arc::clone(&self.inner),
             run.id.clone(),

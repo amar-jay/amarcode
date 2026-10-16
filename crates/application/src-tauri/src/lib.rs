@@ -211,6 +211,15 @@ async fn list_chats(
 }
 
 #[tauri::command]
+async fn discover_commands(
+    state: State<'_, AppState>,
+    chat_id: String,
+    agent_id: String,
+) -> Result<crate::protocol::SessionCommands, String> {
+    state.discover_commands(chat_id, agent_id).await
+}
+
+#[tauri::command]
 async fn get_chat(
     state: State<'_, AppState>,
     chat_id: String,
@@ -769,6 +778,7 @@ pub fn run() {
             create_chat,
             list_chats,
             get_chat,
+            discover_commands,
             get_message_parts,
             list_acp_events_for_chat,
             list_agent_runs_for_chat,

@@ -28,6 +28,7 @@ pub mod methods {
     pub const GET_ATTACHMENT: &str = "get_attachment";
     pub const UPDATE_CHAT: &str = "update_chat";
     pub const DELETE_CHAT: &str = "delete_chat";
+    pub const DISCOVER_COMMANDS: &str = "discover_commands";
     pub const PROMPT: &str = "prompt";
     pub const SET_SESSION_CONFIG_OPTION: &str = "set_session_config_option";
     pub const CANCEL: &str = "cancel";
@@ -346,4 +347,11 @@ pub struct RespondAgentError {
 pub struct RespondAgentResult {
     pub ok: bool,
     pub request_id: String,
+}
+
+/// Start or reuse a session to discover commands without sending a prompt.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct DiscoverCommandsParams {
+    pub chat_id: String,
+    pub agent_id: String,
 }

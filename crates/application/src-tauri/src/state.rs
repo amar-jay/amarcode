@@ -29,6 +29,18 @@ impl AppState {
         Self {}
     }
 
+    pub async fn discover_commands(
+        &self,
+        chat_id: String,
+        agent_id: String,
+    ) -> Result<crate::protocol::SessionCommands, String> {
+        self.call(
+            methods::DISCOVER_COMMANDS,
+            json!({ "chat_id": chat_id, "agent_id": agent_id }),
+        )
+        .await
+    }
+
     pub async fn health(&self) -> Result<HealthResult, String> {
         let health: HealthResult = self.call(methods::HEALTH, Value::Null).await?;
         ensure_compatible_protocol(health.protocol_version)?;

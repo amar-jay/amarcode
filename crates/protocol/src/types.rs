@@ -225,7 +225,32 @@ pub struct ChatDetail {
     #[serde(default)]
     pub session_config: Vec<SessionConfigOption>,
     #[serde(default)]
+    pub session_commands: Option<SessionCommands>,
+    #[serde(default)]
     pub context_usage: Option<ContextUsage>,
+}
+
+/// Agent-advertised slash command. Names and hints are session-owned.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AvailableCommand {
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub input: Option<AvailableCommandInput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AvailableCommandInput {
+    pub hint: String,
+}
+
+/// Ephemeral catalog for one live ACP run; never restored from a previous process.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SessionCommands {
+    pub run_id: String,
+    pub agent_id: String,
+    pub revision: u32,
+    pub commands: Vec<AvailableCommand>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

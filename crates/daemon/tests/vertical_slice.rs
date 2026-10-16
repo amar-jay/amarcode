@@ -98,7 +98,10 @@ async fn create_chat_prompt_store_and_events() {
         &app_dir,
         &mock_agent,
         &now,
-        vec![("AMARCODE_MOCK_IMAGE_SUPPORT".into(), "1".into())],
+        vec![
+            ("AMARCODE_MOCK_IMAGE_SUPPORT".into(), "1".into()),
+            ("AMARCODE_MOCK_COMMANDS".into(), "1".into()),
+        ],
     );
 
     // Subscriber connection (stays open for events).
@@ -145,6 +148,27 @@ async fn create_chat_prompt_store_and_events() {
     .expect("create_chat");
     let chat_id = create["result"]["id"].as_str().expect("chat id").to_owned();
 
+    let discovery = rpc(&addr, json!({ "method": "discover_commands", "params": { "chat_id": chat_id, "agent_id": AGENT_ID } })).await.expect("discover commands");
+    let discovered_run = discovery["result"]["run_id"]
+        .as_str()
+        .expect("discovery run")
+        .to_owned();
+    let initial_catalog = wait_for_command_catalog(&addr, &chat_id, 2).await;
+    assert_eq!(
+        initial_catalog["result"]["messages"],
+        json!([]),
+        "discovery must not send a prompt"
+    );
+    assert_eq!(
+        initial_catalog["result"]["session_commands"]["commands"][0]["input"]["hint"],
+        "task to plan"
+    );
+    let reused = rpc(&addr, json!({ "method": "discover_commands", "params": { "chat_id": chat_id, "agent_id": AGENT_ID } })).await.unwrap();
+    assert_eq!(
+        reused["result"]["run_id"], discovered_run,
+        "discovery must reuse the session"
+    );
+
     let prompt = rpc(
         &addr,
         json!({
@@ -178,6 +202,16 @@ async fn create_chat_prompt_store_and_events() {
         .expect("user_message_id")
         .to_owned();
 
+    assert_eq!(
+        run_id, discovered_run,
+        "command discovery must reuse the prompt's session"
+    );
+    let updated_catalog = wait_for_command_catalog(&addr, &chat_id, 1).await;
+    assert_eq!(
+        updated_catalog["result"]["session_commands"]["commands"][0]["name"], "review",
+        "new advertisements replace the whole list"
+    );
+
     let configured = rpc(
         &addr,
         json!({
@@ -203,6 +237,7 @@ async fn create_chat_prompt_store_and_events() {
     let mut saw_run_updated = false;
     let mut saw_turn_started = false;
     let mut saw_turn_completed = false;
+    let mut command_catalogs = Vec::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     while tokio::time::Instant::now() < deadline {
         match timeout(Duration::from_millis(200), event_rx.recv()).await {
@@ -212,6 +247,8 @@ async fn create_chat_prompt_store_and_events() {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 match event_type {
+                    "sessionCommandsUpdated" => command_catalogs
+                        .push(line["event"]["payload"]["catalog"]["commands"].clone()),
                     "chatUpdated" => saw_chat_updated = true,
                     "messageUpdated" => saw_message_updated = true,
                     "runUpdated" => saw_run_updated = true,
@@ -249,6 +286,19 @@ async fn create_chat_prompt_store_and_events() {
     assert!(
         saw_turn_completed,
         "expected turnUpdated completed when the agent returns stopReason"
+    );
+
+    assert!(
+        command_catalogs
+            .iter()
+            .any(|commands| commands[0]["name"] == "plan"),
+        "initial command advertisements must reach event subscribers"
+    );
+    assert!(
+        command_catalogs
+            .iter()
+            .any(|commands| commands[0]["name"] == "review"),
+        "dynamic replacements must reach event subscribers"
     );
 
     // Store truth: reopen SQLite and check durable rows.
@@ -400,6 +450,67 @@ async fn create_chat_prompt_store_and_events() {
         run.acp_session_id.is_some(),
         "createSession should have set acp_session_id"
     );
+
+    let command = rpc(
+        &addr,
+        json!({ "method": "prompt", "params": {
+        "chat_id": chat_id, "agent_id": AGENT_ID, "text": "/review src/main.rs"
+    } }),
+    )
+    .await
+    .expect("execute slash command");
+    assert_eq!(command["result"]["run_id"], run_id);
+    let cleared = wait_for_command_catalog(&addr, &chat_id, 0).await;
+    assert!(
+        cleared["result"]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["message"]["content"] == "mock echo: /review src/main.rs"),
+        "slash command and arguments must reach ACP verbatim"
+    );
+
+    rpc(
+        &addr,
+        json!({ "method": "cancel", "params": { "chat_id": chat_id } }),
+    )
+    .await
+    .unwrap();
+    let stopped = rpc(
+        &addr,
+        json!({ "method": "get_chat", "params": { "chat_id": chat_id, "include_messages": true } }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        stopped["result"]["session_commands"].is_null(),
+        "stopped catalogs must not be restored from storage"
+    );
+    let restored_command = rpc(
+        &addr,
+        json!({ "method": "prompt", "params": {
+        "chat_id": chat_id, "agent_id": AGENT_ID, "text": "/plan next task"
+    } }),
+    )
+    .await
+    .unwrap();
+    let restored_run = restored_command["result"]["run_id"].as_str().unwrap();
+    assert_ne!(restored_run, run_id);
+    let requests = store.acp_events(restored_run).unwrap();
+    let command_payload = requests
+        .iter()
+        .filter(|event| event.method == "session/prompt")
+        .filter_map(|event| serde_json::from_str::<Value>(&event.payload_json).ok())
+        .find(|payload| payload.pointer("/prompt/0/text").is_some())
+        .expect("recorded command prompt");
+    assert_eq!(
+        command_payload["prompt"][0]["text"], "/plan next task",
+        "history must not hide the command prefix"
+    );
+    assert!(command_payload["prompt"][1]["text"]
+        .as_str()
+        .unwrap()
+        .contains("hello mock"));
 
     // Cleanup
     sub_task.abort();
@@ -770,4 +881,16 @@ async fn client_terminals_stream_persist_and_survive_release_and_compaction() {
         }),
         "full output is recoverable after release"
     );
+}
+
+async fn wait_for_command_catalog(addr: &str, chat_id: &str, count: usize) -> Value {
+    timeout(Duration::from_secs(3), async {
+        loop {
+            let detail = rpc(addr, json!({ "method": "get_chat", "params": { "chat_id": chat_id, "include_messages": true } })).await.unwrap();
+            if detail.pointer("/result/session_commands/commands").and_then(Value::as_array).is_some_and(|commands| commands.len() == count) {
+                return detail;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("latest command catalog")
 }

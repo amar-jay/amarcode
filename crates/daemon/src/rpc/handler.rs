@@ -67,6 +67,13 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         // chats (read / CRUD)
         methods::CREATE_CHAT => Ok(DispatchOutcome::Result(create_chat(app, params)?)),
         methods::LIST_CHATS => Ok(DispatchOutcome::Result(list_chats(app, params)?)),
+        methods::DISCOVER_COMMANDS => {
+            let p: amarcode_protocol::rpc::DiscoverCommandsParams = parse_params(params)?;
+            to_value(tokio::task::block_in_place(|| {
+                app.sessions.discover_commands(&p.chat_id, &p.agent_id)
+            })?)
+            .map(DispatchOutcome::Result)
+        }
         methods::GET_CHAT => Ok(DispatchOutcome::Result(get_chat(app, params)?)),
         methods::GET_MESSAGE_PARTS => Ok(DispatchOutcome::Result(get_message_parts(app, params)?)),
         methods::LIST_ACP_EVENTS_FOR_CHAT => Ok(DispatchOutcome::Result(list_acp_events_for_chat(
@@ -192,7 +199,10 @@ fn get_chat(app: &App, params: Value) -> Result<Value> {
         if !p.include_tool_content {
             compact_tool_parts(&mut detail);
         }
-        to_value(chat_detail_json(&detail)?)
+        let mut value = chat_detail_json(&detail)?;
+        value["session_commands"] =
+            serde_json::to_value(app.sessions.session_commands(&p.chat_id)?)?;
+        to_value(value)
     } else {
         let chat = app.chats.get_required(&p.chat_id)?;
         to_value(chat)

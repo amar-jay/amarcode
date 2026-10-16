@@ -68,6 +68,7 @@ pub(super) struct LiveRun {
     /// values are agent-defined, so mode changes must be planned from these
     /// capabilities rather than from the executable name.
     pub(super) session_configuration: SessionConfiguration,
+    pub(super) commands: crate::protocol::SessionCommands,
     /// Persisted chat context to prepend to the first prompt for this run.
     pub(super) history_hydration: HistoryHydration,
     /// Assistant messages currently being streamed, keyed by the upstream ACP

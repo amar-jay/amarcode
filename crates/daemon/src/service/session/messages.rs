@@ -411,6 +411,12 @@ mod tests {
                     acp_session_id: Some("session".to_owned()),
                     supports_images: false,
                     session_configuration: Default::default(),
+                    commands: crate::protocol::SessionCommands {
+                        run_id: String::new(),
+                        agent_id: String::new(),
+                        revision: 0,
+                        commands: Vec::new(),
+                    },
                     history_hydration: HistoryHydration::None,
                     streaming_message_ids: HashMap::from([(
                         "upstream".to_owned(),

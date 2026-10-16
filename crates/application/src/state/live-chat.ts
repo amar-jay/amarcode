@@ -8,6 +8,7 @@ import type {
   JsonValue,
   PromptAttachment,
   RunStatus,
+  SessionCommands,
   SessionConfigAssignment,
   SessionConfigOption,
   SessionConfigValue,
@@ -58,6 +59,7 @@ export type LiveChatState = {
   contextRestoration: string | null;
   contextUsage: ContextUsage | null;
   sessionConfig: SessionConfigOption[];
+  sessionCommands: SessionCommands | null;
   sessionConfigAgentId: string | null;
   loading: boolean;
   error: string | null;
@@ -82,6 +84,7 @@ const emptyLiveChat = (
   contextRestoration: null,
   contextUsage: null,
   sessionConfig: [],
+  sessionCommands: null,
   sessionConfigAgentId: null,
   loading: true,
   error: null,
@@ -211,6 +214,7 @@ export const loadLiveChatAtom = atom(
     const silent = typeof input === "object" ? Boolean(input?.silent) : false;
     const id = chatId ?? live?.chatId;
     if (!id) return;
+    const commandsAtRequest = live?.sessionCommands;
 
     if (!silent) {
       patchLive(
@@ -229,9 +233,16 @@ export const loadLiveChatAtom = atom(
         const configAgentId = [...result.messages]
           .reverse()
           .find((message) => message.agent_id)?.agent_id;
+        // A slow detail request must not overwrite a newer streamed catalog.
+        const sessionCommands =
+          current.sessionCommands !== commandsAtRequest
+            ? current.sessionCommands
+            : (result.session_commands ?? null);
         set(liveChatAtom, {
           ...current,
           detail: result,
+          sessionCommands,
+          runId: sessionCommands?.run_id ?? current.runId,
           sessionConfig: result.session_config ?? current.sessionConfig,
           sessionConfigAgentId:
             configAgentId ??
@@ -300,6 +311,10 @@ export const applyLiveChatEventAtom = atom(
         ...live,
         turnStatus: event.payload.status,
         runId: event.payload.run_id,
+        sessionCommands:
+          live.sessionCommands?.run_id === event.payload.run_id
+            ? live.sessionCommands
+            : null,
         contextUsage:
           event.payload.run_id === live.runId ? live.contextUsage : null,
         pendingRequest:
@@ -312,6 +327,25 @@ export const applyLiveChatEventAtom = atom(
       set(liveChatAtom, next);
       if (failed) announceAgentFailure(error);
       void set(scheduleLiveChatRefreshAtom);
+      return;
+    }
+
+    if (
+      event.type === "sessionCommandsUpdated" &&
+      event.payload.chat_id === live.chatId
+    ) {
+      const catalog = event.payload.catalog;
+      const current = live.sessionCommands;
+      if (
+        current?.run_id === catalog.run_id &&
+        current.revision >= catalog.revision
+      )
+        return;
+      set(liveChatAtom, {
+        ...live,
+        runId: catalog.run_id,
+        sessionCommands: catalog,
+      });
       return;
     }
 
@@ -383,6 +417,7 @@ export const applyLiveChatEventAtom = atom(
       set(liveChatAtom, {
         ...live,
         runStatus: event.payload.status,
+        sessionCommands: ended ? null : live.sessionCommands,
         turnStatus:
           failed && live.turnStatus === "started"
             ? "failed"

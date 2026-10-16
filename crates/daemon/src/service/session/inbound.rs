@@ -496,12 +496,44 @@ fn apply_session_update(
                 },
             );
         }
+        "available_commands_update" => {
+            let Some(value) = update.get("availableCommands") else {
+                return Ok(());
+            };
+            let commands: Vec<crate::protocol::AvailableCommand> =
+                serde_json::from_value(value.clone())
+                    .map_err(|error| Error::msg(format!("Invalid ACP command catalog: {error}")))?;
+            let mut runs = inner
+                .by_chat
+                .lock()
+                .map_err(|_| Error::msg("session lock poisoned"))?;
+            let Some(live) = runs.get_mut(chat_id).filter(|live| live.run_id == run_id) else {
+                return Ok(());
+            };
+            if let (Some(expected), Some(actual)) = (
+                live.acp_session_id.as_deref(),
+                payload.get("sessionId").and_then(Value::as_str),
+            ) {
+                if expected != actual {
+                    return Ok(());
+                }
+            }
+            live.commands.commands = commands;
+            live.commands.revision += 1;
+            // Publish under the same lock so revisions cannot be delivered out of order.
+            emit(
+                inner,
+                EditorEvent::SessionCommandsUpdated {
+                    chat_id: chat_id.to_owned(),
+                    catalog: live.commands.clone(),
+                },
+            );
+        }
         "session_info_update" => {
             apply_session_title(inner, run_id, chat_id, update)?;
         }
         "usage_update" => {}
-        "available_commands_update"
-        | "session_summary_generated"
+        "session_summary_generated"
         | "response_completed"
         | "turn_completed"
         | "last_turn_summary"
@@ -570,7 +602,7 @@ fn should_persist_notification(envelope: &RpcEnvelope) -> bool {
     match kind {
         "agent_message_chunk" | "agent_thought_chunk" | "user_message_chunk" => false,
         // This is commonly a complete command catalog repeated during a run.
-        // It is neither used for chat restore nor exposed as product state.
+        // Its latest value is held in live session state, not in raw traffic history.
         "available_commands_update" => false,
         // `tool_call` retains the start. For updates, retain only terminal
         // milestones; intermediate output remains in derived message parts.
@@ -979,5 +1011,98 @@ mod tests {
             .collect::<HashSet<_>>();
         assert_eq!(ids.len(), 64);
         assert!(ids.iter().all(|id| uuid::Uuid::parse_str(id).is_ok()));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn command_catalog_replaces_and_rejects_stale_session_updates() {
+        use super::super::types::{HistoryHydration, LiveRun};
+        use crate::protocol::{EditorEvent, SessionCommands};
+        use std::{
+            collections::HashMap,
+            sync::{Arc, Mutex},
+        };
+
+        let (client, _) =
+            crate::acp::AcpClient::spawn("/bin/sh", &["-c".into(), "sleep 30".into()], &[], None)
+                .unwrap();
+        let client = Arc::new(client);
+        let (events, mut receiver) = tokio::sync::broadcast::channel(16);
+        let inner = SessionInner {
+            store: Arc::new(crate::store::Store::open(std::path::Path::new(":memory:")).unwrap()),
+            events,
+            prompt_locks: Mutex::new(HashMap::new()),
+            pending: Mutex::new(HashMap::new()),
+            terminals: Default::default(),
+            by_chat: Mutex::new(HashMap::from([(
+                "chat".to_owned(),
+                LiveRun {
+                    run_id: "run".into(),
+                    agent_id: "agent".into(),
+                    client: Arc::clone(&client),
+                    acp_session_id: Some("session".into()),
+                    supports_images: false,
+                    session_configuration: Default::default(),
+                    commands: SessionCommands {
+                        run_id: "run".into(),
+                        agent_id: "agent".into(),
+                        revision: 0,
+                        commands: vec![],
+                    },
+                    history_hydration: HistoryHydration::None,
+                    streaming_message_ids: HashMap::new(),
+                    last_streaming_message_id: None,
+                    active_user_message_id: None,
+                },
+            )])),
+        };
+        let update = |session: &str, commands| {
+            json!({ "sessionId": session, "update": {
+            "sessionUpdate": "available_commands_update", "availableCommands": commands
+        } })
+        };
+        apply_session_update(
+            &inner,
+            "run",
+            "chat",
+            &update(
+                "session",
+                json!([
+                    { "name": "plan", "description": "Initial plan", "input": { "hint": "task" } },
+                    { "name": "test", "description": "Run tests" }
+                ]),
+            ),
+        )
+        .unwrap();
+        apply_session_update(&inner, "run", "chat", &update("session", json!([
+            { "name": "plan", "description": "Updated plan", "input": { "hint": "new hint" } }
+        ]))).unwrap();
+        {
+            let runs = inner.by_chat.lock().unwrap();
+            let catalog = &runs["chat"].commands;
+            assert_eq!(catalog.commands.len(), 1);
+            assert_eq!(catalog.commands[0].description, "Updated plan");
+            assert_eq!(catalog.commands[0].input.as_ref().unwrap().hint, "new hint");
+        }
+        apply_session_update(&inner, "old-run", "chat", &update("session", json!([]))).unwrap();
+        apply_session_update(&inner, "run", "chat", &update("old-session", json!([]))).unwrap();
+        assert_eq!(inner.by_chat.lock().unwrap()["chat"].commands.revision, 2);
+        assert!(
+            apply_session_update(&inner, "run", "chat", &update("session", json!({}))).is_err()
+        );
+        apply_session_update(&inner, "run", "chat", &update("session", json!([]))).unwrap();
+        assert!(inner.by_chat.lock().unwrap()["chat"]
+            .commands
+            .commands
+            .is_empty());
+        for expected in 1..=3 {
+            match receiver.try_recv().unwrap() {
+                EditorEvent::SessionCommandsUpdated { catalog, .. } => {
+                    assert_eq!(catalog.revision, expected)
+                }
+                event => panic!("unexpected event: {event:?}"),
+            }
+        }
+        assert!(receiver.try_recv().is_err());
+        let _ = client.kill();
     }
 }
