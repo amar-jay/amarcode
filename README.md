@@ -36,10 +36,7 @@ resume, compact, or discard their internal state. A native session therefore
 cannot be restored portably once that state is unavailable, especially when a
 conversation moves between different types of agents.
 
-<details>
-<summary>How Amarcode keeps a conversation portable</summary>
-<br/>
-
+**How Amarcode keeps a conversation portable?**
 Amarcode addresses this by treating its own durable chat history as the source
 of truth. It stores the visible user and assistant messages independently of an
 agent's ACP session ID. When the native session cannot be resumed, Amarcode
@@ -49,7 +46,6 @@ state, but it receives a measurable, inspectable historical record from which
 it can continue the conversation. This is the closest portable approximation
 to continuity that can be applied consistently across heterogeneous ACP
 agents.
-</details>
 
 In short, Amarcode first uses native ACP resumption when available and uses
 local transcript hydration as the interoperable fallback. This lets one durable
@@ -58,13 +54,16 @@ without pretending that opaque native state can be reproduced exactly.
 
 ### Guarantees and limitations
 
+- Hydration currently includes non-empty user and assistant text. Structured tool calls, tool results, thinking, and prior attachments are retained for Amarcode's UI where applicable but are not replayed into the new agent session as historical turns.
+
+- Injected history is limited to the context window of the model. Amarcode compresses the oldest turns until the transcript fits.
+
+- A live prompt can be cancelled, but individual historical messages cannot be mutated or deleted through ACP.
+
+
 > [!IMPORTANT]
 > Semantic continuation is not native state restoration. Hidden reasoning,
 > provider-side conversation state, model caches, permissions, and other
 > vendor proprietary data cannot be reconstructed from ACP messages.
 
 
-- Hydration currently includes non-empty user and assistant text. Structured tool calls, tool results, thinking, and prior attachments are retained for Amarcode's UI where applicable but are not replayed into the new agent session as historical turns.
-
-- Injected history is limited to the context window of the model. Amarcode compresses the oldest turns until the transcript fits.
-- A live prompt can be cancelled, but individual historical messages cannot be mutated or deleted through ACP.
