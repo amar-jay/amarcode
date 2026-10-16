@@ -2,7 +2,7 @@
   <img src="./crates/application/src-tauri/icons/128x128.png" width="88" alt="Amarcode"/>
 </p>
 
-<h1 align="center">Amarcode</h1>
+<h2 align="center">Amarcode</h2>
 
 <p align="center">
   <em>Your coding conversations, carried across agents.</em>
@@ -23,14 +23,6 @@
   <img src="./assets/amarcode-dark.png#gh-dark-mode-only" alt="Amarcode in dark theme" width="100%"/>
   <img src="./assets/amarcode-light.png#gh-light-mode-only" alt="Amarcode in light theme" width="100%"/>
 </p>
-
-<details>
-<summary>Compare dark and light side by side</summary>
-<br/>
-<p align="center">
-  <img src="./assets/amarcode-theme-split.png" alt="Amarcode shown in dark and light themes" width="100%"/>
-</p>
-</details>
 
 ## Advantages
 
@@ -64,15 +56,15 @@ local transcript hydration as the interoperable fallback. This lets one durable
 conversation survive agent restarts and differences in agent session support
 without pretending that opaque native state can be reproduced exactly.
 
-### Guarantees and limitations
-
 > [!IMPORTANT]
 > Semantic continuation is not native state restoration. Hidden reasoning,
 > provider-side conversation state, model caches, permissions, and other
 > vendor proprietary data cannot be reconstructed from ACP messages.
 
 
-- Hydration currently includes non-empty user and assistant text. Structured tool calls, tool results, thinking, and prior attachments are retained for Amarcode's UI where applicable but are not replayed into the new agent session as historical turns.
+> [!NOTE]
+> - Hydration currently includes non-empty user and assistant text. Structured tool calls, tool results, thinking, and prior attachments are retained for Amarcode's UI where applicable but are not replayed into the new agent session as historical turns.
 
-- Injected history is limited to the context window of the model. Amarcode compresses the oldest turns until the transcript fits.
-- A live prompt can be cancelled, but individual historical messages cannot be mutated or deleted through ACP.
+> - Injected history is limited to the context window of the model. Amarcode compresses the oldest turns until the transcript fits.
+
+> - A live prompt can be cancelled, but individual historical messages cannot be mutated or deleted through ACP.
