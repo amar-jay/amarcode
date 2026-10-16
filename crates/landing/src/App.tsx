@@ -1,11 +1,14 @@
-import { Button } from "@/components/ui/button";
+import CloudShaderDemo from "@/components/cloud-shader-demo";
+
+import AppPreview from "@/components/app-preview";
+import AgentLogos from "@/components/agent-logos";
 
 export default function App() {
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6">
-      <h1 className="text-3xl font-semibold">Amarcode</h1>
-      <p className="text-muted-foreground">Landing page coming soon.</p>
-      <Button variant="outline" disabled>Coming soon</Button>
+    <main>
+      <CloudShaderDemo />
+      <AppPreview />
+      <AgentLogos />
     </main>
   );
 }

@@ -25,3 +25,7 @@ bunx shadcn@latest add card
 ```
 
 Source lives in `src/`, shared UI components in `src/components/ui/`, and the theme in `src/index.css`. The `@/` alias resolves to `src/`. No environment variables are required.
+
+Typography uses locally hosted Cormorant Garamond from Google Fonts (300 and 400), with its OFL license in `public/fonts/OFL.txt`. Agent icons and names are copied from `vendor/acp-registry`; `src/lib/agents.json` records the local snapshot. All icons are retained; quarantined entries are omitted from the page. Registry licensing is retained alongside the icons.
+
+Application assets are copied without modification into `public/images/app/`: the logo from `crates/application/src-tauri/icons/icon.svg`, and light, dark, and split-theme screenshots from `assets/`. `AppPreview` uses shadcn Tabs to display light and dark screenshots. Card, Badge, Separator, Accordion, and Dropdown Menu are installed for future sections.
