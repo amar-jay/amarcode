@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "amarcode-daemon"
-version = "0.6.32"
+version = "0.6.33"
 dependencies = [
  "agent-client-protocol",
  "amarcode-protocol",
