@@ -511,6 +511,11 @@ async fn create_chat_prompt_store_and_events() {
         .as_str()
         .unwrap()
         .contains("hello mock"));
+    let restored_history = command_payload["prompt"][1]["text"].as_str().unwrap();
+    assert!(restored_history.contains("<message role=\"user\""));
+    assert!(restored_history.contains("<message role=\"assistant\""));
+    assert!(!restored_history.contains("/plan next task"));
+    assert!(!restored_history.contains("<new-user-message>"));
 
     // Cleanup
     sub_task.abort();
