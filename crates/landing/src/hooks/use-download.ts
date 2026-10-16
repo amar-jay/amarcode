@@ -3,15 +3,20 @@ import {
   useOperatingSystem,
   type Platform,
 } from "@/hooks/use-operating-system";
+import {
+  RELEASES_URL,
+  fetchReleaseAssets,
+  parseAssets,
+  getInstallers,
+  type ReleaseAsset,
+} from "@/lib/releases";
 
-export const RELEASES_URL = "https://github.com/amar-jay/amarcode/releases";
-const RELEASE_API =
-  "https://api.github.com/repos/amar-jay/amarcode/releases/latest";
+export { RELEASES_URL } from "@/lib/releases";
 type Download = { href: string; label: string };
 const fallback: Download = { href: RELEASES_URL, label: "Explore releases" };
 
 export function selectDownload(assets: unknown, platform: Platform): Download {
-  if (!Array.isArray(assets) || !platform.architecture) return fallback;
+  if (!platform.architecture) return fallback;
   const extension =
     platform.os === "Windows"
       ? /-setup\.exe$/i
@@ -20,16 +25,8 @@ export function selectDownload(assets: unknown, platform: Platform): Download {
         : /\.AppImage$/i;
   const architecture =
     platform.architecture === "arm64" ? /aarch64|arm64/i : /amd64|x86_64|x64/i;
-  const asset = assets.find(
-    (entry) =>
-      entry &&
-      typeof entry.name === "string" &&
-      typeof entry.browser_download_url === "string" &&
-      extension.test(entry.name) &&
-      architecture.test(entry.name) &&
-      entry.browser_download_url.startsWith(
-        "https://github.com/amar-jay/amarcode/releases/download/",
-      ),
+  const asset = parseAssets(assets).find(
+    (entry) => extension.test(entry.name) && architecture.test(entry.name),
   );
   return asset
     ? { href: asset.browser_download_url, label: `Download for ${platform.os}` }
@@ -38,33 +35,27 @@ export function selectDownload(assets: unknown, platform: Platform): Download {
 
 export function useDownload() {
   const platform = useOperatingSystem();
-  const [download, setDownload] = useState<Download>(fallback);
+  const [release, setRelease] = useState<{
+    assets: ReleaseAsset[];
+    loading: boolean;
+  }>({ assets: [], loading: true });
   useEffect(() => {
-    if (!platform) return;
-    const controller = new AbortController();
     let active = true;
-    const timeout = window.setTimeout(() => controller.abort(), 8000);
-    async function resolveDownload() {
-      try {
-        const response = await fetch(RELEASE_API, {
-          signal: controller.signal,
-          headers: { Accept: "application/vnd.github+json" },
-        });
-        if (!response.ok) return;
-        const release = await response.json();
-        if (active) setDownload(selectDownload(release.assets, platform!));
-      } catch {
-        // The releases page remains usable when the lookup fails or is rate-limited.
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    }
-    void resolveDownload();
+    fetchReleaseAssets().then(
+      (assets) => {
+        if (active) setRelease({ assets, loading: false });
+      },
+      () => {
+        if (active) setRelease({ assets: [], loading: false });
+      },
+    );
     return () => {
       active = false;
-      window.clearTimeout(timeout);
-      controller.abort();
     };
-  }, [platform]);
-  return download;
+  }, []);
+  return {
+    ...(platform ? selectDownload(release.assets, platform) : fallback),
+    installers: getInstallers(release.assets),
+    loading: release.loading,
+  };
 }

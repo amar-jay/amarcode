@@ -33,3 +33,17 @@ Application assets are copied without modification into `public/images/app/`: th
 All page layout, responsive styling, texture overlays, and interaction effects use Tailwind utilities in the components. `src/index.css` contains only Tailwind imports, local font declarations, theme tokens, and the shadcn base layer. Dynamic agent icon URLs are passed as a CSS variable consumed by a Tailwind mask utility.
 
 Closing-section photograph: [Misty forest covered mountains in soft light](https://unsplash.com/photos/misty-forest-covered-mountains-in-soft-light-2GeemxzkzY8) by Damien Dufour on Unsplash, downloaded as `public/images/misty-mountains.webp`. Source: `https://images.unsplash.com/photo-1756817371084-d4433d191d9d`. [Unsplash license](https://unsplash.com/license).
+
+## Downloads and social sharing
+
+The split download button opens an **Other platforms** menu. Both controls share one GitHub latest-release request per page load. Only published installer files are listed (`.exe`, `.msi`, `.AppImage`, `.deb`, `.rpm`, `.dmg`); signatures and updater archives are excluded. Missing installers are labeled unavailable, and **All releases** remains usable if the request fails.
+
+Open Graph and Twitter metadata are included in the built HTML, so link-preview crawlers do not need JavaScript. The default public URL is provisionally `https://amarcode.amarjay.com`, based on the existing registry hostname. Set the actual deployment URL when building:
+
+```sh
+SITE_URL=https://your-domain.example bun run landing:build
+```
+
+`public/social-preview.png` is the 1200×630 sharing image. Its editable Tailwind source is `scripts/social-preview.html`; open `/scripts/social-preview.html` in the Vite dev server and capture it at a 1200×630 viewport after fonts and images load to regenerate the PNG.
+
+Validate installer filtering with `bun test ./crates/landing/scripts/releases.test.ts` from the repository root.
