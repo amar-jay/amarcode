@@ -108,7 +108,7 @@ export type OpenLiveChatInput = {
 
 /**
  * Reset conversation-owned state when navigation selects a chat.
- * Prefer calling with just `chatId` — seed fields are read from
+ * Prefer calling with just `chatId`, seed fields are read from
  * `activeSessionAtom` so the live-chat effect only depends on identity.
  */
 export const openLiveChatAtom = atom(
@@ -125,7 +125,7 @@ export const openLiveChatAtom = atom(
           }
         : input;
 
-    // Same chat already open — don't wipe streaming state on incidental re-renders.
+    // Same chat already open, don't wipe streaming state on incidental re-renders.
     // (The live-chat effect only depends on chatId, so this mainly guards Strict Mode.)
     const existing = get(liveChatAtom);
     if (existing?.chatId === chatId && existing.detail) return;
@@ -472,7 +472,7 @@ export const applyLiveChatEventAtom = atom(
       return;
     }
 
-    // Message events carry no content — they only make streaming feel immediate.
+    // Message events carry no content, they only make streaming feel immediate.
     if (event.type === "messageUpdated" || event.type === "messagePartAdded") {
       void set(scheduleLiveChatRefreshAtom);
     }

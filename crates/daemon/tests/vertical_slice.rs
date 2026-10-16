@@ -58,7 +58,7 @@ async fn create_chat_prompt_store_and_events() {
     let now = chrono_now();
     let health = rpc(
         &addr,
-        // No create_agent RPC — use list_agents then we need another path.
+        // No create_agent RPC: use list_agents then we need another path.
         // We'll open the store file directly to insert the agent.
         json!({"method": "health"}),
     )

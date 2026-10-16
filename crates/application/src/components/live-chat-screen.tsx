@@ -116,7 +116,7 @@ export function LiveChatScreen() {
   const refreshChats = useSetAtom(refreshChatsAtom);
 
   // Open only when chat identity changes. Seed (turn-active, mode) is read
-  // from activeSessionAtom inside the write atom — don't re-open on those.
+  // from activeSessionAtom inside the write atom: don't re-open on those.
   const chatId = session?.chat.id;
   const showSearch =
     conversationView === "chat" && searchOpen && searchChatId === chatId;

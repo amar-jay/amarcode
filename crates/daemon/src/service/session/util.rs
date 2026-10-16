@@ -99,7 +99,7 @@ pub(super) fn normalize_permission_result(pending_params: &Value, result: Value)
         });
     }
 
-    // Unknown shape — pass through so we don't invent a decision.
+    // Unknown shape pass through so we don't invent a decision.
     result
 }
 

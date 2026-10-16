@@ -7,7 +7,7 @@ type EventListener = (event: EditorEvent) => void;
 
 /**
  * Latest daemon event (debug / simple subscribers). Prefer
- * `subscribeDaemonEvents` for anything that must see *every* event —
+ * `subscribeDaemonEvents` for anything that must see *every* event,
  * high-frequency updates can overwrite this atom between React renders.
  */
 export const lastDaemonEventAtom = atom<EditorEvent | null>(null);
@@ -20,7 +20,7 @@ export type TurnSnapshot = {
   error_message: string | null;
 };
 
-/** Latest turnUpdated payload per chat — survives remount / last-event overwrite. */
+/** Latest turnUpdated payload per chat, survives remount / last-event overwrite. */
 export const latestTurnByChatAtom = atom<Record<string, TurnSnapshot>>({});
 
 export type DaemonEventStreamState = {
@@ -71,7 +71,7 @@ function activeStore(fallback?: JotaiStore): JotaiStore {
  * store React uses (pass `useStore()` from under `JotaiProvider`).
  *
  * Using `getDefaultStore()` while the app mounts `<Provider>` silently
- * orphans events — the UI stays stuck on "Thinking…" forever.
+ * orphans events, the UI stays stuck on "Thinking…" forever.
  */
 export function ensureDaemonEventStream(store: JotaiStore) {
   boundStore = store;

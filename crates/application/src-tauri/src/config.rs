@@ -1,9 +1,9 @@
 //! Runtime configuration loaded from the environment.
 //!
 //! Fields:
-//! - `daemon_service_executable` — optional lifecycle CLI override for a
+//! - `daemon_service_executable`: optional lifecycle CLI override for a
 //!   developer-installed service (`AMARCODE_DAEMON_SERVICE_EXECUTABLE`)
-//! - `daemon_addr` — TCP bind address (`AMARCODE_DAEMON_ADDR`, default `127.0.0.1:43821`)
+//! - `daemon_addr`: TCP bind address (`AMARCODE_DAEMON_ADDR`, default `127.0.0.1:43821`)
 //!
 //! Logging filter is **not** stored here; see [`crate::logging`] and `AMARCODE_LOG` / `RUST_LOG`.
 //!

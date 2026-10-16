@@ -5,7 +5,7 @@
 //! - sync registry catalog into SQLite
 //! - persist host availability
 //!
-//! No process spawning — resolving executables is `service::agent_manager`.
+//! No process spawning: resolving executables is `service::agent_manager`.
 
 use std::collections::HashSet;
 

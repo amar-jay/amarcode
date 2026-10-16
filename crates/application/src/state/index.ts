@@ -1,5 +1,5 @@
 /**
- * Application state — organized by domain.
+ * Application state, organized by domain.
  *
  * | Domain        | File              | Owns                                              |
  * |---------------|-------------------|---------------------------------------------------|

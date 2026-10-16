@@ -98,7 +98,7 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         }
         methods::DELETE_CHAT => Ok(DispatchOutcome::Result(delete_chat(app, params).await?)),
 
-        // sessions (ACP — may block; run off the async worker)
+        // sessions (ACP may block; run off the async worker)
         methods::PROMPT => Ok(DispatchOutcome::Result(prompt(app, params).await?)),
         methods::SET_SESSION_CONFIG_OPTION => Ok(DispatchOutcome::Result(
             set_session_config_option(app, params).await?,

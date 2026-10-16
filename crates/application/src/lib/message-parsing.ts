@@ -383,7 +383,7 @@ export function groupChatBlocks(
     }
     if (item.message.role !== "assistant") continue;
 
-    // Skip empty assistant shells — they only produce orphan "Thinking…" rows.
+    // Skip empty assistant shells, they only produce orphan "Thinking…" rows.
     const hasText = Boolean(item.message.content.trim());
     const hasParts = item.parts.some(
       (part) => part.kind === "thinking" || part.kind === "tool_call",

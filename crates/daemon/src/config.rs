@@ -1,11 +1,11 @@
 //! Runtime configuration loaded from the environment.
 //!
 //! Fields:
-//! - `transport` — `tcp` (default) or `websocket` (Clap `--transport`)
-//! - `app_dir` — data directory (`AMARCODE_APPDIR` / platform default)
-//! - `daemon_addr` — bind address (`AMARCODE_DAEMON_ADDR`), defaulting by transport
-//! - `db_path` — SQLite file path (default `app_dir/workspace.sqlite3`, or `AMARCODE_STORE_PATH`)
-//! - `acp_registry_source` — Git source for the ACP agent registry
+//! - `transport`: `tcp` (default) or `websocket` (Clap `--transport`)
+//! - `app_dir`: data directory (`AMARCODE_APPDIR` / platform default)
+//! - `daemon_addr`: bind address (`AMARCODE_DAEMON_ADDR`), defaulting by transport
+//! - `db_path`: SQLite file path (default `app_dir/workspace.sqlite3`, or `AMARCODE_STORE_PATH`)
+//! - `acp_registry_source`: Git source for the ACP agent registry
 //!
 //! Logging filter is **not** stored here; see [`crate::logging`] and `AMARCODE_LOG` / `RUST_LOG`.
 //!

@@ -4,9 +4,9 @@
 //! dispatch methods, write results/errors, stream subscription events.
 //!
 //! Submodules:
-//! - [`server`] — bind/accept loop
-//! - [`connection`] — per-socket read/write and subscribe mode
-//! - [`handler`] — method dispatch into `service` / `store`
+//! - [`server`] bind/accept loop
+//! - [`connection`] per-socket read/write and subscribe mode
+//! - [`handler`] method dispatch into `service` / `store`
 //!
 //! No SQL and no ACP stdio in this module tree.
 

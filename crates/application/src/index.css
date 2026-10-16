@@ -185,7 +185,7 @@
   body {
     @apply m-0 overflow-hidden bg-background text-foreground;
   }
-  /* Thin frame for the borderless Tauri window — on #root so top bar is inside it. */
+  /* Thin frame for the borderless Tauri window; on #root so top bar is inside it. */
   #root {
     box-sizing: border-box;
     border: 1px solid
@@ -255,7 +255,7 @@
 /* -------------------------------------------------------------------------- */
 /* Streamdown link-safety dialog                                              */
 /* max-w-md lives in streamdown's node_modules and isn't always scanned by    */
-/* Tailwind — without it, w-full stretches the confirm card edge-to-edge.     */
+/* Tailwind; without it, w-full stretches the confirm card edge-to-edge.     */
 /* -------------------------------------------------------------------------- */
 
 [data-streamdown="link-safety-modal"] {
@@ -280,7 +280,7 @@
 /* -------------------------------------------------------------------------- */
 
 [data-streamdown="code-block"] {
-  /* Streamdown sets contain-intrinsic-size: auto 200px — that leaves a tall
+  /* Streamdown sets contain-intrinsic-size: auto 200px; that leaves a tall
      blank card when a fence is empty or still streaming. Size to content. */
   content-visibility: visible !important;
   contain-intrinsic-size: none !important;
@@ -303,7 +303,7 @@
   opacity: 0.95;
 }
 
-/* Language label row — reserve right side for copy */
+/* Language label row; reserve right side for copy */
 [data-streamdown="code-block-header"] {
   display: flex;
   align-items: center;
@@ -334,7 +334,7 @@
 /*
  * Streamdown places actions in a sticky overlay sibling with -mt-10.
  * Pin them to the top-right of the card so they sit in the header band,
- * inside the border — not floating above the block.
+ * inside the border; not floating above the block.
  */
 [data-streamdown="code-block"] > .pointer-events-none.sticky,
 [data-streamdown="code-block"]
@@ -428,12 +428,12 @@
   font-family: inherit;
   font-size: inherit;
   color: inherit;
-  /* Fallback only for --sdm-c (light). Do NOT set --shiki-dark here —
+  /* Fallback only for --sdm-c (light). Do NOT set --shiki-dark here;
      that would clobber per-token dark colors from shiki dual themes. */
   --sdm-c: var(--foreground);
 }
 
-/* Line numbers — only when there is real content on the line */
+/* Line numbers; only when there is real content on the line */
 [data-streamdown="code-block-body"] code > span.block {
   min-height: 0;
 }

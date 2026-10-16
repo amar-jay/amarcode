@@ -273,7 +273,7 @@ export const Persona: FC<PersonaProps> = memo(
     const asleepInput = useStateMachineInput(rive, stateMachine, "asleep");
 
     // Rive state machine inputs are mutable objects that must be set via direct
-    // property assignment — this is the intended Rive API, not a React anti-pattern.
+    // property assignment; this is the intended Rive API, not a React anti-pattern.
     useEffect(() => {
       if (listeningInput) {
         listeningInput.value = state === "listening";

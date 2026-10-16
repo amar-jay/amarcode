@@ -1,6 +1,6 @@
 /**
  * Soft logo watermark for the empty home / new-chat screen.
- * Decorative only — sits behind the prompt and never captures pointer events.
+ * Decorative only; sits behind the prompt and never captures pointer events.
  *
  * Opacity reacts to the sibling prompt shell via the parent
  * `[data-home-stage]:has([data-prompt-shell]:…)` rules in index.css.
@@ -21,7 +21,7 @@ export function HomeWatermark() {
         className="absolute inset-0 bg-[radial-gradient(circle_at_50%_55%,color-mix(in_oklab,#f3ba63_10%,transparent),transparent_55%)] dark:bg-[radial-gradient(circle_at_50%_55%,color-mix(in_oklab,#f3ba63_8%,transparent),transparent_50%)]"
       />
 
-      {/* Logo mark — large, muted, gradient-faded toward edges */}
+      {/* Logo mark; large, muted, gradient-faded toward edges */}
       <div className="absolute left-1/2 top-[42%] w-[min(78vw,26rem)] -translate-x-1/2 -translate-y-1/2">
         <div
           data-watermark-mark

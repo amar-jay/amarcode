@@ -3,8 +3,8 @@
 //! Built on `tracing` + `tracing-subscriber`.
 //!
 //! ## Outputs
-//! - **stderr** — always (ANSI colors when the stream is a TTY)
-//! - **`{app_dir}/daemon.log`** — append-only file, no ANSI
+//! - **stderr** always (ANSI colors when the stream is a TTY)
+//! - **`{app_dir}/daemon.log`** append-only file, no ANSI
 //!
 //! ## Filter
 //! Precedence:

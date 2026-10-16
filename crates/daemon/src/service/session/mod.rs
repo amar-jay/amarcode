@@ -16,11 +16,11 @@
 //!
 //! ## Layout
 //!
-//! - [`manager`] — public `SessionManager` API (start/prompt/cancel/respond)
-//! - [`inbound`] — ACP inbound worker + notification routing
-//! - [`messages`] — streaming assistant messages, parts, run completion
-//! - [`types`] — shared live-run state and public result types
-//! - [`util`] — pure helpers (timestamps, payload extraction, emit)
+//! - [`manager`] public `SessionManager` API (start/prompt/cancel/respond)
+//! - [`inbound`] ACP inbound worker + notification routing
+//! - [`messages`] streaming assistant messages, parts, run completion
+//! - [`types`] shared live-run state and public result types
+//! - [`util`] pure helpers (timestamps, payload extraction, emit)
 
 mod failures;
 mod inbound;

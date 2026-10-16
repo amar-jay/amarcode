@@ -4,9 +4,9 @@
 //! managers call `store` and `acp`.
 //!
 //! Submodules:
-//! - [`agent_manager`] — agent definitions and binary resolution
-//! - [`chat_manager`] — chat CRUD and workspace-scoped listing
-//! - [`session`] — live runs, prompts, ACP sessions, event fan-out
+//! - [`agent_manager`] agent definitions and binary resolution
+//! - [`chat_manager`] chat CRUD and workspace-scoped listing
+//! - [`session`] live runs, prompts, ACP sessions, event fan-out
 //!
 //! ## Orchestration contract
 //!

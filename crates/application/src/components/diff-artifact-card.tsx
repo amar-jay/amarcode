@@ -192,7 +192,7 @@ export type DiffArtifact = {
 /**
  * ACP delivers edit previews as `content: [{ type: "diff", path, oldText, newText }]`
  * on a tool_call / tool_call_update. The daemon stores the raw update payload in a
- * `tool_call` part — decode at the presentation boundary.
+ * `tool_call` part; decode at the presentation boundary.
  *
  * Also tolerates agent extensions: `changes[]`, string/`{text}` git patches.
  */

@@ -1,4 +1,4 @@
-//! `SessionManager` — public API for runs, prompts, cancel, and agent replies.
+//! `SessionManager` public API for runs, prompts, cancel, and agent replies.
 
 mod agent_requests;
 mod lifecycle;

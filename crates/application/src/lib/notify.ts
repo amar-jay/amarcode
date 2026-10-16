@@ -38,7 +38,7 @@ export function notify(
 ) {
   toast[kind](message, options);
   void sendWhenAppIsUnfocused(
-    kind === "info" ? "Amarcode" : `Amarcode — ${kind}`,
+    kind === "info" ? "Amarcode" : `Amarcode, ${kind}`,
     message,
   );
 }

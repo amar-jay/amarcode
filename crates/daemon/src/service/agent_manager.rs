@@ -5,7 +5,7 @@
 //! - resolve an agent row to a concrete command (managed install under
 //!   app data dir vs custom PATH command)
 //!
-//! Does not own live ACP sessions — that is `session`.
+//! Does not own live ACP sessions. that is `session`.
 
 use std::{
     ffi::OsString,
@@ -93,7 +93,7 @@ impl AgentManager {
     /// Resolve each agent command on this host and persist `available`.
     ///
     /// For registry `bunx` / `uvx` agents, the runner existing on PATH is not
-    /// enough — the package argument must already be present in the local
+    /// enough. the package argument must already be present in the local
     /// package cache so the first prompt does not block on a download.
     pub fn refresh_availability(&self) -> Result<()> {
         for agent in self.store.agents()? {

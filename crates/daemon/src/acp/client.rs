@@ -5,7 +5,7 @@
 //! channel for `service::session` to drain.
 //!
 //! Owns process lifecycle + framing + id correlation. Does not touch SQLite
-//! or TCP — `service::session` persists (`store`) and fans out after each unit.
+//! or TCP: `service::session` persists (`store`) and fans out after each unit.
 
 use std::{
     collections::HashMap,

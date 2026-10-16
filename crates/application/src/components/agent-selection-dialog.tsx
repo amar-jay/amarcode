@@ -51,7 +51,7 @@ export function AgentSelectionDialog({
         notify(`${stripAcpSuffix(result.agent.name)} installed`, "success");
       } else if (result.runtime_status === "auth_required") {
         notify(
-          `${stripAcpSuffix(result.agent.name)} installed — sign in required`,
+          `${stripAcpSuffix(result.agent.name)} installed: sign in required`,
           "info",
         );
       } else {

@@ -629,7 +629,7 @@ function AcpProviderPanel() {
                 autoComplete="off"
                 placeholder={
                   config.has_api_key
-                    ? "API key saved — enter to replace"
+                    ? "API key saved: enter to replace"
                     : "API key"
                 }
                 value={apiKey}
@@ -709,7 +709,7 @@ function AgentDefaultsPanel({
       if (result.runtime_status === "ready") {
         notify(`${name} installed`, "success");
       } else if (result.runtime_status === "auth_required") {
-        notify(`${name} installed — sign in required`, "info");
+        notify(`${name} installed: sign in required`, "info");
       } else {
         notify(
           result.runtime_message ?? `${name} installed but is not ready`,
