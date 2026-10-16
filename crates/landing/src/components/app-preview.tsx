@@ -1,11 +1,8 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-const screenshots = [
-  { theme: "light", label: "Light", src: "/images/app/amarcode-light.png" },
-  { theme: "dark", label: "Dark", src: "/images/app/amarcode-dark.png" },
-];
+import { useState, type CSSProperties } from "react";
+import { MoveHorizontal } from "lucide-react";
 
 export default function AppPreview() {
+  const [reveal, setReveal] = useState(50);
   return (
     <section
       id="app-preview"
@@ -29,49 +26,68 @@ export default function AppPreview() {
           </p>
         </div>
       </div>
-      <Tabs
-        defaultValue="light"
-        className="mx-[54px] gap-0 border border-rule max-[901px]:mx-7 max-[601px]:mx-3"
-      >
-        <div className="flex items-center justify-between border-b border-rule bg-panel px-[18px] py-3 max-[601px]:gap-2.5 max-[601px]:p-2.5">
-          <span className="inline-flex items-center gap-[9px] text-[17px] max-[601px]:gap-1.5 max-[601px]:text-[14px]">
-            <span className="inline-block size-[5px] shrink-0 bg-current" />{" "}
+      <div className="mx-[54px] border border-rule max-[901px]:mx-7 max-[601px]:mx-3">
+        <div className="flex items-center justify-between gap-3 border-b border-rule bg-panel px-[18px] py-3 text-[17px] max-[601px]:p-2.5 max-[601px]:text-[14px]">
+          <span className="inline-flex items-center gap-[9px]">
+            <span className="inline-block size-[5px] shrink-0 bg-current" />
             Amarcode in focus
           </span>
-          <TabsList
-            aria-label="Application screenshot theme"
-            className="h-8 rounded-none border border-[#b7c0b6] bg-transparent p-0"
-          >
-            {screenshots.map(({ theme, label }) => (
-              <TabsTrigger
-                key={theme}
-                value={theme}
-                className="rounded-none px-[19px] py-0.5 text-[17px] font-normal data-[state=active]:bg-ink data-[state=active]:text-paper max-[601px]:px-3 max-[601px]:text-[16px]"
-              >
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+          <span id="preview-slider-hint">Slide to compare</span>
         </div>
-        {screenshots.map(({ theme, src }) => (
-          <TabsContent
-            key={theme}
-            value={theme}
-            className="[&_figure]:m-0 [&_img]:block [&_img]:h-auto [&_img]:w-full"
+        <figure
+          className="relative m-0 isolate select-none has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-4 has-[:focus-visible]:outline-[#80602a]"
+          style={{ "--reveal": `${reveal}%` } as CSSProperties}
+        >
+          <img
+            src="/images/app/amarcode-light.png"
+            alt="Amarcode in light mode, showing a coding conversation and message composer."
+            width={1853}
+            height={1048}
+            loading="lazy"
+            decoding="async"
+            className="block h-auto w-full"
+          />
+          <img
+            src="/images/app/amarcode-dark.png"
+            alt="The same Amarcode workspace in dark mode."
+            width={1853}
+            height={1048}
+            loading="lazy"
+            decoding="async"
+            className="pointer-events-none absolute inset-0 size-full [clip-path:inset(0_calc(100%_-_var(--reveal))_0_0)]"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-between px-3 text-[14px] max-[601px]:bottom-2 max-[601px]:px-2 max-[601px]:text-[12px]"
           >
-            <figure>
-              <img
-                src={src}
-                alt={`Amarcode in ${theme} mode showing a coding conversation, code blocks, and the message composer.`}
-                width={1853}
-                height={1048}
-                loading="lazy"
-                decoding="async"
-              />
-            </figure>
-          </TabsContent>
-        ))}
-      </Tabs>
+            <span className="border border-white/20 bg-ink px-2 py-0.5 text-paper">
+              Dark
+            </span>
+            <span className="border border-rule bg-paper px-2 py-0.5 text-ink">
+              Light
+            </span>
+          </div>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 left-(--reveal) w-0.5 -translate-x-1/2 bg-paper shadow-[0_0_0_1px_#242c2b40]"
+          >
+            <span className="absolute top-1/2 left-1/2 flex size-11 -translate-1/2 items-center justify-center border border-rule bg-paper text-ink shadow-md max-[601px]:size-9">
+              <MoveHorizontal size={21} />
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={reveal}
+            onChange={(event) => setReveal(Number(event.target.value))}
+            aria-label="Compare light and dark themes"
+            aria-describedby="preview-slider-hint"
+            aria-valuetext={`${reveal}% dark theme, ${100 - reveal}% light theme`}
+            className="absolute inset-0 m-0 size-full cursor-ew-resize touch-pan-y appearance-none opacity-0 [&::-webkit-slider-thumb]:h-11 [&::-webkit-slider-thumb]:w-1 [&::-webkit-slider-thumb]:appearance-none [&::-moz-range-thumb]:h-11 [&::-moz-range-thumb]:w-1 [&::-moz-range-thumb]:border-0"
+          />
+        </figure>
+      </div>
       <div className="flex justify-between px-[54px] pt-[17px] pb-[37px] text-[16px] text-muted-ink max-[901px]:px-7 max-[601px]:gap-[15px] max-[601px]:px-[15px] max-[601px]:pt-[15px] max-[601px]:pb-[25px] max-[601px]:text-[13px]">
         <span>A real workspace. A real conversation.</span>
         <span>Light & dark themes</span>

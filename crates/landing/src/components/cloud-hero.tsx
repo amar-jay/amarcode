@@ -40,8 +40,15 @@ export default function CloudHero() {
               variant="outline"
               className="h-auto min-h-12 leading-[1.428571] gap-[22px] rounded-none px-[23px] py-3 text-[19px] font-normal shadow-none transition-colors duration-200 motion-reduce:transition-none border border-[#83968e] bg-[#fafaf670] text-ink hover:bg-paper"
             >
-              <a href="#app-preview">
-                Meet your workspace <ArrowDown />
+              <a href="https://github.com/amar-jay/amarcode">
+                Visit GitHub{" "}
+                <img
+                  src="/images/github.svg"
+                  alt=""
+                  width={16}
+                  height={16}
+                  className="size-4 shrink-0"
+                />
               </a>
             </Button>
           </div>

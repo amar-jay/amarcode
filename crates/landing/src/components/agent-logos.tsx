@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from "react";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { Ellipsis, ArrowUp } from "lucide-react";
 import agents from "@/lib/agents.json";
 import { Button } from "@/components/ui/button";
 
@@ -28,7 +28,7 @@ const orderedAgents = [...activeAgents].sort((a, b) => {
 
 export default function AgentLogos() {
   const [expanded, setExpanded] = useState(false);
-  const visibleAgents = expanded ? orderedAgents : orderedAgents.slice(0, 12);
+  const visibleAgents = expanded ? orderedAgents : orderedAgents.slice(0, 11);
   return (
     <section
       id="agents"
@@ -79,19 +79,51 @@ export default function AgentLogos() {
             </a>
           </li>
         ))}
+        {!expanded && orderedAgents.length > 11 && (
+          <li className="flex min-h-[135px] flex-col items-center justify-center gap-[18px] border-r border-b border-rule p-0 text-center text-[18px] min-[901px]:[&:nth-child(6n)]:border-r-0 min-[601px]:max-[901px]:[&:nth-child(4n)]:border-r-0 max-[601px]:min-h-[120px] max-[601px]:text-[16px] max-[601px]:[&:nth-child(3n)]:border-r-0">
+            <button
+              type="button"
+              className="flex min-h-[inherit] w-full flex-1 cursor-pointer flex-col items-center justify-center gap-[18px] px-3 py-8 text-ink transition-colors hover:bg-[#edf1eb] focus-visible:bg-[#edf1eb] motion-reduce:transition-none max-[601px]:px-2 max-[601px]:py-[23px]"
+              aria-label="Show all agents"
+              aria-expanded={false}
+              aria-controls="agent-directory"
+              onClick={() => {
+                setExpanded(true);
+                requestAnimationFrame(() => {
+                  document
+                    .querySelector<HTMLAnchorElement>(
+                      "#agent-directory li:nth-child(12) a",
+                    )
+                    ?.focus({ preventScroll: true });
+                });
+              }}
+            >
+              <Ellipsis size={27} aria-hidden="true" />
+              <span>More agents</span>
+            </button>
+          </li>
+        )}
       </ul>
       <div className="flex items-center justify-between gap-5 px-[35px] py-5 [&>p]:m-0 [&>p]:text-[16px] [&>p]:text-muted-ink max-[601px]:flex-col max-[601px]:gap-3 max-[601px]:px-[15px] max-[601px]:py-[22px]">
         <p>{activeAgents.length} active entries in the local ACP registry.</p>
-        <Button
-          variant="ghost"
-          className="rounded-none text-[18px] font-normal"
-          aria-expanded={expanded}
-          aria-controls="agent-directory"
-          onClick={() => setExpanded(!expanded)}
-        >
-          {expanded ? "Show fewer agents" : "Explore all agents"}
-          {expanded ? <ArrowUp /> : <ArrowDown />}
-        </Button>
+        {expanded && (
+          <Button
+            variant="ghost"
+            className="rounded-none text-[18px] font-normal"
+            aria-expanded={true}
+            aria-controls="agent-directory"
+            onClick={() => {
+              setExpanded(false);
+              requestAnimationFrame(() => {
+                document
+                  .querySelector<HTMLButtonElement>("#agent-directory button")
+                  ?.focus({ preventScroll: true });
+              });
+            }}
+          >
+            Show fewer agents <ArrowUp />
+          </Button>
+        )}
       </div>
     </section>
   );

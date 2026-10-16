@@ -28,6 +28,8 @@ Source lives in `src/`, shared UI components in `src/components/ui/`, and the th
 
 Typography uses locally hosted Cormorant Garamond from Google Fonts (300 and 400), with its OFL license in `public/fonts/OFL.txt`. Agent icons and names are copied from `vendor/acp-registry`; `src/lib/agents.json` records the local snapshot. All icons are retained; quarantined entries are omitted from the page. Registry licensing is retained alongside the icons.
 
-Application assets are copied without modification into `public/images/app/`: the logo from `crates/application/src-tauri/icons/icon.svg`, and light, dark, and split-theme screenshots from `assets/`. `AppPreview` uses shadcn Tabs to display light and dark screenshots. Card, Badge, Separator, Accordion, and Dropdown Menu are installed for future sections.
+Application assets are copied without modification into `public/images/app/`: the logo from `crates/application/src-tauri/icons/icon.svg`, and light, dark, and split-theme screenshots from `assets/`. `AppPreview` uses a native, keyboard-accessible comparison slider to reveal the light and dark screenshots. Card, Badge, Separator, Accordion, and Dropdown Menu are installed for future sections.
 
 All page layout, responsive styling, texture overlays, and interaction effects use Tailwind utilities in the components. `src/index.css` contains only Tailwind imports, local font declarations, theme tokens, and the shadcn base layer. Dynamic agent icon URLs are passed as a CSS variable consumed by a Tailwind mask utility.
+
+Closing-section photograph: [Misty forest covered mountains in soft light](https://unsplash.com/photos/misty-forest-covered-mountains-in-soft-light-2GeemxzkzY8) by Damien Dufour on Unsplash, downloaded as `public/images/misty-mountains.webp`. Source: `https://images.unsplash.com/photo-1756817371084-d4433d191d9d`. [Unsplash license](https://unsplash.com/license).
