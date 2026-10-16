@@ -28,5 +28,10 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ["scripts/**/*.mjs"],
+    // Capture scripts execute in Node and include browser-evaluated callbacks.
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
   prettier,
 );

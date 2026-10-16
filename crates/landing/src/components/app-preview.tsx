@@ -33,18 +33,18 @@ export default function AppPreview() {
         >
           <img
             src="/images/app/amarcode-light.png"
-            alt="Amarcode in light mode, showing a coding conversation and message composer."
-            width={1853}
-            height={1048}
+            alt="Amarcode in light mode, showing a demo conversation with Codex and Claude about the independent daemon and conversation continuity."
+            width={3200}
+            height={1800}
             loading="lazy"
             decoding="async"
             className="block h-auto w-full"
           />
           <img
             src="/images/app/amarcode-dark.png"
-            alt="The same Amarcode workspace in dark mode."
-            width={1853}
-            height={1048}
+            alt="The same Codex and Claude demo conversation in Amarcode’s dark theme."
+            width={3200}
+            height={1800}
             loading="lazy"
             decoding="async"
             className="pointer-events-none absolute inset-0 size-full [clip-path:inset(0_calc(100%_-_var(--reveal))_0_0)]"
@@ -81,8 +81,7 @@ export default function AppPreview() {
           />
         </figure>
       </div>
-      <div className="py-3">
-      </div>
+      <div className="py-3"></div>
     </section>
   );
 }
