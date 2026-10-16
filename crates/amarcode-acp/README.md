@@ -70,11 +70,13 @@ remain opt-in. Streamed `reasoning_details`, `reasoning`, and
 Reasoning is presented through an ACP tool-call lifecycle with `kind: "think"`,
 including cumulative streamed content and a final completed status.
 
-For `openrouter.ai` providers, the adapter fetches available models from the
+For every configured provider, the adapter attempts to fetch available models from the
 provider's `/models` endpoint and exposes them in the ACP session model
 selector. Results are cached for one hour. `provider.model` remains the default
 and is the fallback if discovery fails. Model selections are scoped to each
-session and persisted with it. Discovery also reads each model's `context_length`. Before every provider
+session and persisted with it. Vercel's catalog is filtered to language models.
+Discovery also reads each model's `context_length` (or Vercel's `context_window`)
+and output token limit. Before every provider
 call the adapter estimates prompt size with a bytes/4 heuristic, prunes large
 tool results while retaining their beginning and end, then summarizes older
 exchanges if necessary. The original request and latest user request stay

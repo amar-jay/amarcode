@@ -348,22 +348,20 @@ impl Runtime {
         let mut ids = vec![configured.clone()];
         let mut context_lengths = HashMap::new();
         let mut max_completion_tokens = HashMap::new();
-        if self.config.provider.is_openrouter() {
-            match provider::fetch_models(&self.http, &self.config).await {
-                Ok(models) => {
-                    ids = models.iter().map(|model| model.id.clone()).collect();
-                    for model in models {
-                        if let Some(context_length) = model.context_length {
-                            context_lengths.insert(model.id.clone(), context_length);
-                        }
-                        if let Some(max_completion) = model.max_completion_tokens {
-                            max_completion_tokens.insert(model.id.clone(), max_completion);
-                        }
+        match provider::fetch_models(&self.http, &self.config).await {
+            Ok(models) => {
+                ids = models.iter().map(|model| model.id.clone()).collect();
+                for model in models {
+                    if let Some(context_length) = model.context_length {
+                        context_lengths.insert(model.id.clone(), context_length);
+                    }
+                    if let Some(max_completion) = model.max_completion_tokens {
+                        max_completion_tokens.insert(model.id.clone(), max_completion);
                     }
                 }
-                Err(error) => {
-                    eprintln!("amarcode-acp: {error}; using configured model");
-                }
+            }
+            Err(error) => {
+                eprintln!("amarcode-acp: {error}; using configured model");
             }
         }
         if !ids.iter().any(|id| id == &configured) {

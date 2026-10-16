@@ -719,6 +719,14 @@ pub async fn fetch_models(
 }
 
 fn parse_discovered_model(model: &Value) -> Option<DiscoveredModel> {
+    // Gateway catalogs also contain embeddings, images, and other non-chat models.
+    if model
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind != "language")
+    {
+        return None;
+    }
     let id = model
         .get("id")
         .and_then(Value::as_str)
@@ -727,14 +735,16 @@ fn parse_discovered_model(model: &Value) -> Option<DiscoveredModel> {
         .to_owned();
     // Prefer the tighter window when both the model and top provider advertise one.
     let context_length = match (
-        positive_u64(model.get("context_length")),
+        positive_u64(model.get("context_length"))
+            .or_else(|| positive_u64(model.get("context_window"))),
         positive_u64(model.pointer("/top_provider/context_length")),
     ) {
         (Some(model_len), Some(provider_len)) => Some(model_len.min(provider_len)),
         (model_len, provider_len) => model_len.or(provider_len),
     };
     let max_completion_tokens = positive_u64(model.pointer("/top_provider/max_completion_tokens"))
-        .or_else(|| positive_u64(model.get("max_completion_tokens")));
+        .or_else(|| positive_u64(model.get("max_completion_tokens")))
+        .or_else(|| positive_u64(model.get("max_tokens")));
     Some(DiscoveredModel {
         id,
         context_length,
@@ -1170,6 +1180,24 @@ mod tests {
         assert!(names.contains(&"edit_file".to_owned()));
         assert!(names.contains(&"write_file".to_owned()));
         assert!(names.contains(&"run_command".to_owned()));
+    }
+
+    #[test]
+    fn parses_vercel_gateway_language_models_and_limits() {
+        let model = parse_discovered_model(&json!({
+            "id": "vendor/chat-model",
+            "type": "language",
+            "context_window": 200_000,
+            "max_tokens": 32_000
+        }))
+        .expect("language model");
+        assert_eq!(model.id, "vendor/chat-model");
+        assert_eq!(model.context_length, Some(200_000));
+        assert_eq!(model.max_completion_tokens, Some(32_000));
+        for kind in ["embedding", "reranking", "image", "video"] {
+            assert!(parse_discovered_model(&json!({"id":"vendor/model", "type":kind})).is_none());
+        }
+        assert!(parse_discovered_model(&json!({"id":"vendor/model"})).is_some());
     }
 
     #[test]

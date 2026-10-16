@@ -46,6 +46,23 @@ fn read_http_request(socket: &mut TcpStream) -> Vec<u8> {
     buffer
 }
 
+// Existing completion fixtures do not implement model discovery.
+fn accept_chat(listener: &TcpListener) -> std::io::Result<(TcpStream, std::net::SocketAddr)> {
+    loop {
+        let (mut socket, address) = listener.accept()?;
+        socket.set_read_timeout(Some(TIMEOUT))?;
+        let mut method = [0; 4];
+        let size = socket.peek(&mut method)?;
+        if size >= 4 && &method == b"GET " {
+            let request = read_http_request(&mut socket);
+            assert!(request.starts_with(b"GET /v1/models "));
+            write_json_response(&mut socket, "404 Not Found", "", json!({}));
+            continue;
+        }
+        return Ok((socket, address));
+    }
+}
+
 fn write_sse(socket: &mut impl Write, body: &str) {
     write!(
         socket,
@@ -258,7 +275,7 @@ fn transcript_cancels_an_in_flight_provider_stream() {
     let address = listener.local_addr().expect("provider address");
     let (streaming_sender, streaming_receiver) = mpsc::channel();
     thread::spawn(move || {
-        let (mut socket, _) = listener.accept().expect("provider connection");
+        let (mut socket, _) = accept_chat(&listener).expect("provider connection");
         socket
             .set_read_timeout(Some(TIMEOUT))
             .expect("set read timeout");
@@ -310,7 +327,7 @@ fn transcript_streams_a_uuid_message_id() {
     };
     let address = listener.local_addr().expect("provider address");
     thread::spawn(move || {
-        let (mut socket, _) = listener.accept().expect("provider connection");
+        let (mut socket, _) = accept_chat(&listener).expect("provider connection");
         let _ = read_http_request(&mut socket);
         write_sse(
             &mut socket,
@@ -357,7 +374,7 @@ fn transcript_streams_reasoning_as_a_think_tool() {
     };
     let address = listener.local_addr().expect("provider address");
     thread::spawn(move || {
-        let (mut socket, _) = listener.accept().expect("provider connection");
+        let (mut socket, _) = accept_chat(&listener).expect("provider connection");
         let _ = read_http_request(&mut socket);
         write_sse(
             &mut socket,
@@ -437,7 +454,7 @@ fn transcript_executes_tool_and_returns_result_to_model() {
             "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"I should inspect the file.\",\"id\":\"reasoning-1\",\"index\":0}]}}]}\n\ndata: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-read\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"hello.txt\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
             "data: {\"choices\":[{\"delta\":{\"content\":\"I read the file.\"}}]}\n\ndata: [DONE]\n\n",
         ] {
-            let (mut socket, _) = listener.accept().expect("provider connection");
+            let (mut socket, _) = accept_chat(&listener).expect("provider connection");
             let request = read_http_request(&mut socket);
             request_sender
                 .send(String::from_utf8_lossy(&request).into_owned())
@@ -522,7 +539,7 @@ fn transcript_reports_file_edits_as_acp_diffs() {
             "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-edit\",\"type\":\"function\",\"function\":{\"name\":\"edit_file\",\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\",\\\"old_text\\\":\\\"old\\\",\\\"new_text\\\":\\\"new\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
             "data: {\"choices\":[{\"delta\":{\"content\":\"Edited the file.\"}}]}\n\ndata: [DONE]\n\n",
         ] {
-            let (mut socket, _) = listener.accept().expect("provider connection");
+            let (mut socket, _) = accept_chat(&listener).expect("provider connection");
             let _ = read_http_request(&mut socket);
             write_sse(&mut socket, body);
         }
@@ -601,7 +618,7 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
             "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-command-again\",\"type\":\"function\",\"function\":{\"name\":\"run_command\",\"arguments\":\"{\\\"command\\\":\\\"/bin/echo\\\",\\\"args\\\":[\\\"hello terminal\\\"],\\\"cwd\\\":\\\".\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
             "data: {\"choices\":[{\"delta\":{\"content\":\"Command completed.\"}}]}\n\ndata: [DONE]\n\n",
         ] {
-            let (mut socket, _) = listener.accept().expect("provider connection");
+            let (mut socket, _) = accept_chat(&listener).expect("provider connection");
             let request = read_http_request(&mut socket);
             request_sender
                 .send(String::from_utf8_lossy(&request).into_owned())
@@ -765,7 +782,7 @@ fn transcript_retries_transient_statuses_and_reports_usage() {
     let server = thread::spawn(move || {
         let mut requests = Vec::new();
         for status in ["429 Too Many Requests", "503 Service Unavailable", "200 OK"] {
-            let (mut socket, _) = listener.accept().unwrap();
+            let (mut socket, _) = accept_chat(&listener).unwrap();
             requests.push(provider_request(&mut socket));
             if status == "200 OK" {
                 write_sse(
@@ -816,7 +833,7 @@ fn transcript_cancels_during_retry_after_backoff() {
     let address = listener.local_addr().unwrap();
     let (ready_tx, ready_rx) = mpsc::channel();
     thread::spawn(move || {
-        let (mut socket, _) = listener.accept().unwrap();
+        let (mut socket, _) = accept_chat(&listener).unwrap();
         provider_request(&mut socket);
         write_json_response(
             &mut socket,
@@ -842,7 +859,7 @@ fn transcript_falls_back_only_after_explicit_streaming_rejection() {
     };
     let address = listener.local_addr().unwrap();
     let server = thread::spawn(move || {
-        let (mut socket, _) = listener.accept().unwrap();
+        let (mut socket, _) = accept_chat(&listener).unwrap();
         assert_eq!(provider_request(&mut socket)["stream"], true);
         write_json_response(
             &mut socket,
@@ -850,7 +867,7 @@ fn transcript_falls_back_only_after_explicit_streaming_rejection() {
             "",
             json!({"error":{"message":"stream is unsupported"}}),
         );
-        let (mut socket, _) = listener.accept().unwrap();
+        let (mut socket, _) = accept_chat(&listener).unwrap();
         let request = provider_request(&mut socket);
         assert_eq!(request["stream"], false);
         assert!(request.get("stream_options").is_none());
@@ -884,7 +901,7 @@ fn transcript_does_not_retry_auth_errors_or_execute_truncated_tool_calls() {
         };
         let address = listener.local_addr().unwrap();
         thread::spawn(move || {
-            let (mut socket, _) = listener.accept().unwrap();
+            let (mut socket, _) = accept_chat(&listener).unwrap();
             provider_request(&mut socket);
             if auth_error {
                 write_json_response(
@@ -939,7 +956,7 @@ fn transcript_stops_on_round_call_and_repetition_limits_and_keeps_balanced_histo
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
             for index in 0..rounds {
-                let (mut socket, _) = listener.accept().unwrap();
+                let (mut socket, _) = accept_chat(&listener).unwrap();
                 provider_request(&mut socket);
                 let mut calls = vec![read_call(&format!("call-{index}"), "missing-file")];
                 if rounds == 1 {
@@ -987,7 +1004,7 @@ fn transcript_time_budget_and_idle_timeout_interrupt_a_stalled_stream() {
         };
         let address = listener.local_addr().unwrap();
         thread::spawn(move || {
-            let (mut socket, _) = listener.accept().unwrap();
+            let (mut socket, _) = accept_chat(&listener).unwrap();
             provider_request(&mut socket);
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").unwrap();
             socket.flush().unwrap();
@@ -1040,7 +1057,7 @@ fn transcript_compacts_old_exchanges_and_injects_workspace_instructions() {
     )
     .unwrap();
     let server = thread::spawn(move || {
-        let (mut socket, _) = listener.accept().unwrap();
+        let (mut socket, _) = accept_chat(&listener).unwrap();
         let first = provider_request(&mut socket);
         assert!(first["messages"][0]["content"]
             .as_str()
@@ -1054,7 +1071,7 @@ fn transcript_compacts_old_exchanges_and_injects_workspace_instructions() {
                 json!({"choices":[{"delta":{"content":old}}]})
             ),
         );
-        let (mut socket, _) = listener.accept().unwrap();
+        let (mut socket, _) = accept_chat(&listener).unwrap();
         let summary = provider_request(&mut socket);
         assert_eq!(summary["stream"], false);
         assert!(summary.get("tools").is_none());
@@ -1064,7 +1081,7 @@ fn transcript_compacts_old_exchanges_and_injects_workspace_instructions() {
             "",
             json!({"choices":[{"message":{"content":"Preserved decision: use ZEBRA; verification pending."}}]}),
         );
-        let (mut socket, _) = listener.accept().unwrap();
+        let (mut socket, _) = accept_chat(&listener).unwrap();
         let request = provider_request(&mut socket);
         let text = request["messages"].to_string();
         assert!(
@@ -1103,7 +1120,7 @@ fn transcript_time_budget_kills_and_releases_an_active_terminal() {
     };
     let address = listener.local_addr().unwrap();
     thread::spawn(move || {
-        let (mut socket, _) = listener.accept().unwrap();
+        let (mut socket, _) = accept_chat(&listener).unwrap();
         provider_request(&mut socket);
         write_sse(
             &mut socket,
@@ -1175,7 +1192,7 @@ fn transcript_cost_budget_stops_requests_and_persists_reported_session_cost() {
     };
     let address = listener.local_addr().unwrap();
     thread::spawn(move || {
-        let (mut socket, _) = listener.accept().unwrap();
+        let (mut socket, _) = accept_chat(&listener).unwrap();
         provider_request(&mut socket);
         let body = json!({"choices":[{"delta":{"tool_calls":[read_call("cost", "missing-file")]}}],
             "usage":{"prompt_tokens":100,"completion_tokens":5,"cost":0.02}});
@@ -1210,7 +1227,7 @@ fn transcript_model_output_limit_reports_max_tokens_without_executing_calls() {
     };
     let address = listener.local_addr().unwrap();
     thread::spawn(move || {
-        let (mut socket, _) = listener.accept().unwrap();
+        let (mut socket, _) = accept_chat(&listener).unwrap();
         provider_request(&mut socket);
         write_sse(
             &mut socket,
@@ -1238,7 +1255,7 @@ fn transcript_preserves_split_utf8_and_finishes_at_done_without_waiting_for_eof(
     };
     let address = listener.local_addr().unwrap();
     thread::spawn(move || {
-        let (mut socket, _) = listener.accept().unwrap();
+        let (mut socket, _) = accept_chat(&listener).unwrap();
         provider_request(&mut socket);
         socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"").unwrap();
         socket.write_all(&[0xc3]).unwrap();
@@ -1261,4 +1278,47 @@ fn transcript_preserves_split_utf8_and_finishes_at_done_without_waiting_for_eof(
     assert!(messages
         .iter()
         .any(|message| message["params"]["update"]["content"]["text"] == "ö"));
+}
+
+#[test]
+fn transcript_discovers_models_from_arbitrary_provider_and_falls_back_on_invalid_catalogs() {
+    for (catalog, expected) in [
+        (
+            json!({"data":[{"id":"custom/model-b"},{"id":"custom/model-a"},{"id":"custom/model-a"}]}),
+            json!(["test-model", "custom/model-a", "custom/model-b"]),
+        ),
+        (
+            json!({"models":[{"id":"custom/model"}]}),
+            json!(["test-model"]),
+        ),
+        (json!({"data":[]}), json!(["test-model"])),
+    ] {
+        let Some(listener) = provider_listener() else {
+            return;
+        };
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let request = read_http_request(&mut socket);
+            assert!(request.starts_with(b"GET /v1/models "));
+            write_json_response(&mut socket, "200 OK", "", catalog);
+        });
+        let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+        initialize(&mut agent);
+        for id in [2, 3] {
+            agent.send(json!({"jsonrpc":"2.0", "id":id, "method":"session/new",
+                "params":{"cwd":"/workspace", "mcpServers":[]}}));
+            let response = agent.response(id);
+            let options = response
+                .pointer("/result/configOptions/0/options")
+                .and_then(Value::as_array)
+                .expect("model selector options");
+            let models: Vec<_> = options
+                .iter()
+                .map(|option| option["value"].clone())
+                .collect();
+            assert_eq!(json!(models), expected);
+        }
+        server.join().unwrap();
+    }
 }
