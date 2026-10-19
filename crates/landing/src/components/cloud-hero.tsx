@@ -52,7 +52,13 @@ export default function CloudHero() {
       </CloudShader>
       <div className="flex items-center justify-between gap-5 border-t border-[#bdcdc4] bg-[#edf2ed] px-10 py-4.25 text-[16px] max-[601px]:p-[15px] max-[601px]:text-[14px] max-[601px]:[&>span:nth-child(2)]:hidden">
         <span>Amarcode / Desktop workspace</span>
-        <ArrowDown size={16} aria-hidden="true" />
+        <a
+          href="#app-preview"
+          aria-label="Scroll to workspace preview"
+          className="-m-3 inline-flex p-3 text-ink"
+        >
+          <ArrowDown size={16} aria-hidden="true" />
+        </a>
       </div>
     </section>
   );
