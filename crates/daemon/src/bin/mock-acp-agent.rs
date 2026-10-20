@@ -438,7 +438,9 @@ fn run_terminal(
         ],
     );
     #[cfg(windows)]
-    let (command, args) = ("powershell.exe", vec!["-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.WriteLine('first output'); Start-Sleep -Milliseconds 500; [Console]::Out.WriteLine('last output')"]);
+    // Write LF explicitly. WriteLine uses Environment.NewLine (CRLF) and the
+    // stream test compares the captured bytes to the Unix fixture.
+    let (command, args) = ("powershell.exe", vec!["-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write('first output' + [char]10); Start-Sleep -Milliseconds 500; [Console]::Out.Write('last output' + [char]10)"]);
     let raw_input = json!({"command":command,"args":args,"cwd":"."});
     notify(
         output,

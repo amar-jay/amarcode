@@ -720,6 +720,15 @@ fn env_bin(name: &str) -> PathBuf {
     );
 }
 
+/// Host consoles may capture CRLF. The fixture is the two LF-terminated lines.
+fn terminal_output_text(value: &Value) -> String {
+    value
+        .as_str()
+        .unwrap_or_default()
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+}
+
 fn uuid_simple() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
@@ -846,7 +855,7 @@ async fn client_terminals_stream_persist_and_survive_release_and_compaction() {
     );
     assert_eq!(snapshots[0]["_meta"]["terminal_exit"]["exit_code"], 0);
     assert_eq!(
-        snapshots[0]["_meta"]["terminal_output"]["data"],
+        terminal_output_text(&snapshots[0]["_meta"]["terminal_output"]["data"]),
         "first output\nlast output\n"
     );
     let compact = rpc(
@@ -881,7 +890,8 @@ async fn client_terminals_stream_persist_and_survive_release_and_compaction() {
             serde_json::from_str::<Value>(part["content_json"].as_str().unwrap())
                 .unwrap()
                 .pointer("/_meta/terminal_output/data")
-                .and_then(Value::as_str)
+                .map(terminal_output_text)
+                .as_deref()
                 == Some("first output\nlast output\n")
         }),
         "full output is recoverable after release"
