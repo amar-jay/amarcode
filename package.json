@@ -37,7 +37,7 @@
     "lint:check": "bun run app:lint:check",
     "test": "bun run app:test && bun run worker:test",
     "clippy": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
-    "prettify": "bun run prettier -w . --ignore-path .gitignore --ignore-path .prettierignore && cargo fmt --all",
+    "prettier": "bun run prettier -w . --ignore-path .gitignore --ignore-path .prettierignore && cargo fmt --all",
     "landing:dev": "bun run --cwd crates/landing dev",
     "landing:build": "bun run --cwd crates/landing build",
     "landing:preview": "bun run --cwd crates/landing preview"

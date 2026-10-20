@@ -10,65 +10,49 @@
   },
   "browserZoom": 1,
   "fps": 60,
-  "duration": 30,
+  "duration": 10.5,
   "fixture": "scripts/demo-bridge.mjs",
-  "recordingOffset": 5.383333333333334,
+  "recordingOffset": 3.05,
   "actions": [
     {
-      "time": 1.75,
+      "time": 1.32,
       "action": "open the conversation"
     },
     {
-      "time": 3.81,
-      "action": "open git history"
+      "time": 2.87,
+      "action": "open the agent picker"
     },
     {
-      "time": 7.9,
-      "action": "open subscribed agents"
-    },
-    {
-      "time": 9.77,
+      "time": 3.85,
       "action": "switch to Claude"
     },
     {
-      "time": 10.31,
+      "time": 4.34,
       "action": "focus prompt"
     },
     {
-      "time": 12.44,
+      "time": 5.37,
       "action": "continue with Claude"
     },
     {
-      "time": 17.09,
+      "time": 7.88,
       "action": "open workspace"
     },
     {
-      "time": 17.64,
+      "time": 8.42,
       "action": "expand source folder"
     },
     {
-      "time": 18.14,
+      "time": 8.97,
       "action": "expand components"
     },
     {
-      "time": 18.88,
+      "time": 9.74,
       "action": "open edited component"
     },
     {
-      "time": 19.69,
+      "time": 10.38,
       "action": "review diff"
-    },
-    {
-      "time": 20.28,
-      "action": "close workspace"
-    },
-    {
-      "time": 21.43,
-      "action": "leave conversation"
-    },
-    {
-      "time": 22.78,
-      "action": "reopen saved conversation"
     }
   ],
   "errors": []

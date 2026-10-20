@@ -6,14 +6,11 @@
   "scripts": {
     "studio": "remotion studio src/index.tsx",
     "capture": "node scripts/capture.mjs",
-    "audio": "python3 scripts/audio.py",
-    "render": "remotion render src/index.tsx AmarcodeLaunch out/amarcode-launch.mp4 --codec h264 --crf 16 --concurrency 4 && node scripts/finalize.mjs",
-    "still": "remotion still src/index.tsx AmarcodeLaunch out/poster.png --frame 1100",
+    "render": "remotion render src/index.tsx PromoLanding out/promo-launch.mp4 --codec h264 --crf 16 --concurrency 4 && node scripts/finalize.mjs",
+    "still": "remotion still src/index.tsx PromoLanding out/poster.png --frame 90",
     "typecheck": "tsc --noEmit",
     "verify": "node scripts/verify.mjs",
-    "contact-sheet": "ffmpeg -hide_banner -loglevel error -y -ss 1.5 -i out/amarcode-launch.mp4 -vf \"fps=1/2.4,scale=640:360,tile=3x4\" -frames:v 1 out/contact-sheet.jpg",
-    "capture:landing": "node scripts/capture-landing.mjs",
-    "styleframes": "node scripts/styleframes.mjs"
+    "contact-sheet": "ffmpeg -hide_banner -loglevel error -y -ss 1.5 -i out/promo-launch.mp4 -vf \"fps=1/2.4,scale=640:360,tile=3x4\" -frames:v 1 out/contact-sheet.jpg"
   },
   "dependencies": {
     "@remotion/cli": "4.0.366",
@@ -26,6 +23,7 @@
   "devDependencies": {
     "@remotion/tailwind-v4": "4.0.366",
     "tailwindcss": "^4.1.11",
+    "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "playwright": "^1.58.0",

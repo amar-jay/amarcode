@@ -1,12 +1,11 @@
-// AAC packet padding can extend a nominally 30-second Remotion file by ~59ms.
-// Preserve the video bitstream and trim the audio/container to exactly 30s.
+// Preserve the video bitstream and re-mux to exactly 20 seconds.
 import { execFileSync } from "node:child_process";
 import { renameSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const output = `${root}out/amarcode-launch.mp4`;
-const temp = `${root}out/amarcode-launch-final.mp4`;
+const output = `${root}out/promo-launch.mp4`;
+const temp = `${root}out/promo-launch-final.mp4`;
 execFileSync(
   "ffmpeg",
   [
@@ -17,13 +16,10 @@ execFileSync(
     "-i",
     output,
     "-t",
-    "30",
+    "20",
     "-c:v",
     "copy",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "320k",
+    "-an",
     "-movflags",
     "+faststart",
     temp,
@@ -31,4 +27,4 @@ execFileSync(
   { stdio: "inherit" },
 );
 renameSync(temp, output);
-console.log("Finalized exact 30-second MP4 with streaming-friendly metadata.");
+console.log("Finalized exact 20-second MP4 with streaming-friendly metadata.");

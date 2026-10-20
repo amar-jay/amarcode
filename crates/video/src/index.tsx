@@ -1,15 +1,16 @@
 import { registerRoot, Composition } from "remotion";
-import { LaunchFilm } from "./LaunchFilm";
+import { PromoFilm } from "./PromoFilm";
+import { FPS, HEIGHT, TOTAL_FRAMES, WIDTH } from "./promo-state";
 import "./style.css";
 
 const Root = () => (
   <Composition
-    id="AmarcodeLaunch"
-    component={LaunchFilm}
-    durationInFrames={1800}
-    fps={60}
-    width={1920}
-    height={1080}
+    id="PromoLanding"
+    component={PromoFilm}
+    durationInFrames={TOTAL_FRAMES}
+    fps={FPS}
+    width={WIDTH}
+    height={HEIGHT}
   />
 );
 registerRoot(Root);

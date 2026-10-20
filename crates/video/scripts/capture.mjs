@@ -8,33 +8,30 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const target = `${root}public/walkthrough`;
 await mkdir(`${root}out/raw`, { recursive: true });
 await mkdir(target, { recursive: true });
+
 const server = spawn("bun", ["run", "dev"], {
   cwd: `${root}../application`,
   stdio: "ignore",
 });
+
 let browser;
 try {
-  for (let i = 0; i < 80; i++) {
+  for (let i = 0; i < 120; i++) {
     try {
       if ((await fetch("http://127.0.0.1:1420")).ok) break;
     } catch {}
     await new Promise((r) => setTimeout(r, 250));
   }
+
   browser = await chromium.launch({
     headless: true,
-    ...(process.env.CHROME_PATH
-      ? { executablePath: process.env.CHROME_PATH }
-      : {}),
+    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
     args: ["--no-sandbox"],
   });
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
     deviceScaleFactor: 1,
-    recordVideo: {
-      dir: `${root}out/raw`,
-      size: { width: 1920, height: 1080 },
-      fps: 60,
-    },
+    recordVideo: { dir: `${root}out/raw`, size: { width: 1920, height: 1080 }, fps: 60 },
   });
   await context.addInitScript(installDemoBridge);
   const page = await context.newPage();
@@ -43,11 +40,14 @@ try {
     errors.push(error.message);
     console.error(error.message);
   });
+
   await page.goto("http://127.0.0.1:1420");
-  await page.getByRole("button", { name: "Codex", exact: true }).waitFor();
+  // Wait for the home composer to settle (agents + chats loaded).
+  await page.getByText("Center the down icon").first().waitFor();
+
   const zoom = 1;
-  await page.evaluate((zoom) => {
-    document.documentElement.style.zoom = String(zoom);
+  await page.evaluate((z) => {
+    document.documentElement.style.zoom = String(z);
   }, zoom);
   await page.evaluate(() => document.fonts.ready);
   await page.evaluate(() => {
@@ -67,6 +67,7 @@ try {
   });
   await page.waitForTimeout(350);
   await page.evaluate(() => document.getElementById("video-sync").remove());
+
   const start = Date.now();
   const actions = [];
   const elapsed = () => Math.round((Date.now() - start) / 10) / 100;
@@ -77,8 +78,8 @@ try {
   async function move(locator) {
     const box = await locator.boundingBox();
     if (!box) throw new Error("Missing interaction target");
-    const x = box.x + box.width / 2,
-      y = box.y + box.height / 2;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
     await page.evaluate(
       async ({ x, y, zoom }) => {
         const el = document.getElementById("video-cursor");
@@ -88,8 +89,8 @@ try {
         const start = performance.now();
         await new Promise((resolve) => {
           const step = (now) => {
-            const t = Math.min((now - start) / 360, 1),
-              e = t * t * (3 - 2 * t);
+            const t = Math.min((now - start) / 360, 1);
+            const e = t * t * (3 - 2 * t);
             el.style.transform = `translate(${from.x + (x - from.x) * e}px,${from.y + (y - from.y) * e}px)`;
             if (t < 1) requestAnimationFrame(step);
             else resolve();
@@ -123,101 +124,84 @@ try {
   async function shot(name) {
     await page.screenshot({ path: `${target}/${name}.png` });
   }
-  await page.getByText("Center the down icon").first().waitFor();
-  await shot("start");
-  await at(0.6);
+
+  // 0-2s: open the saved conversation from the sidebar.
+  await at(0.5);
   await click(
     page.getByText("Center the down icon").first(),
     "open the conversation",
   );
-  await page.getByText("Reasoning").first().waitFor();
-  await at(3.2);
-  const history = page.getByText(/git log/).first();
-  await history.waitFor();
-  await click(history, "open git history");
-  await at(6.4);
-  await shot("history");
-  await at(7.2);
+  await page.getByRole("heading", { name: "Center the down icon" }).first().waitFor();
+  await at(2.0);
+  await shot("conversation");
+
+  // 2-4.8s: switch agent in the live composer (Codex -> Claude) and continue.
+  await at(2.2);
   await click(
-    page.getByRole("button", { name: "Codex", exact: true }),
-    "open subscribed agents",
+    page.locator("button", { hasText: "Codex" }).first(),
+    "open the agent picker",
   );
-  await at(8.6);
-  await shot("agents");
-  await click(page.getByRole("option", { name: /Claude/ }), "switch to Claude");
-  await at(9.4);
-  await type("Keep the icon centered and check the diff.");
-  await at(12.2);
+  await at(2.8);
+  await click(
+    page.locator('[data-slot="command-item"]', { hasText: "Claude" }).first(),
+    "switch to Claude",
+  );
+  await at(3.5);
+  await type("Add a subtle entrance.");
+  await at(4.8);
   await page.locator("textarea").last().press("Enter");
   actions.push({ time: elapsed(), action: "continue with Claude" });
-  await at(16.2);
+  await page.getByText("Added a subtle entrance", { exact: false }).first().waitFor();
+  await at(6.8);
   await shot("claude");
+
+  // 6.8-10.6s: open the workspace panel and review the diff.
+  await at(7.2);
   await click(
     page.getByRole("button", { name: "Open workspace panel" }),
     "open workspace",
   );
-  await at(16.4);
+  await at(7.8);
   await click(page.getByText("src", { exact: true }), "expand source folder");
-  await at(17.0);
+  await at(8.4);
   await click(
     page.getByText("components", { exact: true }),
     "expand components",
   );
-  await at(17.5);
+  await at(8.9);
   await click(
     page.getByText("cloud-hero.tsx", { exact: true }),
     "open edited component",
   );
-  await at(17.7);
+  await at(9.3);
   await click(
     page.getByRole("button", { name: "Show unstaged diff", exact: true }),
     "review diff",
   );
-  await at(19.6);
+  await at(10.2);
   await shot("diff");
-  await at(20.2);
-  await page.keyboard.press("Escape");
-  actions.push({ time: elapsed(), action: "close workspace" });
-  await at(20.8);
-  await click(
-    page.getByRole("button", { name: "New chat", exact: false }).first(),
-    "leave conversation",
-  );
-  await at(22.0);
-  await click(
-    page
-      .getByText("Center the down icon", { exact: true })
-      .first(),
-    "reopen saved conversation",
-  );
-  await at(24.4);
-  await shot("saved");
-  await at(30.4);
+  await at(10.4);
+
   const raw = await page.video().path();
   await context.close();
   if (errors.length) throw new Error(errors.join("\n"));
+
   const pixels = execFileSync(
     "ffmpeg",
     [
-      "-v",
-      "error",
-      "-i",
-      raw,
-      "-vf",
-      "fps=60,crop=2:2:14:14,scale=1:1",
-      "-pix_fmt",
-      "rgb24",
-      "-f",
-      "rawvideo",
+      "-v", "error",
+      "-i", raw,
+      "-vf", "fps=60,crop=2:2:14:14,scale=1:1",
+      "-pix_fmt", "rgb24",
+      "-f", "rawvideo",
       "pipe:1",
     ],
     { maxBuffer: 4 * 1024 * 1024 },
   );
-  let marker = false,
-    offset = null;
+  let marker = false;
+  let offset = null;
   for (let i = 0; i < pixels.length; i += 3) {
-    const magenta =
-      pixels[i] > 180 && pixels[i + 1] < 70 && pixels[i + 2] > 180;
+    const magenta = pixels[i] > 180 && pixels[i + 1] < 70 && pixels[i + 2] > 180;
     if (magenta) marker = true;
     else if (marker) {
       offset = i / 3 / 60;
@@ -228,29 +212,17 @@ try {
   execFileSync(
     "ffmpeg",
     [
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-y",
-      "-ss",
-      String(offset),
-      "-i",
-      raw,
-      "-t",
-      "30",
+      "-hide_banner", "-loglevel", "error", "-y",
+      "-ss", String(offset),
+      "-i", raw,
+      "-t", "10.5",
       "-an",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "fast",
-      "-crf",
-      "14",
-      "-pix_fmt",
-      "yuv420p",
-      "-r",
-      "60",
-      "-movflags",
-      "+faststart",
+      "-c:v", "libx264",
+      "-preset", "fast",
+      "-crf", "14",
+      "-pix_fmt", "yuv420p",
+      "-r", "60",
+      "-movflags", "+faststart",
       `${target}/app-walkthrough.mp4`,
     ],
     { stdio: "inherit" },
@@ -264,7 +236,7 @@ try {
         recording: { width: 1920, height: 1080 },
         browserZoom: zoom,
         fps: 60,
-        duration: 30,
+        duration: 10.5,
         fixture: "scripts/demo-bridge.mjs",
         recordingOffset: offset,
         actions,
@@ -274,7 +246,7 @@ try {
       2,
     ),
   );
-  console.log("Captured one continuous 30-second walkthrough.");
+  console.log("Captured a 20-second walkthrough.");
 } finally {
   await browser?.close();
   server.kill();
