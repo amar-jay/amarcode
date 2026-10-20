@@ -1,0 +1,83 @@
+{
+  "source": "crates/application",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "recording": {
+    "width": 1920,
+    "height": 1080
+  },
+  "browserZoom": 1,
+  "fps": 60,
+  "duration": 30,
+  "fixture": "scripts/demo-bridge.mjs",
+  "recordingOffset": 2.9,
+  "actions": [
+    {
+      "time": 1.12,
+      "action": "open subscribed agents"
+    },
+    {
+      "time": 2.66,
+      "action": "choose Codex"
+    },
+    {
+      "time": 3.2,
+      "action": "focus prompt"
+    },
+    {
+      "time": 4.77,
+      "action": "start with Codex"
+    },
+    {
+      "time": 5.28,
+      "action": "open git history"
+    },
+    {
+      "time": 9.45,
+      "action": "open agent picker mid-conversation"
+    },
+    {
+      "time": 11.48,
+      "action": "switch to Claude"
+    },
+    {
+      "time": 11.94,
+      "action": "focus prompt"
+    },
+    {
+      "time": 12.97,
+      "action": "continue with Claude"
+    },
+    {
+      "time": 16.19,
+      "action": "open workspace"
+    },
+    {
+      "time": 16.95,
+      "action": "expand source folder"
+    },
+    {
+      "time": 17.67,
+      "action": "open edited component"
+    },
+    {
+      "time": 18.46,
+      "action": "review diff"
+    },
+    {
+      "time": 20.24,
+      "action": "close workspace"
+    },
+    {
+      "time": 21.45,
+      "action": "leave conversation"
+    },
+    {
+      "time": 22.7,
+      "action": "reopen saved conversation"
+    }
+  ],
+  "errors": []
+}
