@@ -3,20 +3,6 @@
 </p>
 
 <h2 align="center">Amarcode</h2>
-
-<p align="center">
-  <em>Your coding conversations, carried across agents.</em>
-</p>
-
-<p align="center">
-  <a href="https://agentclientprotocol.com/"><img src="https://img.shields.io/badge/protocol-ACP-187A67?style=flat-square" alt="Agent Client Protocol"/></a>
-  <img src="https://img.shields.io/badge/ChatGPT-111111?style=flat-square" alt="ChatGPT"/>
-  <img src="https://img.shields.io/badge/Claude-D97706?style=flat-square" alt="Claude"/>
-  <img src="https://img.shields.io/badge/Grok-6B7280?style=flat-square" alt="Grok"/>
-  <img src="https://img.shields.io/badge/Antigravity-30294C?style=flat-square" alt="Antigravity"/>
-  <img src="https://img.shields.io/badge/Cursor-27221F?style=flat-square" alt="Cursor"/>
-</p>
-
 <br/>
 
 <p align="center">
