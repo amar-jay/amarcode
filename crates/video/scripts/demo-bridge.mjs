@@ -296,7 +296,7 @@ export function installDemoBridge() {
         };
       if (cmd === "list_workspace_files")
         return [
-          "src/CommandPalette.tsx",
+          "src/components/cloud-hero.tsx",
           "src/App.tsx",
           "src/theme.css",
           "src/commands.ts",
@@ -306,7 +306,7 @@ export function installDemoBridge() {
       if (cmd === "list_workspace_changes")
         return [
           {
-            path: "src/CommandPalette.tsx",
+            path: "src/components/cloud-hero.tsx",
             status: "M",
             staged: false,
             unstaged: true,
@@ -316,7 +316,7 @@ export function installDemoBridge() {
       if (cmd === "read_workspace_file") return after;
       if (cmd === "get_workspace_file_diff")
         return {
-          path: "src/CommandPalette.tsx",
+          path: "src/components/cloud-hero.tsx",
           status: "M",
           before,
           after,

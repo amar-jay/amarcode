@@ -12,70 +12,62 @@
   "fps": 60,
   "duration": 30,
   "fixture": "scripts/demo-bridge.mjs",
-  "recordingOffset": 2.9,
+  "recordingOffset": 5.383333333333334,
   "actions": [
     {
-      "time": 1.12,
-      "action": "open subscribed agents"
+      "time": 1.75,
+      "action": "open the conversation"
     },
     {
-      "time": 2.66,
-      "action": "choose Codex"
-    },
-    {
-      "time": 3.2,
-      "action": "focus prompt"
-    },
-    {
-      "time": 4.77,
-      "action": "start with Codex"
-    },
-    {
-      "time": 5.28,
+      "time": 3.81,
       "action": "open git history"
     },
     {
-      "time": 9.45,
-      "action": "open agent picker mid-conversation"
+      "time": 7.9,
+      "action": "open subscribed agents"
     },
     {
-      "time": 11.48,
+      "time": 9.77,
       "action": "switch to Claude"
     },
     {
-      "time": 11.94,
+      "time": 10.31,
       "action": "focus prompt"
     },
     {
-      "time": 12.97,
+      "time": 12.44,
       "action": "continue with Claude"
     },
     {
-      "time": 16.19,
+      "time": 17.09,
       "action": "open workspace"
     },
     {
-      "time": 16.95,
+      "time": 17.64,
       "action": "expand source folder"
     },
     {
-      "time": 17.67,
+      "time": 18.14,
+      "action": "expand components"
+    },
+    {
+      "time": 18.88,
       "action": "open edited component"
     },
     {
-      "time": 18.46,
+      "time": 19.69,
       "action": "review diff"
     },
     {
-      "time": 20.24,
+      "time": 20.28,
       "action": "close workspace"
     },
     {
-      "time": 21.45,
+      "time": 21.43,
       "action": "leave conversation"
     },
     {
-      "time": 22.7,
+      "time": 22.78,
       "action": "reopen saved conversation"
     }
   ],

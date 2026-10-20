@@ -1,3 +1,4 @@
+import { Provider, useAtomValue } from "jotai";
 import { useEffect, useState } from "react";
 import {
   AbsoluteFill,
@@ -11,6 +12,7 @@ import {
   staticFile,
   useCurrentFrame,
 } from "remotion";
+import { captionsAtom, splashAtAtom } from "./film-state";
 
 // Tokens and type taken directly from crates/landing/src/index.css.
 const C = {
@@ -28,17 +30,15 @@ const ease = Easing.bezier(0.4, 0, 0.2, 1);
 const times = [0, 3, 8, 12, 16, 22, 26.2, 30].map((t) => t * 60);
 const zooms = [1.02, 1.06, 1.08, 1.05, 1.04, 1.08, 1.02, 1.02];
 const pans = [0, -20, -10, 0, 0, 16, 0, 0];
-const captions = [
-  { from: 0.4, to: 2.6, text: "Several agents. The subscriptions you already use." },
-  { from: 3.2, to: 6.2, text: "Start the work with any of them." },
-  { from: 6.6, to: 8.8, text: "Git history stays in the conversation." },
-  { from: 9.0, to: 12.0, text: "Switch agents in the middle of the chat." },
-  { from: 12.4, to: 15.4, text: "The next agent already has the context." },
-  { from: 16.0, to: 22.6, text: "Review the files and the diff beside the chat." },
-  { from: 23.2, to: 26.0, text: "Leave, and the same conversation is still here." },
-];
-
 export function LaunchFilm() {
+  return (
+    <Provider>
+      <Film />
+    </Provider>
+  );
+}
+
+function Film() {
   const f = useCurrentFrame();
   const [handle] = useState(() => delayRender("Load landing-page typography"));
   useEffect(() => {
@@ -50,7 +50,9 @@ export function LaunchFilm() {
   }, [handle]);
   const scale = interpolate(f, times, zooms, { ...clamp, easing: ease });
   const pan = interpolate(f, times, pans, { ...clamp, easing: ease });
-  const splash = interpolate(f, [26.3 * 60, 27.1 * 60], [0, 1], {
+  const captions = useAtomValue(captionsAtom);
+  const splashAt = useAtomValue(splashAtAtom);
+  const splash = interpolate(f, [splashAt * 60, (splashAt + 0.8) * 60], [0, 1], {
     ...clamp,
     easing: ease,
   });
@@ -100,19 +102,11 @@ export function LaunchFilm() {
           return (
             <div
               key={c.from}
+              className="absolute bottom-8 left-9 max-w-[920px] border px-5 py-3.5 text-[34px] leading-tight font-normal tracking-tight"
               style={{
-                position: "absolute",
-                left: 36,
-                bottom: 32,
-                maxWidth: 920,
-                padding: "14px 22px",
                 background: "#fafaf6ee",
-                border: `1px solid ${C.rule}`,
+                borderColor: C.rule,
                 color: C.ink,
-                fontSize: 34,
-                fontWeight: 400,
-                letterSpacing: -0.6,
-                lineHeight: 1.15,
                 opacity: enter * leave,
                 transform: `translateY(${(1 - enter) * 8}px)`,
               }}

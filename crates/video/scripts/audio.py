@@ -9,46 +9,32 @@ rng = np.random.default_rng(23)
 n = SR * DURATION
 t = np.arange(n) / SR
 
-def place(signal,start,pan=0):
-    offset=int(start*SR); n=min(len(signal),len(t)-offset)
-    if offset<0 or n<=0:return
-    mix[offset:offset+n,0]+=signal[:n]*np.sqrt((1-pan)/2)
-    mix[offset:offset+n,1]+=signal[:n]*np.sqrt((1+pan)/2)
-
-def note(freq,duration,gain=.03):
-    x=np.arange(int(SR*duration))/SR
-    env=(1-np.exp(-x/.008))*np.exp(-x/1.0)*np.minimum((duration-x)/.15,1)
-    return gain*env*(np.sin(2*np.pi*freq*x)+.16*np.sin(2*np.pi*2*freq*x)*np.exp(-x*4))
-
-# Warm major-ninth harmony; no impacts or slide-transition swooshes.
-for channel,detune in enumerate([.999,1.001]):
-    pad=sum(np.sin(2*np.pi*freq*detune*t+i*.6)/(i+2) for i,freq in enumerate([130.81,196,246.94,293.66,329.63]))
-    env=np.minimum(t/2,1)*np.minimum((30-t)/2,1)
-    mix[:,channel]+=pad*.035*env
-for beat in range(48):
-    at=.5+beat*.6
-    if at>28:break
-    freq=[523.25,659.25,783.99,587.33,659.25,987.77,783.99,659.25][beat%8]
-    place(note(freq,2.0,.035),at,(-.3 if beat%2 else .3))
-    if beat%2==0:
-        x=np.arange(int(SR*.22))/SR
-        place(np.sin(2*np.pi*(62*x+1.2*(1-np.exp(-x*30))))*np.exp(-x*26)*.07,at)
-# Soft pointer clicks synchronized to recorded actions.
-manifest=Path(__file__).resolve().parent.parent/'public/walkthrough/manifest.json'
-for action in json.loads(manifest.read_text())['actions']:
-    if action['action']=='focus prompt':continue
-    x=np.arange(int(SR*.035))/SR
-    place((rng.normal(0,1,len(x))*.5+np.sin(x*2*np.pi*1700)) * np.exp(-x*210)*.022,action['time'])
-for start,text in [(2.86,'Build a command palette for Orbit.'),(8.74,'Add a subtle entrance.'),(14.74,'Respect reduced motion, too.')]:
-    for i in range(len(text)):
-        x=np.arange(int(SR*.018))/SR
-        place(rng.normal(0,1,len(x))*np.exp(-x*300)*.005,start+.024*i,-.1)
-place(note(523.25,3.7,.035),26.2)
-place(note(659.25,3.7,.025),26.2,.2)
-place(note(783.99,3.7,.02),26.2,-.2)
-mix*=np.clip(t/.15,0,1)[:,None]*np.clip((30-t)/1.1,0,1)[:,None]
-mix=np.tanh(mix*1.3)
-mix*=.65/max(np.max(np.abs(mix)),.001)
+white = rng.normal(0, 1, n)
+kernel = np.exp(-np.arange(1800) / 420)
+stream = np.convolve(white, kernel, mode="same")
+stream /= np.max(np.abs(stream))
+wind = np.convolve(rng.normal(0, 1, n), np.exp(-np.arange(8000) / 2400), mode="same")
+wind /= np.max(np.abs(wind))
+gust = 0.65 + 0.35 * np.sin(2 * np.pi * 0.07 * t + 0.4)
+mix = np.zeros((n, 2))
+bed = (stream * 0.55 + wind * gust * 0.28) * 0.11
+mix[:, 0] += bed * 0.92
+mix[:, 1] += bed * 1.0
+for start, freq, pan in (
+    (4.2, 2480, -0.35),
+    (11.6, 2760, 0.4),
+    (18.4, 2320, -0.15),
+    (23.8, 3010, 0.25),
+):
+    x = np.arange(int(SR * 0.22)) / SR
+    chirp = np.sin(2 * np.pi * freq * x * (1 + 0.04 * x)) * np.exp(-x * 14) * 0.035
+    offset = int(start * SR)
+    mix[offset : offset + len(chirp), 0] += chirp * (0.5 - pan / 2)
+    mix[offset : offset + len(chirp), 1] += chirp * (0.5 + pan / 2)
+fade = np.clip(t / 0.8, 0, 1) * np.clip((DURATION - t) / 1.2, 0, 1)
+mix *= fade[:, None]
+peak = np.max(np.abs(mix))
+mix *= 0.22 / max(peak, 1e-6)
 output=Path(__file__).resolve().parent.parent/'public/audio/score.wav'
 with wave.open(str(output),'wb') as f:
     f.setnchannels(2);f.setsampwidth(2);f.setframerate(SR);f.writeframes((mix*32767).astype('<i2').tobytes())

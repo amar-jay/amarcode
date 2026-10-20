@@ -160,7 +160,12 @@ try {
   await click(page.getByText("src", { exact: true }), "expand source folder");
   await at(17.0);
   await click(
-    page.getByText("CommandPalette.tsx", { exact: true }),
+    page.getByText("components", { exact: true }),
+    "expand components",
+  );
+  await at(17.5);
+  await click(
+    page.getByText("cloud-hero.tsx", { exact: true }),
     "open edited component",
   );
   await at(17.7);
@@ -181,7 +186,7 @@ try {
   await at(22.0);
   await click(
     page
-      .getByText("Build a command palette for Orbit.", { exact: true })
+      .getByText("Center the down icon", { exact: true })
       .first(),
     "reopen saved conversation",
   );
