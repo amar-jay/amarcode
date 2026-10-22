@@ -2,7 +2,6 @@
 //! communication and service lifecycle live in `daemon/`.
 
 mod app_update;
-mod clipboard_files;
 mod commands;
 mod config;
 mod daemon;
@@ -29,7 +28,7 @@ pub fn run() {
             commands::application::app_install_update,
             commands::application::prepare_application_uninstall,
             commands::application::exit_application,
-            commands::application::read_pasted_files,
+            commands::clipboard::read_pasted_files,
             commands::daemon::daemon_bootstrap,
             commands::daemon::daemon_install,
             commands::daemon::daemon_check_update,

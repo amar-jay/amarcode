@@ -1,10 +1,12 @@
 //! IPC boundary: preserve frontend command names and arguments, adapt them to
 //! shared daemon requests or native desktop services, and report channel status.
-//! Domain behavior and transport framing belong outside this module.
+//! Daemon domain behavior and transport framing belong outside this module.
+//! Native clipboard commands keep their private helpers within their domain.
 
 pub mod agents;
 pub mod application;
 pub mod chats;
+pub mod clipboard;
 pub mod daemon;
 pub mod events;
 pub mod sessions;

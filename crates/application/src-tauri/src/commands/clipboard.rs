@@ -1,5 +1,5 @@
-//! Native clipboard access and image encoding. Call only on a blocking worker:
-//! raw screenshot pixels stay here; the webview receives compressed images.
+//! Clipboard command and native image helpers. Blocking work stays off the UI
+//! and async runtime workers; the webview receives compressed images.
 
 use std::{
     fs::File,
@@ -30,7 +30,14 @@ struct PastedImage {
     data: String,
 }
 
-pub fn read_pasted_files(paths: Vec<String>) -> Result<PastedFiles, String> {
+#[tauri::command]
+pub async fn read_pasted_files(paths: Vec<String>) -> Result<PastedFiles, String> {
+    tauri::async_runtime::spawn_blocking(move || read_pasted_files_inner(paths))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn read_pasted_files_inner(paths: Vec<String>) -> Result<PastedFiles, String> {
     if !paths.is_empty() {
         return Ok(load_images(paths.into_iter().map(PathBuf::from).collect()));
     }

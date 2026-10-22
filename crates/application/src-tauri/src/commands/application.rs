@@ -1,7 +1,7 @@
 //! Tauri IPC adapters for application operations.
 use super::report_failure;
+use crate::app_update;
 use crate::daemon;
-use crate::{app_update, clipboard_files};
 use tauri::{ipc::Channel, AppHandle, State};
 
 #[tauri::command]
@@ -38,13 +38,4 @@ pub async fn prepare_application_uninstall(
 #[tauri::command]
 pub fn exit_application(app: AppHandle) {
     app.exit(0);
-}
-
-#[tauri::command]
-pub async fn read_pasted_files(paths: Vec<String>) -> Result<clipboard_files::PastedFiles, String> {
-    // Native clipboard reads, file I/O, and screenshot PNG encoding all stay
-    // off the UI and async runtime workers, using a single clipboard handle.
-    tauri::async_runtime::spawn_blocking(move || clipboard_files::read_pasted_files(paths))
-        .await
-        .map_err(|error| error.to_string())?
 }
