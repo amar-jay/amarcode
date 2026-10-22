@@ -299,3 +299,30 @@ pub enum GetChatResult {
     Detail(ChatDetail),
     Chat(Chat),
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceInfo {
+    pub display_name: String,
+    pub is_git_repository: bool,
+    pub branch_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChange {
+    pub path: String,
+    pub status: String,
+    pub staged: bool,
+    pub unstaged: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDiff {
+    pub path: String,
+    pub status: String,
+    pub before: String,
+    pub after: String,
+    pub comparison: String,
+}

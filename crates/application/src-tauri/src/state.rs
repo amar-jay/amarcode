@@ -4,6 +4,11 @@
 //! model.  Tauri commands should delegate here; no command may invent an RPC
 //! method or change a daemon parameter name.
 
+use amarcode_protocol::rpc::{
+    CommitWorkspaceChangesParams, GetWorkspaceFileDiffParams, ListWorkspaceFilesParams,
+    SaveWorkspaceFileParams, WorkspaceFileParams, WorkspaceParams,
+};
+use amarcode_protocol::{WorkspaceChange, WorkspaceDiff, WorkspaceInfo};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -27,6 +32,157 @@ pub struct AppState {}
 impl AppState {
     pub fn new() -> Self {
         Self {}
+    }
+
+    pub async fn list_workspace_files(
+        &self,
+        workspace_path: String,
+        query: Option<String>,
+    ) -> Result<Vec<String>, String> {
+        self.call(
+            methods::LIST_WORKSPACE_FILES,
+            serde_json::to_value(ListWorkspaceFilesParams {
+                workspace_path,
+                query,
+            })
+            .map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
+    pub async fn get_workspace_info(
+        &self,
+        workspace_path: String,
+    ) -> Result<WorkspaceInfo, String> {
+        self.call(
+            methods::GET_WORKSPACE_INFO,
+            serde_json::to_value(WorkspaceParams { workspace_path })
+                .map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
+    pub async fn list_workspace_changes(
+        &self,
+        workspace_path: String,
+    ) -> Result<Vec<WorkspaceChange>, String> {
+        self.call(
+            methods::LIST_WORKSPACE_CHANGES,
+            serde_json::to_value(WorkspaceParams { workspace_path })
+                .map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
+    pub async fn stage_workspace_file(
+        &self,
+        workspace_path: String,
+        relative_path: String,
+    ) -> Result<(), String> {
+        self.call(
+            methods::STAGE_WORKSPACE_FILE,
+            serde_json::to_value(WorkspaceFileParams {
+                workspace_path,
+                relative_path,
+            })
+            .map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
+    pub async fn unstage_workspace_file(
+        &self,
+        workspace_path: String,
+        relative_path: String,
+    ) -> Result<(), String> {
+        self.call(
+            methods::UNSTAGE_WORKSPACE_FILE,
+            serde_json::to_value(WorkspaceFileParams {
+                workspace_path,
+                relative_path,
+            })
+            .map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
+    pub async fn stage_all_workspace_files(&self, workspace_path: String) -> Result<(), String> {
+        self.call(
+            methods::STAGE_ALL_WORKSPACE_FILES,
+            serde_json::to_value(WorkspaceParams { workspace_path })
+                .map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
+    pub async fn commit_workspace_changes(
+        &self,
+        workspace_path: String,
+        message: String,
+    ) -> Result<(), String> {
+        self.call(
+            methods::COMMIT_WORKSPACE_CHANGES,
+            serde_json::to_value(CommitWorkspaceChangesParams {
+                workspace_path,
+                message,
+            })
+            .map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
+    pub async fn get_workspace_file_diff(
+        &self,
+        workspace_path: String,
+        relative_path: String,
+        staged: Option<bool>,
+    ) -> Result<WorkspaceDiff, String> {
+        self.call(
+            methods::GET_WORKSPACE_FILE_DIFF,
+            serde_json::to_value(GetWorkspaceFileDiffParams {
+                workspace_path,
+                relative_path,
+                staged,
+            })
+            .map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
+    pub async fn read_workspace_file(
+        &self,
+        workspace_path: String,
+        relative_path: String,
+    ) -> Result<String, String> {
+        self.call(
+            methods::READ_WORKSPACE_FILE,
+            serde_json::to_value(WorkspaceFileParams {
+                workspace_path,
+                relative_path,
+            })
+            .map_err(|error| error.to_string())?,
+        )
+        .await
+    }
+
+    pub async fn save_workspace_file(
+        &self,
+        workspace_path: String,
+        relative_path: String,
+        expected_content: String,
+        content: String,
+    ) -> Result<(), String> {
+        self.call(
+            methods::SAVE_WORKSPACE_FILE,
+            serde_json::to_value(SaveWorkspaceFileParams {
+                workspace_path,
+                relative_path,
+                expected_content,
+                content,
+            })
+            .map_err(|error| error.to_string())?,
+        )
+        .await
     }
 
     pub async fn discover_commands(

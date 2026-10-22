@@ -38,6 +38,20 @@ pub enum DispatchOutcome {
 /// Dispatch one RPC method against shared app state.
 pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<DispatchOutcome> {
     match method {
+        // Filesystem and Git operations share this path across TCP and WS.
+        methods::LIST_WORKSPACE_FILES
+        | methods::GET_WORKSPACE_INFO
+        | methods::LIST_WORKSPACE_CHANGES
+        | methods::STAGE_WORKSPACE_FILE
+        | methods::UNSTAGE_WORKSPACE_FILE
+        | methods::STAGE_ALL_WORKSPACE_FILES
+        | methods::COMMIT_WORKSPACE_CHANGES
+        | methods::GET_WORKSPACE_FILE_DIFF
+        | methods::READ_WORKSPACE_FILE
+        | methods::SAVE_WORKSPACE_FILE => super::workspace::dispatch(method.to_owned(), params)
+            .await
+            .map(DispatchOutcome::Result),
+
         // meta
         methods::HEALTH => Ok(DispatchOutcome::Result(health(app)?)),
         methods::VERSION => Ok(DispatchOutcome::Result(version()?)),

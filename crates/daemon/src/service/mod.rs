@@ -24,6 +24,7 @@ pub mod attachments;
 pub mod chat_manager;
 pub mod session;
 pub mod transcription;
+pub mod workspace;
 
 pub use agent_manager::{AgentManager, ResolvedAgent};
 pub use chat_manager::{ChatDetail, ChatManager, MessageDetail};

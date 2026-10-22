@@ -1,6 +1,6 @@
 use std::{fs, io::Write, path::Path, sync::Mutex};
 
-// Serialize this application's read/check/replace saves.
+// Serialize read/check/replace saves from every daemon client.
 static SAVE_LOCK: Mutex<()> = Mutex::new(());
 const MAX_BYTES: usize = 1_000_000;
 
@@ -27,17 +27,12 @@ fn read_text(path: &Path) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "Only UTF-8 text files can be edited.".into())
 }
 
-#[tauri::command]
-pub async fn read_workspace_file(
+pub fn read_workspace_file(
     workspace_path: String,
     relative_path: String,
 ) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = super::workspace_relative_path(Path::new(&workspace_path), &relative_path)?;
-        read_text(&path)
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    let path = super::workspace_relative_path(Path::new(&workspace_path), &relative_path)?;
+    read_text(&path)
 }
 
 fn save(root: &Path, relative_path: &str, expected: &str, content: &str) -> Result<(), String> {
@@ -84,23 +79,18 @@ fn save(root: &Path, relative_path: &str, expected: &str, content: &str) -> Resu
     result
 }
 
-#[tauri::command]
-pub async fn save_workspace_file(
+pub fn save_workspace_file(
     workspace_path: String,
     relative_path: String,
     expected_content: String,
     content: String,
 ) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        save(
-            Path::new(&workspace_path),
-            &relative_path,
-            &expected_content,
-            &content,
-        )
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    save(
+        Path::new(&workspace_path),
+        &relative_path,
+        &expected_content,
+        &content,
+    )
 }
 
 #[cfg(test)]

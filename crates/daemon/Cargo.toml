@@ -21,6 +21,7 @@ clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"
 ed25519-dalek = "2"
 hex = "0.4"
+ignore = "0.4"
 futures-util = { version = "0.3", features = ["sink"] }
 tokio-tungstenite = "0.28"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

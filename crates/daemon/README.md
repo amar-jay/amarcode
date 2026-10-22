@@ -79,6 +79,37 @@ manifest must still be signed by the release key compiled into the daemon.
 The daemon is the **system of record** for chats, messages, runs, and agents.
 The UI is a client: it does not own the agent process or the SQLite file.
 
+Workspace operations also belong to the daemon. `service/workspace.rs` owns
+file discovery, workspace/Git metadata, status, staging, commits, and diffs;
+`service/workspace/editor.rs` owns text reads and conflict-checked saves.
+The desktop's workspace commands only forward RPC through `AppState`.
+The native folder picker remains a desktop concern.
+
+The following methods are available over both TCP and WebSocket, without a
+desktop process. Every path is interpreted on the **daemon host**. Request
+types live in `amarcode-protocol::rpc`, and workspace result types are generated
+into the frontend contract alongside the other shared types.
+
+| Methods | Parameters |
+| --- | --- |
+| `list_workspace_files` | `workspace_path`, optional `query` |
+| `get_workspace_info`, `list_workspace_changes`, `stage_all_workspace_files` | `workspace_path` |
+| `read_workspace_file`, `stage_workspace_file`, `unstage_workspace_file` | `workspace_path`, `relative_path` |
+| `get_workspace_file_diff` | `workspace_path`, `relative_path`, optional `staged` |
+| `save_workspace_file` | `workspace_path`, `relative_path`, `expected_content`, `content` |
+| `commit_workspace_changes` | `workspace_path`, `message` |
+
+Workspace RPC runs filesystem and Git work on Tokio's blocking pool. File
+operations enforce workspace containment, including symlinks. Text editing
+retains the 1 MB/UTF-8 limit and rejects stale `expected_content`; saves from
+all clients share the daemon's save lock. Staging accepts deleted paths and
+treats individual filenames as literal Git pathspecs. `staged: true` compares
+HEAD to the index; `false` compares the index to the working tree. Omitting it
+prefers the unstaged comparison when a file has both kinds of changes.
+
+These methods require protocol version 12. The desktop and daemon must be
+upgraded together; the desktop rejects older protocol versions at bootstrap.
+
 ---
 
 ## Architecture (layers)

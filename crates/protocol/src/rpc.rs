@@ -8,6 +8,16 @@ use crate::{
 };
 
 pub mod methods {
+    pub const LIST_WORKSPACE_FILES: &str = "list_workspace_files";
+    pub const GET_WORKSPACE_INFO: &str = "get_workspace_info";
+    pub const LIST_WORKSPACE_CHANGES: &str = "list_workspace_changes";
+    pub const STAGE_WORKSPACE_FILE: &str = "stage_workspace_file";
+    pub const UNSTAGE_WORKSPACE_FILE: &str = "unstage_workspace_file";
+    pub const STAGE_ALL_WORKSPACE_FILES: &str = "stage_all_workspace_files";
+    pub const COMMIT_WORKSPACE_CHANGES: &str = "commit_workspace_changes";
+    pub const GET_WORKSPACE_FILE_DIFF: &str = "get_workspace_file_diff";
+    pub const READ_WORKSPACE_FILE: &str = "read_workspace_file";
+    pub const SAVE_WORKSPACE_FILE: &str = "save_workspace_file";
     pub const HEALTH: &str = "health";
     pub const VERSION: &str = "version";
     pub const SUBSCRIBE_EVENTS: &str = "subscribe_events";
@@ -354,4 +364,44 @@ pub struct RespondAgentResult {
 pub struct DiscoverCommandsParams {
     pub chat_id: String,
     pub agent_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ListWorkspaceFilesParams {
+    pub workspace_path: String,
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkspaceParams {
+    pub workspace_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkspaceFileParams {
+    pub workspace_path: String,
+    pub relative_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct CommitWorkspaceChangesParams {
+    pub workspace_path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GetWorkspaceFileDiffParams {
+    pub workspace_path: String,
+    pub relative_path: String,
+    #[serde(default)]
+    pub staged: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SaveWorkspaceFileParams {
+    pub workspace_path: String,
+    pub relative_path: String,
+    pub expected_content: String,
+    pub content: String,
 }

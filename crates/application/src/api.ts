@@ -1,6 +1,9 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AgentInfo,
+  WorkspaceInfo,
+  WorkspaceChange,
+  WorkspaceDiff,
   AcpEvent,
   AgentRun,
   AgentResponse,
@@ -91,26 +94,7 @@ export interface ApplicationCleanupResult {
   daemonReleaseCacheRemoved: boolean;
 }
 
-export interface WorkspaceInfo {
-  displayName: string;
-  isGitRepository: boolean;
-  branchName: string | null;
-}
-
-export interface WorkspaceChange {
-  path: string;
-  status: string;
-  staged: boolean;
-  unstaged: boolean;
-}
-
-export interface WorkspaceDiff {
-  path: string;
-  status: string;
-  before: string;
-  after: string;
-  comparison: string;
-}
+export type { WorkspaceInfo, WorkspaceChange, WorkspaceDiff } from "./types";
 
 /**
  * Typed bindings for the daemon-backed Tauri commands.

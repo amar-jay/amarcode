@@ -10,11 +10,12 @@ pub use types::{
     AgentRuntimeStatus, AvailableCommand, AvailableCommandInput, Chat, ChatDetail, ContextCost,
     ContextUsage, GetChatResult, Message, MessageDetail, MessagePart, MessagePartKind, MessageRole,
     MessageStatus, RunStatus, SessionCommands, SessionConfigAssignment, SessionConfigOption,
-    SessionConfigSelectChoice, SessionConfigValue, TurnStatus,
+    SessionConfigSelectChoice, SessionConfigValue, TurnStatus, WorkspaceChange, WorkspaceDiff,
+    WorkspaceInfo,
 };
 
 /// Increment when a wire change is not backward compatible.
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// Deterministic checked-in TypeScript contract consumed by the React app.
 pub fn typescript_bindings() -> String {
@@ -22,6 +23,15 @@ pub fn typescript_bindings() -> String {
 
     let config = ts_rs::Config::default();
     let declarations = [
+        WorkspaceInfo::decl(&config),
+        WorkspaceChange::decl(&config),
+        WorkspaceDiff::decl(&config),
+        rpc::ListWorkspaceFilesParams::decl(&config),
+        rpc::WorkspaceParams::decl(&config),
+        rpc::WorkspaceFileParams::decl(&config),
+        rpc::CommitWorkspaceChangesParams::decl(&config),
+        rpc::GetWorkspaceFileDiffParams::decl(&config),
+        rpc::SaveWorkspaceFileParams::decl(&config),
         RunStatus::decl(&config),
         TurnStatus::decl(&config),
         MessageRole::decl(&config),
