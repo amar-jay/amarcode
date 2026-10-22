@@ -78,9 +78,8 @@ describe("clipboard attachments", () => {
       ],
       fallback_paths: [],
     });
-    const screenshot = vi.fn();
     const paths = pathsFor({ "text/plain": "/tmp/a photo.png" });
-    const result = await readClipboardAttachments(paths, screenshot);
+    const result = await readClipboardAttachments(paths);
     expect(invoke).toHaveBeenCalledWith("read_pasted_files", { paths });
     expect(result.files[0].name).toBe("a photo.png");
     expect(result.files[0].type).toBe("image/png");
@@ -88,7 +87,6 @@ describe("clipboard attachments", () => {
       137, 80, 78, 71, 13, 10, 26, 10,
     ]);
     expect(result.fallbackPaths).toEqual([]);
-    expect(screenshot).not.toHaveBeenCalled();
   });
 
   it("reads native file lists even when the webview exposes no clipboard payload", async () => {
@@ -96,33 +94,49 @@ describe("clipboard attachments", () => {
       images: [],
       fallback_paths: ["/tmp/unsupported.bmp"],
     });
-    const screenshot = vi.fn();
-    expect(await readClipboardAttachments([], screenshot)).toEqual({
+    expect(await readClipboardAttachments([])).toEqual({
       files: [],
       fallbackPaths: ["/tmp/unsupported.bmp"],
     });
-    expect(screenshot).not.toHaveBeenCalled();
   });
 
   it("retains paths if the native file reader fails", async () => {
     vi.mocked(invoke).mockRejectedValue("unavailable");
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const screenshot = vi.fn();
-    const result = await readClipboardAttachments(
-      ["/tmp/missing.png"],
-      screenshot,
-    );
+    const result = await readClipboardAttachments(["/tmp/missing.png"]);
     expect(result).toEqual({ files: [], fallbackPaths: ["/tmp/missing.png"] });
-    expect(screenshot).not.toHaveBeenCalled();
     warning.mockRestore();
   });
 
-  it("still attaches screenshots when there are no copied files", async () => {
+  it("attaches a screenshot encoded by the native worker", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      images: [
+        {
+          filename: "clipboard.png",
+          media_type: "image/png",
+          data: "iVBORw0KGgo=",
+        },
+      ],
+      fallback_paths: [],
+    });
+    const result = await readClipboardAttachments([]);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("read_pasted_files", {
+      paths: [],
+    });
+    expect(result.files[0].name).toBe("clipboard.png");
+    expect(result.files[0].type).toBe("image/png");
+    expect([...new Uint8Array(await result.files[0].arrayBuffer())]).toEqual([
+      137, 80, 78, 71, 13, 10, 26, 10,
+    ]);
+    expect(result.fallbackPaths).toEqual([]);
+  });
+
+  it("returns no attachments for an empty clipboard", async () => {
     vi.mocked(invoke).mockResolvedValue({ images: [], fallback_paths: [] });
-    const file = new File(["pixels"], "screenshot.png", { type: "image/png" });
-    expect(await readClipboardAttachments([], async () => file)).toEqual({
-      files: [file],
+    expect(await readClipboardAttachments([])).toEqual({
+      files: [],
       fallbackPaths: [],
     });
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 });

@@ -91,6 +91,7 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
  "hex",
+ "image",
  "reqwest",
  "semver",
  "serde",
@@ -98,7 +99,6 @@ dependencies = [
  "sha2",
  "tauri",
  "tauri-build",
- "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
@@ -4795,21 +4795,6 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
-]
-
-[[package]]
-name = "tauri-plugin-clipboard-manager"
-version = "2.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "206dc20af4ed210748ba945c2774e60fd0acd52b9a73a028402caf809e9b6ecf"
-dependencies = [
- "arboard",
- "log",
- "serde",
- "serde_json",
- "tauri",
- "tauri-plugin",
- "thiserror 2.0.19",
 ]
 
 [[package]]

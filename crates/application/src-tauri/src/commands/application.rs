@@ -42,6 +42,8 @@ pub fn exit_application(app: AppHandle) {
 
 #[tauri::command]
 pub async fn read_pasted_files(paths: Vec<String>) -> Result<clipboard_files::PastedFiles, String> {
+    // Native clipboard reads, file I/O, and screenshot PNG encoding all stay
+    // off the UI and async runtime workers, using a single clipboard handle.
     tauri::async_runtime::spawn_blocking(move || clipboard_files::read_pasted_files(paths))
         .await
         .map_err(|error| error.to_string())?

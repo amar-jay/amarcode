@@ -57,29 +57,30 @@ type PastedFiles = {
 
 export type ClipboardAttachments = { files: File[]; fallbackPaths: string[] };
 
-/** Read copied files first, then fall back to the existing screenshot reader. */
+/** Native clipboard access and PNG encoding run in one Rust blocking task. */
 export async function readClipboardAttachments(
   paths: string[],
-  readImage: () => Promise<File | null>,
 ): Promise<ClipboardAttachments> {
   try {
     const result = await invoke<PastedFiles>("read_pasted_files", { paths });
-    if (result.images.length || result.fallback_paths.length) {
-      return {
-        files: result.images.map((image) => {
-          const bytes = Uint8Array.from(atob(image.data), (char) =>
-            char.charCodeAt(0),
+    return {
+      files: await Promise.all(
+        result.images.map(async (image) => {
+          // Let the browser decode compressed bytes without a per-byte JS loop
+          // or transferring uncompressed screenshot pixels across IPC.
+          const response = await fetch(
+            `data:${image.media_type};base64,${image.data}`,
           );
-          return new File([bytes], image.filename, { type: image.media_type });
+          return new File([await response.blob()], image.filename, {
+            type: image.media_type,
+          });
         }),
-        fallbackPaths: result.fallback_paths,
-      };
-    }
+      ),
+      fallbackPaths: result.fallback_paths,
+    };
   } catch (error) {
     console.warn("Unable to read copied files from the clipboard:", error);
   }
 
-  if (paths.length) return { files: [], fallbackPaths: paths };
-  const image = await readImage();
-  return { files: image ? [image] : [], fallbackPaths: [] };
+  return { files: [], fallbackPaths: paths };
 }
