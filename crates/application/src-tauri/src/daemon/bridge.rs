@@ -1,7 +1,8 @@
 use std::time::Duration;
 
-use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use amarcode_protocol::rpc::{methods, SubscribeEventsParams};
+use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
     net::{
@@ -24,6 +25,21 @@ pub struct EventSubscription {
     // Keep the write side open: the daemon uses client disconnect to terminate
     // its event-stream loop.
     _writer: OwnedWriteHalf,
+}
+
+/// The only request-serialization boundary. Callers supply shared parameter
+/// types; the transport supplies the common JSON-line envelope.
+fn encode_request(method: &str, params: impl Serialize) -> Result<String, String> {
+    #[derive(Serialize)]
+    struct Request<'a, P> {
+        method: &'a str,
+        params: P,
+    }
+
+    let mut line =
+        serde_json::to_string(&Request { method, params }).map_err(|error| error.to_string())?;
+    line.push('\n');
+    Ok(line)
 }
 
 impl DaemonBridge {
@@ -71,14 +87,11 @@ impl DaemonBridge {
     }
 
     /// Opens a distinct event-stream connection and verifies its acknowledgement.
-    pub async fn subscribe(params: Value) -> Result<EventSubscription, String> {
+    pub async fn subscribe(params: SubscribeEventsParams) -> Result<EventSubscription, String> {
         let stream = Self::connect().await?;
         let (read_half, mut writer) = stream.into_split();
         let mut reader = BufReader::new(read_half).lines();
-        let request = format!(
-            "{}\n",
-            json!({ "method": crate::protocol::rpc::methods::SUBSCRIBE_EVENTS, "params": params })
-        );
+        let request = encode_request(methods::SUBSCRIBE_EVENTS, params)?;
         writer
             .write_all(request.as_bytes())
             .await
@@ -111,10 +124,10 @@ impl DaemonBridge {
     pub async fn call<T: DeserializeOwned>(
         &mut self,
         method: &str,
-        params: Value,
+        params: impl Serialize,
     ) -> Result<T, String> {
         self.ensure_connected().await?;
-        let request = format!("{}\n", json!({ "method": method, "params": params }));
+        let request = encode_request(method, params)?;
 
         self.writer
             .as_mut()

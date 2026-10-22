@@ -9,6 +9,7 @@ use std::{
 #[cfg(unix)]
 use std::ffi::OsString;
 
+use amarcode_protocol::rpc::HealthResult;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, AppHandle, Manager};
@@ -16,8 +17,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::{
     config::Config,
-    daemon::{release, DaemonBridge},
-    protocol::rpc::{methods, HealthResult},
+    daemon::{release, DaemonClient},
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -161,7 +161,7 @@ impl DaemonManager {
         // Health is trusted only after native service registration has been
         // verified. A random foreground daemon must not satisfy bootstrap.
         if status.state == ServiceState::Running {
-            if let Ok(health) = compatible_health().await {
+            if let Ok(health) = DaemonClient::new().health().await {
                 ensure_expected_version(expected_version.as_deref(), &health)?;
                 ready(on_status, &health);
                 return Ok(Some(health));
@@ -357,7 +357,7 @@ impl DaemonManager {
         let artifact = latest.artifact(target)?.clone();
         match update_check(&previous.manifest.version, &latest.manifest.version)? {
             DaemonUpdateCheck::Available { .. } => {}
-            DaemonUpdateCheck::UpToDate { .. } => return compatible_health().await,
+            DaemonUpdateCheck::UpToDate { .. } => return DaemonClient::new().health().await,
             DaemonUpdateCheck::Unavailable { reason } => return Err(reason),
         }
 
@@ -1041,25 +1041,11 @@ fn ensure_manifest_compatible(manifest: &release::VerifiedManifest) -> Result<()
     }
 }
 
-async fn compatible_health() -> Result<HealthResult, String> {
-    let health: HealthResult = DaemonBridge::new()
-        .call(methods::HEALTH, serde_json::Value::Null)
-        .await?;
-    let expected = amarcode_protocol::PROTOCOL_VERSION;
-    if health.protocol_version != expected {
-        return Err(format!(
-            "incompatible daemon protocol: application requires {expected}, daemon provides {}",
-            health.protocol_version
-        ));
-    }
-    Ok(health)
-}
-
 async fn wait_for_health() -> Result<HealthResult, String> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(12);
     let mut last_error = "daemon did not start".to_string();
     while tokio::time::Instant::now() < deadline {
-        match compatible_health().await {
+        match DaemonClient::new().health().await {
             Ok(health) => return Ok(health),
             Err(error) => last_error = error,
         }
@@ -1078,7 +1064,7 @@ mod tests {
         write_cleanup_phase, write_update_marker, ApplicationCleanupResult,
         ApplicationCleanupStatus, CleanupPhase, DaemonUpdateCheck, ServiceState, ServiceStatus,
     };
-    use crate::protocol::rpc::HealthResult;
+    use amarcode_protocol::rpc::HealthResult;
 
     fn health(version: &str) -> HealthResult {
         HealthResult {

@@ -99,7 +99,7 @@ export type { WorkspaceInfo, WorkspaceChange, WorkspaceDiff } from "./types";
 /**
  * Typed bindings for the daemon-backed Tauri commands.
  *
- * This is intentionally a direct mirror of `src-tauri/src/lib.rs`; no
+ * This is intentionally a direct mirror of `src-tauri/src/commands/`; no
  * session-era compatibility methods live here.
  */
 export const daemonApi = {

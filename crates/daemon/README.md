@@ -82,7 +82,7 @@ The UI is a client: it does not own the agent process or the SQLite file.
 Workspace operations also belong to the daemon. `service/workspace.rs` owns
 file discovery, workspace/Git metadata, status, staging, commits, and diffs;
 `service/workspace/editor.rs` owns text reads and conflict-checked saves.
-The desktop's workspace commands only forward RPC through `AppState`.
+The desktop's workspace commands only forward RPC through `DaemonClient`.
 The native folder picker remains a desktop concern.
 
 The following methods are available over both TCP and WebSocket, without a
