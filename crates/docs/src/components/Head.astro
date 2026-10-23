@@ -1,0 +1,17 @@
+---
+import DefaultHead from '@astrojs/starlight/components/Head.astro';
+
+const { head } = Astro.locals.starlightRoute;
+const title = head.find(({ tag }) => tag === 'title')?.content;
+const description = head.find(
+  ({ tag, attrs }) => tag === 'meta' && attrs?.name === 'description'
+)?.attrs?.content;
+const hasMeta = (name: string) => head.some(
+  ({ tag, attrs }) => tag === 'meta' && attrs?.name === name
+);
+---
+<DefaultHead />
+{title && !hasMeta('twitter:title') && <meta name="twitter:title" content={title} />}
+{typeof description === 'string' && !hasMeta('twitter:description') && (
+  <meta name="twitter:description" content={description} />
+)}

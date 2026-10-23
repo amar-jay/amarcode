@@ -40,7 +40,11 @@
     "prettier": "bun run prettier -w . --ignore-path .gitignore --ignore-path .prettierignore && cargo fmt --all",
     "landing:dev": "bun run --cwd crates/landing dev",
     "landing:build": "bun run --cwd crates/landing build",
-    "landing:preview": "bun run --cwd crates/landing preview"
+    "landing:preview": "bun run --cwd crates/landing preview",
+    "docs:dev": "bun run --cwd crates/docs dev",
+    "docs:build": "bun run --cwd crates/docs build",
+    "docs:check": "bun run --cwd crates/docs check",
+    "docs:preview": "bun run --cwd crates/docs preview"
   },
   "devDependencies": {
     "prettier": "^3.9.6"

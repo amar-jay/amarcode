@@ -76,3 +76,14 @@ curl -fsSI https://updates.amarcode.amarjay.com/install.sh
 curl -fsSL https://amarcode.amarjay.com/install.sh -o /tmp/amarcode-install.sh
 bash -n /tmp/amarcode-install.sh
 ```
+
+## Documentation
+
+The Docs navigation link opens the custom-themed Starlight site at `/docs/`.
+Source lives in `../docs`. For development, run `bun run docs:dev` from the
+repository root alongside the landing server; Vite proxies `/docs` to port 4321.
+
+The landing build now includes the documentation build and copies its output to
+`dist/docs/`. The existing Vercel build command (`bun run build` from this
+workspace) and `dist` output serve both sites. No separate deployment is needed.
+See [the docs workspace README](../docs/README.md) for authoring and preview.

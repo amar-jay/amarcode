@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && bun run --cwd ../docs build && bun ../../scripts/assemble-website.ts",
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "lint": "eslint .",

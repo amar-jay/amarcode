@@ -113,9 +113,9 @@ export function Questions() {
         </h2>
         <a
           className="inline-flex items-center gap-[18px] text-ink no-underline hover:underline"
-          href="https://github.com/amar-jay/amarcode"
+          href="/docs/"
         >
-          Explore the project <ArrowUpRight size={17} />
+          Read the handbook <ArrowUpRight size={17} />
         </a>
       </div>
       <Accordion

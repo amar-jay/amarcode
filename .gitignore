@@ -23,3 +23,6 @@ target
 
 # Generated Tauri daemon sidecars
 crates/application/src-tauri/binaries/
+
+# Astro generated content and types
+.astro/

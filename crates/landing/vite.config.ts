@@ -22,5 +22,11 @@ export default defineConfig({
       },
     },
   ],
+  server: {
+    proxy: {
+      "/docs": { target: "http://localhost:4321", changeOrigin: true },
+    },
+  },
+  preview: { proxy: {} },
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
 });
