@@ -65,6 +65,14 @@ For an existing Chromium installation, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`
 
 After changing the screenshots, rebuild the landing page and regenerate the sharing image with `bun run --cwd crates/landing screenshots:social`.
 
-The public `/install.sh` URL redirects to the registry using `public/_redirects`
-(Cloudflare Pages redirect rules). The installer source lives in
+The public `/install.sh` URL redirects to the registry using the redirect in `vercel.json`. The installer source lives in
 `crates/amarcode-registry/assets/install.sh`.
+
+Deploy the registry Worker before deploying this landing page so the redirect
+target is available. Verify both endpoints after deployment:
+
+```sh
+curl -fsSI https://updates.amarcode.amarjay.com/install.sh
+curl -fsSL https://amarcode.amarjay.com/install.sh -o /tmp/amarcode-install.sh
+bash -n /tmp/amarcode-install.sh
+```
