@@ -7,6 +7,8 @@ description: Add images, pasted text, and spoken input to your prompts.
 
 Paste supported content into the composer and review its attachment preview before sending. A prompt supports up to four attachments.
 
+![An image attached in a conversation, shown above the agent’s reply.](/images/workspace/attachment.webp)
+
 | Content | Limit |
 | --- | --- |
 | PNG, JPEG, WebP, or GIF image | 10 MB per image |
