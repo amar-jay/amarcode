@@ -26,6 +26,8 @@ Attachments remain available to Amarcode's UI, but historical attachments are no
 
 Use the microphone control in the composer and grant microphone access if requested. Record your speech, stop recording, and review the transcribed text before sending it.
 
+![The dictation controls in the composer, showing a recording timer and discard option.](/images/workspace/dictation.webp)
+
 Dictation requires a provider configured in **Settings → ACP provider**. That provider must support `/audio/transcriptions` and the requested model, `openai/whisper-large-v3-turbo`.
 
 The audio upload limit is 25 MB. The daemon forwards audio in memory to the provider and does not save it to disk. Your provider's own data-handling policies still apply.
