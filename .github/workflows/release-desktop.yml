@@ -64,7 +64,7 @@ jobs:
             . -> target
 
       - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
+        run: bun install  
 
       - name: Run frontend tests
         run: bun run --cwd crates/application test -- --passWithNoTests

@@ -720,13 +720,29 @@ fn env_bin(name: &str) -> PathBuf {
     );
 }
 
-/// Host consoles may capture CRLF. The fixture is the two LF-terminated lines.
+/// Windows consoles may capture CRLF; preserve all other output for assertions.
 fn terminal_output_text(value: &Value) -> String {
     value
         .as_str()
-        .unwrap_or_default()
+        .expect("terminal output must be a string")
         .replace("\r\n", "\n")
-        .replace('\r', "\n")
+}
+
+#[test]
+fn terminal_output_comparison_accepts_lf_and_crlf() {
+    for output in [
+        "first output\nlast output\n",
+        "first output\r\nlast output\r\n",
+    ] {
+        assert_eq!(
+            terminal_output_text(&json!(output)),
+            "first output\nlast output\n"
+        );
+    }
+    assert_eq!(
+        terminal_output_text(&json!("progress\rdone")),
+        "progress\rdone"
+    );
 }
 
 fn uuid_simple() -> String {
