@@ -15,21 +15,23 @@ that cannot enforce token authentication or run `--remote`. The additive
 `remote_auth_required` health field lets the desktop check that the remote
 service actually enables authentication. Protocol version remains 12.
 
-The Worker serves the Bash installer at `/install.sh`. It requires Linux, Bash,
+The landing site serves the Bash installer at
+`https://amarcode.amarjay.com/install.sh`. It requires Linux, Bash,
 Python 3, and OpenSSL with Ed25519 support. The registry must contain an artifact
 for the host architecture (current publishing defaults include Linux x86_64).
-Cloudflared supports both x86_64 and ARM64. No Rust, Bun, root privileges, or
-systemd user session is required.
+Cloudflared supports both x86_64 and ARM64. No preinstalled Rust, Bun, or uv,
+root privileges, or systemd user session is required.
 
 ## One-time installation
 
 ```bash
-curl -fsSL https://updates.amarcode.amarjay.com/install.sh | bash
+curl -fsSL https://amarcode.amarjay.com/install.sh | bash
 # Alternatively:
-wget -qO- https://updates.amarcode.amarjay.com/install.sh | bash
+wget -qO- https://amarcode.amarjay.com/install.sh | bash
 ```
 
-The installer downloads and verifies both binaries, saves a private access token,
+The installer downloads and verifies the daemon, cloudflared, Bun, and uv,
+saves a private access token,
 and installs `amarcode-daemon` into `~/.local/bin`. It prints the access token
 only when first created; subsequent installs preserve it and your chat data.
 It does not start a service, daemon, or tunnel. If `~/.local/bin` is absent from
@@ -44,16 +46,28 @@ include that directory. The installer does not edit shell startup files.
 
 To inspect before execution, save the script and run `bash install.sh`.
 Optional flags are `--version <daemon-version>`,
-`--cloudflared-version <cloudflared-version>`, and `--bin-dir <directory>`.
+`--cloudflared-version <cloudflared-version>`, `--bun-version <bun-release-tag>`,
+`--uv-version <uv-release-tag>`, and `--bin-dir <directory>`.
 `--start` additionally starts remote mode immediately after setup.
 The earlier `--tunnel` spelling remains an alias for `--start`.
 
 Daemon downloads require a pinned Ed25519 manifest signature plus exact size and
 SHA-256 verification. Cloudflared downloads come from the official Cloudflare
 GitHub release, checked against its size and SHA-256 digest before execution.
+Bun and uv use the same verified official-release download process. Bun uses the
+x86_64 baseline build for compatibility with cloud VMs, or the ARM64 build on
+aarch64 hosts. Archives are unpacked using Python; no `unzip` dependency is needed.
 GitHub API rate limits or missing release digests stop installation with an
 error. Existing commands outside this installation are never overwritten;
-choose another `--bin-dir` if `amarcode-daemon` already exists there.
+choose another `--bin-dir` if `amarcode-daemon` already exists there. Existing
+user-owned Bun/uv commands are preserved. Managed copies of `bun`, `bunx`, `uv`,
+and `uvx` are linked into the selected bin directory where those names are free.
+Remote mode prepends the managed runtime directories to its own PATH before
+starting, so installs and agent processes work without shell-profile changes.
+Runtime paths and versions are included in the installation summary. Rerun the
+installer and restart the daemon to add these runtimes to an existing installation.
+Agent installation starts, results, and failures are recorded in `data/daemon.log`;
+failed package commands include a bounded stdout/stderr tail.
 
 ## Start remote access
 
@@ -87,11 +101,12 @@ their existing behavior. Custom deployments can override `AMARCODE_REMOTE_ROOT`,
 
 Files live in `${XDG_DATA_HOME:-$HOME/.local/share}/amarcode-remote/`:
 
-- `remote.json`: installed cloudflared executable location.
+- `remote.json`: installed cloudflared location and managed runtime directories.
 - `access-token`: private bearer credential, preserved on reinstall.
 - `data/`: remote chats, attachments, agent installations, and credentials.
 - `releases/<version>/<sha256>/`: verified daemon binaries and release evidence.
 - `cloudflared/<version>/<sha256>/cloudflared`: verified Cloudflare connector.
+- `runtimes/<bun|uv>/<version>/<sha256>/bin/`: managed runtime binaries and launchers.
 - `run.sh` / `tunnel.sh`: compatibility helpers; `tunnel.sh` now delegates to the
   same native `amarcode-daemon --remote` lifecycle.
 

@@ -9,7 +9,6 @@ route.
 ## Routes
 
 - `GET /health`
-<!-- - `GET /install.sh` (signed remote-daemon installer bootstrap - moved to landing page) -->
 - `GET /v1/daemon/versions.json`
 - `GET /v1/daemon/latest.json`
 - `GET /v1/daemon/latest.json.sig`
@@ -145,3 +144,6 @@ and API key; the public release manifest intentionally contains none of those
 credentials.
 
 Remote installer and release requirements: [remote daemon guide](../../docs/remote-daemon.md).
+
+The remote installer is maintained in `crates/landing/public/install.sh` and served
+by the landing site at `https://amarcode.amarjay.com/install.sh`.

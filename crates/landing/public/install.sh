@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the signed remote daemon and cloudflared without administrator privileges.
+# Install the remote daemon, cloudflared, Bun, and uv without administrator privileges.
 set -euo pipefail
 command -v python3 >/dev/null 2>&1 || { echo 'python3 is required' >&2; exit 1; }
 exec python3 - "$@" <<'PY'
@@ -127,6 +127,115 @@ def install_cloudflared(root, architecture, requested_version=None):
         return destination
 
 
+def runtime_layout(tool, architecture):
+    if tool == 'bun':
+        target = 'bun-linux-x64-baseline' if architecture == 'x86_64' else 'bun-linux-aarch64'
+        return 'oven-sh/bun', target + '.zip', { 'bun': target + '/bun' }
+    target = 'uv-' + architecture + '-unknown-linux-gnu'
+    return 'astral-sh/uv', target + '.tar.gz', { 'uv': target + '/uv', 'uvx': target + '/uvx' }
+
+
+def install_runtime(root, tool, architecture, requested_version=None):
+    repo, asset_name, members = runtime_layout(tool, architecture)
+    endpoint = 'https://api.github.com/repos/' + repo + '/releases/'
+    endpoint += 'tags/' + requested_version if requested_version else 'latest'
+    with tempfile.TemporaryDirectory(dir=root) as temporary:
+        directory = Path(temporary)
+        metadata = directory / 'release.json'
+        print('Resolving official ' + tool + ' release...', flush=True)
+        download(endpoint, metadata, 2 * 1024 * 1024)
+        release = json.loads(metadata.read_bytes())
+        version = release['tag_name']
+        if not isinstance(version, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]{0,127}', version):
+            raise ValueError('Invalid ' + tool + ' release version')
+        if requested_version and version != requested_version:
+            raise ValueError(tool + ' release does not match requested version')
+        asset = next((item for item in release['assets'] if item.get('name') == asset_name), None)
+        if not asset:
+            raise ValueError('No official ' + tool + ' binary for ' + architecture)
+        url = 'https://github.com/' + repo + '/releases/download/' + version + '/' + asset_name
+        size, digest = asset.get('size'), asset.get('digest', '')
+        if asset.get('browser_download_url') != url:
+            raise ValueError(tool + ' must come from its official release repository')
+        if type(size) is not int or not 0 < size <= 256 * 1024 * 1024:
+            raise ValueError('Invalid ' + tool + ' archive size')
+        if not isinstance(digest, str) or not re.fullmatch(r'sha256:[a-fA-F0-9]{64}', digest):
+            raise ValueError(tool + ' release has no valid SHA-256 digest')
+        checksum = digest.split(':', 1)[1].lower()
+        destination = root / 'runtimes' / tool / version / checksum
+        names = list(members) + (['bunx'] if tool == 'bun' else [])
+        receipt = destination / 'installed.json'
+        try:
+            hashes = json.loads(receipt.read_text())
+            cached = all(re.fullmatch(r'[a-f0-9]{64}', hashes.get(name, '')) and
+                         hashlib.sha256((destination / 'bin' / name).read_bytes()).hexdigest() == hashes[name]
+                         for name in names)
+        except (OSError, ValueError, TypeError, AttributeError):
+            cached = False
+        if not cached:
+            archive = directory / asset_name
+            print('Downloading ' + tool + ' ' + version + '...', flush=True)
+            download(url, archive, size)
+            if archive.stat().st_size != size or hashlib.sha256(archive.read_bytes()).hexdigest() != checksum:
+                raise ValueError('Downloaded ' + tool + ' size/checksum verification failed')
+            staged = directory / 'bin'
+            staged.mkdir(mode=0o700)
+            # Read only explicitly expected regular files; never extract archive paths.
+            def copy_member(source, name, member_size):
+                if not 0 < member_size <= 256 * 1024 * 1024:
+                    raise ValueError('Invalid ' + tool + ' executable size')
+                target = staged / name
+                with target.open('wb') as output:
+                    shutil.copyfileobj(source, output)
+                os.chmod(target, 0o700)
+            if tool == 'bun':
+                import zipfile
+                with zipfile.ZipFile(archive) as package:
+                    for name, member in members.items():
+                        entry = package.getinfo(member)
+                        if entry.is_dir() or (entry.external_attr >> 16) & 0o170000 == 0o120000:
+                            raise ValueError('Runtime archive entry must be a regular file')
+                        with package.open(entry) as source:
+                            copy_member(source, name, entry.file_size)
+                (staged / 'bunx').symlink_to('bun')
+            else:
+                import tarfile
+                with tarfile.open(archive, 'r:gz') as package:
+                    for name, member in members.items():
+                        entry = package.getmember(member)
+                        if not entry.isfile():
+                            raise ValueError('Runtime archive entry must be a regular file')
+                        with package.extractfile(entry) as source:
+                            copy_member(source, name, entry.size)
+            environment = dict(os.environ, PATH=str(staged) + os.pathsep + os.environ.get('PATH', ''))
+            for name in names:
+                subprocess.run([str(staged / name), '--version'], check=True,
+                               capture_output=True, timeout=10, env=environment)
+            destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+            final_bin = destination / 'bin'
+            final_bin.mkdir(exist_ok=True, mode=0o700)
+            for name in names:
+                os.replace(staged / name, final_bin / name)
+            hashes = {name: hashlib.sha256((final_bin / name).read_bytes()).hexdigest() for name in names}
+            private_write(receipt, json.dumps(hashes))
+        print('Installed ' + tool + ' ' + version, flush=True)
+        return destination / 'bin'
+
+
+def link_runtime(bin_dir, name, executable, root):
+    command = bin_dir / name
+    if os.path.lexists(command) and (not command.is_symlink() or not command.resolve().is_relative_to((root / 'runtimes').resolve())):
+        # Keep unrelated user installations; the daemon uses its own managed PATH.
+        return
+    temporary = bin_dir / ('.' + name + '-' + secrets.token_hex(8))
+    try:
+        temporary.symlink_to(executable)
+        os.replace(temporary, command)
+    finally:
+        if temporary.is_symlink():
+            temporary.unlink()
+
+
 def private_write(path, contents):
     # Atomic replacement and mode from creation, including on reinstall.
     descriptor, name = tempfile.mkstemp(dir=path.parent)
@@ -158,9 +267,11 @@ def install_command(bin_dir, executable, root):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Install the Amarcode remote daemon and cloudflared (Linux)')
+    parser = argparse.ArgumentParser(description='Install Amarcode, cloudflared, Bun, and uv (Linux)')
     parser.add_argument('--version', help='Install a specific signed release; default: latest')
     parser.add_argument('--cloudflared-version', help='Install a specific official cloudflared release; default: latest')
+    parser.add_argument('--bun-version', help='Official Bun release tag; default: latest')
+    parser.add_argument('--uv-version', help='Official uv release tag; default: latest')
     parser.add_argument('--bin-dir', type=Path, default=Path.home() / '.local/bin', help='Command installation directory; default: ~/.local/bin')
     parser.add_argument('--start', '--tunnel', dest='start', action='store_true', help='Start amarcode-daemon --remote after installation')
     parser.add_argument('--no-service', action='store_true', help=argparse.SUPPRESS)
@@ -177,6 +288,9 @@ def main():
         parser.error('Invalid version')
     if args.cloudflared_version and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]{0,127}', args.cloudflared_version):
         parser.error('Invalid cloudflared version')
+    for label, value in [('Bun', args.bun_version), ('uv', args.uv_version)]:
+        if value and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]{0,127}', value):
+            parser.error('Invalid ' + label + ' version')
     manifest_url = REGISTRY + ('/v1/daemon/' + args.version + '/manifest.json' if args.version else '/v1/daemon/latest.json')
     root = Path(os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local/share'))) / 'amarcode-remote'
     if not root.is_absolute() or any(c in str(root) for c in '\n\r\0'):
@@ -208,6 +322,9 @@ def main():
         shutil.copyfile(manifest_path, release / 'manifest.json')
         shutil.copyfile(signature_path, release / 'manifest.json.sig')
     cloudflared = install_cloudflared(root, architecture, args.cloudflared_version)
+    bun_bin = install_runtime(root, 'bun', architecture, args.bun_version)
+    uv_bin = install_runtime(root, 'uv', architecture, args.uv_version)
+    tool_bin_dirs = [str(bun_bin), str(uv_bin)]
     token_path = root / 'access-token'
     first_install = not token_path.exists()
     if first_install:
@@ -216,14 +333,17 @@ def main():
     token = token_path.read_text().strip()
     if not re.fullmatch(r'[A-Za-z0-9._~-]{32,512}', token):
         raise ValueError('Existing access-token is invalid; fix it before restarting')
-    private_write(root / 'remote.json', json.dumps({'cloudflared': str(cloudflared)}) + '\n')
+    private_write(root / 'remote.json', json.dumps({'cloudflared': str(cloudflared), 'tool_bin_dirs': tool_bin_dirs}) + '\n')
     command = install_command(bin_dir, executable, root)
+    for name, directory in [('bun', bun_bin), ('bunx', bun_bin), ('uv', uv_bin), ('uvx', uv_bin)]:
+        link_runtime(bin_dir, name, directory / name, root)
     import shlex
     quote = lambda value: shlex.quote(str(value))
     # Existing helper paths continue to use the same native command and lifecycle.
     for name, arguments in [('run.sh', '--transport websocket'), ('tunnel.sh', '--transport websocket --remote')]:
         launcher = root / name
         private_write(launcher, '#!/bin/sh\nset -eu\n' +
+                      'export PATH=' + quote(os.pathsep.join(tool_bin_dirs)) + ':"$PATH"\n' +
                       'export AMARCODE_REMOTE_ROOT=' + quote(root) + '\n' +
                       'export AMARCODE_APPDIR=' + quote(root / 'data') + '\n' +
                       'export AMARCODE_WS_TOKEN_FILE=' + quote(token_path) + '\n' +
@@ -233,6 +353,8 @@ def main():
     print('Daemon version: ' + version)
     print('Command: ' + str(command))
     print('Cloudflared: ' + str(cloudflared))
+    print('Bun / bunx: ' + str(bun_bin))
+    print('uv / uvx: ' + str(uv_bin))
     print('Data directory: ' + str(root / 'data'))
     print('Access token file: ' + str(token_path))
     if first_install:
@@ -248,6 +370,7 @@ def main():
     print('Project paths refer to this host. Ctrl+C stops both processes; quick tunnel URLs change each time.')
     if args.start:
         os.environ['AMARCODE_REMOTE_ROOT'] = str(root)
+        os.environ['PATH'] = os.pathsep.join(tool_bin_dirs + [os.environ.get('PATH', '')])
         sys.stdout.flush()
         os.execv(str(command), [str(command), '--transport', 'websocket', '--remote'])
 

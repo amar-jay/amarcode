@@ -10,6 +10,8 @@ use tokio::{
 #[derive(Deserialize)]
 pub struct Setup {
     pub cloudflared: PathBuf,
+    #[serde(default)]
+    pub tool_bin_dirs: Vec<PathBuf>,
 }
 
 /// Called before Tokio starts: the installed remote defaults never affect local runs.
@@ -28,6 +30,30 @@ pub fn prepare() -> Result<Setup> {
         return Err(Error::msg(
             "Installed cloudflared is missing; rerun the Amarcode installer",
         ));
+    }
+    if !setup.tool_bin_dirs.is_empty() {
+        let path = env::var_os("PATH").unwrap_or_default();
+        let mut directories = Vec::new();
+        for directory in &setup.tool_bin_dirs {
+            if !directory.is_absolute() || !directory.is_dir() {
+                return Err(Error::msg(
+                    "Installed agent runtimes are missing; rerun the Amarcode installer",
+                ));
+            }
+            if !directories.contains(directory) {
+                directories.push(directory.clone());
+            }
+        }
+        for directory in env::split_paths(&path) {
+            if !directories.contains(&directory) {
+                directories.push(directory);
+            }
+        }
+        env::set_var(
+            "PATH",
+            env::join_paths(directories)
+                .map_err(|error| Error::msg(format!("Invalid installed runtime PATH: {error}")))?,
+        );
     }
     for (key, value) in [
         ("AMARCODE_APPDIR", root.join("data").into_os_string()),

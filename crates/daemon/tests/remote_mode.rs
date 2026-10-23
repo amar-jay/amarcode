@@ -79,6 +79,9 @@ fn remote_starts_after_listener_prints_url_and_stops_connector_on_sigterm() {
     let root = tempfile::tempdir().unwrap();
     let body = r#"import os, pathlib, socket, sys, time
 from urllib.parse import urlparse
+import shutil
+for tool in ['bun', 'bunx', 'uv', 'uvx']:
+    assert pathlib.Path(shutil.which(tool)).parent == pathlib.Path(os.environ['AMARCODE_REMOTE_ROOT'], 'runtime-bin')
 origin = urlparse(sys.argv[-1])
 socket.create_connection((origin.hostname, origin.port), timeout=2).close()
 print('INF connector booting; this log must be hidden', file=sys.stderr, flush=True)
@@ -88,6 +91,21 @@ print('INF connection registered', file=sys.stderr, flush=True)
 pathlib.Path(os.environ['AMARCODE_REMOTE_ROOT'], 'connector.pid').write_text(str(os.getpid()))
 time.sleep(120)"#;
     let (mut command, address) = setup(root.path(), body);
+    let runtime_bin = root.path().join("runtime-bin");
+    fs::create_dir(&runtime_bin).unwrap();
+    for tool in ["bun", "bunx", "uv", "uvx"] {
+        let executable = runtime_bin.join(tool);
+        fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(executable, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    fs::write(
+        root.path().join("remote.json"),
+        serde_json::json!({
+            "cloudflared": root.path().join("cloudflared"), "tool_bin_dirs": [runtime_bin]
+        })
+        .to_string(),
+    )
+    .unwrap();
     command.args(["--transport", "websocket"]);
     let mut running = Running(command.spawn().unwrap());
     let pid_path = root.path().join("connector.pid");
@@ -168,8 +186,12 @@ fn connector_failure_stops_daemon_and_explains_how_to_restart() {
 fn occupied_listener_never_starts_a_tunnel_to_the_other_process() {
     let root = tempfile::tempdir().unwrap();
     let body = "import os, pathlib\npathlib.Path(os.environ['AMARCODE_REMOTE_ROOT'], 'unexpected-tunnel').touch()";
-    let (mut command, address) = setup(root.path(), body);
-    let _reservation = std::net::TcpListener::bind(address).unwrap();
+    let (mut command, _) = setup(root.path(), body);
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    command.env(
+        "AMARCODE_DAEMON_ADDR",
+        reservation.local_addr().unwrap().to_string(),
+    );
     let mut running = Running(command.spawn().unwrap());
     assert!(!wait_for_exit(&mut running.0).success());
     assert!(!root.path().join("unexpected-tunnel").exists());
@@ -187,4 +209,51 @@ fn remote_rejects_tcp_and_lifecycle_commands_before_setup() {
             .unwrap();
         assert_eq!(output.status.code(), Some(2));
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_agent_installation_is_returned_and_written_to_remote_log() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+    let root = tempfile::tempdir().unwrap();
+    let body = "import os, pathlib, time\npathlib.Path(os.environ['AMARCODE_REMOTE_ROOT'], 'ready').touch()\ntime.sleep(120)";
+    let (mut command, address) = setup(root.path(), body);
+    let mut running = Running(command.spawn().unwrap());
+    wait_for_file(&root.path().join("ready"), &mut running.0);
+    let mut request = format!("ws://{address}/rpc").into_client_request().unwrap();
+    request.headers_mut().insert(
+        "authorization",
+        format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
+    );
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    socket
+        .send(Message::Text(
+            serde_json::json!({"method":"install_agent", "params":{"agent_id":"missing-agent"}})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(5), socket.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let response: serde_json::Value = serde_json::from_str(response.to_text().unwrap()).unwrap();
+    assert!(response["error"]
+        .as_str()
+        .unwrap()
+        .contains("agent not found"));
+    let log = fs::read_to_string(root.path().join("data/daemon.log")).unwrap();
+    assert!(log.contains("starting agent installation"));
+    assert!(log.contains("agent installation failed"));
+    assert!(log.contains("missing-agent"));
+    assert!(!log.contains(&"a".repeat(64)));
+    socket.close(None).await.unwrap();
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(running.0.id() as i32),
+        nix::sys::signal::Signal::SIGTERM,
+    )
+    .unwrap();
+    assert!(wait_for_exit(&mut running.0).success());
 }

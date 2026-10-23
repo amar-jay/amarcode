@@ -71,6 +71,22 @@ impl AgentManager {
 
     /// Materialize a registry agent so it becomes `available`, then probe ACP.
     pub fn install(&self, agent_id: &str) -> Result<InstallAgentResult> {
+        tracing::info!(%agent_id, "starting agent installation");
+        let result = self.install_inner(agent_id);
+        match &result {
+            Ok(installed) if matches!(installed.runtime_status, AgentRuntimeStatus::Ready) => {
+                tracing::info!(%agent_id, "agent installation completed");
+            }
+            Ok(installed) => {
+                tracing::warn!(%agent_id, status = ?installed.runtime_status,
+                    detail = ?installed.runtime_message, "agent installed but runtime is not ready");
+            }
+            Err(error) => tracing::error!(%agent_id, %error, "agent installation failed"),
+        }
+        result
+    }
+
+    fn install_inner(&self, agent_id: &str) -> Result<InstallAgentResult> {
         if agent_id == super::amarcode_acp::AGENT_ID {
             self.install_amarcode_acp()?;
             self.refresh_availability()?;
@@ -277,28 +293,22 @@ fn which(name: &str) -> Option<PathBuf> {
 fn prefetch_bun_package(package: &str) -> Result<()> {
     let temp = temp_dir("bun-prefetch")?;
     write_minimal_package_json(&temp)?;
-    let status = run_timed(
+    let result = run_timed(
         Command::new("bun")
             .arg("add")
             .arg(package)
             .current_dir(&temp),
         INSTALL_TIMEOUT,
         &format!("bun add {package}"),
-    )?;
+    );
     let _ = fs::remove_dir_all(&temp);
-    if status.success() {
-        Ok(())
-    } else {
-        Err(Error::msg(format!(
-            "failed to install npm package {package} with bun"
-        )))
-    }
+    result.map(|_| ())
 }
 
 fn prefetch_uv_package(package: &str) -> Result<()> {
     let temp = temp_dir("uv-prefetch")?;
     let requirement = uv_requirement(package);
-    let status = run_timed(
+    let result = run_timed(
         Command::new("uv")
             .arg("pip")
             .arg("install")
@@ -307,15 +317,9 @@ fn prefetch_uv_package(package: &str) -> Result<()> {
             .arg(&requirement),
         INSTALL_TIMEOUT,
         &format!("uv pip install {requirement}"),
-    )?;
+    );
     let _ = fs::remove_dir_all(&temp);
-    if status.success() {
-        Ok(())
-    } else {
-        Err(Error::msg(format!(
-            "failed to install Python package {package} with uv"
-        )))
-    }
+    result.map(|_| ())
 }
 
 fn uv_requirement(package: &str) -> String {
@@ -547,6 +551,31 @@ fn temp_dir(prefix: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+const INSTALL_OUTPUT_TAIL_BYTES: usize = 16 * 1024;
+type OutputTail = std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<u8>>>;
+
+fn drain_install_output(
+    reader: impl std::io::Read + Send + 'static,
+) -> (OutputTail, std::thread::JoinHandle<()>) {
+    let tail = std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+    let output = std::sync::Arc::clone(&tail);
+    let worker = std::thread::spawn(move || {
+        let mut reader = reader;
+        let mut buffer = [0u8; 4096];
+        while let Ok(count) = reader.read(&mut buffer) {
+            if count == 0 {
+                break;
+            }
+            if let Ok(mut tail) = output.lock() {
+                tail.extend(&buffer[..count]);
+                let excess = tail.len().saturating_sub(INSTALL_OUTPUT_TAIL_BYTES);
+                tail.drain(..excess);
+            }
+        }
+    });
+    (tail, worker)
+}
+
 fn run_timed(
     command: &mut Command,
     timeout: Duration,
@@ -557,34 +586,120 @@ fn run_timed(
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     let mut child = command
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|error| Error::msg(format!("failed to start {label}: {error}")))?;
+    // Drain both pipes concurrently: package managers can otherwise fill a pipe
+    // and block forever while the parent waits for their exit status.
+    let (stdout, stdout_worker) = drain_install_output(child.stdout.take().expect("piped stdout"));
+    let (stderr, stderr_worker) = drain_install_output(child.stderr.take().expect("piped stderr"));
     let started = std::time::Instant::now();
-    loop {
+    let result = loop {
         match child.try_wait() {
-            Ok(Some(status)) => return Ok(status),
+            Ok(Some(status)) => break Ok(status),
             Ok(None) if started.elapsed() > timeout => {
+                #[cfg(unix)]
+                {
+                    let _ = nix::sys::signal::killpg(
+                        nix::unistd::Pid::from_raw(child.id() as i32),
+                        nix::sys::signal::Signal::SIGKILL,
+                    );
+                }
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(Error::msg(format!(
+                break Err(Error::msg(format!(
                     "{label} timed out after {}s",
                     timeout.as_secs()
                 )));
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
             Err(error) => {
-                return Err(Error::msg(format!("failed waiting for {label}: {error}")));
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(Error::msg(format!("failed waiting for {label}: {error}")));
             }
         }
+    };
+    // Do not let an inherited pipe held by a background grandchild stall RPC.
+    let drain_deadline = std::time::Instant::now() + Duration::from_millis(250);
+    while !(stdout_worker.is_finished() && stderr_worker.is_finished())
+        && std::time::Instant::now() < drain_deadline
+    {
+        std::thread::sleep(Duration::from_millis(5));
     }
+    if stdout_worker.is_finished() {
+        let _ = stdout_worker.join();
+    }
+    if stderr_worker.is_finished() {
+        let _ = stderr_worker.join();
+    }
+    let output = |tail: OutputTail| {
+        let bytes = tail
+            .lock()
+            .map(|tail| tail.iter().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
+        String::from_utf8_lossy(&bytes).trim().to_owned()
+    };
+    let stderr = output(stderr);
+    let stdout = output(stdout);
+    let failure = match result {
+        Ok(status) if status.success() => return Ok(status),
+        Ok(status) => format!("{label} exited with {status}"),
+        Err(error) => error.to_string(),
+    };
+    let detail = [
+        (!stderr.is_empty()).then(|| format!("stderr: {stderr}")),
+        (!stdout.is_empty()).then(|| format!("stdout: {stdout}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("\n");
+    Err(Error::msg(if detail.is_empty() {
+        failure
+    } else {
+        format!("{failure}\n{detail}")
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn install_commands_drain_large_output_and_return_bounded_failure_details() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "head -c 262144 /dev/zero; head -c 262144 /dev/zero >&2; printf 'registry-install-failed' >&2; exit 7"]);
+        let error = run_timed(&mut command, Duration::from_secs(5), "test install")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("registry-install-failed"));
+        assert!(error.contains("exit status: 7"));
+        assert!(error.len() < 2 * INSTALL_OUTPUT_TAIL_BYTES + 256);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_command_timeout_kills_children_and_retains_the_error_tail() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "printf 'download stalled' >&2; sleep 10"]);
+        let started = std::time::Instant::now();
+        let error = run_timed(&mut command, Duration::from_millis(100), "test install")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("timed out"));
+        assert!(error.contains("download stalled"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 
     #[test]
     fn converts_uvx_at_version_to_pip_requirement() {

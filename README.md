@@ -71,7 +71,8 @@ wget -qO- https://amarcode.amarjay.com/install.sh | bash
 The installer prints your access token, installed paths, and any PATH setup
 needed. It installs `amarcode-daemon` in `~/.local/bin` without starting a service
 or tunnel. Requires Bash, Python 3, and OpenSSL with Ed25519 support; no sudo,
-Rust, Bun, or systemd is needed.
+Rust, a preinstalled Bun/uv runtime, or systemd is needed. The installer sets up
+the runtimes used for agent installation and remote mode finds them automatically.
 
 After setup, start remote access whenever you need it:
 
