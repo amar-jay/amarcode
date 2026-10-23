@@ -20,9 +20,9 @@ export default function Navigation() {
         className="flex gap-[35px] text-[19px] [&>a]:text-ink [&>a]:no-underline [&>a:hover]:underline max-[901px]:gap-5 max-[601px]:order-3 max-[601px]:w-full max-[601px]:justify-between max-[601px]:border-t max-[601px]:border-rule max-[601px]:pt-3 max-[601px]:text-[17px]"
         aria-label="Main navigation"
       >
-        {/* <a href="#app-preview">Workspace</a>
+        <a href="#app-preview">Workspace</a>
         <a href="#features">Features</a>
-        <a href="#agents">Agents</a> */}
+        <a href="#agents">Agents</a>
         <a href="/docs/">Docs</a>
       </nav>
       <a

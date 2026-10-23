@@ -15,6 +15,8 @@ First [start remote mode](/docs/remote/setup/) on your Linux host and copy its W
 
 Amarcode verifies authentication, health, and protocol compatibility before saving. A failed connection does not silently fall back to your local daemon.
 
+![Connection settings with remote daemon enabled, a WebSocket URL, an access token, and Apply and reload.](/images/workspace/remote-connection.webp)
+
 Remote connections require `wss://`. Plain `ws://` is allowed only for loopback testing. Tokens are sent in an authorization header, never in the URL. The desktop stores the token in native settings and does not return the saved token to the webview.
 
 ## Open a project on the host

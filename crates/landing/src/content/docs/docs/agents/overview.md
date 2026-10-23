@@ -9,6 +9,8 @@ Amarcode communicates with coding agents through the Agent Client Protocol (ACP)
 
 Open the agent picker in the composer or **Settings → Agent defaults**. Available agents are listed separately from agents that need installation.
 
+![The agent picker, including built-in Amarcode ACP and installed agents.](/images/workspace/agent-picker.webp)
+
 Select the install action for an agent and wait for it to finish. The daemon installs and launches agents on its own host. With a remote connection, installation happens on the remote machine.
 
 The catalog comes from Amarcode's ACP registry checkout. Package-based agents use Bun or uv tooling; availability depends on the host's installed tools and package cache. Binary distributions depend on platform support.

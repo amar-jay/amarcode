@@ -132,17 +132,31 @@ h1 {
 }
 
 .sidebar-content {
-  font-size: 0.84rem;
+  font-family: var(--sl-font);
+  font-size: 0.9375rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  font-synthesis: none;
 }
-.sidebar-content summary {
-  font-size: 0.77rem;
-  letter-spacing: 0.035em;
+.sidebar-content summary,
+.sidebar-content .large {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: normal;
 }
 .sidebar-content a[aria-current="page"] {
   background: var(--sl-color-accent-low);
   color: var(--sl-color-accent-high);
   border-inline-start: 2px solid var(--sl-color-accent);
   border-radius: 0;
+  font-weight: 500;
+}
+.sl-markdown-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-block: 1.25rem;
+  border: 1px solid var(--sl-color-hairline-light);
 }
 .pagination-links a,
 .card {

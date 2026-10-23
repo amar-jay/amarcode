@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   FileCode2,
   GitCompareArrows,
+  MonitorUp,
   Replace,
   Users,
 } from "lucide-react";
@@ -60,6 +61,19 @@ const views = [
     alt: "One Amarcode conversation’s activity timeline showing successive runs by codex-acp, grok-build, and amarcode-acp.",
     link: "/docs/concepts/continuity/",
   },
+  {
+    id: "remote",
+    label: "Work remotely",
+    Icon: MonitorUp,
+    title: "Work where your code lives.",
+    description:
+      "Run the daemon on another machine and connect from your desktop. Project files, Git commands, and coding agents run on that host. Your conversations stay with that daemon, and active runs continue when you close the desktop.",
+    image: "remote-connection",
+    width: 803,
+    height: 502,
+    alt: "Amarcode connection settings with remote daemon enabled, WebSocket URL and access token fields, and an Apply and reload button.",
+    link: "/docs/remote/setup/",
+  },
 ] as const;
 
 export default function WorkspaceShowcase() {
@@ -94,7 +108,7 @@ export default function WorkspaceShowcase() {
       <div
         role="group"
         aria-label="Workspace views"
-        className="grid grid-cols-4 border-t border-rule max-[601px]:grid-cols-2"
+        className="grid grid-cols-5 border-t border-rule max-[601px]:grid-cols-2"
       >
         {views.map(({ id, label, Icon }) => (
           <button
@@ -103,7 +117,7 @@ export default function WorkspaceShowcase() {
             aria-pressed={selected === id}
             aria-controls="workspace-view"
             onClick={() => setSelected(id)}
-            className="flex cursor-pointer items-center justify-center gap-3 border-r border-rule px-3 py-5 text-[20px] last:border-r-0 hover:bg-panel aria-pressed:bg-ink aria-pressed:text-paper max-[601px]:border-b max-[601px]:px-2 max-[601px]:py-4 max-[601px]:text-[17px] max-[601px]:[&:nth-child(2)]:border-r-0"
+            className="flex cursor-pointer items-center justify-center gap-3 border-r border-rule px-3 py-5 text-[20px] last:border-r-0 hover:bg-panel aria-pressed:bg-ink aria-pressed:text-paper max-[601px]:border-b max-[601px]:px-2 max-[601px]:py-4 max-[601px]:text-[17px] max-[601px]:[&:nth-child(2n)]:border-r-0"
           >
             <Icon size={18} strokeWidth={1.4} aria-hidden="true" />
             {label}
@@ -154,7 +168,9 @@ export default function WorkspaceShowcase() {
           <figcaption className="mt-4 text-center text-[16px] text-muted-ink">
             {view.id === "handoff"
               ? "Codex → Grok Build → Amarcode ACP"
-              : "Captured in Amarcode"}{" "}
+              : view.id === "remote"
+                ? "Your desktop here. Your files and agents on the connected host."
+                : "Captured in Amarcode"}{" "}
             · Open image to enlarge
           </figcaption>
         </figure>

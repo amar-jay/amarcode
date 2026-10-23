@@ -15,6 +15,8 @@ The editor supports UTF-8 text files up to 1 MB. Binary files cannot be opened a
 
 Drafts and undo history stay in memory while you close and reopen the editor panel. They are not durable across app reloads, so save your work before reloading or switching daemon connections.
 
+![The project tree and editor, with a TypeScript file open beside the conversation.](/images/workspace/editor.webp)
+
 ## Handle a save conflict
 
 A save includes the content originally read from disk. If an agent or another client has changed the file, the daemon rejects the stale save rather than overwriting those changes.
@@ -29,6 +31,8 @@ The Git view distinguishes staged and unstaged changes. A file can have both:
 - **Staged** compares the index with `HEAD`.
 
 Review the diff, stage or unstage individual files, or stage all files. Enter a commit message to commit staged changes. Git must be installed and configured on the daemon host.
+
+![Git review with staged and unstaged files, an inline diff, and the commit field.](/images/workspace/git-review.webp)
 
 :::note
 A non-Git folder can still be a workspace. Git actions require a repository, and text diff display is limited to files up to 1 MB.

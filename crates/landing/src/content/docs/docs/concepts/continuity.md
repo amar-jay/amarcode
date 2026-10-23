@@ -5,6 +5,8 @@ description: What Amarcode restores when you restart an agent or switch agents, 
 
 Amarcode stores visible conversation history independently of an agent's native session. This gives a chat a durable identity even when the agent process changes.
 
+![One conversation’s activity timeline, with successive runs by codex-acp, grok-build, and amarcode-acp.](/images/workspace/agent-handoff.webp)
+
 ## Native resumption comes first
 
 When starting an agent for an existing chat, the daemon looks for an earlier run of that agent with an ACP session ID and attempts to resume it.
