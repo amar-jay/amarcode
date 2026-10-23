@@ -132,6 +132,13 @@ impl App {
             config.app_dir.join("attachments"),
         );
 
+        let update_config = config.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = crate::update::resume(&update_config) {
+                warn!(%error, "could not resume pending daemon update");
+            }
+        });
+
         info!("application initialized");
         Ok(Self {
             config,

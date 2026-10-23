@@ -1,3 +1,4 @@
+//! Signed daemon release storage shared by bootstrap and the independent updater.
 use std::{
     collections::HashMap,
     fs::{self, File, OpenOptions},
@@ -7,13 +8,22 @@ use std::{
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::config::{
-    CURRENT_MANIFEST_FILE, CURRENT_SIGNATURE_FILE, DEFAULT_RELEASE_MANIFEST_URL,
-    RELEASE_PUBLIC_KEY_HEX,
-};
+pub const CURRENT_MANIFEST_FILE: &str = "current-manifest.json";
+pub const CURRENT_SIGNATURE_FILE: &str = "current-manifest.json.sig";
+pub const DEFAULT_RELEASE_MANIFEST_URL: &str =
+    "https://updates.amarcode.amarjay.com/v1/daemon/latest.json";
+pub const RELEASE_PUBLIC_KEY_HEX: &str =
+    "5ef56cd7772e8c601ca9c5a15378b7088fc558e7edcde73770cbb116d9e255d2";
+
+#[derive(Serialize, Deserialize)]
+struct StoredRelease {
+    manifest: String,
+    signature: String,
+    source_url: String,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,19 +92,28 @@ pub async fn fetch_latest(client: &reqwest::Client) -> Result<VerifiedManifest, 
         return Err("daemon manifest signature exceeds the safety limit".into());
     }
 
-    let bytes = manifest_response
-        .bytes()
-        .await
-        .map_err(|error| format!("failed to read daemon manifest: {error}"))?
-        .to_vec();
-    let signature = signature_response
-        .text()
-        .await
-        .map_err(|error| format!("failed to read daemon manifest signature: {error}"))?;
+    let bytes = bounded_body(manifest_response, 1024 * 1024).await?;
+    let signature = String::from_utf8(bounded_body(signature_response, 4096).await?)
+        .map_err(|error| error.to_string())?;
     verified_manifest(bytes, signature, manifest_url)
 }
 
 pub fn load_cached(install_root: &Path) -> Result<VerifiedManifest, String> {
+    // A single atomic record commits the manifest, signature and source URL
+    // together. Fall back to the original pair only for pre-migration installs.
+    let record = install_root.join("current-release.json");
+    match fs::read(&record) {
+        Ok(bytes) => {
+            let saved: StoredRelease = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            return verified_manifest(
+                saved.manifest.into_bytes(),
+                saved.signature,
+                reqwest::Url::parse(&saved.source_url).map_err(|e| e.to_string())?,
+            );
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
     let bytes = fs::read(install_root.join(CURRENT_MANIFEST_FILE))
         .map_err(|error| format!("failed to read cached daemon manifest: {error}"))?;
     let signature = fs::read_to_string(install_root.join(CURRENT_SIGNATURE_FILE))
@@ -195,10 +214,10 @@ impl VerifiedManifest {
                 ));
             }
         }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| format!("failed to read daemon download: {error}"))?;
+        if artifact.size == 0 || artifact.size > 512 * 1024 * 1024 {
+            return Err("daemon artifact size is outside the supported range".into());
+        }
+        let bytes = bounded_body(response, artifact.size).await?;
         verify_bytes(&bytes, artifact)?;
 
         fs::create_dir_all(&install_dir)
@@ -209,9 +228,10 @@ impl VerifiedManifest {
                 .map_err(|error| format!("failed to clear stale daemon download: {error}"))?;
         }
         write_executable(&temporary, &bytes)?;
+        // Never replace an executing binary in place. Versioned releases are
+        // immutable; a corrupt file must be repaired before it is used.
         if destination.exists() {
-            fs::remove_file(&destination)
-                .map_err(|error| format!("failed to replace daemon executable: {error}"))?;
+            fs::remove_file(&destination).map_err(|e| e.to_string())?;
         }
         fs::rename(&temporary, &destination)
             .map_err(|error| format!("failed to install daemon executable: {error}"))?;
@@ -244,10 +264,21 @@ impl VerifiedManifest {
     pub fn save_as_current(&self, install_root: &Path) -> Result<(), String> {
         fs::create_dir_all(install_root)
             .map_err(|error| format!("failed to create daemon install directory: {error}"))?;
+        let saved = StoredRelease {
+            manifest: String::from_utf8(self.bytes.clone()).map_err(|e| e.to_string())?,
+            signature: self.signature.clone(),
+            source_url: self.source_url.to_string(),
+        };
+        // Keep pre-job desktop clients' cache readable. New clients and the
+        // supervisor use the coherent record below as the sole commit point.
         atomic_write(&install_root.join(CURRENT_MANIFEST_FILE), &self.bytes)?;
         atomic_write(
             &install_root.join(CURRENT_SIGNATURE_FILE),
-            format!("{}\n", self.signature).as_bytes(),
+            self.signature.as_bytes(),
+        )?;
+        atomic_write(
+            &install_root.join("current-release.json"),
+            &serde_json::to_vec(&saved).map_err(|e| e.to_string())?,
         )
     }
 }
@@ -292,23 +323,40 @@ fn write_executable(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let temporary = path.with_extension(format!("{}.part", std::process::id()));
     let mut file = File::create(&temporary)
         .map_err(|error| format!("failed to create {}: {error}", temporary.display()))?;
     file.write_all(bytes)
         .and_then(|_| file.sync_all())
         .map_err(|error| format!("failed to write {}: {error}", temporary.display()))?;
-    if path.exists() {
-        fs::remove_file(path)
-            .map_err(|error| format!("failed to replace {}: {error}", path.display()))?;
-    }
     fs::rename(&temporary, path)
-        .map_err(|error| format!("failed to install {}: {error}", path.display()))
+        .map_err(|error| format!("failed to install {}: {error}", path.display()))?;
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        File::open(parent)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+async fn bounded_body(mut response: reqwest::Response, limit: u64) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        if (bytes.len() as u64).saturating_add(chunk.len() as u64) > limit {
+            return Err("release response exceeds its size limit".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 fn validate_segment(label: &str, value: &str) -> Result<(), String> {
-    let valid = !value.is_empty()
+    let valid = value
+        .as_bytes()
+        .first()
+        .is_some_and(u8::is_ascii_alphanumeric)
         && value.len() <= 128
         && value
             .bytes()
@@ -318,6 +366,52 @@ fn validate_segment(label: &str, value: &str) -> Result<(), String> {
     } else {
         Err(format!("invalid daemon {label}: {value}"))
     }
+}
+
+/// Read-only progress fallback while the daemon's RPC listener is restarting.
+/// Only the supervisor writes these snapshots; clients never drive recovery.
+pub fn read_update_job(
+    root: &Path,
+    id: Option<&str>,
+) -> Result<Option<amarcode_protocol::rpc::DaemonUpdateJob>, String> {
+    let id = match id {
+        Some(id) => id.to_owned(),
+        None => match fs::read_to_string(root.join("updates/latest")) {
+            Ok(id) => id,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        },
+    };
+    if id.len() != 36 || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
+        return Err("invalid daemon update job id".into());
+    }
+    let bytes =
+        fs::read(root.join("updates").join(&id).join("status.json")).map_err(|e| e.to_string())?;
+    let job: amarcode_protocol::rpc::DaemonUpdateJob =
+        serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    if job.id != id {
+        return Err("daemon update job id mismatch".into());
+    }
+    Ok(Some(job))
+}
+
+/// Serialize bootstrap repairs against daemon job creation. The independent
+/// supervisor has its own lock, so a restart never transfers a workspace lock.
+pub fn lock_update(root: &Path, name: &str) -> Result<File, String> {
+    if !matches!(name, "request.lock" | "supervisor.lock") {
+        return Err("invalid update lock name".into());
+    }
+    fs::create_dir_all(root.join("updates")).map_err(|e| e.to_string())?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join("updates").join(name))
+        .map_err(|e| e.to_string())?;
+    file.try_lock()
+        .map_err(|_| "another daemon update operation is active".to_string())?;
+    Ok(file)
 }
 
 #[cfg(test)]
@@ -380,5 +474,61 @@ mod tests {
             assert!(verify_file(&executable, manifest.artifact(target).unwrap()).unwrap());
             std::fs::remove_dir_all(install_root).unwrap();
         });
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+    const MANIFEST: &str = "{\"version\":\"0.1.0\",\"protocolVersion\":1,\"artifacts\":{}}\n";
+    const SIGNATURE: &str =
+        "GQgA9igK36F5ZYEeLMv3gFhW/AovXsVQRTiV71xvjTOa01T7E5rknhzNSu3eab3sn8b7CTXQXC85Iy+BxsTVBQ==";
+    #[test]
+    fn migrates_legacy_cache_to_one_atomic_signed_record_and_preserves_source() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(CURRENT_MANIFEST_FILE), MANIFEST).unwrap();
+        fs::write(dir.path().join(CURRENT_SIGNATURE_FILE), SIGNATURE).unwrap();
+        let old = load_cached(dir.path()).unwrap();
+        old.save_as_current(dir.path()).unwrap();
+        fs::remove_file(dir.path().join(CURRENT_MANIFEST_FILE)).unwrap();
+        fs::remove_file(dir.path().join(CURRENT_SIGNATURE_FILE)).unwrap();
+        let loaded = load_cached(dir.path()).unwrap();
+        assert_eq!(loaded.bytes, MANIFEST.as_bytes());
+        let mut custom = loaded;
+        custom.source_url = reqwest::Url::parse("https://example.com/custom/latest.json").unwrap();
+        custom.save_as_current(dir.path()).unwrap();
+        assert_eq!(
+            load_cached(dir.path()).unwrap().source_url,
+            custom.source_url
+        );
+    }
+    #[test]
+    fn uncommitted_temporary_file_cannot_replace_current_release() {
+        let dir = tempfile::tempdir().unwrap();
+        let verified = verified_manifest(
+            MANIFEST.as_bytes().to_vec(),
+            SIGNATURE.into(),
+            reqwest::Url::parse(DEFAULT_RELEASE_MANIFEST_URL).unwrap(),
+        )
+        .unwrap();
+        verified.save_as_current(dir.path()).unwrap();
+        fs::write(
+            dir.path().join("current-release.interrupted.part"),
+            "corrupted",
+        )
+        .unwrap();
+        assert_eq!(load_cached(dir.path()).unwrap().manifest.version, "0.1.0");
+        // A corrupt committed record must not silently fall back to an older
+        // pair, which could otherwise conceal a torn or tampered activation.
+        fs::write(dir.path().join(CURRENT_MANIFEST_FILE), MANIFEST).unwrap();
+        fs::write(dir.path().join(CURRENT_SIGNATURE_FILE), SIGNATURE).unwrap();
+        fs::write(dir.path().join("current-release.json"), "corrupted").unwrap();
+        assert!(load_cached(dir.path()).is_err());
+    }
+    #[test]
+    fn release_identifiers_cannot_name_parent_or_current_directory() {
+        for value in [".", "..", "../version", "/version", ""] {
+            assert!(validate_segment("version", value).is_err());
+        }
     }
 }

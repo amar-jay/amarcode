@@ -38,6 +38,11 @@ struct Cli {
 enum LifecycleCommand {
     /// Run the long-lived RPC server in the foreground.
     Run,
+    /// Resume a durable update job in an independent native service/task.
+    UpdateSupervisor {
+        #[arg(long)]
+        release_root: PathBuf,
+    },
     /// Register the current executable as a per-user login service.
     Install,
     /// Stop and unregister the per-user service without deleting user data.
@@ -69,7 +74,10 @@ fn main() {
     let command = cli.command.unwrap_or(LifecycleCommand::Run);
     // Set the service environment before Tokio creates any worker threads.
     #[cfg(windows)]
-    if command == LifecycleCommand::Run {
+    if matches!(
+        &command,
+        LifecycleCommand::Run | LifecycleCommand::UpdateSupervisor { .. }
+    ) {
         if let Err(error) = amarcode_daemon::windows::prepare_environment() {
             eprintln!("amarcode-daemon: {error}");
             std::process::exit(1);
@@ -80,6 +88,13 @@ fn main() {
 
 #[tokio::main]
 async fn async_main(command: LifecycleCommand, transport: DaemonTransport) {
+    if let LifecycleCommand::UpdateSupervisor { ref release_root } = command {
+        if let Err(error) = amarcode_daemon::update::supervisor::run(release_root).await {
+            eprintln!("amarcode update supervisor: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if command != LifecycleCommand::Run {
         if let Err(error) = run_lifecycle_command(command) {
             eprintln!("amarcode-daemon: {error}");
@@ -125,7 +140,9 @@ async fn async_main(command: LifecycleCommand, transport: DaemonTransport) {
 fn run_lifecycle_command(command: LifecycleCommand) -> amarcode_daemon::Result<()> {
     let controller = NativeServiceController;
     match command {
-        LifecycleCommand::Run => unreachable!("run is handled by the async entrypoint"),
+        LifecycleCommand::Run | LifecycleCommand::UpdateSupervisor { .. } => {
+            unreachable!("run is handled by the async entrypoint")
+        }
         LifecycleCommand::Install => {
             let executable = std::env::current_exe()?;
             controller.install(&executable, std::env::var_os("PATH").as_deref())?;
@@ -135,11 +152,13 @@ fn run_lifecycle_command(command: LifecycleCommand) -> amarcode_daemon::Result<(
             );
         }
         LifecycleCommand::Uninstall => {
+            amarcode_daemon::service_control::remove_update_supervisor()?;
             controller.uninstall()?;
             println!("uninstalled Amarcode per-user service");
         }
         LifecycleCommand::Purge { confirm_data_loss } => {
             require_data_loss_confirmation(confirm_data_loss)?;
+            amarcode_daemon::service_control::remove_update_supervisor()?;
             cleanup::purge_default(&controller)?;
             println!("removed Amarcode per-user service and daemon data");
         }

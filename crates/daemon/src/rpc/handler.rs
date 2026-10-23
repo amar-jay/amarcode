@@ -38,6 +38,26 @@ pub enum DispatchOutcome {
 /// Dispatch one RPC method against shared app state.
 pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<DispatchOutcome> {
     match method {
+        methods::CHECK_DAEMON_UPDATE => crate::update::check(&app.config)
+            .await
+            .map_err(Error::msg)
+            .and_then(to_value)
+            .map(DispatchOutcome::Result),
+        methods::START_DAEMON_UPDATE => {
+            let p: crate::protocol::rpc::StartDaemonUpdateParams = parse_params(params)?;
+            crate::update::start(&app.config, p.version)
+                .await
+                .map_err(Error::msg)
+                .and_then(to_value)
+                .map(DispatchOutcome::Result)
+        }
+        methods::GET_DAEMON_UPDATE => {
+            let p: crate::protocol::rpc::GetDaemonUpdateParams = parse_params(params)?;
+            crate::update::get(p.job_id.as_deref())
+                .map_err(Error::msg)
+                .and_then(to_value)
+                .map(DispatchOutcome::Result)
+        }
         // Filesystem and Git operations share this path across TCP and WS.
         methods::LIST_WORKSPACE_FILES
         | methods::GET_WORKSPACE_INFO

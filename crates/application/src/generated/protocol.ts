@@ -47,7 +47,7 @@ export type ContextCost = { amount: number, currency: string, };
 
 export type ContextUsage = { used: number, size: number, cost: ContextCost | null, };
 
-export type AgentDefinition = { id: string, name: string, command: string, arguments: Array<string>, environment: Array<[string, string]>, 
+export type AgentDefinition = { id: string, name: string, command: string, arguments: Array<string>, environment: Array<[string, string]>,
 /**
  * Whether the launch command currently resolves on this host.
  */
@@ -82,6 +82,28 @@ export type ChatDetail = { chat: Chat, messages: Array<MessageDetail>, session_c
 export type GetChatResult = ChatDetail | Chat;
 
 export type DiscoverCommandsParams = { chat_id: string, agent_id: string, };
+
+export type DaemonUpdateCheck = { "status": "upToDate", currentVersion: string, } | { "status": "available", currentVersion: string, version: string, } | { "status": "unavailable", reason: string, };
+
+export type DaemonUpdateStatus = { "status": "downloading", received: number, total: number, } | { "status": "verifying" } | { "status": "installing" } | { "status": "restarting" } | { "status": "rollingBack" } | { "status": "ready", version: string, } | { "status": "failed", error: string, };
+
+export type DaemonUpdateJob = { id: string, version: string, previous_version: string, status: DaemonUpdateStatus,
+/**
+ * True only after activation commits or failure/rollback has settled.
+ */
+finished: boolean, };
+
+export type StartDaemonUpdateParams = {
+/**
+ * The version explicitly approved by the user; never silently update to a different release.
+ */
+version: string, };
+
+export type GetDaemonUpdateParams = {
+/**
+ * Omit to inspect the latest job, including after a desktop restart.
+ */
+job_id: string | null, };
 
 export type HealthResult = { status: string, version: string, protocol_version: number, addr: string, };
 

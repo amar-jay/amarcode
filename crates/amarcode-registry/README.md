@@ -70,19 +70,28 @@ fetches `latest.json`, verifies its Ed25519 signature, selects the platform
 artifact, verifies its byte size and SHA-256, and invokes the daemon's
 short-lived `install` and `restart` lifecycle commands.
 
-After a successful bootstrap, the desktop performs a best-effort signed update
-check in the background. A newer semantically-versioned release with the same
-protocol version produces a non-blocking UI notification. Updating always
-requires user confirmation because restarting the service interrupts active
-agent turns.
+After a successful bootstrap, the desktop requests an update check through
+daemon RPC. A newer signed release with the same protocol version produces a
+non-blocking notification. Updating requires user confirmation because restarting
+the service interrupts active agent turns. The desktop submits the exact approved
+version and receives a durable update job ID.
 
-The update is staged before the running service is touched: the signature,
-artifact size, SHA-256, and lifecycle CLI are all verified first. Activation
-then re-registers the versioned executable, restarts the service, and requires
-an exact version/protocol health response before caching the new manifest as
-current. On failure the previous signed release is re-registered and restarted.
-An fsynced activation marker lets the next desktop launch recover the release
-selected by the cached manifest if the desktop exits during this transaction.
+The daemon's independent update supervisor stages and verifies the artifact before
+changing the running service, activates the versioned executable, requires exact
+version/protocol health plus native service status, and commits the signed release
+record. Activation failure restores the previous verified release. Its separate
+systemd user service / Windows scheduled task survives daemon replacement and
+resumes interrupted work at login. Closing the desktop does not cancel the job.
+The desktop monitors RPC status and can read the supervisor's status snapshot
+while the RPC listener is restarting. It does not drive normal-job rollback.
+
+Release verification and storage live in the daemon’s `update::releases` module,
+which desktop bootstrap also reuses.
+A single atomic `current-release.json` file is the commit record; legacy signed
+manifest/signature files are mirrored for older clients. First installation and
+explicit repair retain the signed desktop bootstrap. An initial upgrade from an
+older daemon without update RPC uses that bootstrap once, with the approved
+version pinned and the previous release retained for rollback.
 
 Installed releases are kept below Tauri's application-local data directory in
 `daemon/<version>/<rust-target>/`. The last successfully launched signed

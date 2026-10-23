@@ -86,17 +86,15 @@ dependencies = [
 name = "amarcode"
 version = "0.1.0"
 dependencies = [
+ "amarcode-daemon",
  "amarcode-protocol",
  "arboard",
  "base64 0.22.1",
- "ed25519-dalek",
- "hex",
  "image",
  "reqwest",
  "semver",
  "serde",
  "serde_json",
- "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -141,6 +139,7 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "rustls-pemfile",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

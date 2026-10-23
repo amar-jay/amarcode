@@ -1,6 +1,8 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AgentInfo,
+  DaemonUpdateCheck,
+  DaemonUpdateStatus,
   WorkspaceInfo,
   WorkspaceChange,
   WorkspaceDiff,
@@ -42,19 +44,7 @@ export type DaemonBootstrapStatus =
   | { status: "ready"; version: string }
   | { status: "failed"; error: string };
 
-export type DaemonUpdateCheck =
-  | { status: "upToDate"; currentVersion: string }
-  | { status: "available"; currentVersion: string; version: string }
-  | { status: "unavailable"; reason: string };
-
-export type DaemonUpdateStatus =
-  | { status: "downloading"; received: number; total: number }
-  | { status: "verifying" }
-  | { status: "installing" }
-  | { status: "restarting" }
-  | { status: "rollingBack" }
-  | { status: "ready"; version: string }
-  | { status: "failed"; error: string };
+export type { DaemonUpdateCheck, DaemonUpdateStatus } from "./types";
 
 export type AppUpdateCheck =
   | { status: "upToDate"; currentVersion: string }
@@ -119,11 +109,12 @@ export const daemonApi = {
   },
   checkUpdate: (): Promise<DaemonUpdateCheck> => invoke("daemon_check_update"),
   update: async (
+    version: string,
     onStatus: (status: DaemonUpdateStatus) => void,
   ): Promise<Health> => {
     const statusChannel = new Channel<DaemonUpdateStatus>();
     statusChannel.onmessage = onStatus;
-    return invoke("daemon_update", { onStatus: statusChannel });
+    return invoke("daemon_update", { version, onStatus: statusChannel });
   },
   prepareApplicationUninstall: async (
     confirmed: boolean,

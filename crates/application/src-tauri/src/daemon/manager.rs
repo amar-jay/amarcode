@@ -9,16 +9,14 @@ use std::{
 #[cfg(unix)]
 use std::ffi::OsString;
 
-use amarcode_protocol::rpc::HealthResult;
+use amarcode_daemon::update::releases as release;
+use amarcode_protocol::rpc::{GetDaemonUpdateParams, HealthResult, StartDaemonUpdateParams};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, AppHandle, Manager};
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::{
-    config::Config,
-    daemon::{release, DaemonClient},
-};
+use crate::{config::Config, daemon::DaemonClient};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
@@ -33,40 +31,7 @@ pub enum DaemonBootstrapStatus {
     Failed { error: String },
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(
-    tag = "status",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum DaemonUpdateCheck {
-    UpToDate {
-        current_version: String,
-    },
-    Available {
-        current_version: String,
-        version: String,
-    },
-    Unavailable {
-        reason: String,
-    },
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(
-    tag = "status",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum DaemonUpdateStatus {
-    Downloading { received: u64, total: u64 },
-    Verifying,
-    Installing,
-    Restarting,
-    RollingBack,
-    Ready { version: String },
-    Failed { error: String },
-}
+pub use amarcode_protocol::rpc::{DaemonUpdateCheck, DaemonUpdateStatus};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
@@ -106,6 +71,18 @@ impl DaemonManager {
 
         let target = release::platform_target()?;
         let install_root = install_root(app)?;
+        if let Some(job) = release::read_update_job(&install_root, None)? {
+            if !job.finished {
+                send(on_status, DaemonBootstrapStatus::Starting);
+                let outcome = wait_for_update(&install_root, &job.id, |_| {}).await;
+                let finished = release::read_update_job(&install_root, Some(&job.id))?
+                    .is_some_and(|job| job.finished);
+                if !finished {
+                    outcome?;
+                }
+            }
+        }
+
         if Config::get().daemon_service_executable.is_none() {
             recover_interrupted_update(&install_root, target).await?;
         }
@@ -184,7 +161,26 @@ impl DaemonManager {
         app: &AppHandle,
         on_status: &Channel<DaemonBootstrapStatus>,
     ) -> Result<HealthResult, String> {
+        self.install_release(app, &|status| send(on_status, status), None)
+            .await
+    }
+
+    async fn install_release(
+        &self,
+        app: &AppHandle,
+        on_status: &impl Fn(DaemonBootstrapStatus),
+        expected_version: Option<&str>,
+    ) -> Result<HealthResult, String> {
         let _guard = self.bootstrap_lock.lock().await;
+        let root = install_root(app)?;
+        let _request = release::lock_update(&root, "request.lock")?;
+        if release::read_update_job(&root, None)?.is_some_and(|job| !job.finished) {
+            return Err(
+                "a daemon update is active; wait for it to finish before repairing the service"
+                    .into(),
+            );
+        }
+
         let target = release::platform_target()?;
         let install_root = install_root(app)?;
         let client = reqwest::Client::builder()
@@ -195,6 +191,9 @@ impl DaemonManager {
         let cached = release::load_cached(&install_root).ok();
         let remote_result = release::fetch_latest(&client).await.and_then(|manifest| {
             ensure_manifest_compatible(&manifest)?;
+            if expected_version.is_some_and(|expected| expected != manifest.manifest.version) {
+                return Err("the approved daemon release changed; check for updates again".into());
+            }
             manifest.artifact(target)?;
             Ok(manifest)
         });
@@ -206,7 +205,8 @@ impl DaemonManager {
             Err(error) => failures.push(error),
         }
         if let Some(cached) = cached {
-            if ensure_manifest_compatible(&cached).is_ok()
+            if expected_version.is_none_or(|expected| expected == cached.manifest.version)
+                && ensure_manifest_compatible(&cached).is_ok()
                 && cached.artifact(target).is_ok()
                 && !candidates
                     .iter()
@@ -219,13 +219,10 @@ impl DaemonManager {
         for (manifest, is_remote) in candidates {
             let artifact = manifest.artifact(target)?.clone();
             if is_remote {
-                send(
-                    on_status,
-                    DaemonBootstrapStatus::Downloading {
-                        received: 0,
-                        total: artifact.size,
-                    },
-                );
+                on_status(DaemonBootstrapStatus::Downloading {
+                    received: 0,
+                    total: artifact.size,
+                });
             }
             let executable = match manifest
                 .ensure_installed(&client, &install_root, target)
@@ -238,21 +235,18 @@ impl DaemonManager {
                 }
             };
             if is_remote {
-                send(
-                    on_status,
-                    DaemonBootstrapStatus::Downloading {
-                        received: artifact.size,
-                        total: artifact.size,
-                    },
-                );
+                on_status(DaemonBootstrapStatus::Downloading {
+                    received: artifact.size,
+                    total: artifact.size,
+                });
             }
-            send(on_status, DaemonBootstrapStatus::Verifying);
+            on_status(DaemonBootstrapStatus::Verifying);
             if let Err(error) = verify_lifecycle_cli(&executable) {
                 failures.push(error);
                 continue;
             }
-            send(on_status, DaemonBootstrapStatus::Installing);
-            send(on_status, DaemonBootstrapStatus::Starting);
+            on_status(DaemonBootstrapStatus::Installing);
+            on_status(DaemonBootstrapStatus::Starting);
 
             let service_path = agent_path();
             if let Err(error) =
@@ -282,7 +276,9 @@ impl DaemonManager {
                     fs::write(service_installation_marker(&install_root), b"1\n").map_err(
                         |error| format!("failed to save service installation state: {error}"),
                     )?;
-                    ready(on_status, &health);
+                    on_status(DaemonBootstrapStatus::Ready {
+                        version: health.version.clone(),
+                    });
                     return Ok(health);
                 }
                 Err(error) => {
@@ -302,135 +298,111 @@ impl DaemonManager {
     /// native service. Failures are returned so callers can treat update
     /// checks as best-effort without hiding diagnostics.
     pub async fn check_update(&self, app: &AppHandle) -> Result<DaemonUpdateCheck, String> {
-        let _guard = self.bootstrap_lock.lock().await;
         if Config::get().daemon_service_executable.is_some() {
             return Ok(DaemonUpdateCheck::Unavailable {
-                reason: "updates are disabled for a configured development daemon".into(),
+                reason: "updates are disabled for a development daemon".into(),
             });
         }
-
-        let target = release::platform_target()?;
-        let install_root = install_root(app)?;
-        if !service_installation_marker(&install_root).is_file() {
-            return Ok(DaemonUpdateCheck::Unavailable {
-                reason: "the daemon service is not installed".into(),
-            });
+        match DaemonClient::new().check_daemon_update().await {
+            Ok(result) => Ok(result),
+            Err(error) if error.contains("unknown method: check_daemon_update") => {
+                // Transition only: old v12 daemons cannot serve update RPC yet.
+                let root = install_root(app)?;
+                let current = release::load_cached(&root)?;
+                let latest = release::fetch_latest(&release_client()?).await?;
+                ensure_manifest_compatible(&latest)?;
+                latest.artifact(release::platform_target()?)?;
+                update_check(&current.manifest.version, &latest.manifest.version)
+            }
+            Err(error) => Err(error),
         }
-        let current = release::load_cached(&install_root)?;
-        ensure_manifest_compatible(&current)?;
-        current.artifact(target)?;
-
-        let client = release_client()?;
-        let latest = release::fetch_latest(&client).await?;
-        ensure_manifest_compatible(&latest)?;
-        latest.artifact(target)?;
-
-        update_check(&current.manifest.version, &latest.manifest.version)
     }
 
-    /// Stage, verify and activate a newer daemon release. The previous
-    /// executable and signed manifest remain available until the replacement
-    /// passes its health check, and are restored on any activation failure.
+    /// Request a durable job; activation and rollback belong to the daemon's
+    /// independent supervisor. Closing this IPC call never cancels that job.
     pub async fn update(
         &self,
         app: &AppHandle,
+        version: String,
         on_status: &Channel<DaemonUpdateStatus>,
     ) -> Result<HealthResult, String> {
-        let _guard = self.bootstrap_lock.lock().await;
         if Config::get().daemon_service_executable.is_some() {
-            return Err("updates are disabled for a configured development daemon".into());
+            return Err("updates are disabled for a development daemon".into());
         }
-
-        let target = release::platform_target()?;
-        let install_root = install_root(app)?;
-        let previous = release::load_cached(&install_root).map_err(|error| {
-            format!("cannot update without a verified current release: {error}")
-        })?;
-        ensure_manifest_compatible(&previous)?;
-        let previous_executable = previous
-            .installed_executable(&install_root, target)?
-            .ok_or_else(|| "the current verified daemon executable is missing".to_string())?;
-
-        let client = release_client()?;
-        let latest = release::fetch_latest(&client).await?;
-        ensure_manifest_compatible(&latest)?;
-        let artifact = latest.artifact(target)?.clone();
-        match update_check(&previous.manifest.version, &latest.manifest.version)? {
-            DaemonUpdateCheck::Available { .. } => {}
-            DaemonUpdateCheck::UpToDate { .. } => return DaemonClient::new().health().await,
-            DaemonUpdateCheck::Unavailable { reason } => return Err(reason),
-        }
-
-        send_update(
-            on_status,
-            DaemonUpdateStatus::Downloading {
-                received: 0,
-                total: artifact.size,
-            },
-        );
-        let executable = latest
-            .ensure_installed(&client, &install_root, target)
-            .await?;
-        send_update(
-            on_status,
-            DaemonUpdateStatus::Downloading {
-                received: artifact.size,
-                total: artifact.size,
-            },
-        );
-        send_update(on_status, DaemonUpdateStatus::Verifying);
-        verify_lifecycle_cli(&executable)?;
-
-        write_update_marker(&install_root)?;
-        send_update(on_status, DaemonUpdateStatus::Installing);
-        let service_path = agent_path();
-        if let Err(error) =
-            run_lifecycle_command(&executable, &["install"], service_path.as_deref())
+        let root = install_root(app)?;
+        let job = match DaemonClient::new()
+            .start_daemon_update(StartDaemonUpdateParams {
+                version: version.clone(),
+            })
+            .await
         {
-            return Err(rollback_release(
-                &previous,
-                &previous_executable,
-                &install_root,
-                on_status,
-                format!("failed to install daemon update: {error}"),
-            )
-            .await);
-        }
-
-        send_update(on_status, DaemonUpdateStatus::Restarting);
-        let activation = activate_release(&executable, &latest.manifest.version).await;
-        let health = match activation {
-            Ok(health) => health,
-            Err(error) => {
-                return Err(rollback_release(
-                    &previous,
-                    &previous_executable,
-                    &install_root,
-                    on_status,
-                    error,
-                )
-                .await);
+            Ok(job) => job,
+            Err(error) if error.contains("unknown method: start_daemon_update") => {
+                // First upgrade only: an old daemon needs the signed bootstrap
+                // installer. Once installed, all future updates use jobs.
+                let progress = |status| {
+                    let status = match status {
+                        DaemonBootstrapStatus::Downloading { received, total } => {
+                            DaemonUpdateStatus::Downloading { received, total }
+                        }
+                        DaemonBootstrapStatus::Verifying => DaemonUpdateStatus::Verifying,
+                        DaemonBootstrapStatus::Installing => DaemonUpdateStatus::Installing,
+                        DaemonBootstrapStatus::Starting => DaemonUpdateStatus::Restarting,
+                        DaemonBootstrapStatus::Ready { version } => {
+                            DaemonUpdateStatus::Ready { version }
+                        }
+                        DaemonBootstrapStatus::Failed { error } => {
+                            DaemonUpdateStatus::Failed { error }
+                        }
+                        _ => return,
+                    };
+                    send_update(on_status, status);
+                };
+                let previous = release::load_cached(&root)?;
+                let previous_executable = previous
+                    .installed_executable(&root, release::platform_target()?)?
+                    .ok_or("verified bootstrap rollback release is missing")?;
+                write_update_marker(&root)?;
+                match self.install_release(app, &progress, Some(&version)).await {
+                    Ok(health) => {
+                        clear_update_marker(&root)?;
+                        return Ok(health);
+                    }
+                    Err(error) => {
+                        send_update(on_status, DaemonUpdateStatus::RollingBack);
+                        let rollback = async {
+                            run_lifecycle_command(
+                                &previous_executable,
+                                &["install"],
+                                agent_path().as_deref(),
+                            )?;
+                            activate_release(&previous_executable, &previous.manifest.version)
+                                .await?;
+                            previous.save_as_current(&root)?;
+                            clear_update_marker(&root)
+                        }
+                        .await;
+                        return Err(match rollback {
+                            Ok(()) => format!("{error}; previous daemon restored"),
+                            Err(rollback) => format!("{error}; bootstrap rollback failed: {rollback}. Repair the daemon service from the connection dialog"),
+                        });
+                    }
+                }
             }
-        };
-
-        if let Err(error) = latest.save_as_current(&install_root) {
-            return Err(rollback_release(
-                &previous,
-                &previous_executable,
-                &install_root,
-                on_status,
-                format!("failed to commit daemon update: {error}"),
-            )
-            .await);
-        }
-        clear_update_marker(&install_root)?;
-
-        send_update(
-            on_status,
-            DaemonUpdateStatus::Ready {
-                version: health.version.clone(),
+            Err(error) => match release::read_update_job(&root, None)? {
+                Some(job)
+                    if job.version == version
+                        && (!job.finished
+                            || matches!(&job.status, DaemonUpdateStatus::Ready { .. })) =>
+                {
+                    job
+                }
+                _ => return Err(error),
             },
-        );
+        };
+        wait_for_update(&root, &job.id, |status| send_update(on_status, status)).await?;
+        let health = DaemonClient::new().health().await?;
+        ensure_expected_version(Some(&job.version), &health)?;
         Ok(health)
     }
 
@@ -484,6 +456,42 @@ impl DaemonManager {
     }
 }
 
+async fn wait_for_update(
+    root: &Path,
+    id: &str,
+    progress: impl Fn(DaemonUpdateStatus),
+) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+    loop {
+        let rpc = tokio::time::timeout(
+            Duration::from_secs(2),
+            DaemonClient::new().get_daemon_update(GetDaemonUpdateParams {
+                job_id: Some(id.to_owned()),
+            }),
+        )
+        .await;
+        let job = match rpc {
+            Ok(Ok(Some(job))) => Some(job),
+            _ => release::read_update_job(root, Some(id))?,
+        }
+        .ok_or("daemon update job disappeared")?;
+        progress(job.status.clone());
+        if job.finished {
+            return match job.status {
+                DaemonUpdateStatus::Ready { .. } => Ok(()),
+                DaemonUpdateStatus::Failed { error } => Err(error),
+                _ => Err("invalid terminal daemon update state".into()),
+            };
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(
+                "daemon update is still running; its supervisor will continue independently".into(),
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+}
+
 fn release_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(90))
@@ -517,36 +525,6 @@ async fn activate_release(
     ensure_service_running(executable)?;
     ensure_expected_version(Some(expected_version), &health)?;
     Ok(health)
-}
-
-async fn rollback_release(
-    previous: &release::VerifiedManifest,
-    previous_executable: &Path,
-    install_root: &Path,
-    on_status: &Channel<DaemonUpdateStatus>,
-    update_error: String,
-) -> String {
-    send_update(on_status, DaemonUpdateStatus::RollingBack);
-    let service_path = agent_path();
-    let rollback = async {
-        run_lifecycle_command(previous_executable, &["install"], service_path.as_deref())?;
-        activate_release(previous_executable, &previous.manifest.version).await?;
-        previous.save_as_current(install_root)?;
-        Ok::<(), String>(())
-    }
-    .await;
-
-    match rollback {
-        Ok(()) => match clear_update_marker(install_root) {
-            Ok(()) => format!("{update_error}; the previous daemon version was restored"),
-            Err(error) => format!(
-                "{update_error}; the previous daemon version was restored, but recovery state could not be cleared: {error}"
-            ),
-        },
-        Err(rollback_error) => format!(
-            "{update_error}; rollback also failed: {rollback_error}. Repair the daemon service from the connection dialog"
-        ),
-    }
 }
 
 const SERVICE_INSTALLATION_MARKER: &str = "service-installed-v1";

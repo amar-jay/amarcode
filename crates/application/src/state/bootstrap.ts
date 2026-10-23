@@ -207,7 +207,11 @@ export function useAppBootstrap() {
 
   const updateDaemon = useCallback(async () => {
     try {
-      const health = await daemonApi.update(setDaemonUpdateStatus);
+      if (!daemonUpdateVersion) return;
+      const health = await daemonApi.update(
+        daemonUpdateVersion,
+        setDaemonUpdateStatus,
+      );
       await reconcileDaemonClient();
       notify(`Daemon ${health.version} updated successfully.`, "success");
       setDaemonUpdateVersion(null);
@@ -227,7 +231,7 @@ export function useAppBootstrap() {
         );
       }
     }
-  }, [reconcileDaemonClient]);
+  }, [reconcileDaemonClient, daemonUpdateVersion]);
 
   // Keep sidebar list fresh when any chat metadata changes (every event).
   useEffect(() => {

@@ -16,6 +16,7 @@ pub mod rpc;
 pub mod service;
 pub mod service_control;
 pub mod store;
+pub mod update;
 #[cfg(windows)]
 pub mod windows;
 

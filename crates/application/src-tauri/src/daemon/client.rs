@@ -17,6 +17,9 @@ use amarcode_protocol::rpc::{
     SubscribeEventsParams, TranscribeAudioParams, TranscribeAudioResult, UpdateChatParams,
     VacuumDatabaseResult, VersionResult, WorkspaceFileParams, WorkspaceParams,
 };
+use amarcode_protocol::rpc::{
+    DaemonUpdateCheck, DaemonUpdateJob, GetDaemonUpdateParams, StartDaemonUpdateParams,
+};
 use amarcode_protocol::{
     AcpEvent, AgentInfo, AgentRun, Chat, GetChatResult, MessagePart, SessionCommands,
     WorkspaceChange, WorkspaceDiff, WorkspaceInfo,
@@ -31,6 +34,21 @@ impl DaemonClient {
         Self
     }
 
+    pub async fn check_daemon_update(&self) -> Result<DaemonUpdateCheck, String> {
+        self.call(methods::CHECK_DAEMON_UPDATE, ()).await
+    }
+    pub async fn start_daemon_update(
+        &self,
+        params: StartDaemonUpdateParams,
+    ) -> Result<DaemonUpdateJob, String> {
+        self.call(methods::START_DAEMON_UPDATE, params).await
+    }
+    pub async fn get_daemon_update(
+        &self,
+        params: GetDaemonUpdateParams,
+    ) -> Result<Option<DaemonUpdateJob>, String> {
+        self.call(methods::GET_DAEMON_UPDATE, params).await
+    }
     pub async fn health(&self) -> Result<HealthResult, String> {
         let response: HealthResult = self.call(methods::HEALTH, ()).await?;
         ensure_compatible_protocol(response.protocol_version)?;

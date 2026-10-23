@@ -79,6 +79,58 @@ manifest must still be signed by the release key compiled into the daemon.
 The daemon is the **system of record** for chats, messages, runs, and agents.
 The UI is a client: it does not own the agent process or the SQLite file.
 
+## Daemon-owned updates
+
+Update RPC is additive to protocol 12:
+
+- `check_daemon_update` returns a signed-release check result.
+- `start_daemon_update { "version": "..." }` starts the exact approved release
+  and returns a durable job ID. Duplicate requests reuse a pending job.
+- `get_daemon_update { "job_id": "..." }` returns its status. Omitting `job_id`
+  returns the latest job, including after a client reconnects.
+
+`update/` owns staging, activation, health checks, rollback and recovery.
+`update/releases.rs` supplies the daemon-owned verifier and release store reused by the
+desktop's first-install/repair bootstrap. Normal desktop updates only request
+jobs and observe status. Old protocol-12 daemons without update RPC use the
+desktop's signed bootstrap once, with the approved version pinned and the
+previous release retained for rollback.
+
+The updater runs as `amarcode-daemon update-supervisor --release-root ...` in
+an **independent** native service/task, not as a child owned by the RPC daemon:
+
+- Linux: `amarcode-daemon-update.service` in the systemd user manager.
+- Windows: `Amarcode Daemon Update` in Task Scheduler.
+
+It is registered for login recovery and restarts on failure. Closing the
+desktop or stopping the daemon's own service does not stop this supervisor.
+The supervisor never constructs `App`, opens SQLite, or acquires the daemon's
+database instance lock. Uninstall/purge removes the updater service/task too.
+
+Jobs and public status snapshots live under the existing release cache's
+`updates/<job-id>/` directory, with separate request and supervisor OS locks.
+Activation starts only after both the candidate and rollback binaries are
+verified. The service must report the exact new daemon version and protocol
+before committing the signed `current-release.json` record. That single atomic,
+fsynced record replaces the former manifest/signature pair as the commit point;
+the legacy pair is mirrored for older desktop clients and remains readable for
+migration. An interrupted, uncommitted
+activation rolls back; a committed healthy release is retained. Failed rollback
+is retried across supervisor restarts, with three failed recovery attempts
+ending in an explicit repair-required status.
+
+The desktop can read the supervisor's status snapshot during the RPC restart
+gap. It never writes that journal or drives normal-job recovery. Bootstrap
+waits for pending updates before starting/re-registering a service, and repair
+shares the request lock so it cannot race a new daemon update.
+
+Self-updating currently supports the standard managed desktop TCP service on
+the published Linux/Windows targets. Custom address, transport, data/store, or
+registry-source overrides, development binaries and unpublished targets return `unavailable`;
+this avoids silently discarding custom service configuration during activation.
+Progress currently reports staging milestones rather than individual download
+chunks. No service update is performed without an explicit start request.
+
 Workspace operations also belong to the daemon. `service/workspace.rs` owns
 file discovery, workspace/Git metadata, status, staging, commits, and diffs;
 `service/workspace/editor.rs` owns text reads and conflict-checked saves.

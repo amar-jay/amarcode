@@ -44,11 +44,12 @@ pub async fn daemon_check_update(
 #[tauri::command]
 pub async fn daemon_update(
     app: AppHandle,
+    version: String,
     manager: State<'_, daemon::DaemonManager>,
     on_status: Channel<daemon::DaemonUpdateStatus>,
 ) -> Result<HealthResult, String> {
     report_failure(
-        manager.update(&app, &on_status).await,
+        manager.update(&app, version, &on_status).await,
         &on_status,
         |error| daemon::DaemonUpdateStatus::Failed { error },
     )

@@ -78,6 +78,19 @@ impl ServiceController for NativeServiceController {
     }
 }
 
+/// The updater has its own service/task, outside the daemon's process group.
+pub(crate) fn launch_update_supervisor(
+    executable: &Path,
+    root: &Path,
+    restart: bool,
+) -> Result<()> {
+    platform::launch_update_supervisor(executable, root, restart)
+}
+
+pub fn remove_update_supervisor() -> Result<()> {
+    platform::remove_update_supervisor()
+}
+
 fn checked(command: &mut Command, operation: &str) -> Result<Output> {
     let output = command
         .output()
@@ -147,6 +160,61 @@ mod platform {
         Ok(config_root.join("systemd/user").join(UNIT_NAME))
     }
 
+    const UPDATE_UNIT: &str = "amarcode-daemon-update.service";
+
+    pub fn launch_update_supervisor(executable: &Path, root: &Path, restart: bool) -> Result<()> {
+        let directory = unit_path()?
+            .parent()
+            .ok_or_else(|| Error::msg("missing service directory"))?
+            .to_owned();
+        let path = directory.join(UPDATE_UNIT);
+        let unit = update_unit(executable, root)?;
+        fs::create_dir_all(&directory)?;
+        crate::update::releases::atomic_write(&path, unit.as_bytes()).map_err(Error::msg)?;
+        checked(
+            Command::new("systemctl").args(["--user", "daemon-reload"]),
+            "reload updater service",
+        )?;
+        checked(
+            Command::new("systemctl").args(["--user", "enable", UPDATE_UNIT]),
+            "enable updater recovery at login",
+        )?;
+        checked(
+            Command::new("systemctl").args([
+                "--user",
+                if restart { "restart" } else { "start" },
+                UPDATE_UNIT,
+            ]),
+            "start independent updater service",
+        )?;
+        Ok(())
+    }
+
+    fn update_unit(executable: &Path, root: &Path) -> Result<String> {
+        let executable = systemd_quote(executable.as_os_str())?.replace('$', "$$");
+        let root = systemd_quote(root.as_os_str())?.replace('$', "$$");
+        let path = systemd_quote(&std::env::var_os("PATH").unwrap_or_default())?;
+        Ok(format!("[Unit]\nDescription=Amarcode update supervisor\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\nExecStart=\"{executable}\" update-supervisor --release-root \"{root}\"\nEnvironment=\"PATH={path}\"\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n"))
+    }
+
+    pub fn remove_update_supervisor() -> Result<()> {
+        let path = unit_path()?
+            .parent()
+            .ok_or_else(|| Error::msg("missing service directory"))?
+            .join(UPDATE_UNIT);
+        if path.exists() {
+            checked(
+                Command::new("systemctl").args(["--user", "disable", "--now", UPDATE_UNIT]),
+                "remove updater recovery service",
+            )?;
+            fs::remove_file(path)?;
+            checked(
+                Command::new("systemctl").args(["--user", "daemon-reload"]),
+                "reload service manager",
+            )?;
+        }
+        Ok(())
+    }
     pub fn install(executable: &Path, agent_path: Option<&OsStr>) -> Result<()> {
         let path = unit_path()?;
         let unit = systemd_unit(executable, agent_path)?;
@@ -280,6 +348,21 @@ mod platform {
         use std::ffi::OsStr;
 
         #[test]
+        fn updater_has_an_independent_persistent_user_service() {
+            let unit = super::update_unit(
+                std::path::Path::new("/tmp/a $name/%daemon"),
+                std::path::Path::new("/tmp/releases root"),
+            )
+            .unwrap();
+            assert!(unit.contains("update-supervisor --release-root"));
+            assert!(unit.contains("Restart=on-failure"));
+            assert!(unit.contains("WantedBy=default.target"));
+            assert!(unit.contains("$$name/%%daemon"));
+            assert!(!unit.contains("PartOf=") && !unit.contains("BindsTo="));
+            assert!(!unit.contains("amarcode-daemon.service"));
+        }
+
+        #[test]
         fn escapes_systemd_specifiers_and_quotes() {
             assert_eq!(
                 systemd_quote(OsStr::new("/tmp/a %i/\"daemon\"")).unwrap(),
@@ -321,6 +404,14 @@ mod platform {
         Ok((domain, service))
     }
 
+    pub fn launch_update_supervisor(_: &Path, _: &Path, _: bool) -> Result<()> {
+        Err(Error::msg(
+            "daemon update artifacts are not published for macOS",
+        ))
+    }
+    pub fn remove_update_supervisor() -> Result<()> {
+        Ok(())
+    }
     pub fn install(executable: &Path, agent_path: Option<&OsStr>) -> Result<()> {
         let path = plist_path()?;
         let executable = xml_escape(
@@ -471,6 +562,53 @@ mod platform {
         command
     }
 
+    const UPDATE_TASK: &str = "Amarcode Daemon Update";
+    pub fn launch_update_supervisor(executable: &Path, root: &Path, restart: bool) -> Result<()> {
+        if restart {
+            // A previous job is already terminal before a new job can replace it.
+            let _ = command("schtasks.exe")
+                .args(["/End", "/TN", UPDATE_TASK])
+                .output();
+        }
+        let arguments = format!("update-supervisor --release-root \"{}\"", root.display());
+        let xml = task_xml(executable, &current_user()?)?.replace(
+            "<Arguments>run</Arguments>",
+            &format!("<Arguments>{}</Arguments>", xml_escape(&arguments)),
+        );
+        let file =
+            std::env::temp_dir().join(format!("amarcode-update-task-{}.xml", std::process::id()));
+        fs::write(&file, utf16le_with_bom(&xml))?;
+        let registration = checked(
+            command("schtasks.exe")
+                .args(["/Create", "/TN", UPDATE_TASK, "/XML"])
+                .arg(&file)
+                .arg("/F"),
+            "register independent updater logon task",
+        );
+        let _ = fs::remove_file(file);
+        registration?;
+        checked(
+            command("schtasks.exe").args(["/Run", "/TN", UPDATE_TASK]),
+            "start updater task",
+        )?;
+        Ok(())
+    }
+    pub fn remove_update_supervisor() -> Result<()> {
+        let exists = command("schtasks.exe")
+            .args(["/Query", "/TN", UPDATE_TASK])
+            .output()?;
+        if !exists.status.success() {
+            return Ok(());
+        }
+        let _ = command("schtasks.exe")
+            .args(["/End", "/TN", UPDATE_TASK])
+            .output();
+        checked(
+            command("schtasks.exe").args(["/Delete", "/TN", UPDATE_TASK, "/F"]),
+            "remove updater task",
+        )?;
+        Ok(())
+    }
     pub fn install(executable: &Path, agent_path: Option<&OsStr>) -> Result<()> {
         let user = current_user()?;
         let task = task_xml(executable, &user)?;

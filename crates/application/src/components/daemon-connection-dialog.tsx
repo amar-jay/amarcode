@@ -95,6 +95,11 @@ export function DaemonConnectionDialog({
               {!isError ? "Please wait..." : "Try again"}
             </Button>
           )}
+          {isError && (
+            <Button variant="outline" onClick={onInstall}>
+              Repair service
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

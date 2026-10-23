@@ -1,7 +1,6 @@
 mod bridge;
 mod client;
 mod manager;
-mod release;
 
 pub use bridge::EventSubscription;
 pub use client::DaemonClient;
