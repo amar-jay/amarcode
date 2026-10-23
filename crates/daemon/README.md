@@ -199,7 +199,7 @@ Strict layering. Dependencies point **down** only.
 | **Client RPC**      | `rpc/`                  | TCP accept, one JSON object per line, method dispatch, event subscriptions                   |
 | **Protocol**        | `../protocol/`          | Versioned client wire types and shared domain enums; generates the React TypeScript contract |
 | **ACP protocol**    | `protocol/acp_types.rs` | Daemon-private vocabulary for the agent subprocess protocol                                  |
-| **Service**         | `service/`              | Product use-cases (chat CRUD, start run, prompt, fan-out). _Mostly scaffolded_               |
+| **Service**         | `service/`              | Agent installation, chat lifecycle, ACP sessions, prompts, permissions, terminals, workspace operations, transcription, and persisted event fan-out |
 | **Store**           | `store/`                | SQLite persistence (WAL, FKs, migrations)                                                    |
 | **ACP**             | `acp/`                  | Spawn agent, stdio JSON-RPC, correlate requests, inbound notifications                       |
 

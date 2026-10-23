@@ -3,8 +3,9 @@ import Landing from '../layouts/Landing.astro';
 import Navigation from '../components/navigation';
 import CloudHero from '../components/cloud-hero';
 import AppPreview from '../components/app-preview';
-import HeadlessDaemon from '../components/headless-daemon';
 import AgentLogos from '../components/agent-logos';
+import WorkspaceShowcase from '../components/workspace-showcase';
+import RemoteWorkspace from '../components/remote-workspace';
 import { Features, Questions, Closing } from '../components/sections';
 ---
 <Landing>
@@ -13,10 +14,11 @@ import { Features, Questions, Closing } from '../components/sections';
     <Navigation />
     <main id="main">
       <CloudHero client:load />
-      <AppPreview client:visible />
-      <Features />
       <AgentLogos client:visible />
-      <HeadlessDaemon />
+			<AppPreview client:visible />
+			<Features />
+      <WorkspaceShowcase client:visible />
+      <RemoteWorkspace />
       <Questions client:visible />
       <Closing client:visible />
     </main>
