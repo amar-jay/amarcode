@@ -81,7 +81,10 @@ fn remote_starts_after_listener_prints_url_and_stops_connector_on_sigterm() {
 from urllib.parse import urlparse
 origin = urlparse(sys.argv[-1])
 socket.create_connection((origin.hostname, origin.port), timeout=2).close()
+print('INF connector booting; this log must be hidden', file=sys.stderr, flush=True)
 print('| https://my-remote.trycloudflare.com |', file=sys.stderr, flush=True)
+print('| https://my-remote.trycloudflare.com |', file=sys.stderr, flush=True)
+print('INF connection registered', file=sys.stderr, flush=True)
 pathlib.Path(os.environ['AMARCODE_REMOTE_ROOT'], 'connector.pid').write_text(str(os.getpid()))
 time.sleep(120)"#;
     let (mut command, address) = setup(root.path(), body);
@@ -105,13 +108,27 @@ time.sleep(120)"#;
         .unwrap()
         .read_to_string(&mut output)
         .unwrap();
-    assert!(
-        output.contains("wss://my-remote.trycloudflare.com/rpc"),
-        "{output}"
+    assert_eq!(
+        output,
+        format!(
+            "Remote URL: wss://my-remote.trycloudflare.com/rpc\nAccess token: {}\n",
+            "a".repeat(64)
+        )
     );
+    let mut stderr = String::new();
+    running
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert!(stderr.is_empty(), "Unexpected terminal logs: {stderr}");
+    let file_log = fs::read_to_string(root.path().join("data/daemon.log")).unwrap();
+    assert!(file_log.contains("starting"));
     assert!(
-        !output.contains(&"a".repeat(64)),
-        "runtime must not print credentials"
+        !file_log.contains(&"a".repeat(64)),
+        "credentials must not enter file logs"
     );
     let connector_pid = fs::read_to_string(pid_path)
         .unwrap()
@@ -140,6 +157,10 @@ fn connector_failure_stops_daemon_and_explains_how_to_restart() {
         .unwrap();
     assert!(error.contains("Cloudflare tunnel exited"), "{error}");
     assert!(!error.contains("panicked"), "{error}");
+    assert!(
+        !error.contains("connector failed"),
+        "raw connector logs must be hidden"
+    );
     assert!(std::net::TcpListener::bind(address).is_ok());
 }
 

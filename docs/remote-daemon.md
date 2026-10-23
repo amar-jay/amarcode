@@ -65,10 +65,11 @@ amarcode-daemon --remote
 
 Remote mode loads the installed configuration and access token, starts the
 daemon on `127.0.0.1:43721`, and waits until its own listener is bound before
-spawning `cloudflared`. The command prints a formatted remote WebSocket URL as
-soon as Cloudflare assigns one, plus the token file path and connection steps.
-Runtime output does not include the token value. Read it from its private file
-if you did not save it during installation.
+spawning `cloudflared`. Once Cloudflare assigns a hostname, the command prints only the remote
+WebSocket URL and access token. Cloudflared logs are suppressed, and ordinary
+daemon logs remain in `data/daemon.log`. The token is displayed in the terminal
+for copying into Amarcode and is never written to the daemon log. Startup or
+tunnel failures still produce a concise error on stderr.
 
 Cloudflare forwards to the loopback origin and terminates public TLS. No inbound
 firewall port is needed. Keep the foreground command running while using the
@@ -174,7 +175,7 @@ Do not bind a public listener without authentication. If you use WSS directly,
 keep the existing `AMARCODE_WS_TLS_CERT` and `AMARCODE_WS_TLS_KEY` settings. A token
 file with invalid contents or public Unix permissions prevents listener startup.
 Rotate the token by replacing its contents and restarting the daemon; reconnect
-clients with the new token. Never place tokens in command-line URLs or logs.
+clients with the new token. Never place tokens in command-line URLs or persistent logs.
 
 To uninstall, stop remote mode and remove the `amarcode-daemon` symlink from
 your selected bin directory. Remove the remote data directory separately only

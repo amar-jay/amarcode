@@ -43,6 +43,15 @@ pub const LOG_FILE_NAME: &str = "daemon.log";
 ///
 /// Creates `config.app_dir` if needed and opens `{app_dir}/daemon.log` for append.
 pub fn init(config: &Config) -> Result<()> {
+    init_with_console(config, true)
+}
+
+/// Remote mode reserves terminal output for connection details; retain file logs.
+pub fn init_remote(config: &Config) -> Result<()> {
+    init_with_console(config, false)
+}
+
+fn init_with_console(config: &Config, console: bool) -> Result<()> {
     let filter = env_filter();
     let log_path = log_file_path(&config.app_dir);
 
@@ -60,12 +69,14 @@ pub fn init(config: &Config) -> Result<()> {
         ))
     })?;
 
-    let stderr_layer = fmt::layer()
-        .with_writer(io::stderr)
-        .with_ansi(io::stderr().is_terminal())
-        .with_target(true)
-        .with_thread_ids(false)
-        .with_level(true);
+    let stderr_layer = console.then(|| {
+        fmt::layer()
+            .with_writer(io::stderr)
+            .with_ansi(io::stderr().is_terminal())
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_level(true)
+    });
 
     let file_layer = fmt::layer()
         .with_writer(Mutex::new(file))

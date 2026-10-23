@@ -76,6 +76,12 @@ fn tunnel_url(line: &str) -> Option<String> {
 
 pub async fn run(config: Config, setup: Setup) -> Result<()> {
     validate(&config)?;
+    let token_path = env::var_os("AMARCODE_WS_TOKEN_FILE")
+        .ok_or_else(|| Error::msg("Remote access token file is not configured"))?;
+    let token = fs::read_to_string(token_path)
+        .map_err(|error| Error::msg(format!("Cannot read remote access token file: {error}")))?
+        .trim()
+        .to_owned();
     let address = config.daemon_addr.clone();
     let app = App::new(config).await?;
     let (ready, listening) = tokio::sync::oneshot::channel();
@@ -98,12 +104,6 @@ pub async fn run(config: Config, setup: Setup) -> Result<()> {
             return Err(Error::msg(format!("Cannot start cloudflared: {error}")));
         }
     };
-    println!("Remote daemon listening on {address}");
-    println!(
-        "Access token file: {}",
-        env::var("AMARCODE_WS_TOKEN_FILE").unwrap_or_default()
-    );
-    println!("Waiting for the Cloudflare URL. Press Ctrl+C to stop the daemon and tunnel.");
     let stderr = tunnel.stderr.take().expect("piped cloudflared stderr");
     let output = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
@@ -111,11 +111,10 @@ pub async fn run(config: Config, setup: Setup) -> Result<()> {
         while let Ok(Some(line)) = lines.next_line().await {
             if !announced {
                 if let Some(url) = tunnel_url(&line) {
-                    println!("\nRemote URL: {url}\nIn Amarcode: Settings → Connection → Remote. Use this URL and your saved access token.\n");
+                    println!("Remote URL: {url}\nAccess token: {token}");
                     announced = true;
                 }
             }
-            eprintln!("cloudflared: {line}");
         }
     });
     let outcome = tokio::select! {

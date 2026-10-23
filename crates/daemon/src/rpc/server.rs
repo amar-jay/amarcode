@@ -57,13 +57,11 @@ pub async fn run(app: Arc<App>, listener: Listener) -> Result<()> {
                         let app = Arc::clone(&app);
                         clients.spawn(async move {
                             let _permit = permit;
-                            let result = match websocket {
+                            let _ = match websocket {
                                 Some(state) => state.handle(stream, app, &peer.to_string()).await,
                                 None => connection::handle(stream, app).await,
                             };
-                            if let Err(error) = result {
-                                warn!(%peer, %error, "RPC connection ended");
-                            }
+
                         });
                     }
                     Err(error) => error!(%error, "RPC accept failed"),

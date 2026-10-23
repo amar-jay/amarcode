@@ -154,7 +154,13 @@ async fn async_main(
         }
     };
 
-    if let Err(err) = logging::init(config) {
+    let quiet_remote = remote.is_some();
+    let logging = if quiet_remote {
+        logging::init_remote(config)
+    } else {
+        logging::init(config)
+    };
+    if let Err(err) = logging {
         eprintln!("amarcode-daemon: failed to initialize logging: {err}");
         std::process::exit(1);
     }
@@ -176,6 +182,9 @@ async fn async_main(
     };
     if let Err(err) = outcome {
         error!(error = %err, "daemon exited with error");
+        if quiet_remote {
+            eprintln!("amarcode-daemon: {err}");
+        }
         std::process::exit(1);
     }
 

@@ -243,8 +243,7 @@ def main():
         print('Add the command to this shell before continuing:')
         print('  export PATH=' + quote(bin_dir) + ':"$PATH"')
     print('\nStart whenever needed:')
-    print('  amarcode-daemon --transport websocket --remote')
-    print('  (or simply: amarcode-daemon --remote)')
+    print('  amarcode-daemon --remote')
     print('The command prints a wss://<tunnel-host>/rpc URL. Enter it with the access token in Amarcode → Settings → Connection.')
     print('Project paths refer to this host. Ctrl+C stops both processes; quick tunnel URLs change each time.')
     if args.start:

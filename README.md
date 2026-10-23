@@ -81,8 +81,8 @@ amarcode-daemon --transport websocket --remote
 amarcode-daemon --remote
 ```
 
-This starts the authenticated daemon and `cloudflared` together, then prints the
-remote `wss://<tunnel-host>/rpc` URL. Enter that URL and your saved access token in
+This starts the authenticated daemon and `cloudflared` together, then prints only
+the remote `wss://<tunnel-host>/rpc` URL and access token. Enter those details in
 Amarcode’s **Settings → Connection**. Ctrl+C stops both processes. Quick tunnel
 URLs change each time you restart; your token and chat data are preserved.
 
