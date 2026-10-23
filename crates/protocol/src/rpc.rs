@@ -83,6 +83,9 @@ impl RpcResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct HealthResult {
+    /// True only when WebSocket handshakes require the configured bearer token.
+    #[serde(default)]
+    pub remote_auth_required: bool,
     pub status: String,
     pub version: String,
     pub protocol_version: u32,

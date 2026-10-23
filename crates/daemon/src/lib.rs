@@ -12,6 +12,7 @@ mod instance_lock;
 pub mod logging;
 pub mod protocol;
 pub mod registry;
+pub mod remote;
 pub mod rpc;
 pub mod service;
 pub mod service_control;

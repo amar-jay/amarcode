@@ -5,7 +5,10 @@ use std::{
     process::{Command, Stdio},
     time::Duration,
 };
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{client::IntoClientRequest, Message},
+};
 
 fn command(directory: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_amarcode-daemon"));
@@ -16,7 +19,8 @@ fn command(directory: &std::path::Path) -> Command {
         .env_remove("AMARCODE_DAEMON_ADDR")
         .env_remove("AMARCODE_WS_TLS_CERT")
         .env_remove("AMARCODE_WS_TLS_KEY")
-        .env_remove("AMARCODE_WS_ALLOW_ORIGIN");
+        .env_remove("AMARCODE_WS_ALLOW_ORIGIN")
+        .env_remove("AMARCODE_WS_TOKEN_FILE");
     command
 }
 
@@ -37,11 +41,31 @@ fn transports_validate_shared_address_before_startup() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn websocket_mode_uses_only_its_selected_listener() {
+    assert_websocket_mode(None).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_cli_enforces_token_and_reports_authentication() {
+    assert_websocket_mode(Some(&"a".repeat(64))).await;
+}
+
+async fn assert_websocket_mode(token: Option<&str>) {
     let directory = tempfile::tempdir().unwrap();
     let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = reservation.local_addr().unwrap();
     drop(reservation);
-    let child = command(directory.path())
+    let mut cmd = command(directory.path());
+    if let Some(token) = token {
+        let path = directory.path().join("access-token");
+        std::fs::write(&path, token).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        cmd.env("AMARCODE_WS_TOKEN_FILE", path);
+    }
+    let child = cmd
         .args(["--transport", "websocket"])
         .env("AMARCODE_DAEMON_ADDR", address.to_string())
         .stdout(Stdio::null())
@@ -58,7 +82,13 @@ async fn websocket_mode_uses_only_its_selected_listener() {
     let mut cleanup = Cleanup(child);
     let mut socket = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            match connect_async(format!("ws://{address}/rpc")).await {
+            let mut request = format!("ws://{address}/rpc").into_client_request().unwrap();
+            if let Some(token) = token {
+                request
+                    .headers_mut()
+                    .insert("authorization", format!("Bearer {token}").parse().unwrap());
+            }
+            match connect_async(request).await {
                 Ok((socket, _)) => break socket,
                 Err(_) => {
                     assert!(
@@ -83,6 +113,15 @@ async fn websocket_mode_uses_only_its_selected_listener() {
         .unwrap();
     let reply: Value = serde_json::from_str(reply.to_text().unwrap()).unwrap();
     assert_eq!(reply["result"]["status"], "ok");
+    assert_eq!(reply["result"]["remote_auth_required"], token.is_some());
+    if token.is_some() {
+        let unauthorized = connect_async(format!("ws://{address}/rpc"))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(unauthorized, tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == 401)
+        );
+    }
     assert_eq!(reply["result"]["addr"], address.to_string());
     socket.close(None).await.unwrap();
 }

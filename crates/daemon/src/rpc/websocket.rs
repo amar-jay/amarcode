@@ -37,6 +37,7 @@ pub struct Listener {
 pub(super) struct State {
     tls: Option<TlsAcceptor>,
     origins: Vec<String>,
+    bearer_token: Option<String>,
 }
 
 impl Listener {
@@ -51,6 +52,9 @@ impl Listener {
 
 impl State {
     fn prepare(config: &Config) -> Result<Self> {
+        let bearer_token = std::env::var_os("AMARCODE_WS_TOKEN_FILE")
+            .map(|path| load_token(Path::new(&path)))
+            .transpose()?;
         let tls = match (&config.ws_tls_cert, &config.ws_tls_key) {
             (Some(cert_path), Some(key_path)) => {
                 check_private_file(key_path)?;
@@ -81,6 +85,7 @@ impl State {
         };
         Ok(Self {
             tls,
+            bearer_token,
             origins: config.ws_allowed_origins.clone(),
         })
     }
@@ -109,7 +114,12 @@ impl State {
         let handshake = accept_hdr_async_with_config(
             stream,
             |request: &Request, response: Response| {
-                validate_handshake(request, response, &self.origins)
+                validate_handshake(
+                    request,
+                    response,
+                    &self.origins,
+                    self.bearer_token.as_deref(),
+                )
             },
             Some(config),
         );
@@ -128,6 +138,32 @@ impl State {
             result = transport => result,
         }
     }
+}
+
+fn load_token(path: &Path) -> Result<String> {
+    check_private_file(path)?;
+    let token = std::fs::read_to_string(path)?.trim().to_owned();
+    if token.len() < 32
+        || token.len() > 512
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-._~".contains(&b))
+    {
+        return Err(Error::msg(
+            "WebSocket token must contain 32–512 URL-safe ASCII characters",
+        ));
+    }
+    Ok(token)
+}
+
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+        == 0
 }
 
 fn check_private_file(path: &Path) -> Result<()> {
@@ -153,9 +189,21 @@ fn validate_handshake(
     request: &Request,
     response: Response,
     origins: &[String],
+    bearer_token: Option<&str>,
 ) -> std::result::Result<Response, ErrorResponse> {
     if request.uri().path() != "/rpc" || request.uri().query().is_some() {
         return Err(reject(StatusCode::NOT_FOUND));
+    }
+    if let Some(token) = bearer_token {
+        let expected = format!("Bearer {token}");
+        let mut headers = request.headers().get_all("authorization").iter();
+        let supplied = headers
+            .next()
+            .map(|value| value.as_bytes())
+            .unwrap_or_default();
+        if headers.next().is_some() || !constant_time_equal(supplied, expected.as_bytes()) {
+            return Err(reject(StatusCode::UNAUTHORIZED));
+        }
     }
     let mut supplied = request.headers().get_all("origin").iter();
     if let Some(origin) = supplied.next() {

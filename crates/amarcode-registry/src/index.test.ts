@@ -299,3 +299,28 @@ describe("handleRequest", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
   });
 });
+
+describe("remote installer", () => {
+  test("serves an executable installer with HEAD and read-only method support", async () => {
+    const url = "https://downloads.example/install.sh";
+    const response = await handleRequest(new Request(url), environment({}));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain(
+      "text/x-shellscript",
+    );
+    const source = await response.text();
+    expect(source.startsWith("#!/usr/bin/env bash")).toBe(true);
+    expect(source).toContain("Manifest signature verification failed");
+    const head = await handleRequest(
+      new Request(url, { method: "HEAD" }),
+      environment({}),
+    );
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    const post = await handleRequest(
+      new Request(url, { method: "POST" }),
+      environment({}),
+    );
+    expect(post.status).toBe(405);
+  });
+});

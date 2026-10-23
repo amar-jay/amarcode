@@ -78,3 +78,16 @@ pub async fn vacuum_database(
 ) -> Result<VacuumDatabaseResult, String> {
     client.vacuum_database().await
 }
+
+#[tauri::command]
+pub fn get_daemon_connection() -> Result<daemon::remote::ConnectionInfo, String> {
+    daemon::remote::info()
+}
+
+#[tauri::command]
+pub async fn set_daemon_connection(
+    url: String,
+    token: String,
+) -> Result<daemon::remote::ConnectionInfo, String> {
+    daemon::remote::save(url, token).await
+}

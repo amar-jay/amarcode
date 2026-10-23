@@ -326,6 +326,7 @@ mod bundled_rollback_tests {
         }
         fn health(&self, address: &str, expected: &str) -> Result<HealthResult, String> {
             Ok(HealthResult {
+                remote_auth_required: false,
                 status: "ok".into(),
                 version: expected.into(),
                 protocol_version: amarcode_protocol::PROTOCOL_VERSION,

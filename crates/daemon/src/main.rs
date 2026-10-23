@@ -27,8 +27,11 @@ use tracing::{error, info};
 #[command(propagate_version = true)]
 struct Cli {
     /// RPC transport; WebSocket address and TLS settings are read from the environment.
-    #[arg(long, value_enum, default_value = "tcp", global = true)]
-    transport: DaemonTransport,
+    #[arg(long, value_enum, global = true)]
+    transport: Option<DaemonTransport>,
+    /// Start the daemon with an authenticated Cloudflare tunnel (implies websocket).
+    #[arg(long, global = true)]
+    remote: bool,
     /// Run in the foreground when no subcommand is supplied.
     #[command(subcommand)]
     command: Option<LifecycleCommand>,
@@ -88,11 +91,37 @@ fn main() {
             std::process::exit(1);
         }
     }
-    async_main(command, cli.transport);
+    let transport = cli.transport.unwrap_or(if cli.remote {
+        DaemonTransport::WebSocket
+    } else {
+        DaemonTransport::Tcp
+    });
+    let remote = if cli.remote {
+        if command != LifecycleCommand::Run || transport != DaemonTransport::WebSocket {
+            eprintln!(
+                "amarcode-daemon: --remote is supported only for run with --transport websocket"
+            );
+            std::process::exit(2);
+        }
+        match amarcode_daemon::remote::prepare() {
+            Ok(setup) => Some(setup),
+            Err(error) => {
+                eprintln!("amarcode-daemon: {error}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+    async_main(command, transport, remote);
 }
 
 #[tokio::main]
-async fn async_main(command: LifecycleCommand, transport: DaemonTransport) {
+async fn async_main(
+    command: LifecycleCommand,
+    transport: DaemonTransport,
+    remote: Option<amarcode_daemon::remote::Setup>,
+) {
     if let LifecycleCommand::Bootstrap { ref command } = command {
         if let Err(error) = amarcode_daemon::update::bootstrap::run(command.clone()).await {
             eprintln!("amarcode bootstrap: {error}");
@@ -141,7 +170,11 @@ async fn async_main(command: LifecycleCommand, transport: DaemonTransport) {
         "starting"
     );
 
-    if let Err(err) = run(config.clone()).await {
+    let outcome = match remote {
+        Some(setup) => amarcode_daemon::remote::run(config.clone(), setup).await,
+        None => run(config.clone()).await,
+    };
+    if let Err(err) = outcome {
         error!(error = %err, "daemon exited with error");
         std::process::exit(1);
     }
@@ -303,7 +336,8 @@ mod tests {
         assert_eq!(
             Cli::try_parse_from(["amarcode-daemon", "run"])
                 .unwrap()
-                .transport,
+                .transport
+                .unwrap_or_default(),
             DaemonTransport::Tcp
         );
         for args in [
@@ -312,7 +346,7 @@ mod tests {
         ] {
             assert_eq!(
                 Cli::try_parse_from(args).unwrap().transport,
-                DaemonTransport::WebSocket
+                Some(DaemonTransport::WebSocket)
             );
         }
         assert!(Cli::try_parse_from(["amarcode-daemon", "run", "--transport", "udp"]).is_err());

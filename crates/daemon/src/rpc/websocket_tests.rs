@@ -39,6 +39,18 @@ async fn start(
     tokio::task::JoinHandle<Result<()>>,
     tempfile::TempDir,
 ) {
+    start_with_token(tls, None).await
+}
+
+async fn start_with_token(
+    tls: bool,
+    token: Option<&str>,
+) -> (
+    Client,
+    Arc<App>,
+    tokio::task::JoinHandle<Result<()>>,
+    tempfile::TempDir,
+) {
     let directory = tempfile::tempdir().unwrap();
     let mut config = test_config();
     config.transport = crate::config::DaemonTransport::WebSocket;
@@ -51,7 +63,8 @@ async fn start(
         config.ws_tls_cert = Some(cert);
         config.ws_tls_key = Some(key);
     }
-    let listener = Listener::bind(&config).await.unwrap();
+    let mut listener = Listener::bind(&config).await.unwrap();
+    Arc::get_mut(&mut listener.state).unwrap().bearer_token = token.map(str::to_owned);
     let address = listener.socket.local_addr().unwrap();
     config.daemon_addr = address.to_string();
     config.app_dir = directory.path().to_owned();
@@ -92,9 +105,15 @@ async fn start(
         Box::new(tcp)
     };
     let scheme = if tls { "wss" } else { "ws" };
-    let (client, _) = client_async(format!("{scheme}://localhost:{}/rpc", address.port()), io)
-        .await
+    let mut request = format!("{scheme}://localhost:{}/rpc", address.port())
+        .into_client_request()
         .unwrap();
+    if let Some(token) = token {
+        request
+            .headers_mut()
+            .insert("authorization", format!("Bearer {token}").parse().unwrap());
+    }
+    let (client, _) = client_async(request, io).await.unwrap();
     (client, app, server, directory)
 }
 
@@ -175,7 +194,7 @@ fn origin_allowlist_and_rpc_path_are_enforced() {
                 .headers_mut()
                 .insert("origin", origin.parse().unwrap());
         }
-        validate_handshake(&request, Response::new(()), allowed).is_ok()
+        validate_handshake(&request, Response::new(()), allowed, None).is_ok()
     }
     let origins = vec!["https://app.example.com".to_owned()];
     assert!(check("ws://localhost/rpc", None, &[]));
@@ -236,4 +255,83 @@ fn malformed_tls_credentials_are_rejected_before_binding() {
     config.ws_tls_cert = Some(cert);
     config.ws_tls_key = Some(key);
     assert!(State::prepare(&config).is_err());
+}
+
+#[test]
+#[allow(clippy::result_large_err)] // The handshake validator returns Tungstenite HTTP errors.
+fn authenticated_handshake_rejects_missing_wrong_and_duplicate_tokens() {
+    let token = "a".repeat(64);
+    let mut request = "ws://localhost/rpc".into_client_request().unwrap();
+    let check =
+        |request: &Request| validate_handshake(request, Response::new(()), &[], Some(&token));
+    assert_eq!(
+        check(&request).unwrap_err().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    request
+        .headers_mut()
+        .insert("authorization", "Bearer wrong".parse().unwrap());
+    assert!(check(&request).is_err());
+    request
+        .headers_mut()
+        .insert("authorization", format!("Bearer {token}").parse().unwrap());
+    assert!(check(&request).is_ok());
+    request
+        .headers_mut()
+        .append("authorization", format!("Bearer {token}").parse().unwrap());
+    assert!(check(&request).is_err());
+}
+
+#[test]
+fn token_files_must_be_private_and_nonempty() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("token");
+    private_file(&path, b"short");
+    assert!(load_token(&path).is_err());
+    private_file(&path, "a".repeat(64).as_bytes());
+    assert_eq!(load_token(&path).unwrap().len(), 64);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(load_token(&path).is_err());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn authenticated_ws_and_wss_deliver_rpc_and_events() {
+    for tls in [false, true] {
+        let token = "a".repeat(64);
+        let (mut client, app, server, directory) = start_with_token(tls, Some(&token)).await;
+        assert_eq!(
+            request(&mut client, json!({"method":"health"})).await["result"]["status"],
+            "ok"
+        );
+        assert_eq!(
+            request(
+                &mut client,
+                json!({"method":"subscribe_events","params":{}})
+            )
+            .await["result"]["subscribed"],
+            true
+        );
+        app.events
+            .send(crate::protocol::EditorEvent::ChatUpdated {
+                chat_id: "remote".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            receive(&mut client).await["event"]["payload"]["chat_id"],
+            "remote"
+        );
+        client.close(None).await.unwrap();
+        timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        drop(client);
+        drop(app);
+        directory.close().unwrap();
+    }
 }

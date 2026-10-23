@@ -1,10 +1,12 @@
+import { hostPreferenceKey } from "@/lib/connection-preferences";
 import type {
   SessionConfigAssignment,
   SessionConfigOption,
   SessionConfigValue,
 } from "@/types";
 
-const storageKey = (agentId: string) => `amarcode-session-config:${agentId}`;
+const storageKey = (agentId: string) =>
+  hostPreferenceKey(`amarcode-session-config:${agentId}`);
 
 export function loadLastSessionConfig(agentId: string): SessionConfigOption[] {
   if (!agentId) return [];

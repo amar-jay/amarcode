@@ -192,6 +192,15 @@ impl App {
 
     /// Serve the configured transport until shutdown.
     pub async fn run(self) -> Result<()> {
+        self.serve(None).await
+    }
+
+    /// Remote mode must wait for this process to bind before opening its tunnel.
+    pub async fn run_with_ready(self, ready: tokio::sync::oneshot::Sender<()>) -> Result<()> {
+        self.serve(Some(ready)).await
+    }
+
+    async fn serve(self, ready: Option<tokio::sync::oneshot::Sender<()>>) -> Result<()> {
         self.config.validate()?;
         let addr = &self.config.daemon_addr;
         info!(%addr, transport = ?self.config.transport, "run starting");
@@ -206,6 +215,9 @@ impl App {
                 rpc::websocket::Listener::bind(&self.config).await?,
             ),
         };
+        if let Some(ready) = ready {
+            let _ = ready.send(());
+        }
         rpc::server::run(Arc::new(self), listener).await?;
         info!("run finished");
         Ok(())

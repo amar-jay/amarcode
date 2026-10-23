@@ -54,6 +54,11 @@ impl DaemonManager {
         on_status: &Channel<DaemonBootstrapStatus>,
     ) -> Result<Option<HealthResult>, String> {
         let _guard = self.bootstrap_lock.lock().await;
+        if super::remote::is_remote()? {
+            let health = DaemonClient::new().health().await?;
+            ready(on_status, &health);
+            return Ok(Some(health));
+        }
         if let Some(executable) = &Config::get().daemon_service_executable {
             let status = service_status(executable).await?;
             if !status.installed {
@@ -81,6 +86,9 @@ impl DaemonManager {
         on_status: &Channel<DaemonBootstrapStatus>,
     ) -> Result<HealthResult, String> {
         let _guard = self.bootstrap_lock.lock().await;
+        if super::remote::is_remote()? {
+            return Err("Install or repair the remote daemon on its host".into());
+        }
         if let Some(executable) = &Config::get().daemon_service_executable {
             send(on_status, DaemonBootstrapStatus::Installing);
             let path = tokio::task::spawn_blocking(agent_path)
@@ -104,6 +112,11 @@ impl DaemonManager {
     }
 
     pub async fn check_update(&self) -> Result<DaemonUpdateCheck, String> {
+        if super::remote::is_remote()? {
+            return Ok(DaemonUpdateCheck::Unavailable {
+                reason: "Update the remote daemon using its host installer".into(),
+            });
+        }
         if Config::get().daemon_service_executable.is_some() {
             return Ok(DaemonUpdateCheck::Unavailable {
                 reason: "updates are disabled for a development daemon".into(),
@@ -124,6 +137,9 @@ impl DaemonManager {
         version: String,
         on_status: &Channel<DaemonUpdateStatus>,
     ) -> Result<HealthResult, String> {
+        if super::remote::is_remote()? {
+            return Err("Update the remote daemon on its host".into());
+        }
         if Config::get().daemon_service_executable.is_some() {
             return Err("updates are disabled for a development daemon".into());
         }
@@ -640,6 +656,7 @@ mod tests {
 
     fn health(version: &str) -> HealthResult {
         HealthResult {
+            remote_auth_required: false,
             status: "ok".into(),
             version: version.into(),
             protocol_version: amarcode_protocol::PROTOCOL_VERSION,

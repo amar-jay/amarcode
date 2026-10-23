@@ -23,13 +23,18 @@ pub async fn subscribe_events(
     on_event: Channel<EditorEvent>,
     on_status: Channel<DaemonEventStreamStatus>,
 ) -> Result<(), String> {
+    let mut changes = crate::daemon::remote::changes();
     let mut subscription = client.subscribe_events(filter).await?;
     on_status
         .send(DaemonEventStreamStatus::Connected)
         .map_err(|error| error.to_string())?;
 
     loop {
-        match subscription.next::<EditorEvent>().await {
+        let next = tokio::select! {
+            next = subscription.next::<EditorEvent>() => next,
+            _ = changes.changed() => return Err("Daemon connection settings changed".into()),
+        };
+        match next {
             Ok(event) => on_event.send(event).map_err(|error| error.to_string())?,
             Err(error) => {
                 let _ = on_status.send(DaemonEventStreamStatus::Disconnected {

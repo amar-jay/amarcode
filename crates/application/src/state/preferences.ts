@@ -1,3 +1,4 @@
+import { hostPreferenceKey } from "@/lib/connection-preferences";
 import { atomWithStorage } from "jotai/utils";
 import type { PermissionMode } from "./permission-mode";
 
@@ -38,7 +39,7 @@ export const paletteAtom = atomWithStorage<Palette>(
 
 /** Default agent for new chats / home composer. */
 export const defaultAgentIdAtom = atomWithStorage<string>(
-  "amarcode-default-agent",
+  hostPreferenceKey("amarcode-default-agent"),
   "",
   undefined,
   { getOnInit: true },
@@ -46,7 +47,7 @@ export const defaultAgentIdAtom = atomWithStorage<string>(
 
 /** Default project folder for new chats / home composer. */
 export const defaultWorkspacePathAtom = atomWithStorage<string>(
-  "amarcode-default-workspace",
+  hostPreferenceKey("amarcode-default-workspace"),
   "",
   undefined,
   { getOnInit: true },
@@ -73,7 +74,7 @@ export const verboseReasoningAtom = atomWithStorage<boolean>(
 
 /** Chat IDs pinned in this client only. Never sent to the daemon. */
 export const pinnedChatIdsAtom = atomWithStorage<string[]>(
-  "amarcode-pinned-chats",
+  hostPreferenceKey("amarcode-pinned-chats"),
   [],
   undefined,
   { getOnInit: true },

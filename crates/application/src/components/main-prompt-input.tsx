@@ -23,7 +23,7 @@ import { FolderOpen } from "lucide-react";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
-import { open } from "@tauri-apps/plugin-dialog";
+import { useWorkspacePicker } from "@/hooks/use-workspace-picker";
 import type {
   AgentInfo,
   Chat,
@@ -124,22 +124,12 @@ function AppPromptInput({
       : lastKnown;
   const showPermissionFallback = !hasAcpSessionMode(options);
 
-  const openDirectory = async () => {
-    try {
-      const path = await open({
-        directory: true,
-        multiple: false,
-        title: "Choose a project folder",
-      });
-
-      if (typeof path === "string") {
-        onWorkspacePathChange?.(path);
-      }
-    } catch (error) {
-      console.error("Error choosing workspace directory:", error);
-      notify("Unable to open the directory picker.", "error");
-    }
-  };
+  const { chooseWorkspace, workspaceDialog } = useWorkspacePicker(
+    (path) => onWorkspacePathChange?.(path),
+    workspacePath,
+  );
+  const openDirectory = () =>
+    chooseWorkspace().catch((error: unknown) => notify(String(error), "error"));
 
   const composerRef = useRef<HTMLDivElement>(null);
   const dictation = useDictation({
@@ -245,6 +235,7 @@ function AppPromptInput({
   };
   return (
     <PromptInputProvider>
+      {workspaceDialog}
       <div
         className="@container/prompt w-full min-w-0"
         ref={composerRef}

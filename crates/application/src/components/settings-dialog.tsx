@@ -1,7 +1,8 @@
 import { getPreferredAgent } from "@/lib/agent";
 import { useEffect, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { open } from "@tauri-apps/plugin-dialog";
+import { useWorkspacePicker } from "@/hooks/use-workspace-picker";
+import { DaemonConnectionSettings } from "@/components/daemon-connection-settings";
 import {
   Check,
   Bot,
@@ -106,13 +107,15 @@ import { Badge } from "@/components/ui/badge";
 import { installAgentAtom, reloadAgentsAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 
-type SettingsPage = "appearance" | "general" | "acp" | "agent" | "daemon";
+type SettingsPage =
+  "appearance" | "general" | "acp" | "agent" | "daemon" | "connection";
 
 const navigation: { id: SettingsPage; label: string; icon: typeof Palette }[] =
   [
     { id: "appearance", label: "Appearance", icon: Palette },
     { id: "acp", label: "ACP provider", icon: KeyRound },
     { id: "agent", label: "Agent defaults", icon: Bot },
+    { id: "connection", label: "Connection", icon: Monitor },
     { id: "daemon", label: "Daemon data", icon: Database },
     { id: "general", label: "General", icon: SlidersHorizontal },
   ];
@@ -275,6 +278,8 @@ export function SettingsDialog({
                   onDefaultWorkspacePathChange={onDefaultWorkspacePathChange}
                   portalContainer={dialogContentElement}
                 />
+              ) : page === "connection" ? (
+                <DaemonConnectionSettings />
               ) : page === "daemon" ? (
                 <DaemonDataPanel />
               ) : (
@@ -683,20 +688,8 @@ function AgentDefaultsPanel({
   const availableAgents = agents.filter((agent) => agent.available);
   const installableAgents = agents.filter((agent) => !agent.available);
 
-  const chooseDefaultWorkspace = async () => {
-    try {
-      const path = await open({
-        directory: true,
-        multiple: false,
-        title: "Choose the default workspace",
-        defaultPath: defaultWorkspacePath || undefined,
-      });
-      if (typeof path === "string") onDefaultWorkspacePathChange(path);
-    } catch (error) {
-      console.error("Error choosing default workspace:", error);
-      notify("Unable to open the directory picker.", "error");
-    }
-  };
+  const { chooseWorkspace: chooseDefaultWorkspace, workspaceDialog } =
+    useWorkspacePicker(onDefaultWorkspacePathChange, defaultWorkspacePath);
 
   const handleInstall = async (agent: AgentInfo) => {
     if (installingId) return;
@@ -784,6 +777,7 @@ function AgentDefaultsPanel({
   };
   return (
     <div className="mx-auto w-full max-w-132">
+      {workspaceDialog}
       <h2 className="text-base font-medium">Agent defaults</h2>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         Choose the agent used for new chats. Session configuration is provided

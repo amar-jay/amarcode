@@ -88,6 +88,16 @@ export type { WorkspaceInfo, WorkspaceChange, WorkspaceDiff } from "./types";
  * session-era compatibility methods live here.
  */
 export const daemonApi = {
+  getConnection: (): Promise<{
+    remote: boolean;
+    url: string;
+    hasToken: boolean;
+  }> => invoke("get_daemon_connection"),
+  setConnection: (
+    url: string,
+    token: string,
+  ): Promise<{ remote: boolean; url: string; hasToken: boolean }> =>
+    invoke("set_daemon_connection", { url, token }),
   bootstrap: async (
     onStatus: (status: DaemonBootstrapStatus) => void,
   ): Promise<Health | null> => {

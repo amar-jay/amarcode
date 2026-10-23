@@ -1,3 +1,5 @@
+import remoteInstaller from "../assets/install.sh" with { type: "text" };
+
 export interface Env {
   DAEMON_ARTIFACTS: R2Bucket;
   GITHUB_TOKEN: string;
@@ -293,6 +295,16 @@ export async function handleRequest(
 
   if (request.method !== "GET" && request.method !== "HEAD") {
     return json({ error: "method not allowed" }, 405, { allow: "GET, HEAD" });
+  }
+
+  if (url.pathname === "/install.sh") {
+    return new Response(request.method === "HEAD" ? null : remoteInstaller, {
+      headers: {
+        "content-type": "text/x-shellscript; charset=utf-8",
+        "cache-control": JSON_CACHE_CONTROL,
+        "x-content-type-options": "nosniff",
+      },
+    });
   }
 
   if (url.pathname === VERSIONS_PATH || url.pathname === ACP_VERSIONS_PATH) {

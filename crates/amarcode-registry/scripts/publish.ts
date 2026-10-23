@@ -154,7 +154,10 @@ async function execute(plan: ReleasePlan) {
       const manifest: Manifest = {
         version,
         ...(product.includeProtocolVersion
-          ? { protocolVersion: protocolVersion() }
+          ? {
+              protocolVersion: protocolVersion(),
+              capabilities: ["authenticated-websocket", "remote-cli"],
+            }
           : {}),
         publishedAt: new Date().toISOString(),
         sourceCommit,

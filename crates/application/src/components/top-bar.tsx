@@ -1,7 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useAtom, useAtomValue } from "jotai";
 import { Minus, PanelRightOpen, Square, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { daemonApi } from "@/api";
 import { ChatStateIndicators } from "@/components/chat-state-indicators";
@@ -13,6 +13,15 @@ import {
 } from "@/state";
 
 export function TopBar() {
+  const [remoteUrl, setRemoteUrl] = useState("");
+  useEffect(() => {
+    void daemonApi
+      .getConnection()
+      .then((value) => {
+        if (value.remote) setRemoteUrl(value.url);
+      })
+      .catch(() => {});
+  }, []);
   const [, setSheetOpen] = useAtom(sidePanelOpenAtom);
   const workspacePath = useAtomValue(workspacePathAtom);
   const live = useAtomValue(liveChatAtom);
@@ -52,6 +61,14 @@ export function TopBar() {
         >
           <img src="/acp-mark.svg" alt="" className="size-4" />
           <span className="text-xs font-medium border-r pr-2">AMARCODE</span>
+          {remoteUrl && (
+            <span
+              className="truncate text-xs text-muted-foreground"
+              title={remoteUrl}
+            >
+              Remote · {remoteUrl.split("/")[2] ?? remoteUrl}
+            </span>
+          )}
         </div>
         {live && (
           <div className="pointer-events-none absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center select-none">

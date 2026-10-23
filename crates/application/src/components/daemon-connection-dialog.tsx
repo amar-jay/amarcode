@@ -1,3 +1,6 @@
+import { useState, useEffect } from "react";
+import { daemonApi } from "@/api";
+import { DaemonConnectionSettings } from "./daemon-connection-settings";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { X } from "lucide-react";
 import {
@@ -22,37 +25,51 @@ export function DaemonConnectionDialog({
   onInstall,
   onCloseApplication,
 }: DaemonConnectionDialogProps) {
+  const [configure, setConfigure] = useState(false);
+  const [remote, setRemote] = useState(false);
+  useEffect(() => {
+    void daemonApi
+      .getConnection()
+      .then((value) => setRemote(value.remote))
+      .catch(() => {});
+  }, []);
   const isError = status.status === "failed";
   const requiresInstall = status.status === "installRequired";
   const illustration = connectionIllustration(status);
-  const title = requiresInstall
-    ? "Background service required"
-    : status.status === "downloading"
-      ? "Downloading daemon..."
-      : status.status === "verifying"
-        ? "Verifying daemon..."
-        : status.status === "installing"
-          ? "Installing daemon..."
-          : status.status === "starting"
-            ? "Starting daemon..."
-            : isError
-              ? "Connection failed"
-              : "Checking daemon...";
-  const description = requiresInstall
-    ? `${status.reason} It runs for your user account, starts at login, and remains available when this window closes.`
-    : status.status === "downloading"
-      ? status.total > 0
-        ? `${Math.round((status.received / status.total) * 100)}% downloaded`
-        : "Downloading the daemon for this platform."
-      : isError
-        ? status.error
-        : "Preparing the local daemon service.";
+  const title = configure
+    ? "Choose a daemon"
+    : requiresInstall
+      ? "Background service required"
+      : status.status === "downloading"
+        ? "Downloading daemon..."
+        : status.status === "verifying"
+          ? "Verifying daemon..."
+          : status.status === "installing"
+            ? "Installing daemon..."
+            : status.status === "starting"
+              ? "Starting daemon..."
+              : isError
+                ? "Connection failed"
+                : "Checking daemon...";
+  const description = configure
+    ? "Use a local service or connect to another host."
+    : requiresInstall
+      ? `${status.reason} It runs for your user account, starts at login, and remains available when this window closes.`
+      : status.status === "downloading"
+        ? status.total > 0
+          ? `${Math.round((status.received / status.total) * 100)}% downloaded`
+          : "Downloading the daemon for this platform."
+        : isError
+          ? status.error
+          : remote
+            ? "Connecting to the remote daemon."
+            : "Preparing the local daemon service.";
 
   return (
     <Dialog open>
       <DialogContent
         showCloseButton={false}
-        className="max-w-xs gap-6 p-7 text-center"
+        className="max-w-md gap-6 p-7 text-center"
         onEscapeKeyDown={(event) => event.preventDefault()}
       >
         <button
@@ -63,18 +80,20 @@ export function DaemonConnectionDialog({
         >
           <X className="size-4" />
         </button>
-        <div className="mx-auto flex size-36 items-center justify-center">
-          <img
-            key={illustration}
-            src={illustration}
-            alt=""
-            className={
-              !isError && !requiresInstall
-                ? "size-full object-contain animate-[pulse_1.8s_ease-in-out_infinite] dark:invert"
-                : "size-full object-contain dark:invert"
-            }
-          />
-        </div>
+        {!configure && (
+          <div className="mx-auto flex size-36 items-center justify-center">
+            <img
+              key={illustration}
+              src={illustration}
+              alt=""
+              className={
+                !isError && !requiresInstall
+                  ? "size-full object-contain animate-[pulse_1.8s_ease-in-out_infinite] dark:invert"
+                  : "size-full object-contain dark:invert"
+              }
+            />
+          </div>
+        )}
         <DialogHeader className="items-center gap-2">
           <DialogTitle className="text-base">{title}</DialogTitle>
           <DialogDescription className="max-w-[18rem]">
@@ -82,7 +101,9 @@ export function DaemonConnectionDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-2">
-          {requiresInstall ? (
+          {configure ? (
+            <DaemonConnectionSettings />
+          ) : requiresInstall && !remote ? (
             <Button onClick={onInstall}>Install and start service</Button>
           ) : (
             <Button
@@ -95,11 +116,14 @@ export function DaemonConnectionDialog({
               {!isError ? "Please wait..." : "Try again"}
             </Button>
           )}
-          {isError && (
+          {isError && !remote && !configure && (
             <Button variant="outline" onClick={onInstall}>
               Repair service
             </Button>
           )}
+          <Button variant="ghost" onClick={() => setConfigure(!configure)}>
+            {configure ? "Back" : "Connection settings"}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

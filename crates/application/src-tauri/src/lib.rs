@@ -16,6 +16,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            daemon::remote::initialize(app)?;
             #[cfg(target_os = "linux")]
             microphone::configure(app)?;
             window::fit_main_window(app)?;
@@ -30,6 +31,8 @@ pub fn run() {
             commands::application::exit_application,
             commands::clipboard::read_pasted_files,
             commands::daemon::daemon_bootstrap,
+            commands::daemon::get_daemon_connection,
+            commands::daemon::set_daemon_connection,
             commands::daemon::daemon_install,
             commands::daemon::daemon_check_update,
             commands::daemon::daemon_update,

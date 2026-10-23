@@ -20,6 +20,7 @@ export type Artifact = {
 export type Manifest = {
   version: string;
   protocolVersion?: number;
+  capabilities?: string[];
   publishedAt: string;
   sourceCommit: string;
   sourceDirty?: boolean;

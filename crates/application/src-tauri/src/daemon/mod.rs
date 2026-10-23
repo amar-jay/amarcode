@@ -8,3 +8,5 @@ pub use manager::{
     ApplicationCleanupResult, ApplicationCleanupStatus, DaemonBootstrapStatus, DaemonManager,
     DaemonUpdateCheck, DaemonUpdateStatus,
 };
+
+pub mod remote;

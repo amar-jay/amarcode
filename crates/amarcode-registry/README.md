@@ -9,6 +9,7 @@ route.
 ## Routes
 
 - `GET /health`
+- `GET /install.sh` (signed remote-daemon installer bootstrap)
 - `GET /v1/daemon/versions.json`
 - `GET /v1/daemon/latest.json`
 - `GET /v1/daemon/latest.json.sig`
@@ -142,3 +143,5 @@ The published executable remains a configurable ACP adapter. Installation must
 pair it with a private provider configuration containing the model, endpoint,
 and API key; the public release manifest intentionally contains none of those
 credentials.
+
+Remote installer and release requirements: [remote daemon guide](../../docs/remote-daemon.md).

@@ -69,6 +69,10 @@ jobs:
       - name: Run frontend tests
         run: bun run --cwd crates/application test -- --passWithNoTests
 
+      - name: Test signed remote installer
+        if: matrix.platform == 'ubuntu-22.04'
+        run: python3 scripts/test-remote-installer.py
+
       - name: Prepare bundled daemon for Rust tests
         run: bun scripts/prepare-desktop-daemon.ts --debug
 

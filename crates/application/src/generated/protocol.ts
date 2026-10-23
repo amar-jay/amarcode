@@ -109,7 +109,11 @@ export type GetDaemonUpdateParams = {
  */
 job_id: string | null, };
 
-export type HealthResult = { status: string, version: string, protocol_version: number, addr: string, };
+export type HealthResult = {
+/**
+ * True only when WebSocket handshakes require the configured bearer token.
+ */
+remote_auth_required: boolean, status: string, version: string, protocol_version: number, addr: string, };
 
 export type VersionResult = { version: string, protocol_version: number, };
 

@@ -684,3 +684,8 @@ Non-browser clients may omit Origin. For an installed service, set these
 variables in its systemd user unit / launchd job / Windows service environment
 and restart it. Set its startup command to `run --transport websocket` to select
 WebSocket mode. The flag defaults to TCP when omitted.
+
+## Remote installation and Cloudflare Tunnel
+
+See [the remote daemon guide](../../docs/remote-daemon.md) for the signed registry
+installer, token configuration, loopback service, tunnels, and desktop setup.

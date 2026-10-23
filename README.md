@@ -53,3 +53,41 @@ without pretending that opaque native state can be reproduced exactly.
 > vendor proprietary data cannot be reconstructed from ACP messages.
 
 
+
+## Remote daemon
+
+Run this once on your remote Linux host to install the daemon and `cloudflared`:
+
+```bash
+curl -fsSL https://updates.amarcode.amarjay.com/install.sh | bash
+```
+
+Or with wget:
+
+```bash
+wget -qO- https://updates.amarcode.amarjay.com/install.sh | bash
+```
+
+The installer prints your access token, installed paths, and any PATH setup
+needed. It installs `amarcode-daemon` in `~/.local/bin` without starting a service
+or tunnel. Requires Bash, Python 3, and OpenSSL with Ed25519 support; no sudo,
+Rust, Bun, or systemd is needed.
+
+After setup, start remote access whenever you need it:
+
+```bash
+amarcode-daemon --transport websocket --remote
+# Shorthand:
+amarcode-daemon --remote
+```
+
+This starts the authenticated daemon and `cloudflared` together, then prints the
+remote `wss://<tunnel-host>/rpc` URL. Enter that URL and your saved access token in
+Amarcode’s **Settings → Connection**. Ctrl+C stops both processes. Quick tunnel
+URLs change each time you restart; your token and chat data are preserved.
+
+See [installation and connection instructions](docs/remote-daemon.md) for PATH
+setup, version selection, and permanent hostnames.
+
+The installer endpoint requires the registry Worker to be deployed and a daemon
+release with authenticated remote CLI support to be published from this source.

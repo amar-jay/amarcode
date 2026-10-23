@@ -77,7 +77,7 @@ pub async fn run(app: Arc<App>, listener: Listener) -> Result<()> {
     Ok(())
 }
 
-async fn shutdown_signal() {
+pub(crate) async fn shutdown_signal() {
     let ctrl_c = async {
         if let Err(err) = tokio::signal::ctrl_c().await {
             error!(error = %err, "failed to install Ctrl-C handler");

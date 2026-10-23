@@ -52,6 +52,12 @@ impl DaemonClient {
     pub async fn health(&self) -> Result<HealthResult, String> {
         let response: HealthResult = self.call(methods::HEALTH, ()).await?;
         ensure_compatible_protocol(response.protocol_version)?;
+        if super::remote::is_remote()? && !response.remote_auth_required {
+            return Err(
+                "Remote daemon no longer enforces authentication; check its host configuration"
+                    .into(),
+            );
+        }
         Ok(response)
     }
 
