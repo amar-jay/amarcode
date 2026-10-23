@@ -9,7 +9,7 @@ route.
 ## Routes
 
 - `GET /health`
-- `GET /install.sh` (signed remote-daemon installer bootstrap)
+<!-- - `GET /install.sh` (signed remote-daemon installer bootstrap - moved to landing page) -->
 - `GET /v1/daemon/versions.json`
 - `GET /v1/daemon/latest.json`
 - `GET /v1/daemon/latest.json.sig`

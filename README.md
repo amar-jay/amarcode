@@ -59,13 +59,13 @@ without pretending that opaque native state can be reproduced exactly.
 Run this once on your remote Linux host to install the daemon and `cloudflared`:
 
 ```bash
-curl -fsSL https://updates.amarcode.amarjay.com/install.sh | bash
+curl -fsSL https://amarcode.amarjay.com/install.sh | bash
 ```
 
 Or with wget:
 
 ```bash
-wget -qO- https://updates.amarcode.amarjay.com/install.sh | bash
+wget -qO- https://amarcode.amarjay.com/install.sh | bash
 ```
 
 The installer prints your access token, installed paths, and any PATH setup
