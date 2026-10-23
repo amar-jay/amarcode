@@ -20,6 +20,9 @@ pub mod methods {
     pub const SAVE_WORKSPACE_FILE: &str = "save_workspace_file";
     pub const HEALTH: &str = "health";
     pub const VERSION: &str = "version";
+    pub const CHECK_DAEMON_UPDATE: &str = "check_daemon_update";
+    pub const START_DAEMON_UPDATE: &str = "start_daemon_update";
+    pub const GET_DAEMON_UPDATE: &str = "get_daemon_update";
     pub const SUBSCRIBE_EVENTS: &str = "subscribe_events";
     pub const LIST_AGENTS: &str = "list_agents";
     pub const INSTALL_AGENT: &str = "install_agent";
@@ -90,6 +93,69 @@ pub struct HealthResult {
 pub struct VersionResult {
     pub version: String,
     pub protocol_version: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum DaemonUpdateCheck {
+    UpToDate {
+        current_version: String,
+    },
+    Available {
+        current_version: String,
+        version: String,
+    },
+    Unavailable {
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum DaemonUpdateStatus {
+    Downloading {
+        #[ts(type = "number")]
+        received: u64,
+        #[ts(type = "number")]
+        total: u64,
+    },
+    Verifying,
+    Installing,
+    Restarting,
+    RollingBack,
+    Ready {
+        version: String,
+    },
+    Failed {
+        error: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct DaemonUpdateJob {
+    pub id: String,
+    pub version: String,
+    pub previous_version: String,
+    pub status: DaemonUpdateStatus,
+    /// True only after activation commits or failure/rollback has settled.
+    pub finished: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct StartDaemonUpdateParams {
+    /// The version explicitly approved by the user; never silently update to a different release.
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+pub struct GetDaemonUpdateParams {
+    /// Omit to inspect the latest job, including after a desktop restart.
+    #[serde(default)]
+    pub job_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]

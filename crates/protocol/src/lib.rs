@@ -60,6 +60,11 @@ pub fn typescript_bindings() -> String {
         ChatDetail::decl(&config),
         GetChatResult::decl(&config),
         rpc::DiscoverCommandsParams::decl(&config),
+        rpc::DaemonUpdateCheck::decl(&config),
+        rpc::DaemonUpdateStatus::decl(&config),
+        rpc::DaemonUpdateJob::decl(&config),
+        rpc::StartDaemonUpdateParams::decl(&config),
+        rpc::GetDaemonUpdateParams::decl(&config),
         rpc::HealthResult::decl(&config),
         rpc::VersionResult::decl(&config),
         rpc::SubscribeEventsParams::decl(&config),
@@ -104,7 +109,7 @@ pub fn typescript_bindings() -> String {
          export type JsonValue = null | boolean | number | string | JsonValue[] | {{ [key: string]: JsonValue }};\n\n{}\n",
         declarations
             .into_iter()
-            .map(|declaration| format!("export {declaration}"))
+            .map(|declaration| format!("export {}", declaration.lines().map(str::trim_end).collect::<Vec<_>>().join("\n")))
             .collect::<Vec<_>>()
             .join("\n\n")
     )
