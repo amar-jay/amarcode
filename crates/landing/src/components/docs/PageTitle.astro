@@ -1,0 +1,10 @@
+---
+import DefaultPageTitle from '@astrojs/starlight/components/PageTitle.astro';
+
+const isOverview = Astro.locals.starlightRoute.entry.id === 'docs';
+---
+{isOverview ? (
+  <div class="docs-overview-banner">
+    <DefaultPageTitle />
+  </div>
+) : <DefaultPageTitle />}

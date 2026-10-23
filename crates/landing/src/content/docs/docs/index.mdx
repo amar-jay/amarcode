@@ -1,13 +1,8 @@
 ---
-title: A workspace. Many ways to think.
+title: Amarcode Docs
 description: Install Amarcode, bring your coding agent, and keep your work moving across local and remote projects.
 tableOfContents: false
 ---
-
-<div className="docs-intro">
-  <p className="docs-eyebrow">The Amarcode handbook</p>
-  <p className="docs-lead">Bring your coding agents into one workspace. Start with a project on your computer, or connect to a daemon on another machine. Your conversations stay with Amarcode as you work.</p>
-</div>
 
 <div className="docs-paths">
   <a className="docs-path" href="/docs/getting-started/installation/">
@@ -35,7 +30,21 @@ tableOfContents: false
 ## Three parts, one workspace
 
 <div className="docs-flow" aria-label="The desktop connects to the daemon, which runs coding agents">
-  <b>Desktop</b><span aria-hidden="true">↔</span><b>Daemon</b><span aria-hidden="true">↔</span><b>Coding agents</b>
+  <div className="docs-flow-part">
+    <span className="docs-part-icon docs-part-icon-application" aria-hidden="true"></span>
+    <strong>Desktop</strong>
+    <span>Read, write, and review.</span>
+  </div>
+  <div className="docs-flow-part">
+    <span className="docs-part-icon docs-part-icon-background" aria-hidden="true"></span>
+    <strong>Daemon</strong>
+    <span>Keep the work running.</span>
+  </div>
+  <div className="docs-flow-part">
+    <span className="docs-part-icon docs-part-icon-compass" aria-hidden="true"></span>
+    <strong>Coding agents</strong>
+    <span>Bring your tools and models.</span>
+  </div>
 </div>
 
 The desktop is where you read, write, and review. The daemon keeps your chat history, works with project files, and runs agents through the Agent Client Protocol (ACP). It can live on your computer or a remote host.

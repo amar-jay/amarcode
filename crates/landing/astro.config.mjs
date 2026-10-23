@@ -73,6 +73,7 @@ export default defineConfig({
       components: {
         SiteTitle: "./src/components/docs/SiteTitle.astro",
         Head: "./src/components/docs/Head.astro",
+        PageTitle: "./src/components/docs/PageTitle.astro",
       },
       social: [
         {
