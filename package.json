@@ -41,10 +41,11 @@
     "landing:dev": "bun run --cwd crates/landing dev",
     "landing:build": "bun run --cwd crates/landing build",
     "landing:preview": "bun run --cwd crates/landing preview",
-    "docs:dev": "bun run --cwd crates/docs dev",
-    "docs:build": "bun run --cwd crates/docs build",
-    "docs:check": "bun run --cwd crates/docs check",
-    "docs:preview": "bun run --cwd crates/docs preview"
+    "docs:dev": "bun run --cwd crates/landing dev",
+    "docs:build": "bun run --cwd crates/landing build",
+    "docs:check": "bun run --cwd crates/landing check",
+    "docs:preview": "bun run --cwd crates/landing preview",
+    "landing:check": "bun run --cwd crates/landing check"
   },
   "devDependencies": {
     "prettier": "^3.9.6"

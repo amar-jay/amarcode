@@ -3,8 +3,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("../../../landing/public/fonts/cormorant-garamond-400.ttf")
-    format("truetype");
+  src: url("../../public/fonts/cormorant-garamond-400.ttf") format("truetype");
 }
 
 :root {

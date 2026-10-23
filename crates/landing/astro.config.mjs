@@ -1,24 +1,20 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
-
-const site = new URL(process.env.SITE_URL || "https://amarcode.amarjay.com");
-if (!["https:", "http:"].includes(site.protocol)) {
-  throw new Error("SITE_URL must be an absolute HTTP(S) URL");
-}
-const socialImage = new URL("/docs/social-preview.png", site).href;
-const socialImageAlt =
-  "Amarcode: Your agents. One continuous conversation. Light and dark desktop workspaces against a misty mountain landscape.";
+import react from "@astrojs/react";
+import tailwindcss from "@tailwindcss/vite";
+import { site, socialImage, socialImageAlt } from "./site.config.mjs";
 
 export default defineConfig({
-  site: site.origin,
-  base: "/docs",
+  site,
   trailingSlash: "always",
+  vite: { plugins: [tailwindcss()] },
   integrations: [
+    react(),
     starlight({
       title: "Amarcode",
       description:
         "Guides for your Amarcode workspace, coding agents, and remote daemon.",
-      customCss: ["@fontsource-variable/geist", "./src/styles/amarcode.css"],
+      customCss: ["@fontsource-variable/geist", "./src/styles/docs.css"],
       favicon: "/favicon.ico",
       head: [
         {
@@ -26,7 +22,7 @@ export default defineConfig({
           attrs: {
             rel: "icon",
             type: "image/svg+xml",
-            href: "/docs/favicon.svg",
+            href: "/favicon.svg",
           },
         },
         {
@@ -34,7 +30,7 @@ export default defineConfig({
           attrs: {
             rel: "apple-touch-icon",
             sizes: "180x180",
-            href: "/docs/apple-touch-icon.png",
+            href: "/apple-touch-icon.png",
           },
         },
         {
@@ -75,8 +71,8 @@ export default defineConfig({
         },
       ],
       components: {
-        SiteTitle: "./src/components/SiteTitle.astro",
-        Head: "./src/components/Head.astro",
+        SiteTitle: "./src/components/docs/SiteTitle.astro",
+        Head: "./src/components/docs/Head.astro",
       },
       social: [
         {
@@ -86,26 +82,33 @@ export default defineConfig({
         },
       ],
       editLink: {
-        baseUrl: "https://github.com/amar-jay/amarcode/edit/main/crates/docs/",
+        baseUrl:
+          "https://github.com/amar-jay/amarcode/edit/main/crates/landing/",
       },
       sidebar: [
-        { label: "Overview", slug: "index" },
+        { label: "Overview", slug: "docs" },
         {
           label: "Getting started",
           items: [
-            { label: "Install Amarcode", slug: "getting-started/installation" },
+            {
+              label: "Install Amarcode",
+              slug: "docs/getting-started/installation",
+            },
             {
               label: "Your first conversation",
-              slug: "getting-started/first-conversation",
+              slug: "docs/getting-started/first-conversation",
             },
           ],
         },
         {
           label: "Agents",
           items: [
-            { label: "Choose and install an agent", slug: "agents/overview" },
-            { label: "Configure a provider", slug: "agents/provider" },
-            { label: "Permissions", slug: "agents/permissions" },
+            {
+              label: "Choose and install an agent",
+              slug: "docs/agents/overview",
+            },
+            { label: "Configure a provider", slug: "docs/agents/provider" },
+            { label: "Permissions", slug: "docs/agents/permissions" },
           ],
         },
         {
@@ -113,23 +116,23 @@ export default defineConfig({
           items: [
             {
               label: "Conversations and commands",
-              slug: "workspace/conversations",
+              slug: "docs/workspace/conversations",
             },
-            { label: "Files and Git", slug: "workspace/files-and-git" },
+            { label: "Files and Git", slug: "docs/workspace/files-and-git" },
             {
               label: "Attachments and dictation",
-              slug: "workspace/attachments-and-dictation",
+              slug: "docs/workspace/attachments-and-dictation",
             },
           ],
         },
         {
           label: "Remote daemon",
           items: [
-            { label: "Set up a remote host", slug: "remote/setup" },
-            { label: "Connect from the desktop", slug: "remote/connect" },
+            { label: "Set up a remote host", slug: "docs/remote/setup" },
+            { label: "Connect from the desktop", slug: "docs/remote/connect" },
             {
               label: "Updates and troubleshooting",
-              slug: "remote/troubleshooting",
+              slug: "docs/remote/troubleshooting",
             },
           ],
         },
@@ -138,16 +141,25 @@ export default defineConfig({
           items: [
             {
               label: "Desktop, daemon, and agents",
-              slug: "concepts/architecture",
+              slug: "docs/concepts/architecture",
             },
-            { label: "Conversation continuity", slug: "concepts/continuity" },
+            {
+              label: "Conversation continuity",
+              slug: "docs/concepts/continuity",
+            },
           ],
         },
         {
           label: "Contributing",
           items: [
-            { label: "Development setup", slug: "contributing/development" },
-            { label: "Protocol and testing", slug: "contributing/protocol" },
+            {
+              label: "Development setup",
+              slug: "docs/contributing/development",
+            },
+            {
+              label: "Protocol and testing",
+              slug: "docs/contributing/protocol",
+            },
           ],
         },
       ],

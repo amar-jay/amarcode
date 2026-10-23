@@ -47,13 +47,9 @@ Use this instead of a managed daemon on the same address, not alongside it. Only
 bun run landing:dev
 ```
 
-For documentation:
-
-```bash
-bun run docs:dev
-```
-
-The docs server serves `/docs/` on port `4321`. The landing dev server proxies `/docs` to it, so run both when checking navigation between the two.
+The same Astro server serves the landing at `http://localhost:4321/` and the
+handbook at `http://localhost:4321/docs/`. The `docs:dev` command is an alias for
+this server; you only need one process.
 
 Build the complete public site with:
 
@@ -61,7 +57,9 @@ Build the complete public site with:
 bun run landing:build
 ```
 
-This builds the landing, builds Starlight, and copies the docs into `crates/landing/dist/docs`. The existing landing Vercel project can serve that combined output.
+This checks and builds one Astro project into `crates/landing/dist`, including
+the landing, handbook, shared assets, sitemap, and documentation search index.
+The existing Vercel project uses this output directly.
 
 ## Repository map
 
@@ -72,7 +70,6 @@ This builds the landing, builds Starlight, and copies the docs into `crates/land
 | `crates/protocol` | Shared Rust wire contract and TypeScript generation |
 | `crates/amarcode-acp` | Built-in provider adapter and tools |
 | `crates/amarcode-registry` | Release Worker, installer, publishing tools |
-| `crates/landing` | Public React landing page |
-| `crates/docs` | Starlight documentation and theme |
+| `crates/landing` | Astro landing page, React islands, and Starlight handbook |
 
 Continue with [protocol and testing](/docs/contributing/protocol/).

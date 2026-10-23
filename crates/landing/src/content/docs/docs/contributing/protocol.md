@@ -63,8 +63,8 @@ cargo test -p amarcode --lib
 
 ## Maintain these docs
 
-Pages live in `crates/docs/src/content/docs/` as Markdown or MDX. Every page needs a `title` and `description` in its frontmatter. Add new pages to the explicit sidebar in `astro.config.mjs`.
+Pages live in `crates/landing/src/content/docs/docs/` as Markdown or MDX. Every page needs a `title` and `description` in its frontmatter. Add new pages with their `docs/…` slugs to the explicit sidebar in `astro.config.mjs`.
 
-Use `/docs/…/` links for documentation pages. Starlight supplies search, heading anchors, a table of contents, code highlighting, and previous/next links. The custom theme is in `src/styles/amarcode.css`.
+Use `/docs/…/` links for documentation pages. Starlight supplies search, heading anchors, a table of contents, code highlighting, and previous/next links. The custom theme is in `src/styles/docs.css`.
 
 Verify commands, UI labels, and behavior against the implementation. In particular, distinguish native session resumption, daemon transcript hydration, and the built-in adapter's provider compaction.

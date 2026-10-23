@@ -1,89 +1,84 @@
-# Amarcode landing page
+# Amarcode website
 
-Bun workspace with Vite, React, TypeScript, Tailwind CSS v4, shadcn/ui, and Lucide icons. The page includes a cloud hero, app comparison slider, agent directory, daemon overview, and downloads.
+One Astro workspace serves the landing at `/` and the Starlight handbook at
+`/docs/`. React islands preserve the interactive landing components; static
+sections and documentation render to HTML at build time. Both use one dev
+server, one public asset directory, one sitemap, and one production build.
+
+## Develop and build
 
 From the repository root:
 
 ```sh
 bun install
 bun run landing:dev
+bun run landing:check
 bun run landing:build
 bun run landing:preview
 ```
 
-Type-check and lint:
+Open `http://localhost:4321/` or `http://localhost:4321/docs/`. The existing
+`docs:dev`, `docs:check`, `docs:build`, and `docs:preview` commands are aliases for
+the same website workspace. No second server or proxy is needed.
 
-```sh
-bun run --cwd crates/landing check
-bun run --cwd crates/landing lint
-```
+`landing:build` checks the site and produces `crates/landing/dist/` directly.
+Keep the Vercel project rooted at `crates/landing`, with `bun run build` and
+`dist` as its output directory. The existing `/install.sh` redirect remains in
+`vercel.json`.
 
-Add shadcn components from this directory:
-
-```sh
-bunx shadcn@latest add card
-```
-
-Source lives in `src/`, shared UI components in `src/components/ui/`, and the theme in `src/index.css`. The `@/` alias resolves to `src/`. No environment variables are required.
-
-Typography uses locally hosted Cormorant Garamond from Google Fonts (300 and 400), with its OFL license in `public/fonts/OFL.txt`. Agent icons and names are copied from `vendor/acp-registry`; `src/lib/agents.json` records the local snapshot. All icons are retained; quarantined entries are omitted from the page. Registry licensing is retained alongside the icons.
-
-The application logo in `public/images/app/` is copied from `crates/application/src-tauri/icons/icon.svg`. Light and dark screenshots are captured from the actual application renderer with synthetic demo data. The original split-theme reference remains copied from `assets/`. `AppPreview` uses a native, keyboard-accessible comparison slider to reveal the light and dark screenshots. Card, Badge, Separator, Accordion, and Dropdown Menu are installed for future sections.
-
-All page layout, responsive styling, texture overlays, and interaction effects use Tailwind utilities in the components. `src/index.css` contains only Tailwind imports, local font declarations, theme tokens, and the shadcn base layer. Dynamic agent icon URLs are passed as a CSS variable consumed by a Tailwind mask utility.
-
-Closing-section photograph: [Misty forest covered mountains in soft light](https://unsplash.com/photos/misty-forest-covered-mountains-in-soft-light-2GeemxzkzY8) by Damien Dufour on Unsplash, downloaded as `public/images/misty-mountains.webp`. Source: `https://images.unsplash.com/photo-1756817371084-d4433d191d9d`. [Unsplash license](https://unsplash.com/license).
-
-## Downloads and social sharing
-
-The split download button opens an **Other platforms** menu. Both controls share one GitHub latest-release request per page load. Only published installer files are listed (`.exe`, `.msi`, `.AppImage`, `.deb`, `.rpm`, `.dmg`); signatures and updater archives are excluded. Missing installers are labeled unavailable, and **All releases** remains usable if the request fails.
-
-Open Graph and Twitter metadata are included in the built HTML, so link-preview crawlers do not need JavaScript. The public URL is `https://amarcode.amarjay.com`, hosted on Vercel. Metadata uses this URL by default. Override it for another deployment when building:
+Set a different origin for canonical URLs, the sitemap, and social metadata:
 
 ```sh
 SITE_URL=https://your-domain.example bun run landing:build
 ```
 
-`public/social-preview.png` is the 1200×630 sharing image. Its editable Tailwind source is `scripts/social-preview.html`; open `/scripts/social-preview.html` in the Vite dev server and capture it at a 1200×630 viewport after fonts and images load to regenerate the PNG.
+## Source map
 
-Validate installer filtering with `bun test ./crates/landing/scripts/releases.test.ts` from the repository root.
+| Path | Purpose |
+| --- | --- |
+| `src/pages/index.astro` | Landing composition and React hydration boundaries |
+| `src/layouts/Landing.astro` | Landing HTML, metadata, and page-scoped CSS imports |
+| `src/components/` | Landing sections and interactive React components |
+| `src/content/docs/docs/` | Handbook Markdown and MDX, routed under `/docs/` |
+| `src/content/docs/404.md` | Site-wide Starlight error page |
+| `src/content.config.ts` | Starlight content collection schema |
+| `src/components/docs/` | Documentation brand and metadata overrides |
+| `src/index.css` | Landing Tailwind styles and tokens |
+| `src/styles/docs.css` | Custom Starlight theme |
+| `astro.config.mjs` | Astro, React, Tailwind, Starlight, and explicit sidebar |
+| `site.config.mjs` | Shared site origin and social image metadata |
+| `public/` | Shared fonts, icons, screenshots, and social preview |
 
-## Regenerating application screenshots
+The landing's Tailwind stylesheet is imported only by its layout. Starlight
+loads its own stylesheet and theme so the two page layouts do not reset each
+other's styles.
 
-The screenshot harness renders the real app components. Its isolated API fixture contains a sample Codex/Claude conversation and never connects to a daemon, runs an agent, or writes to real workspace data. Both themes use the same 1600×900 viewport at 2× resolution (3200×1800 PNGs), fixed timestamps, local fonts, and matching scroll position.
+## Author documentation
 
-```sh
-# One-time browser setup:
-bunx --cwd crates/landing playwright install chromium
-# Terminal 1 — isolated application renderer:
-bun run --cwd crates/application dev --port 1421
-# Terminal 2 — generate both screenshots:
-bun run --cwd crates/landing screenshots
-```
+Add `.md` or `.mdx` pages under `src/content/docs/docs/`, with `title` and
+`description` frontmatter. Add their `docs/…` slugs to the sidebar in
+`astro.config.mjs`. Internal handbook links use `/docs/…/` paths.
 
-For an existing Chromium installation, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`. Override the renderer URL with `APP_PREVIEW_URL` if needed. `scripts/screenshots/demo-api.mjs` is the editable demo content; it is only substituted by Playwright during capture, never included in the app build. Updating these fixtures does not change app behavior.
+Starlight supplies navigation, heading links, code highlighting, and Pagefind
+search. Search is generated during the production build and is available in
+preview; the development server does not generate the search index. The landing
+is excluded from the documentation search index.
 
-After changing the screenshots, rebuild the landing page and regenerate the sharing image with `bun run --cwd crates/landing screenshots:social`.
+## Branding and assets
 
-The public `/install.sh` URL redirects to the registry using the redirect in `vercel.json`. The installer source lives in
-`crates/amarcode-registry/assets/install.sh`.
+Cormorant Garamond is hosted locally with its OFL license under `public/fonts`.
+Geist is used for handbook body text. Agent names and icons are copied from the
+ACP registry; the local snapshot is `src/lib/agents.json` and its license is
+retained alongside the icons.
 
-Deploy the registry Worker before deploying this landing page so the redirect
-target is available. Verify both endpoints after deployment:
+The SVG logo, multi-resolution ICO, and Apple touch icon use the desktop's
+branding. Both parts of the site share `public/social-preview.png`, a 1200×630
+image. `site.config.mjs` provides the same absolute image URL for both layouts,
+while each documentation page retains its own title and description.
 
-```sh
-curl -fsSI https://updates.amarcode.amarjay.com/install.sh
-curl -fsSL https://amarcode.amarjay.com/install.sh -o /tmp/amarcode-install.sh
-bash -n /tmp/amarcode-install.sh
-```
+The closing photograph is [Misty forest covered mountains in soft light](https://unsplash.com/photos/misty-forest-covered-mountains-in-soft-light-2GeemxzkzY8)
+by Damien Dufour, under the [Unsplash license](https://unsplash.com/license).
 
-## Documentation
-
-The Docs navigation link opens the custom-themed Starlight site at `/docs/`.
-Source lives in `../docs`. For development, run `bun run docs:dev` from the
-repository root alongside the landing server; Vite proxies `/docs` to port 4321.
-
-The landing build now includes the documentation build and copies its output to
-`dist/docs/`. The existing Vercel build command (`bun run build` from this
-workspace) and `dist` output serve both sites. No separate deployment is needed.
-See [the docs workspace README](../docs/README.md) for authoring and preview.
+Downloads share a GitHub latest-release request and fall back to the releases
+page when assets cannot be fetched. Only published installer formats are shown;
+signatures and updater archives are excluded.
