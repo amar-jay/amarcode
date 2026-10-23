@@ -13,7 +13,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / 'crates/landing/public/install.sh'
+SOURCE = Path(__file__).resolve().parents[1] / 'crates/amarcode-registry/assets/install.sh'
 
 
 class RemoteInstallerTests(unittest.TestCase):

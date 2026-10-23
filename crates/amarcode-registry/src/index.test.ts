@@ -123,6 +123,19 @@ describe("resolveArtifactRoute", () => {
 });
 
 describe("handleRequest", () => {
+  test("serves the canonical installer and supports HEAD", async () => {
+    const url = "https://updates.amarcode.amarjay.com/install.sh";
+    const response = await handleRequest(new Request(url), environment({}));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/x-shellscript; charset=utf-8");
+    expect(await response.text()).toBe(await Bun.file(new URL("../assets/install.sh", import.meta.url)).text());
+    const head = await handleRequest(new Request(url, { method: "HEAD" }), environment({}));
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    const post = await handleRequest(new Request(url, { method: "POST" }), environment({}));
+    expect(post.status).toBe(405);
+  });
+
   test("proxies the desktop updater manifest from the rolling GitHub release", async () => {
     let upstreamRequest: Request | undefined;
     const response = await handleRequest(

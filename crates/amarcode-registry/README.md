@@ -145,5 +145,6 @@ credentials.
 
 Remote installer and release requirements: [remote daemon guide](../../docs/remote-daemon.md).
 
-The remote installer is maintained in `crates/landing/public/install.sh` and served
-by the landing site at `https://amarcode.amarjay.com/install.sh`.
+The remote installer is maintained in `assets/install.sh` and served at
+`https://updates.amarcode.amarjay.com/install.sh`. The landing site redirects
+`https://amarcode.amarjay.com/install.sh` to this canonical endpoint.

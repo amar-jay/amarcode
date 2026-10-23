@@ -64,3 +64,7 @@ bun run --cwd crates/landing screenshots
 For an existing Chromium installation, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`. Override the renderer URL with `APP_PREVIEW_URL` if needed. `scripts/screenshots/demo-api.mjs` is the editable demo content; it is only substituted by Playwright during capture, never included in the app build. Updating these fixtures does not change app behavior.
 
 After changing the screenshots, rebuild the landing page and regenerate the sharing image with `bun run --cwd crates/landing screenshots:social`.
+
+The public `/install.sh` URL redirects to the registry using `public/_redirects`
+(Cloudflare Pages redirect rules). The installer source lives in
+`crates/amarcode-registry/assets/install.sh`.
