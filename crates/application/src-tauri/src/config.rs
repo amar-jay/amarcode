@@ -49,28 +49,5 @@ fn resolve_daemon_service_executable() -> Option<PathBuf> {
         }
     }
 
-    // A debug build can manage a service previously registered from the
-    // workspace binary. It still never owns the long-lived daemon process.
-    #[cfg(debug_assertions)]
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    #[cfg(debug_assertions)]
-    let candidates = [
-        manifest_dir.join(format!(
-            "../../../target/debug/amarcode-daemon{}",
-            std::env::consts::EXE_SUFFIX
-        )),
-        manifest_dir.join(format!(
-            "../../target/debug/amarcode-daemon{}",
-            std::env::consts::EXE_SUFFIX
-        )),
-    ];
-
-    #[cfg(debug_assertions)]
-    for candidate in candidates {
-        if candidate.is_file() {
-            return Some(candidate.canonicalize().unwrap_or(candidate));
-        }
-    }
-
     None
 }

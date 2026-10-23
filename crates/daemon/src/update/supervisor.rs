@@ -126,7 +126,7 @@ async fn stage(root: &Path, record: &mut Record) -> Result<std::path::PathBuf, S
     if target.manifest.version != record.job.version {
         return Err("update target changed".into());
     }
-    SignedState::new(root, record).previous_executable()?;
+    ManagedState::new(root, record).previous_executable()?;
     let artifact = target.artifact(releases::platform_target()?)?;
     record.progress(
         root,
@@ -168,13 +168,13 @@ trait ReleaseState {
     fn commit_previous(&self) -> Result<(), String>;
     fn target_committed(&self) -> bool;
 }
-struct SignedState<'a> {
+struct ManagedState<'a> {
     root: &'a Path,
     directory: std::path::PathBuf,
     previous: String,
     target: String,
 }
-impl<'a> SignedState<'a> {
+impl<'a> ManagedState<'a> {
     fn new(root: &'a Path, record: &Record) -> Self {
         Self {
             root,
@@ -183,15 +183,19 @@ impl<'a> SignedState<'a> {
             target: record.job.version.clone(),
         }
     }
-    fn release(&self, previous: bool) -> Result<releases::VerifiedManifest, String> {
-        let manifest = releases::load_cached(&self.directory.join(if previous {
-            "previous"
+    fn release(&self, previous: bool) -> Result<releases::InstalledRelease, String> {
+        let path = self
+            .directory
+            .join(if previous { "previous" } else { "target" });
+        let manifest = if previous {
+            releases::load_installed(&path)?
         } else {
-            "target"
-        }))?;
-        compatible(&manifest)?;
-        if manifest.manifest.version
-            != *if previous {
+            // Network targets always require a signed manifest.
+            releases::InstalledRelease::Signed(releases::load_cached(&path)?)
+        };
+        super::compatible_installed(&manifest)?;
+        if manifest.version()
+            != if previous {
                 &self.previous
             } else {
                 &self.target
@@ -202,14 +206,12 @@ impl<'a> SignedState<'a> {
         Ok(manifest)
     }
 }
-impl ReleaseState for SignedState<'_> {
+impl ReleaseState for ManagedState<'_> {
     fn commit_target(&self) -> Result<(), String> {
         self.release(false)?.save_as_current(self.root)
     }
     fn previous_executable(&self) -> Result<std::path::PathBuf, String> {
-        self.release(true)?
-            .installed_executable(self.root, releases::platform_target()?)?
-            .ok_or("verified rollback executable is missing".into())
+        self.release(true)?.installed_executable(self.root)
     }
     fn commit_previous(&self) -> Result<(), String> {
         self.release(true)?.save_as_current(self.root)
@@ -217,7 +219,8 @@ impl ReleaseState for SignedState<'_> {
     fn target_committed(&self) -> bool {
         let result = (|| {
             let current = releases::load_cached(self.root)?;
-            let target = self.release(false)?;
+            let target = releases::load_cached(&self.directory.join("target"))?;
+            compatible(&target)?;
             let platform = releases::platform_target()?;
             Ok::<_, String>(
                 current.manifest.version == self.target
@@ -234,7 +237,7 @@ fn activate(
     executable: &Path,
     host: &impl Host,
 ) -> Result<(), String> {
-    let state = SignedState::new(root, record);
+    let state = ManagedState::new(root, record);
     activate_with(root, record, executable, host, &state)
 }
 fn activate_with(
@@ -263,7 +266,7 @@ fn activate_with(
     }
 }
 fn recover(root: &Path, record: &mut Record, host: &impl Host) -> Result<(), String> {
-    let state = SignedState::new(root, record);
+    let state = ManagedState::new(root, record);
     recover_with(root, record, host, &state)
 }
 fn recover_with(
@@ -309,4 +312,85 @@ fn rollback_with(
             error: format!("{error}; previous daemon restored"),
         },
     )
+}
+
+#[cfg(test)]
+mod bundled_rollback_tests {
+    use super::*;
+    use std::cell::RefCell;
+    struct FakeHost(RefCell<Vec<std::path::PathBuf>>);
+    impl Host for FakeHost {
+        fn activate(&self, executable: &Path) -> Result<(), String> {
+            self.0.borrow_mut().push(executable.into());
+            Ok(())
+        }
+        fn health(&self, address: &str, expected: &str) -> Result<HealthResult, String> {
+            Ok(HealthResult {
+                status: "ok".into(),
+                version: expected.into(),
+                protocol_version: amarcode_protocol::PROTOCOL_VERSION,
+                addr: address.into(),
+            })
+        }
+    }
+    fn record() -> Record {
+        Record {
+            job: amarcode_protocol::rpc::DaemonUpdateJob {
+                id: uuid::Uuid::new_v4().to_string(),
+                version: "99.0.0".into(),
+                previous_version: env!("CARGO_PKG_VERSION").into(),
+                status: DaemonUpdateStatus::Restarting,
+                finished: false,
+            },
+            phase: Phase::Restarting,
+            address: "127.0.0.1:43821".into(),
+            recovery_failures: 0,
+            last_error: None,
+        }
+    }
+    #[test]
+    fn downloaded_update_can_roll_back_to_the_original_desktop_bundle() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("desktop-bundle");
+        std::fs::write(&source, b"verified bundled fixture").unwrap();
+        let previous = releases::stage_bundle_from(root.path(), &source).unwrap();
+        let mut record = record();
+        previous
+            .save_as_current(&record.directory(root.path()).join("previous"))
+            .unwrap();
+        std::fs::remove_file(source).unwrap();
+        let state = ManagedState::new(root.path(), &record);
+        let host = FakeHost(RefCell::new(Vec::new()));
+        rollback_with(
+            root.path(),
+            &mut record,
+            &host,
+            &state,
+            "new release failed health".into(),
+        )
+        .unwrap();
+        assert!(record.job.finished);
+        assert!(
+            matches!(&record.job.status, DaemonUpdateStatus::Failed { error } if error.contains("previous daemon restored"))
+        );
+        let restored = releases::load_installed(root.path())
+            .unwrap()
+            .installed_executable(root.path())
+            .unwrap();
+        assert_eq!(*host.0.borrow(), [restored]);
+    }
+    #[test]
+    fn a_bundle_record_cannot_be_used_as_a_downloaded_update_target() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("desktop-bundle");
+        std::fs::write(&source, b"bundled fixture").unwrap();
+        let bundle = releases::stage_bundle_from(root.path(), &source).unwrap();
+        let record = record();
+        bundle
+            .save_as_current(&record.directory(root.path()).join("target"))
+            .unwrap();
+        assert!(ManagedState::new(root.path(), &record)
+            .release(false)
+            .is_err());
+    }
 }

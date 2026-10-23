@@ -68,3 +68,49 @@ async fn update_rpc_reports_unavailable_for_custom_services_without_touching_reg
         .unwrap_err();
     assert!(error.to_string().contains("job id"));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn bundled_bootstrap_cli_reports_first_install_without_constructing_app() {
+    use amarcode_protocol::rpc::{DaemonBootstrapEvent, DaemonBootstrapStatus};
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("must-not-exist");
+    let output = Command::new(env!("CARGO_BIN_EXE_amarcode-daemon"))
+        .args(["bootstrap", "ensure"])
+        .env("XDG_DATA_HOME", directory.path())
+        .env("AMARCODE_APPDIR", &database)
+        .env("AMARCODE_DAEMON_ADDR", "invalid-address")
+        .env(
+            "AMARCODE_DAEMON_RELEASE_URL",
+            "http://127.0.0.1:1/no-network",
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let events: Vec<DaemonBootstrapEvent> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(matches!(
+        events.as_slice(),
+        [
+            DaemonBootstrapEvent::Progress {
+                status: DaemonBootstrapStatus::Checking
+            },
+            DaemonBootstrapEvent::Progress {
+                status: DaemonBootstrapStatus::InstallRequired { .. }
+            },
+            DaemonBootstrapEvent::Complete { health: None }
+        ]
+    ));
+    assert!(!database.exists());
+    assert!(!directory
+        .path()
+        .join("com.amarcode.desktop/daemon/bundled")
+        .exists());
+}

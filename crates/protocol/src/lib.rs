@@ -60,6 +60,8 @@ pub fn typescript_bindings() -> String {
         ChatDetail::decl(&config),
         GetChatResult::decl(&config),
         rpc::DiscoverCommandsParams::decl(&config),
+        rpc::DaemonBootstrapStatus::decl(&config),
+        rpc::DaemonBootstrapEvent::decl(&config),
         rpc::DaemonUpdateCheck::decl(&config),
         rpc::DaemonUpdateStatus::decl(&config),
         rpc::DaemonUpdateJob::decl(&config),

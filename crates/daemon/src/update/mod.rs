@@ -1,6 +1,7 @@
 //! Daemon-owned update jobs. Activation runs in a separate OS-managed supervisor.
+pub mod bootstrap;
 pub mod journal;
-pub mod releases;
+pub(crate) mod releases;
 pub mod supervisor;
 use std::path::Path;
 
@@ -54,7 +55,14 @@ pub(crate) fn compatible(manifest: &releases::VerifiedManifest) -> Result<(), St
     manifest.artifact(releases::platform_target()?)?;
     Ok(())
 }
-fn installed(config: &Config) -> Result<(PathBuf, releases::VerifiedManifest, PathBuf), String> {
+pub(crate) fn compatible_installed(release: &releases::InstalledRelease) -> Result<(), String> {
+    if release.protocol_version() != amarcode_protocol::PROTOCOL_VERSION {
+        return Err("installed daemon has an incompatible protocol version".into());
+    }
+    releases::platform_target()?;
+    Ok(())
+}
+fn installed(config: &Config) -> Result<(PathBuf, releases::InstalledRelease, PathBuf), String> {
     // Native service registration currently supports the desktop's standard TCP
     // environment. Do not re-register a custom/remote service with lost settings.
     if config.transport != DaemonTransport::Tcp
@@ -73,12 +81,10 @@ fn installed(config: &Config) -> Result<(PathBuf, releases::VerifiedManifest, Pa
         return Err("the native daemon service is not running".into());
     }
     let root = release_root()?;
-    let current = releases::load_cached(&root)?;
-    compatible(&current)?;
-    let executable = current
-        .installed_executable(&root, releases::platform_target()?)?
-        .ok_or("verified installed daemon executable is missing")?;
-    if current.manifest.version != env!("CARGO_PKG_VERSION")
+    let current = releases::load_installed(&root)?;
+    compatible_installed(&current)?;
+    let executable = current.installed_executable(&root)?;
+    if current.version() != env!("CARGO_PKG_VERSION")
         || executable.canonicalize().map_err(|e| e.to_string())?
             != std::env::current_exe()
                 .and_then(|path| path.canonicalize())
@@ -101,18 +107,41 @@ pub async fn check(config: &Config) -> Result<DaemonUpdateCheck, String> {
     };
     let latest = releases::fetch_latest(&client()?).await?;
     compatible(&latest)?;
-    compare(&current.manifest.version, &latest.manifest.version)
+    compare(current.version(), &latest.manifest.version)
 }
 pub async fn start(config: &Config, version: String) -> Result<DaemonUpdateJob, String> {
     let owned = config.clone();
     let (root, previous, executable) = tokio::task::spawn_blocking(move || installed(&owned))
         .await
         .map_err(|e| e.to_string())??;
+    start_managed(
+        root,
+        previous,
+        executable,
+        config.daemon_addr.clone(),
+        version,
+    )
+    .await
+}
+
+pub(crate) async fn start_managed(
+    root: PathBuf,
+    previous: releases::InstalledRelease,
+    executable: PathBuf,
+    address: String,
+    version: String,
+) -> Result<DaemonUpdateJob, String> {
     let _request = journal::lock(&root, "request.lock")?;
+    // A concurrent activation may have committed after the caller verified its
+    // installation. Never pin stale rollback state for a new job.
+    let committed = releases::load_installed(&root)?;
+    if committed.installed_executable(&root)? != previous.installed_executable(&root)? {
+        return Err("the installed daemon changed; retry the update request".into());
+    }
     if let Some(record) = journal::load(&root, None)? {
         if record.job.finished
             && record.job.version == version
-            && previous.manifest.version == version
+            && previous.version() == version
             && matches!(&record.job.status, DaemonUpdateStatus::Ready { .. })
         {
             return Ok(record.job);
@@ -134,7 +163,7 @@ pub async fn start(config: &Config, version: String) -> Result<DaemonUpdateJob, 
         return Err("the approved release has changed; check for updates again".into());
     }
     if !matches!(
-        compare(&previous.manifest.version, &version)?,
+        compare(previous.version(), &version)?,
         DaemonUpdateCheck::Available { .. }
     ) {
         return Err("the selected release is not newer than the installed daemon".into());
@@ -143,7 +172,7 @@ pub async fn start(config: &Config, version: String) -> Result<DaemonUpdateJob, 
         job: DaemonUpdateJob {
             id: uuid::Uuid::new_v4().to_string(),
             version,
-            previous_version: previous.manifest.version.clone(),
+            previous_version: previous.version().to_owned(),
             status: DaemonUpdateStatus::Downloading {
                 received: 0,
                 total: latest.artifact(releases::platform_target()?)?.size,
@@ -151,7 +180,7 @@ pub async fn start(config: &Config, version: String) -> Result<DaemonUpdateJob, 
             finished: false,
         },
         phase: Phase::Queued,
-        address: config.daemon_addr.clone(),
+        address,
         recovery_failures: 0,
         last_error: None,
     };

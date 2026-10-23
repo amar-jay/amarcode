@@ -20,3 +20,6 @@ credentials/
 target
 .wrangler
 .fast-agent
+
+# Generated Tauri daemon sidecars
+crates/application/src-tauri/binaries/

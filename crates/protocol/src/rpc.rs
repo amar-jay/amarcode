@@ -95,6 +95,39 @@ pub struct VersionResult {
     pub protocol_version: u32,
 }
 
+/// Progress emitted by the bundled daemon's bootstrap CLI.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum DaemonBootstrapStatus {
+    Checking,
+    InstallRequired {
+        reason: String,
+    },
+    Downloading {
+        #[ts(type = "number")]
+        received: u64,
+        #[ts(type = "number")]
+        total: u64,
+    },
+    Verifying,
+    Installing,
+    Starting,
+    Ready {
+        version: String,
+    },
+    Failed {
+        error: String,
+    },
+}
+
+/// Newline-delimited stdout contract of `bootstrap ensure` and `bootstrap install`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "event", rename_all = "camelCase")]
+pub enum DaemonBootstrapEvent {
+    Progress { status: DaemonBootstrapStatus },
+    Complete { health: Option<HealthResult> },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(
     tag = "status",

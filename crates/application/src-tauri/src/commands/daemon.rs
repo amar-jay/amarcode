@@ -5,51 +5,43 @@ use crate::daemon::DaemonClient;
 use amarcode_protocol::rpc::{
     DaemonConfigResult, HealthResult, SetDaemonConfigParams, VacuumDatabaseResult, VersionResult,
 };
-use tauri::{ipc::Channel, AppHandle, State};
+use tauri::{ipc::Channel, State};
 
 #[tauri::command]
 pub async fn daemon_bootstrap(
-    app: AppHandle,
     manager: State<'_, daemon::DaemonManager>,
     on_status: Channel<daemon::DaemonBootstrapStatus>,
 ) -> Result<Option<HealthResult>, String> {
-    report_failure(
-        manager.bootstrap(&app, &on_status).await,
-        &on_status,
-        |error| daemon::DaemonBootstrapStatus::Failed { error },
-    )
+    report_failure(manager.bootstrap(&on_status).await, &on_status, |error| {
+        daemon::DaemonBootstrapStatus::Failed { error }
+    })
 }
 
 #[tauri::command]
 pub async fn daemon_install(
-    app: AppHandle,
     manager: State<'_, daemon::DaemonManager>,
     on_status: Channel<daemon::DaemonBootstrapStatus>,
 ) -> Result<HealthResult, String> {
-    report_failure(
-        manager.install(&app, &on_status).await,
-        &on_status,
-        |error| daemon::DaemonBootstrapStatus::Failed { error },
-    )
+    report_failure(manager.install(&on_status).await, &on_status, |error| {
+        daemon::DaemonBootstrapStatus::Failed { error }
+    })
 }
 
 #[tauri::command]
 pub async fn daemon_check_update(
-    app: AppHandle,
     manager: State<'_, daemon::DaemonManager>,
 ) -> Result<daemon::DaemonUpdateCheck, String> {
-    manager.check_update(&app).await
+    manager.check_update().await
 }
 
 #[tauri::command]
 pub async fn daemon_update(
-    app: AppHandle,
     version: String,
     manager: State<'_, daemon::DaemonManager>,
     on_status: Channel<daemon::DaemonUpdateStatus>,
 ) -> Result<HealthResult, String> {
     report_failure(
-        manager.update(&app, version, &on_status).await,
+        manager.update(version, &on_status).await,
         &on_status,
         |error| daemon::DaemonUpdateStatus::Failed { error },
     )

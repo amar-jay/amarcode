@@ -1,4 +1,8 @@
-//! Signed daemon release storage shared by bootstrap and the independent updater.
+//! Daemon-owned release verification and storage.
+mod installed;
+#[cfg(test)]
+pub(crate) use installed::stage_bundle_from;
+pub use installed::{load_installed, stage_bundle, InstalledRelease};
 use std::{
     collections::HashMap,
     fs::{self, File, OpenOptions},

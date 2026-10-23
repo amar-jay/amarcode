@@ -12,8 +12,8 @@ to the daemon.
 | `src/commands/` | All `#[tauri::command]` adapters, grouped by domain. Preserve frontend arguments, construct shared request types, and delegate. |
 | `src/daemon/client.rs` | Typed daemon API, response-envelope unwrapping, and protocol compatibility checks. Accept shared `amarcode-protocol::rpc` parameter types. |
 | `src/daemon/bridge.rs` | TCP connections, JSON-line encoding/decoding, and the event-subscription socket. This is the only request-serialization boundary. |
-| `src/daemon/manager.rs` | Native daemon installation/startup/cleanup, update-job monitoring, and the one-time older-daemon bootstrap upgrade path. |
-| `crates/daemon/src/update/releases.rs` | Daemon-owned release verification and staging, also reused by desktop bootstrap. |
+| `src/daemon/manager.rs` | Invokes the bundled daemon CLI for bootstrap/repair/cleanup and observes daemon update jobs. |
+| `crates/daemon/src/update/bootstrap.rs` | Daemon-owned installation, startup, repair, and older-daemon update compatibility. |
 | `src/app_update.rs` | Native desktop updates. |
 | `src/commands/clipboard_files.rs` | Clipboard command, private native read/encoding helpers, and clipboard tests. |
 | `src/window.rs`, `src/microphone.rs` | Desktop startup integration. |
@@ -43,14 +43,30 @@ The client is stateless. Each request uses its own connection so a long-running
 prompt does not block cancellation, reads, or permission responses. Event
 subscriptions use a separate connection and recheck compatibility on reconnect.
 
-Daemon updates are durable daemon-owned jobs. The desktop passes the approved
-version to `start_daemon_update`, monitors `get_daemon_update`, and uses the
-supervisor's read-only status snapshot while RPC is restarting. Closing the
-desktop does not cancel the update. The independent daemon supervisor owns
-activation, exact-version health checks, rollback, and login/crash recovery.
-Bootstrap waits for an active update instead of racing the supervisor. The
-signed desktop bootstrap remains available for first installation, explicit
-repair, and the initial upgrade from a daemon without update RPC support.
+The desktop bundles `amarcode-daemon` as the `amarcode-bootstrap` sidecar.
+`bootstrap ensure` checks/starts an existing service; `bootstrap install` performs
+first installation or explicit repair, entirely offline. The helper copies the
+bundled binary into immutable user-data storage before service registration, so
+the service survives desktop updates and never runs from an AppImage mount or
+installer directory. It emits shared protocol progress/results as JSON lines.
+The desktop has no Rust dependency on the daemon library and no release verifier,
+release downloader, or native service registration logic.
+
+Normal updates use `start_daemon_update` and `get_daemon_update` RPC. During RPC
+restarts, `bootstrap update-status` reads the durable journal. Older daemons use
+the bundled CLI's `check-update` / `start-update` compatibility commands; the
+independent native supervisor still owns activation and rollback. Closing the
+desktop does not cancel an update job.
+
+Tauri's development/build hooks run `scripts/prepare-desktop-daemon.ts` before
+compiling the desktop. The script builds the daemon for Tauri's target and stages
+the target-suffixed sidecar required by `externalBin`. For direct Cargo commands,
+prepare it first with `bun scripts/prepare-desktop-daemon.ts --debug` from the
+repository root (add `--target <triple>` when cross-compiling).
+
+Development uses the same bundled flow. Set `AMARCODE_DAEMON_SERVICE_EXECUTABLE`
+explicitly to manage a developer-installed service instead; automatic update
+checks are disabled for that override.
 
 Native services report progress and return errors. Command adapters own
 publishing terminal failures to frontend status channels, using the common
@@ -73,6 +89,7 @@ Tauri APIs; daemon RPC and transport code must remain independent of Tauri.
 ## Verification
 
 ```sh
+bun scripts/prepare-desktop-daemon.ts --debug
 cargo check -p amarcode --all-targets
 cargo test -p amarcode --lib
 cargo clippy -p amarcode --all-targets -- -D warnings

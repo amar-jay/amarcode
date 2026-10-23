@@ -1,6 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AgentInfo,
+  DaemonBootstrapStatus,
   DaemonUpdateCheck,
   DaemonUpdateStatus,
   WorkspaceInfo,
@@ -34,17 +35,11 @@ import type {
 export type DaemonEventStreamStatus =
   { status: "connected" } | { status: "disconnected"; error: string };
 
-export type DaemonBootstrapStatus =
-  | { status: "checking" }
-  | { status: "installRequired"; reason: string }
-  | { status: "downloading"; received: number; total: number }
-  | { status: "verifying" }
-  | { status: "installing" }
-  | { status: "starting" }
-  | { status: "ready"; version: string }
-  | { status: "failed"; error: string };
-
-export type { DaemonUpdateCheck, DaemonUpdateStatus } from "./types";
+export type {
+  DaemonBootstrapStatus,
+  DaemonUpdateCheck,
+  DaemonUpdateStatus,
+} from "./types";
 
 export type AppUpdateCheck =
   | { status: "upToDate"; currentVersion: string }

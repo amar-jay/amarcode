@@ -69,6 +69,9 @@ jobs:
       - name: Run frontend tests
         run: bun run --cwd crates/application test -- --passWithNoTests
 
+      - name: Prepare bundled daemon for Rust tests
+        run: bun scripts/prepare-desktop-daemon.ts --debug
+
       - name: Run Rust tests
         run: cargo test --workspace
 

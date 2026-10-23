@@ -43,6 +43,11 @@ enum LifecycleCommand {
         #[arg(long)]
         release_root: PathBuf,
     },
+    /// Manage desktop first installation, repair, and update compatibility.
+    Bootstrap {
+        #[command(subcommand)]
+        command: amarcode_daemon::update::bootstrap::Command,
+    },
     /// Register the current executable as a per-user login service.
     Install,
     /// Stop and unregister the per-user service without deleting user data.
@@ -88,6 +93,13 @@ fn main() {
 
 #[tokio::main]
 async fn async_main(command: LifecycleCommand, transport: DaemonTransport) {
+    if let LifecycleCommand::Bootstrap { ref command } = command {
+        if let Err(error) = amarcode_daemon::update::bootstrap::run(command.clone()).await {
+            eprintln!("amarcode bootstrap: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let LifecycleCommand::UpdateSupervisor { ref release_root } = command {
         if let Err(error) = amarcode_daemon::update::supervisor::run(release_root).await {
             eprintln!("amarcode update supervisor: {error}");
@@ -140,7 +152,9 @@ async fn async_main(command: LifecycleCommand, transport: DaemonTransport) {
 fn run_lifecycle_command(command: LifecycleCommand) -> amarcode_daemon::Result<()> {
     let controller = NativeServiceController;
     match command {
-        LifecycleCommand::Run | LifecycleCommand::UpdateSupervisor { .. } => {
+        LifecycleCommand::Run
+        | LifecycleCommand::UpdateSupervisor { .. }
+        | LifecycleCommand::Bootstrap { .. } => {
             unreachable!("run is handled by the async entrypoint")
         }
         LifecycleCommand::Install => {
@@ -251,6 +265,36 @@ mod tests {
                 .command,
             Some(LifecycleCommand::Status { json: true })
         );
+    }
+
+    #[test]
+    fn bootstrap_cli_accepts_the_approved_update_version_as_a_value() {
+        use amarcode_daemon::update::bootstrap::Command;
+        assert_eq!(
+            Cli::try_parse_from([
+                "amarcode-daemon",
+                "bootstrap",
+                "start-update",
+                "--version",
+                "1.2.3"
+            ])
+            .unwrap()
+            .command,
+            Some(LifecycleCommand::Bootstrap {
+                command: Command::StartUpdate {
+                    version: "1.2.3".into()
+                }
+            })
+        );
+        assert!(Cli::try_parse_from(["amarcode-daemon", "bootstrap", "start-update"]).is_err());
+        for (arg, command) in [("ensure", Command::Ensure), ("install", Command::Install)] {
+            assert_eq!(
+                Cli::try_parse_from(["amarcode-daemon", "bootstrap", arg])
+                    .unwrap()
+                    .command,
+                Some(LifecycleCommand::Bootstrap { command })
+            );
+        }
     }
 
     #[test]

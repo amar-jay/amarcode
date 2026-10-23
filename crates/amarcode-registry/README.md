@@ -58,45 +58,34 @@ key is embedded in the desktop application; never commit the private key.
 
 ## Desktop application integration
 
-At startup, the Tauri backend first verifies that the native per-user service is
-registered. Only then does it accept a compatible daemon health response or ask
-the service manager to start it. The desktop never launches a long-lived daemon
-child process, including in development, and closing the desktop never stops
-the service.
+The desktop bundles a daemon executable as `amarcode-bootstrap`. At startup it
+invokes `bootstrap ensure`, which verifies the existing native service and its
+managed executable before accepting health or starting the service. It never
+performs first installation without the user's install action.
 
-Ordinary bootstrap does not download or install a service. When installation
-is missing, the desktop presents an explicit consent action. Only that action
-fetches `latest.json`, verifies its Ed25519 signature, selects the platform
-artifact, verifies its byte size and SHA-256, and invokes the daemon's
-short-lived `install` and `restart` lifecycle commands.
+First installation and explicit repair invoke `bootstrap install`. The helper
+copies the bundled binary into immutable user-data storage and registers the
+copy, so installation works offline and the service outlives desktop package
+replacement. The desktop does not download daemon artifacts, verify manifests,
+or import the daemon Rust library. Bundled installs have a distinct hash/size
+record whose trust originates in the desktop package; downloaded releases still
+require the pinned manifest signature.
 
-After a successful bootstrap, the desktop requests an update check through
-daemon RPC. A newer signed release with the same protocol version produces a
-non-blocking notification. Updating requires user confirmation because restarting
-the service interrupts active agent turns. The desktop submits the exact approved
-version and receives a durable update job ID.
+Normal updates use daemon RPC and durable jobs. For older daemons lacking update
+RPC, the bundled CLI checks the signed channel and starts an independent update
+supervisor for the exact approved version. That supervisor stages and verifies
+the signed artifact, activates it, checks exact version/protocol and native
+service health, and commits `current-release.json` atomically. Failure restores
+the previous verified executable, including a bundled baseline. Linux systemd
+and Windows Task Scheduler keep update jobs alive across daemon replacement and
+desktop exit. During RPC restarts, the bundled CLI returns journal status to the
+desktop.
 
-The daemon's independent update supervisor stages and verifies the artifact before
-changing the running service, activates the versioned executable, requires exact
-version/protocol health plus native service status, and commits the signed release
-record. Activation failure restores the previous verified release. Its separate
-systemd user service / Windows scheduled task survives daemon replacement and
-resumes interrupted work at login. Closing the desktop does not cancel the job.
-The desktop monitors RPC status and can read the supervisor's status snapshot
-while the RPC listener is restarting. It does not drive normal-job rollback.
-
-Release verification and storage live in the daemon’s `update::releases` module,
-which desktop bootstrap also reuses.
-A single atomic `current-release.json` file is the commit record; legacy signed
-manifest/signature files are mirrored for older clients. First installation and
-explicit repair retain the signed desktop bootstrap. An initial upgrade from an
-older daemon without update RPC uses that bootstrap once, with the approved
-version pinned and the previous release retained for rollback.
-
-Installed releases are kept below Tauri's application-local data directory in
-`daemon/<version>/<rust-target>/`. The last successfully launched signed
-manifest is cached there as well, allowing the application to use an already
-verified release when Cloudflare is temporarily unreachable.
+All verification and storage live in the daemon's `update/` modules. Signed
+releases use `daemon/<version>/<rust-target>/`; bundled copies use
+`daemon/bundled/<version>/<sha256>/` (with a fresh instance directory for repair
+of a damaged immutable executable). Legacy signed manifest/signature files
+remain readable for migration.
 
 Packaged daemon lifecycle is owned by the operating system and is independent
 of the desktop application:

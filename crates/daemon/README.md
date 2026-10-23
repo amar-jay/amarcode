@@ -90,11 +90,34 @@ Update RPC is additive to protocol 12:
   returns the latest job, including after a client reconnects.
 
 `update/` owns staging, activation, health checks, rollback and recovery.
-`update/releases.rs` supplies the daemon-owned verifier and release store reused by the
-desktop's first-install/repair bootstrap. Normal desktop updates only request
-jobs and observe status. Old protocol-12 daemons without update RPC use the
-desktop's signed bootstrap once, with the approved version pinned and the
-previous release retained for rollback.
+The desktop bundles this executable as `amarcode-bootstrap` and invokes its
+short-lived CLI for first installation and repair:
+
+```sh
+amarcode-bootstrap bootstrap ensure
+amarcode-bootstrap bootstrap install
+amarcode-bootstrap bootstrap check-update
+amarcode-bootstrap bootstrap start-update --version <approved-version>
+amarcode-bootstrap bootstrap update-status --job-id <id>
+```
+
+`ensure` never performs first installation. `install` copies the packaged binary
+to immutable storage below the user's daemon release directory and registers that
+copy as the service. It needs no network or separately published daemon release.
+Repair preserves a valid installed release newer than the bundle; otherwise
+it installs the bundle. Activation uses exact version/protocol health checks and
+a durable bootstrap transaction, retaining a verified previous executable for
+rollback. The desktop consumes JSON-line progress/result events and never links
+the daemon library or imports `update::releases`.
+
+Bundled installations have a distinct `bundled` current-release record containing
+version, protocol, target, size and SHA-256. Trust originates in the desktop
+package; the daemon does not fabricate a release signature. Downloaded releases
+always require the pinned Ed25519 manifest signature. Update rollback supports
+both signed downloaded releases and the verified original bundled executable.
+The single atomic `current-release.json` is the commit point for either origin.
+Older signed manifests remain readable. The compatibility CLI starts durable
+supervisor jobs even when an older running daemon lacks update RPC.
 
 The updater runs as `amarcode-daemon update-supervisor --release-root ...` in
 an **independent** native service/task, not as a child owned by the RPC daemon:
@@ -119,8 +142,8 @@ activation rolls back; a committed healthy release is retained. Failed rollback
 is retried across supervisor restarts, with three failed recovery attempts
 ending in an explicit repair-required status.
 
-The desktop can read the supervisor's status snapshot during the RPC restart
-gap. It never writes that journal or drives normal-job recovery. Bootstrap
+The bundled CLI reads the supervisor's status snapshot during the RPC restart
+gap for the desktop. It never writes that journal or drives normal-job recovery. Bootstrap
 waits for pending updates before starting/re-registering a service, and repair
 shares the request lock so it cannot race a new daemon update.
 
@@ -517,9 +540,10 @@ required to download the agent catalog. Windows health checks are available befo
 the first agent-list request waits for the catalog and reports download errors
 when no cached catalog exists.
 
-Windows fixes in this crate require a new daemon release as well as a desktop
-build: rebuilding the desktop alone still downloads the previously published
-daemon. To validate on Windows, run `cargo test -p amarcode-daemon` and
+Desktop builds include the daemon built from the same source. Fresh installation
+and explicit repair can therefore use new Windows fixes before a standalone
+daemon release is published. Existing services keep their installed version
+until an update or repair is requested. To validate on Windows, run `cargo test -p amarcode-daemon` and
 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-windows-task-status.ps1`
 from the repository root. Then verify that reopening the desktop leaves the
 running scheduled task and daemon PID intact, and agent output appears in the

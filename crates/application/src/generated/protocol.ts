@@ -83,6 +83,10 @@ export type GetChatResult = ChatDetail | Chat;
 
 export type DiscoverCommandsParams = { chat_id: string, agent_id: string, };
 
+export type DaemonBootstrapStatus = { "status": "checking" } | { "status": "installRequired", reason: string, } | { "status": "downloading", received: number, total: number, } | { "status": "verifying" } | { "status": "installing" } | { "status": "starting" } | { "status": "ready", version: string, } | { "status": "failed", error: string, };
+
+export type DaemonBootstrapEvent = { "event": "progress", status: DaemonBootstrapStatus, } | { "event": "complete", health: HealthResult | null, };
+
 export type DaemonUpdateCheck = { "status": "upToDate", currentVersion: string, } | { "status": "available", currentVersion: string, version: string, } | { "status": "unavailable", reason: string, };
 
 export type DaemonUpdateStatus = { "status": "downloading", received: number, total: number, } | { "status": "verifying" } | { "status": "installing" } | { "status": "restarting" } | { "status": "rollingBack" } | { "status": "ready", version: string, } | { "status": "failed", error: string, };

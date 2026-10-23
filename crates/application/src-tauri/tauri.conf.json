@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.amarcode.desktop",
   "build": {
-    "beforeDevCommand": "bun run --cwd .. dev",
+    "beforeDevCommand": "bun ../../scripts/prepare-desktop-daemon.ts --debug && bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run --cwd .. build",
+    "beforeBuildCommand": "bun ../../scripts/prepare-desktop-daemon.ts && bun run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -26,6 +26,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": ["binaries/amarcode-bootstrap"],
     "createUpdaterArtifacts": true,
     "macOS": { "entitlements": "Entitlements.plist" },
     "windows": {

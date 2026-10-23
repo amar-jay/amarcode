@@ -86,13 +86,10 @@ dependencies = [
 name = "amarcode"
 version = "0.1.0"
 dependencies = [
- "amarcode-daemon",
  "amarcode-protocol",
  "arboard",
  "base64 0.22.1",
  "image",
- "reqwest",
- "semver",
  "serde",
  "serde_json",
  "tauri",
