@@ -7,7 +7,13 @@ import { site, socialImage, socialImageAlt } from "./site.config.mjs";
 export default defineConfig({
   site,
   trailingSlash: "always",
-  vite: { plugins: [tailwindcss()] },
+  vite: {
+    plugins: [tailwindcss()],
+    // Checks/builds must not replace optimized modules used by a live dev server.
+    cacheDir: process.argv.includes("dev")
+      ? "node_modules/.vite/astro-dev"
+      : "node_modules/.vite/astro-tools",
+  },
   integrations: [
     react(),
     starlight({
