@@ -3,7 +3,6 @@ import Landing from '../layouts/Landing.astro';
 import Navigation from '../components/navigation';
 import CloudHero from '../components/cloud-hero';
 import AppPreview from '../components/app-preview';
-import HeadlessDaemon from '../components/headless-daemon';
 import AgentLogos from '../components/agent-logos';
 import { Features, Questions, Closing } from '../components/sections';
 ---
@@ -16,7 +15,6 @@ import { Features, Questions, Closing } from '../components/sections';
       <AppPreview client:visible />
       <Features />
       <AgentLogos client:visible />
-      <HeadlessDaemon />
       <Questions client:visible />
       <Closing client:visible />
     </main>
