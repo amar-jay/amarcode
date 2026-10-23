@@ -65,12 +65,8 @@ h3,
 h1 {
   max-width: 16ch;
 }
-.main-pane::after {
-	content: "";
-	display: block;
-	width: var(--sl-content-width);
-	border-width: 1px;
-	border-color: #18221d;
+.main-pane {
+  border-inline: 1px solid var(--sl-color-hairline-light);
 }
 .sl-markdown-content h2 {
   margin-top: 2.5rem;
@@ -214,7 +210,7 @@ h1 {
   color: var(--sl-color-gray-3);
 }
 .content-panel {
-	padding:0;
+	/* padding:0; */
 	width: 100%;
 }
 
