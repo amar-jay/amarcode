@@ -44,6 +44,7 @@ vi.mock("@/api", () => ({
 import { activeSessionAtom } from "./navigation";
 import {
   applyLiveChatEventAtom,
+  applySessionSnapshotAtom,
   failStartedPromptAtom,
   liveChatAtom,
   openLiveChatAtom,
@@ -64,6 +65,23 @@ const chat = {
   updated_at: "2026-01-01T00:00:00Z",
   archived_at: null,
 };
+
+const sessionSnapshot = (
+  patch: Partial<import("@/types").ChatSessionSnapshot> = {},
+): import("@/types").ChatSessionSnapshot => ({
+  daemon_instance_id: "test",
+  chat_id: "chat-1",
+  revision: 1,
+  run_id: "run-1",
+  agent_id: "agent-1",
+  run_status: "running",
+  turn: null,
+  pending_requests: [],
+  error_message: null,
+  error_kind: null,
+  context_restoration: null,
+  ...patch,
+});
 
 describe("failed home-composer prompts", () => {
   it("clears the optimistic flag before the live chat mounts", () => {
@@ -136,19 +154,22 @@ describe("agent failure notifications", () => {
       authRequired: null,
     });
 
-    store.set(applyLiveChatEventAtom, {
-      type: "turnUpdated",
-      payload: {
-        chat_id: chat.id,
-        run_id: "run-1",
-        user_message_id: "msg-1",
-        status: "failed",
-        stop_reason: null,
+    store.set(
+      applySessionSnapshotAtom,
+      sessionSnapshot({
+        turn: {
+          user_message_id: "msg-1",
+          status: "failed",
+          stop_reason: null,
+          error_message:
+            "Internal error: provider returned 401 Unauthorized: API key expired.",
+          error_kind: "error",
+        },
         error_message:
           "Internal error: provider returned 401 Unauthorized: API key expired.",
         error_kind: "error",
-      },
-    });
+      }),
+    );
 
     expect(store.get(liveChatAtom)).toMatchObject({
       turnStatus: "failed",
@@ -304,15 +325,10 @@ describe("dynamic session commands", () => {
     ).toEqual(["review"]);
     update(3, []);
     expect(store.get(liveChatAtom)?.sessionCommands?.commands).toEqual([]);
-    store.set(applyLiveChatEventAtom, {
-      type: "runUpdated",
-      payload: {
-        run_id: "command-run",
-        status: "stopped",
-        error_message: null,
-        error_kind: null,
-      },
-    });
+    store.set(
+      applySessionSnapshotAtom,
+      sessionSnapshot({ run_id: "command-run", run_status: "stopped" }),
+    );
     expect(store.get(liveChatAtom)?.sessionCommands).toBeNull();
   });
 
@@ -338,6 +354,19 @@ describe("dynamic session commands", () => {
       },
     });
     resolve({
+      session_state: {
+        daemon_instance_id: "test",
+        chat_id: "chat-1",
+        revision: 0,
+        run_id: "command-run",
+        agent_id: "agent",
+        run_status: "running",
+        turn: null,
+        pending_requests: [],
+        error_message: null,
+        error_kind: null,
+        context_restoration: null,
+      },
       chat,
       messages: [],
       session_config: [],

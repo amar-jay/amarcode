@@ -7,15 +7,16 @@ pub mod types;
 pub use events::{EditorEvent, EventLine};
 pub use types::{
     AcpEvent, AcpEventDirection, AgentDefinition, AgentFailureKind, AgentInfo, AgentRun,
-    AgentRuntimeStatus, AvailableCommand, AvailableCommandInput, Chat, ChatDetail, ContextCost,
-    ContextUsage, GetChatResult, Message, MessageDetail, MessagePart, MessagePartKind, MessageRole,
-    MessageStatus, RunStatus, SessionCommands, SessionConfigAssignment, SessionConfigOption,
-    SessionConfigSelectChoice, SessionConfigValue, TurnStatus, WorkspaceChange, WorkspaceDiff,
-    WorkspaceInfo,
+    AgentRuntimeStatus, AvailableCommand, AvailableCommandInput, Chat, ChatDetail,
+    ChatSessionSnapshot, ContextCost, ContextUsage, GetChatResult, Message, MessageDetail,
+    MessagePart, MessagePartKind, MessageRole, MessageStatus, RunStatus, SessionCommands,
+    SessionConfigAssignment, SessionConfigOption, SessionConfigSelectChoice, SessionConfigValue,
+    SessionPendingRequest, SessionRequestKind, SessionTurnSnapshot, TurnStatus, WorkspaceChange,
+    WorkspaceDiff, WorkspaceInfo,
 };
 
 /// Increment when a wire change is not backward compatible.
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// Deterministic checked-in TypeScript contract consumed by the React app.
 pub fn typescript_bindings() -> String {
@@ -57,6 +58,10 @@ pub fn typescript_bindings() -> String {
         Message::decl(&config),
         MessagePart::decl(&config),
         MessageDetail::decl(&config),
+        ChatSessionSnapshot::decl(&config),
+        SessionTurnSnapshot::decl(&config),
+        SessionPendingRequest::decl(&config),
+        SessionRequestKind::decl(&config),
         ChatDetail::decl(&config),
         GetChatResult::decl(&config),
         rpc::DiscoverCommandsParams::decl(&config),

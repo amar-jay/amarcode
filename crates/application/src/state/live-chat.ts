@@ -2,6 +2,8 @@ import { atom } from "jotai";
 import { daemonApi } from "@/api";
 import type {
   AgentFailureKind,
+  ChatSessionSnapshot,
+  SessionPendingRequest,
   Chat,
   ChatDetail,
   ContextUsage,
@@ -18,7 +20,13 @@ import type { PendingAgentRequest } from "@/components/pending-agent-request";
 import { notify } from "@/lib/notify";
 import { automaticApprovalResult, shouldAutoApprove } from "./permission-mode";
 import { permissionModeAtom } from "./preferences";
-import { getLatestTurnForChat } from "./daemon-events";
+import {
+  getLatestTurnForChat,
+  daemonConnectionGenerationAtom,
+  daemonEventStreamStateAtom,
+  sessionSnapshotsAtom,
+  rememberSessionSnapshotAtom,
+} from "./daemon-events";
 import { refreshChatsAtom } from "./chats";
 import { activeSessionAtom } from "./navigation";
 import { hasAcpSessionMode, rememberSessionConfig } from "./session-config";
@@ -51,6 +59,8 @@ function isChatDetail(value: Chat | ChatDetail): value is ChatDetail {
  */
 export type LiveChatState = {
   chatId: string;
+  sessionState?: ChatSessionSnapshot | null;
+  pendingRequests?: SessionPendingRequest[];
   detail: ChatDetail | null;
   runId: string | null;
   runStatus: RunStatus | null;
@@ -76,6 +86,8 @@ const emptyLiveChat = (
   seed?: Partial<LiveChatState>,
 ): LiveChatState => ({
   chatId,
+  sessionState: null,
+  pendingRequests: [],
   detail: null,
   runId: null,
   runStatus: null,
@@ -94,6 +106,159 @@ const emptyLiveChat = (
 });
 
 export const liveChatAtom = atom<LiveChatState | null>(null);
+const liveChatIdentityAtom = atom(0);
+const chatLoadSequenceAtom = atom(0);
+const localPromptAtom = atom<{
+  identity: number;
+  generation: number;
+  snapshot: ChatSessionSnapshot | null;
+} | null>(null);
+const attemptedAutoApprovalsAtom = atom<Set<string>>(new Set<string>());
+const autoApprovalsInFlightAtom = atom<Set<string>>(new Set<string>());
+
+/** Runtime snapshots and event payloads share one reconciliation path. */
+export const applySessionSnapshotAtom = atom(
+  null,
+  (get, set, snapshot: ChatSessionSnapshot) => {
+    if (!set(rememberSessionSnapshotAtom, snapshot)) return;
+    const live = get(liveChatAtom);
+    if (!live || live.chatId !== snapshot.chat_id) return;
+    if (
+      live.sessionState?.daemon_instance_id === snapshot.daemon_instance_id &&
+      live.sessionState.revision > snapshot.revision
+    )
+      return;
+    const request = snapshot.pending_requests[0];
+    const attemptKey = `${snapshot.daemon_instance_id}:${request?.request_id}`;
+    const shouldAutomaticallyApprove =
+      request?.kind === "approval" &&
+      !hasAcpSessionMode(live.sessionConfig) &&
+      shouldAutoApprove(get(permissionModeAtom), request.details) &&
+      !get(attemptedAutoApprovalsAtom).has(attemptKey);
+    const automaticallyApproving =
+      shouldAutomaticallyApprove ||
+      get(autoApprovalsInFlightAtom).has(attemptKey);
+    const localPrompt = get(localPromptAtom);
+    const preserveOptimisticTurn =
+      localPrompt &&
+      localPrompt.identity === get(liveChatIdentityAtom) &&
+      localPrompt.generation === get(daemonConnectionGenerationAtom) &&
+      live.turnStatus === "started" &&
+      ((!localPrompt.snapshot &&
+        snapshot.revision === 0 &&
+        snapshot.run_id === null) ||
+        (localPrompt.snapshot?.daemon_instance_id ===
+          snapshot.daemon_instance_id &&
+          localPrompt.snapshot.revision >= snapshot.revision) ||
+        ((localPrompt.snapshot === null ||
+          localPrompt.snapshot.daemon_instance_id ===
+            snapshot.daemon_instance_id) &&
+          snapshot.turn === null &&
+          snapshot.error_message === null &&
+          (snapshot.run_status === "starting" ||
+            snapshot.run_status === "running")));
+    const unchangedRuntime =
+      live.sessionState?.daemon_instance_id === snapshot.daemon_instance_id &&
+      live.sessionState.revision === snapshot.revision;
+    const preserveLocalFailure =
+      live.turnStatus === "failed" &&
+      snapshot.error_message === null &&
+      (unchangedRuntime || (!live.sessionState && snapshot.revision === 0));
+    const runChanged =
+      live.sessionState?.daemon_instance_id !== snapshot.daemon_instance_id ||
+      live.runId !== snapshot.run_id;
+    set(liveChatAtom, {
+      ...live,
+      sessionState: snapshot,
+      runId: snapshot.run_id,
+      runStatus: snapshot.run_status,
+      turnStatus: preserveOptimisticTurn
+        ? "started"
+        : preserveLocalFailure
+          ? "failed"
+          : (snapshot.turn?.status ?? null),
+      pendingRequests: snapshot.pending_requests,
+      pendingRequest:
+        request && !automaticallyApproving
+          ? {
+              requestId: request.request_id,
+              kind: request.kind,
+              details: request.details,
+            }
+          : null,
+      contextRestoration: snapshot.context_restoration,
+      contextUsage: runChanged ? null : live.contextUsage,
+      sessionCommands:
+        (snapshot.run_status === "starting" ||
+          snapshot.run_status === "running") &&
+        live.sessionCommands?.run_id === snapshot.run_id
+          ? live.sessionCommands
+          : null,
+      error: preserveLocalFailure ? live.error : snapshot.error_message,
+      errorKind: preserveLocalFailure ? live.errorKind : snapshot.error_kind,
+      authRequired:
+        snapshot.error_kind === "auth_required" ? live.authRequired : null,
+    });
+    if (snapshot.error_message) announceAgentFailure(snapshot.error_message);
+    if (request && shouldAutomaticallyApprove) {
+      set(
+        autoApprovalsInFlightAtom,
+        new Set([...get(autoApprovalsInFlightAtom), attemptKey]),
+      );
+      set(
+        attemptedAutoApprovalsAtom,
+        new Set([...get(attemptedAutoApprovalsAtom), attemptKey].slice(-256)),
+      );
+      const generation = get(daemonConnectionGenerationAtom);
+      const identity = get(liveChatIdentityAtom);
+      void daemonApi
+        .respondPermission(request.request_id, {
+          result: automaticApprovalResult(request.details),
+        })
+        .catch((cause: unknown) => {
+          const current = get(liveChatAtom);
+          if (
+            current?.chatId !== snapshot.chat_id ||
+            generation !== get(daemonConnectionGenerationAtom) ||
+            identity !== get(liveChatIdentityAtom)
+          )
+            return;
+          if (
+            current.sessionState?.pending_requests[0]?.request_id ===
+            request.request_id
+          )
+            set(liveChatAtom, {
+              ...current,
+              error: String(cause),
+              pendingRequest: {
+                requestId: request.request_id,
+                kind: request.kind,
+                details: request.details,
+              },
+            });
+        })
+        .finally(() => {
+          set(
+            autoApprovalsInFlightAtom,
+            new Set(
+              [...get(autoApprovalsInFlightAtom)].filter(
+                (key) => key !== attemptKey,
+              ),
+            ),
+          );
+          if (
+            generation === get(daemonConnectionGenerationAtom) &&
+            identity === get(liveChatIdentityAtom) &&
+            get(liveChatAtom)?.chatId === snapshot.chat_id
+          )
+            void set(loadLiveChatAtom, {
+              chatId: snapshot.chat_id,
+              silent: true,
+            });
+        });
+    }
+  },
+);
 
 /** Busy = open prompt turn (run/session can stay alive across many turns). */
 export const liveChatIsWorkingAtom = atom(
@@ -130,6 +295,7 @@ export const openLiveChatAtom = atom(
     const existing = get(liveChatAtom);
     if (existing?.chatId === chatId && existing.detail) return;
 
+    set(liveChatIdentityAtom, get(liveChatIdentityAtom) + 1);
     const cached = getLatestTurnForChat(chatId);
     const turnStatus =
       cached?.status ?? (seed.initialTurnActive ? "started" : null);
@@ -146,10 +312,19 @@ export const openLiveChatAtom = atom(
         loading: true,
       }),
     );
+    const snapshot = get(sessionSnapshotsAtom)[chatId];
+    if (seed.initialTurnActive && !cached)
+      set(localPromptAtom, {
+        identity: get(liveChatIdentityAtom),
+        generation: get(daemonConnectionGenerationAtom),
+        snapshot: snapshot ?? null,
+      });
+    if (snapshot) set(applySessionSnapshotAtom, snapshot);
   },
 );
 
-export const clearLiveChatAtom = atom(null, (_get, set) => {
+export const clearLiveChatAtom = atom(null, (get, set) => {
+  set(liveChatIdentityAtom, get(liveChatIdentityAtom) + 1);
   set(liveChatAtom, null);
 });
 
@@ -183,6 +358,22 @@ export const failStartedPromptAtom = atom(
 
     const live = get(liveChatAtom);
     if (live?.chatId === input.chatId) {
+      const attempt = get(localPromptAtom);
+      if (
+        live.sessionState &&
+        (!attempt ||
+          attempt.identity !== get(liveChatIdentityAtom) ||
+          attempt.generation !== get(daemonConnectionGenerationAtom) ||
+          (!attempt.snapshot && live.sessionState.revision > 0) ||
+          (attempt.snapshot &&
+            (attempt.snapshot.daemon_instance_id !==
+              live.sessionState.daemon_instance_id ||
+              attempt.snapshot.revision < live.sessionState.revision)))
+      ) {
+        void set(loadLiveChatAtom, { chatId: input.chatId, silent: true });
+        return;
+      }
+      set(localPromptAtom, null);
       set(liveChatAtom, {
         ...live,
         turnStatus: "failed",
@@ -208,13 +399,28 @@ function patchLive(
 /** Fetch ChatDetail for the open chat. */
 export const loadLiveChatAtom = atom(
   null,
-  async (get, set, input?: string | { chatId?: string; silent?: boolean }) => {
+  async (
+    get,
+    set,
+    input?:
+      string | { chatId?: string; silent?: boolean; retryAttempt?: number },
+  ) => {
     const live = get(liveChatAtom);
     const chatId = typeof input === "string" ? input : input?.chatId;
     const silent = typeof input === "object" ? Boolean(input?.silent) : false;
     const id = chatId ?? live?.chatId;
     if (!id) return;
+    if (live?.chatId !== id) return;
     const commandsAtRequest = live?.sessionCommands;
+    const identity = get(liveChatIdentityAtom);
+    const generation = get(daemonConnectionGenerationAtom);
+    const sequence = get(chatLoadSequenceAtom) + 1;
+    set(chatLoadSequenceAtom, sequence);
+    const stillCurrent = () =>
+      identity === get(liveChatIdentityAtom) &&
+      generation === get(daemonConnectionGenerationAtom) &&
+      sequence === get(chatLoadSequenceAtom) &&
+      get(liveChatAtom)?.chatId === id;
 
     if (!silent) {
       patchLive(
@@ -228,7 +434,7 @@ export const loadLiveChatAtom = atom(
       const result = await daemonApi.getChat(id, true);
       const current = get(liveChatAtom);
       // Ignore stale responses after navigation away.
-      if (!current || current.chatId !== id) return;
+      if (!current || !stillCurrent()) return;
       if (isChatDetail(result)) {
         const configAgentId = [...result.messages]
           .reverse()
@@ -254,20 +460,51 @@ export const loadLiveChatAtom = atom(
           // Keep failure state across detail reloads. Clearing it here made the
           // banner flash for ~80ms after turnUpdated(failed) scheduled a refresh.
         });
+        if (result.session_state)
+          set(applySessionSnapshotAtom, result.session_state);
       } else {
         set(liveChatAtom, { ...current, loading: false });
       }
     } catch (cause) {
       const current = get(liveChatAtom);
-      if (!current || current.chatId !== id) return;
+      if (!current || !stillCurrent()) return;
       set(liveChatAtom, {
         ...current,
         loading: false,
         error:
           cause instanceof Error ? cause.message : "Unable to load this chat.",
       });
+      if (get(daemonEventStreamStateAtom).status === "connected") {
+        const attempt =
+          typeof input === "object" ? (input.retryAttempt ?? 0) : 0;
+        setTimeout(
+          () => {
+            if (
+              stillCurrent() &&
+              get(daemonEventStreamStateAtom).status === "connected"
+            )
+              void set(retryLiveChatLoadAtom, {
+                chatId: id,
+                silent: true,
+                retryAttempt: attempt + 1,
+              });
+          },
+          Math.min(250 * 2 ** Math.min(attempt, 5), 5_000),
+        );
+      }
     }
   },
+);
+
+// A separate action is necessary: setting a write atom from its own writer sets
+// its backing value instead of invoking that writer again.
+const retryLiveChatLoadAtom = atom(
+  null,
+  (
+    _get,
+    set,
+    input: { chatId: string; silent: boolean; retryAttempt: number },
+  ) => set(loadLiveChatAtom, input),
 );
 
 /** Coalesce rapid message stream events into one detail reload. */
@@ -288,44 +525,14 @@ export const applyLiveChatEventAtom = atom(
   (get, set, event: import("@/types").EditorEvent) => {
     const live = get(liveChatAtom);
     if (!live) return;
-
-    if (event.type === "chatUpdated" && event.payload.chat_id === live.chatId) {
-      void set(scheduleLiveChatRefreshAtom);
+    if (event.type === "sessionStateUpdated") {
+      set(applySessionSnapshotAtom, event.payload.snapshot);
+      if (event.payload.snapshot.chat_id === live.chatId)
+        void set(scheduleLiveChatRefreshAtom);
       return;
     }
 
-    if (event.type === "turnUpdated" && event.payload.chat_id === live.chatId) {
-      const failed = event.payload.status === "failed";
-      const errorKind = failed
-        ? (event.payload.error_kind ?? "error")
-        : event.payload.status === "started"
-          ? null
-          : live.errorKind;
-      const error =
-        failed && event.payload.error_message
-          ? event.payload.error_message
-          : event.payload.status === "started"
-            ? null
-            : live.error;
-      const next: LiveChatState = {
-        ...live,
-        turnStatus: event.payload.status,
-        runId: event.payload.run_id,
-        sessionCommands:
-          live.sessionCommands?.run_id === event.payload.run_id
-            ? live.sessionCommands
-            : null,
-        contextUsage:
-          event.payload.run_id === live.runId ? live.contextUsage : null,
-        pendingRequest:
-          event.payload.status !== "started" ? null : live.pendingRequest,
-        contextRestoration:
-          event.payload.status !== "started" ? null : live.contextRestoration,
-        error,
-        errorKind,
-      };
-      set(liveChatAtom, next);
-      if (failed) announceAgentFailure(error);
+    if (event.type === "chatUpdated" && event.payload.chat_id === live.chatId) {
       void set(scheduleLiveChatRefreshAtom);
       return;
     }
@@ -335,6 +542,12 @@ export const applyLiveChatEventAtom = atom(
       event.payload.chat_id === live.chatId
     ) {
       const catalog = event.payload.catalog;
+      if (
+        live.sessionState &&
+        (catalog.run_id !== live.sessionState.run_id ||
+          !["starting", "running"].includes(live.sessionState.run_status ?? ""))
+      )
+        return;
       const current = live.sessionCommands;
       if (
         current?.run_id === catalog.run_id &&
@@ -368,6 +581,11 @@ export const applyLiveChatEventAtom = atom(
       event.type === "contextUsageUpdated" &&
       event.payload.chat_id === live.chatId
     ) {
+      if (
+        live.sessionState &&
+        event.payload.run_id !== live.sessionState.run_id
+      )
+        return;
       set(liveChatAtom, {
         ...live,
         runId: event.payload.run_id,
@@ -386,88 +604,6 @@ export const applyLiveChatEventAtom = atom(
         },
         errorKind: "auth_required",
         error: live.error ?? "Sign in required before this agent can run",
-      });
-      return;
-    }
-
-    if (
-      event.type === "contextRestoration" &&
-      event.payload.chat_id === live.chatId
-    ) {
-      set(liveChatAtom, {
-        ...live,
-        runId: event.payload.run_id,
-        contextRestoration: event.payload.source,
-      });
-      return;
-    }
-
-    if (event.type === "runUpdated" && event.payload.run_id === live.runId) {
-      const ended = ["completed", "stopped", "failed"].includes(
-        event.payload.status,
-      );
-      const failed = event.payload.status === "failed";
-      const error =
-        failed && event.payload.error_message
-          ? event.payload.error_message
-          : live.error;
-      const errorKind = failed
-        ? (event.payload.error_kind ?? live.errorKind ?? "error")
-        : live.errorKind;
-      set(liveChatAtom, {
-        ...live,
-        runStatus: event.payload.status,
-        sessionCommands: ended ? null : live.sessionCommands,
-        turnStatus:
-          failed && live.turnStatus === "started"
-            ? "failed"
-            : ended && live.turnStatus === "started"
-              ? "cancelled"
-              : live.turnStatus,
-        pendingRequest: ended ? null : live.pendingRequest,
-        error,
-        errorKind,
-      });
-      if (failed) announceAgentFailure(error);
-      void set(scheduleLiveChatRefreshAtom);
-      return;
-    }
-
-    if (
-      (event.type === "approvalRequired" ||
-        event.type === "questionRequired") &&
-      (event.payload.run_id === live.runId || live.turnStatus === "started")
-    ) {
-      if (
-        event.type === "approvalRequired" &&
-        !hasAcpSessionMode(live.sessionConfig) &&
-        shouldAutoApprove(get(permissionModeAtom), event.payload.details)
-      ) {
-        void daemonApi
-          .respondPermission(event.payload.request_id, {
-            result: automaticApprovalResult(event.payload.details),
-          })
-          .catch((cause: unknown) => {
-            const current = get(liveChatAtom);
-            if (!current) return;
-            set(liveChatAtom, {
-              ...current,
-              error:
-                cause instanceof Error
-                  ? cause.message
-                  : "Unable to auto-approve the agent action.",
-            });
-          });
-        return;
-      }
-      set(liveChatAtom, {
-        ...live,
-        runId: event.payload.run_id,
-        pendingRequest: {
-          kind: event.type === "approvalRequired" ? "approval" : "input",
-          requestId: event.payload.request_id,
-          details: event.payload.details,
-        },
       });
       return;
     }
@@ -499,6 +635,18 @@ export const submitLivePromptAtom = atom(
     )
       return;
 
+    const identity = get(liveChatIdentityAtom);
+    const generation = get(daemonConnectionGenerationAtom);
+    const attempt = {
+      identity,
+      generation,
+      snapshot: live.sessionState ?? null,
+    };
+    set(localPromptAtom, attempt);
+    const stillCurrent = () =>
+      get(liveChatIdentityAtom) === identity &&
+      get(daemonConnectionGenerationAtom) === generation &&
+      get(localPromptAtom) === attempt;
     set(liveChatAtom, {
       ...live,
       turnStatus: "started",
@@ -514,19 +662,25 @@ export const submitLivePromptAtom = atom(
         input.configValues ?? [],
       );
       const current = get(liveChatAtom);
-      if (!current || current.chatId !== live.chatId) return;
-      set(liveChatAtom, {
-        ...current,
-        runId: result.run_id,
-        // If turnUpdated was missed, the RPC return means the turn finished.
-        turnStatus:
-          current.turnStatus === "started" ? "completed" : current.turnStatus,
-      });
+      if (!current || !stillCurrent()) return;
+      set(localPromptAtom, null);
+      if (!current.sessionState)
+        set(liveChatAtom, {
+          ...current,
+          runId: result.run_id,
+          turnStatus:
+            current.turnStatus === "started" ? "completed" : current.turnStatus,
+        });
       await set(refreshChatsAtom);
       await set(loadLiveChatAtom, live.chatId);
     } catch (cause) {
       const current = get(liveChatAtom);
-      if (!current || current.chatId !== live.chatId) return;
+      if (!current || !stillCurrent()) return;
+      set(localPromptAtom, null);
+      if (current.sessionState && current.sessionState !== attempt.snapshot) {
+        await set(loadLiveChatAtom, { chatId: live.chatId, silent: true });
+        throw cause;
+      }
       const error =
         cause instanceof Error ? cause.message : "Unable to send prompt.";
       set(liveChatAtom, {
@@ -586,20 +740,26 @@ export const setLiveSessionConfigOptionAtom = atom(
 export const stopLiveChatAtom = atom(null, async (get, set) => {
   const live = get(liveChatAtom);
   if (!live) return;
+  const identity = get(liveChatIdentityAtom);
+  const generation = get(daemonConnectionGenerationAtom);
+  const stillCurrent = () =>
+    get(liveChatIdentityAtom) === identity &&
+    get(daemonConnectionGenerationAtom) === generation;
   try {
     await daemonApi.cancel(live.chatId);
     const current = get(liveChatAtom);
-    if (!current || current.chatId !== live.chatId) return;
-    set(liveChatAtom, {
-      ...current,
-      turnStatus:
-        current.turnStatus === "started" ? "cancelled" : current.turnStatus,
-      pendingRequest: null,
-    });
+    if (!current || !stillCurrent()) return;
+    if (!current.sessionState)
+      set(liveChatAtom, {
+        ...current,
+        turnStatus:
+          current.turnStatus === "started" ? "cancelled" : current.turnStatus,
+        pendingRequest: null,
+      });
     await set(loadLiveChatAtom, live.chatId);
   } catch (cause) {
     const current = get(liveChatAtom);
-    if (!current) return;
+    if (!current || !stillCurrent()) return;
     set(liveChatAtom, {
       ...current,
       error:
@@ -613,6 +773,11 @@ export const respondLiveRequestAtom = atom(
   async (get, set, result: JsonValue) => {
     const live = get(liveChatAtom);
     if (!live?.pendingRequest) return;
+    const identity = get(liveChatIdentityAtom);
+    const generation = get(daemonConnectionGenerationAtom);
+    const stillCurrent = () =>
+      get(liveChatIdentityAtom) === identity &&
+      get(daemonConnectionGenerationAtom) === generation;
     try {
       if (live.pendingRequest.kind === "approval") {
         await daemonApi.respondPermission(live.pendingRequest.requestId, {
@@ -622,18 +787,25 @@ export const respondLiveRequestAtom = atom(
         await daemonApi.respondInput(live.pendingRequest.requestId, { result });
       }
       const current = get(liveChatAtom);
-      if (!current) return;
-      set(liveChatAtom, { ...current, pendingRequest: null });
+      if (!current || !stillCurrent()) return;
+      if (
+        !current.sessionState &&
+        current.pendingRequest?.requestId === live.pendingRequest.requestId
+      )
+        set(liveChatAtom, { ...current, pendingRequest: null });
+      await set(loadLiveChatAtom, { chatId: live.chatId, silent: true });
     } catch (cause) {
       const current = get(liveChatAtom);
-      if (!current) return;
-      set(liveChatAtom, {
-        ...current,
-        error:
-          cause instanceof Error
-            ? cause.message
-            : "Unable to respond to the agent.",
-      });
+      if (!current || !stillCurrent()) return;
+      if (current.pendingRequest?.requestId === live.pendingRequest.requestId)
+        set(liveChatAtom, {
+          ...current,
+          error:
+            cause instanceof Error
+              ? cause.message
+              : "Unable to respond to the agent.",
+        });
+      await set(loadLiveChatAtom, { chatId: live.chatId, silent: true });
     }
   },
 );

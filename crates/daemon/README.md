@@ -81,7 +81,7 @@ The UI is a client: it does not own the agent process or the SQLite file.
 
 ## Daemon-owned updates
 
-Update RPC is additive to protocol 12:
+Update RPC is available in protocol 13:
 
 - `check_daemon_update` returns a signed-release check result.
 - `start_daemon_update { "version": "..." }` starts the exact approved release
@@ -182,10 +182,30 @@ treats individual filenames as literal Git pathspecs. `staged: true` compares
 HEAD to the index; `false` compares the index to the working tree. Omitting it
 prefers the unstaged comparison when a file has both kinds of changes.
 
-These methods require protocol version 12. The desktop and daemon must be
+These methods require protocol version 13. The desktop and daemon must be
 upgraded together; the desktop rejects older protocol versions at bootstrap.
 
 ---
+
+## Session recovery (protocol 13)
+
+`get_chat` with `include_messages: true` includes `session_state`: the daemon
+instance ID, per-chat revision, current run, latest turn, and unresolved approval
+and input requests in creation order. Public request IDs are preserved across
+client reconnects; ACP transport IDs are never exposed. `sessionStateUpdated`
+events carry the same snapshot after each runtime transition, including when
+another client answers a request. Only one client can claim a request.
+
+Clients subscribe and await acknowledgement before loading a snapshot. Within
+one daemon instance, newer revisions supersede older snapshots and legacy
+turn/approval events. Clients discard responses from previous connections or
+navigation states. A lagging event subscription closes so clients reconnect and
+resynchronize rather than silently losing approvals or terminal transitions.
+
+Runtime snapshots are not persisted. Restarting the daemon changes the instance
+ID, clears active turns and pending requests, and retains durable messages and
+normal run crash recovery. Reconnecting or opening a chat never starts an agent
+or sends a prompt. Desktop and daemon must both use protocol 13.
 
 ## Architecture (layers)
 

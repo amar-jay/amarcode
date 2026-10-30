@@ -1,6 +1,6 @@
 import { atom, getDefaultStore } from "jotai";
 import { daemonApi } from "@/api";
-import type { EditorEvent, TurnStatus } from "@/types";
+import type { ChatSessionSnapshot, EditorEvent, TurnStatus } from "@/types";
 
 type JotaiStore = ReturnType<typeof getDefaultStore>;
 type EventListener = (event: EditorEvent) => void;
@@ -38,6 +38,35 @@ export const daemonEventStreamStateAtom = atom<DaemonEventStreamState>({
   retryInMs: null,
 });
 
+/** Changes on each subscription attempt and disconnect; invalidates old RPC responses. */
+export const daemonConnectionGenerationAtom = atom(0);
+export const sessionSnapshotsAtom = atom<Record<string, ChatSessionSnapshot>>(
+  {},
+);
+
+export const rememberSessionSnapshotAtom = atom(
+  null,
+  (get, set, snapshot: ChatSessionSnapshot) => {
+    const previous = get(sessionSnapshotsAtom);
+    const known = Object.values(previous)[0];
+    const sameInstance =
+      !known || known.daemon_instance_id === snapshot.daemon_instance_id;
+    const existing = sameInstance ? previous[snapshot.chat_id] : undefined;
+    if (existing && existing.revision > snapshot.revision) return false;
+    if (!sameInstance) set(latestTurnByChatAtom, {});
+    set(sessionSnapshotsAtom, {
+      ...(sameInstance ? previous : {}),
+      [snapshot.chat_id]: snapshot,
+    });
+    const turns = { ...get(latestTurnByChatAtom) };
+    if (snapshot.turn && snapshot.run_id) {
+      turns[snapshot.chat_id] = { ...snapshot.turn, run_id: snapshot.run_id };
+    } else delete turns[snapshot.chat_id];
+    set(latestTurnByChatAtom, turns);
+    return true;
+  },
+);
+
 let streamStarted = false;
 let reconnectAttempt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -46,21 +75,6 @@ const MAX_RECONNECT_DELAY_MS = 5_000;
 /** Store that owns the React tree (Provider). Must not be getDefaultStore() when a Provider is used. */
 let boundStore: JotaiStore | null = null;
 const listeners = new Set<EventListener>();
-
-function rememberTurn(store: JotaiStore, event: EditorEvent) {
-  if (event.type !== "turnUpdated") return;
-  const prev = store.get(latestTurnByChatAtom);
-  store.set(latestTurnByChatAtom, {
-    ...prev,
-    [event.payload.chat_id]: {
-      run_id: event.payload.run_id,
-      user_message_id: event.payload.user_message_id,
-      status: event.payload.status,
-      stop_reason: event.payload.stop_reason,
-      error_message: event.payload.error_message,
-    },
-  });
-}
 
 function activeStore(fallback?: JotaiStore): JotaiStore {
   return boundStore ?? fallback ?? getDefaultStore();
@@ -76,6 +90,8 @@ function activeStore(fallback?: JotaiStore): JotaiStore {
 export function ensureDaemonEventStream(store: JotaiStore) {
   boundStore = store;
   if (streamStarted || reconnectTimer) return;
+  const generation = store.get(daemonConnectionGenerationAtom) + 1;
+  store.set(daemonConnectionGenerationAtom, generation);
   streamStarted = true;
   store.set(daemonEventStreamStateAtom, {
     status: reconnectAttempt > 0 ? "reconnecting" : "connecting",
@@ -89,7 +105,9 @@ export function ensureDaemonEventStream(store: JotaiStore) {
       {},
       (event) => {
         const s = activeStore(store);
-        rememberTurn(s, event);
+        if (s.get(daemonConnectionGenerationAtom) !== generation) return;
+        if (event.type === "sessionStateUpdated")
+          s.set(rememberSessionSnapshotAtom, event.payload.snapshot);
         s.set(lastDaemonEventAtom, event);
         for (const listener of listeners) {
           try {
@@ -101,6 +119,7 @@ export function ensureDaemonEventStream(store: JotaiStore) {
       },
       (status) => {
         const s = activeStore(store);
+        if (s.get(daemonConnectionGenerationAtom) !== generation) return;
         if (status.status === "connected") {
           reconnectAttempt = 0;
           s.set(daemonEventStreamStateAtom, {
@@ -110,6 +129,7 @@ export function ensureDaemonEventStream(store: JotaiStore) {
             retryInMs: null,
           });
         } else {
+          s.set(daemonConnectionGenerationAtom, generation + 1);
           s.set(daemonEventStreamStateAtom, {
             status: "reconnecting",
             error: status.error,
@@ -121,6 +141,7 @@ export function ensureDaemonEventStream(store: JotaiStore) {
     )
     .catch((error: unknown) => {
       streamStarted = false;
+      activeStore(store).set(daemonConnectionGenerationAtom, generation + 1);
       const message = error instanceof Error ? error.message : String(error);
       reconnectAttempt += 1;
       const delay = Math.min(

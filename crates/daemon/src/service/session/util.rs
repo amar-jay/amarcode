@@ -7,7 +7,7 @@ use crate::protocol::EditorEvent;
 use super::types::SessionInner;
 
 pub(super) fn emit(inner: &SessionInner, event: EditorEvent) {
-    let _ = inner.events.send(event);
+    super::runtime::emit(inner, event);
 }
 
 pub(super) fn extract_session_id(value: &Value) -> Option<String> {

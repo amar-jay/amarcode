@@ -90,7 +90,6 @@ pub(super) struct SessionInner {
     /// inactive chats to be reclaimed while preserving one lock for all
     /// current callers and waiters.
     pub(super) prompt_locks: Mutex<HashMap<String, Weak<Mutex<()>>>>,
-    pub(super) by_chat: Mutex<HashMap<String, LiveRun>>,
-    pub(super) pending: Mutex<HashMap<String, PendingAgentRequest>>,
+    pub(super) state: Mutex<super::runtime::SessionState>,
     pub(super) terminals: TerminalManager,
 }

@@ -62,8 +62,8 @@ impl SessionManager {
                 store,
                 events,
                 prompt_locks: std::sync::Mutex::new(HashMap::new()),
-                by_chat: std::sync::Mutex::new(HashMap::new()),
-                pending: std::sync::Mutex::new(HashMap::new()),
+                state: std::sync::Mutex::new(HashMap::new().into()),
+
                 terminals: Default::default(),
             }),
         }
@@ -96,7 +96,7 @@ impl SessionManager {
     ) -> Result<Option<crate::protocol::SessionCommands>> {
         let runs = self
             .inner
-            .by_chat
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?;
         Ok(runs.get(chat_id).map(|live| live.commands.clone()))
@@ -178,7 +178,7 @@ impl SessionManager {
         // initialization. This lets legitimate startup requests through while
         // still giving inbound workers an exact run-id ownership check.
         self.inner
-            .by_chat
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?
             .insert(
@@ -264,7 +264,7 @@ impl SessionManager {
             .cloned();
         if let Some(live) = self
             .inner
-            .by_chat
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?
             .get_mut(chat_id)
@@ -406,7 +406,7 @@ impl SessionManager {
 
         let mut live_runs = self
             .inner
-            .by_chat
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?;
         let live = live_runs
@@ -425,8 +425,17 @@ impl SessionManager {
         Ok(run)
     }
 
+    pub fn session_snapshot(&self, chat_id: &str) -> Result<crate::protocol::ChatSessionSnapshot> {
+        Ok(self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| Error::msg("session lock poisoned"))?
+            .snapshot(chat_id))
+    }
+
     fn emit(&self, event: EditorEvent) {
-        let _ = self.inner.events.send(event);
+        super::runtime::emit(&self.inner, event);
     }
 }
 

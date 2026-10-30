@@ -827,8 +827,35 @@ async fn client_terminals_stream_persist_and_survive_release_and_compaction() {
                 !approved,
                 "terminal RPCs must not become extra approval prompts"
             );
-            let response = rpc(&address, json!({"method":"respond_permission","params":{"request_id":event["payload"]["request_id"],"result":{"allow":true}}})).await.unwrap();
+            // Replace the client connection, then recover an approval that was
+            // delivered only to the old subscriber. Subscription precedes the snapshot.
+            let mut replacement = TcpStream::connect(&address).await.unwrap();
+            write_rpc(
+                &mut replacement,
+                json!({"method":"subscribe_events","params":{"chat_id":chat_id}}),
+            )
+            .await;
+            read_rpc(&mut replacement).await.unwrap();
+            events = BufReader::new(replacement).lines();
+            let recovered = rpc(
+                &address,
+                json!({"method":"get_chat","params":{"chat_id":chat_id,"include_messages":true}}),
+            )
+            .await
+            .unwrap();
+            let snapshot = &recovered["result"]["session_state"];
+            assert_eq!(snapshot["turn"]["status"], "started");
+            assert_eq!(snapshot["pending_requests"].as_array().unwrap().len(), 1);
+            let request_id = snapshot["pending_requests"][0]["request_id"]
+                .as_str()
+                .unwrap();
+            let response = rpc(&address, json!({"method":"respond_permission","params":{"request_id":request_id,"result":{"allow":true}}})).await.unwrap();
             assert!(response.get("error").is_none(), "{response}");
+            let duplicate = rpc(&address, json!({"method":"respond_permission","params":{"request_id":request_id,"result":{"allow":true}}})).await.unwrap();
+            assert!(duplicate["error"]
+                .as_str()
+                .unwrap()
+                .contains("unknown pending"));
             approved = true;
         }
         if event["type"] == "messagePartAdded" {
@@ -849,6 +876,20 @@ async fn client_terminals_stream_persist_and_survive_release_and_compaction() {
         }
     }
     let response = prompt.await.unwrap().unwrap();
+    let completed = rpc(
+        &address,
+        json!({"method":"get_chat","params":{"chat_id":chat_id,"include_messages":true}}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        completed["result"]["session_state"]["turn"]["status"],
+        "completed"
+    );
+    assert!(completed["result"]["session_state"]["pending_requests"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     assert!(response.get("error").is_none(), "{response}");
     assert!(
         approved && saw_live_output,

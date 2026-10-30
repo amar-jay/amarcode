@@ -8,7 +8,7 @@ impl SessionManager {
         let live = {
             let mut guard = self
                 .inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             guard.remove(chat_id)
@@ -102,6 +102,9 @@ impl SessionManager {
         if let Ok(mut locks) = self.inner.prompt_locks.lock() {
             locks.remove(chat_id);
         }
+        if let Ok(mut state) = self.inner.state.lock() {
+            state.forget_chat(chat_id);
+        }
         self.emit(EditorEvent::ChatUpdated {
             chat_id: chat_id.to_owned(),
         });
@@ -129,6 +132,9 @@ impl SessionManager {
         if let Ok(mut locks) = self.inner.prompt_locks.lock() {
             locks.remove(chat_id);
         }
+        if let Ok(mut state) = self.inner.state.lock() {
+            state.forget_chat(chat_id);
+        }
         self.emit(EditorEvent::ChatUpdated {
             chat_id: chat_id.to_owned(),
         });
@@ -138,7 +144,7 @@ impl SessionManager {
     fn has_live_run(&self, chat_id: &str) -> Result<bool> {
         Ok(self
             .inner
-            .by_chat
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?
             .contains_key(chat_id))
@@ -146,7 +152,7 @@ impl SessionManager {
 
     pub(super) fn fail_run(&self, run_id: &str, failure: &ClassifiedFailure) -> Result<()> {
         // If a prompt turn is open on this run, close it as failed first.
-        if let Ok(mut guard) = self.inner.by_chat.lock() {
+        if let Ok(mut guard) = self.inner.state.lock() {
             let hit = guard.iter_mut().find_map(|(chat_id, live)| {
                 if live.run_id == run_id {
                     live.active_user_message_id.take().map(|user_message_id| {
@@ -196,7 +202,7 @@ impl SessionManager {
         error_message: Option<&str>,
         error_kind: Option<crate::protocol::AgentFailureKind>,
     ) {
-        if let Ok(mut guard) = self.inner.by_chat.lock() {
+        if let Ok(mut guard) = self.inner.state.lock() {
             if let Some(live) = guard.get_mut(chat_id) {
                 if live.run_id == run_id
                     && live.active_user_message_id.as_deref() == Some(user_message_id)
@@ -257,7 +263,7 @@ impl SessionManager {
         let mut live = {
             let mut live_runs = self
                 .inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             if live_runs
@@ -328,7 +334,7 @@ impl SessionManager {
     pub(super) fn detach_chat(&self, chat_id: &str) {
         let removed = self
             .inner
-            .by_chat
+            .state
             .lock()
             .ok()
             .and_then(|mut guard| guard.remove(chat_id));
@@ -337,7 +343,7 @@ impl SessionManager {
             self.inner.terminals.release_run(&live.run_id);
             let _ = live.client.kill();
             if let Some(user_message_id) = live.active_user_message_id {
-                let _ = self.inner.events.send(EditorEvent::TurnUpdated {
+                self.emit(EditorEvent::TurnUpdated {
                     chat_id: chat_id.to_owned(),
                     run_id: live.run_id.clone(),
                     user_message_id,
@@ -353,7 +359,7 @@ impl SessionManager {
                 None,
                 Some("replaced by new run"),
             );
-            let _ = self.inner.events.send(EditorEvent::RunUpdated {
+            self.emit(EditorEvent::RunUpdated {
                 run_id: live.run_id,
                 status: RunStatus::Stopped,
                 error_message: Some("replaced by new run".into()),
@@ -363,7 +369,7 @@ impl SessionManager {
     }
 
     pub(super) fn remove_live_run(&self, chat_id: &str, run_id: &str) {
-        if let Ok(mut live_runs) = self.inner.by_chat.lock() {
+        if let Ok(mut live_runs) = self.inner.state.lock() {
             if live_runs
                 .get(chat_id)
                 .is_some_and(|live| live.run_id == run_id)

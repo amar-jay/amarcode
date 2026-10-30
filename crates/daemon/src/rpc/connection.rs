@@ -178,7 +178,8 @@ where
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(skipped = n, "subscriber lagged; dropped events");
+                        warn!(skipped = n, "subscriber lagged; reconnect required");
+                        return Err(crate::Error::msg("event subscriber lagged; reconnect and recover session state"));
                     }
                     Err(broadcast::error::RecvError::Closed) => {
                         debug!("event bus closed");
@@ -207,6 +208,11 @@ fn event_matches(
     }
 
     let mut scope = match event {
+        EditorEvent::SessionStateUpdated { snapshot } => EventScope {
+            chat_id: Some(snapshot.chat_id.clone()),
+            run_id: snapshot.run_id.clone(),
+            session_id: None,
+        },
         EditorEvent::ChatUpdated { chat_id } => EventScope {
             chat_id: Some(chat_id.clone()),
             ..EventScope::default()
@@ -289,6 +295,35 @@ mod tests {
     };
 
     use super::*;
+
+    #[tokio::test]
+    async fn lagged_subscriber_is_closed_for_snapshot_recovery() {
+        let store = Arc::new(Store::open(std::path::Path::new(":memory:")).unwrap());
+        let (events, receiver) = broadcast::channel(1);
+        for n in 0..3 {
+            events
+                .send(EditorEvent::ChatUpdated {
+                    chat_id: n.to_string(),
+                })
+                .unwrap();
+        }
+        let (_client, server) = duplex(1024);
+        let (reader, mut writer) = tokio::io::split(server);
+        let mut lines = BufReader::new(reader).lines();
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            stream_events(
+                &mut writer,
+                &mut lines,
+                SubscribeEventsParams::default(),
+                receiver,
+                store,
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(result.unwrap_err().to_string().contains("lagged"));
+    }
 
     #[tokio::test]
     async fn event_during_subscription_ack_is_retained() {

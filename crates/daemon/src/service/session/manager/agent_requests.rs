@@ -70,7 +70,7 @@ impl SessionManager {
     fn live_client_for_agent(&self, agent_id: &str) -> Result<Option<(String, Arc<AcpClient>)>> {
         let guard = self
             .inner
-            .by_chat
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?;
         Ok(guard.values().find_map(|live| {
@@ -80,28 +80,7 @@ impl SessionManager {
 
     /// Answer an agent-initiated request (`ApprovalRequired` / `QuestionRequired`).
     pub fn respond_to_agent(&self, request_id: &str, result: Value) -> Result<()> {
-        let pending = {
-            let mut guard = self
-                .inner
-                .pending
-                .lock()
-                .map_err(|_| Error::msg("session lock poisoned"))?;
-            guard.remove(request_id)
-        }
-        .ok_or_else(|| Error::msg(format!("unknown pending agent request: {request_id}")))?;
-
-        let client = {
-            let guard = self
-                .inner
-                .by_chat
-                .lock()
-                .map_err(|_| Error::msg("session lock poisoned"))?;
-            guard
-                .get(&pending.chat_id)
-                .filter(|live| live.run_id == pending.run_id)
-                .map(|live| Arc::clone(&live.client))
-                .ok_or_else(|| Error::msg("pending request belongs to a replaced run"))?
-        };
+        let (pending, client) = self.claim_agent_request(request_id)?;
 
         // ACP permission replies must use `outcome.optionId`. Translate
         // convenience shapes from the UI/CLI so agents don't abort the turn.
@@ -124,13 +103,17 @@ impl SessionManager {
             method: format!("response:{}", pending.method),
             payload: result.clone(),
         };
-        self.inner
+        let sent = self
+            .inner
             .store
-            .save_acp_envelope(&pending.run_id, &envelope)?;
-
-        client
-            .respond(pending.acp_id, result)
-            .map_err(Error::from)?;
+            .save_acp_envelope(&pending.run_id, &envelope)
+            .and_then(|_| client.respond(pending.acp_id, result).map_err(Error::from));
+        if sent.is_err() {
+            // A claimed request must not strand an agent after a failed/partial reply.
+            // Killing this exact client lets the inbound disconnect finalize its run.
+            let _ = client.kill();
+        }
+        sent?;
         Ok(())
     }
 
@@ -141,33 +124,36 @@ impl SessionManager {
         message: &str,
         data: Option<Value>,
     ) -> Result<()> {
-        let pending = {
-            let mut guard = self
-                .inner
-                .pending
-                .lock()
-                .map_err(|_| Error::msg("session lock poisoned"))?;
-            guard.remove(request_id)
-        }
-        .ok_or_else(|| Error::msg(format!("unknown pending agent request: {request_id}")))?;
+        let (pending, client) = self.claim_agent_request(request_id)?;
 
-        let client = {
-            let guard = self
-                .inner
-                .by_chat
-                .lock()
-                .map_err(|_| Error::msg("session lock poisoned"))?;
-            guard
-                .get(&pending.chat_id)
-                .filter(|live| live.run_id == pending.run_id)
-                .map(|live| Arc::clone(&live.client))
-                .ok_or_else(|| Error::msg("pending request belongs to a replaced run"))?
-        };
-
-        client
+        let sent = client
             .respond_error(pending.acp_id, code, message, data)
-            .map_err(Error::from)?;
+            .map_err(Error::from);
+        if sent.is_err() {
+            let _ = client.kill();
+        }
+        sent?;
         Ok(())
+    }
+
+    fn claim_agent_request(
+        &self,
+        request_id: &str,
+    ) -> Result<(PendingAgentRequest, Arc<AcpClient>)> {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| Error::msg("session lock poisoned"))?;
+        let pending = state
+            .claim_request(request_id, &self.inner.events)
+            .ok_or_else(|| Error::msg(format!("unknown pending agent request: {request_id}")))?;
+        let client = state
+            .get(&pending.chat_id)
+            .filter(|live| live.run_id == pending.run_id)
+            .map(|live| Arc::clone(&live.client))
+            .ok_or_else(|| Error::msg("pending request belongs to a replaced run"))?;
+        Ok((pending, client))
     }
 
     /// `(run_id, agent_id, acp_session_id)` for the live chat session, if any.
@@ -177,7 +163,7 @@ impl SessionManager {
     ) -> Result<Option<(String, String, Option<String>)>> {
         let guard = self
             .inner
-            .by_chat
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?;
         Ok(guard.get(chat_id).map(|live| {
@@ -192,10 +178,10 @@ impl SessionManager {
     pub fn pending_requests(&self) -> Result<Vec<PendingAgentRequest>> {
         let guard = self
             .inner
-            .pending
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?;
-        Ok(guard.values().cloned().collect())
+        Ok(guard.pending.values().cloned().collect())
     }
 }
 

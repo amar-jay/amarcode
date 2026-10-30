@@ -16,6 +16,9 @@ pub struct EventLine {
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
 #[ts(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum EditorEvent {
+    SessionStateUpdated {
+        snapshot: crate::ChatSessionSnapshot,
+    },
     ChatUpdated {
         chat_id: String,
     },

@@ -127,7 +127,7 @@ impl SessionManager {
         let needs_start = {
             let guard = self
                 .inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             match guard.get(chat_id) {
@@ -145,7 +145,7 @@ impl SessionManager {
         let (run_id, client, session_id, history_hydration, supports_images) = {
             let mut guard = self
                 .inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             let live = guard
@@ -184,7 +184,7 @@ impl SessionManager {
         if !matches!(history_hydration, HistoryHydration::None) {
             if let Some(live) = self
                 .inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?
                 .get_mut(chat_id)
@@ -247,7 +247,7 @@ impl SessionManager {
         {
             let mut guard = self
                 .inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             if let Some(live) = guard.get_mut(chat_id) {
@@ -367,7 +367,7 @@ impl SessionManager {
         let message_ids = {
             let mut guard = self
                 .inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             guard
@@ -452,7 +452,7 @@ impl SessionManager {
         let (run_id, client, session_id, mut configuration) = {
             let guard = self
                 .inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             let live = guard
@@ -485,7 +485,7 @@ impl SessionManager {
         {
             let mut live_runs = self
                 .inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             if let Some(live) = live_runs
@@ -520,7 +520,7 @@ impl SessionManager {
         &self,
         chat_id: &str,
     ) -> Result<Vec<crate::protocol::SessionConfigOption>> {
-        if let Ok(guard) = self.inner.by_chat.lock() {
+        if let Ok(guard) = self.inner.state.lock() {
             if let Some(live) = guard.get(chat_id) {
                 return Ok(live.session_configuration.as_protocol());
             }

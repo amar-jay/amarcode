@@ -101,7 +101,7 @@ pub(super) fn spawn_terminal_request(
         .name(format!("acp-terminal-{id}"))
         .spawn(move || {
             let response = handle_terminal_request(&inner, &run_id, &chat_id, &method, params);
-            let client = inner.by_chat.lock().ok().and_then(|runs| {
+            let client = inner.state.lock().ok().and_then(|runs| {
                 runs.get(&chat_id)
                     .filter(|live| live.run_id == run_id)
                     .map(|live| Arc::clone(&live.client))
@@ -138,7 +138,7 @@ fn handle_terminal_request(
 ) -> Result<Value> {
     let expected_session = {
         let runs = inner
-            .by_chat
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?;
         let live = runs

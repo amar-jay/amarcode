@@ -96,7 +96,7 @@ pub(super) fn complete_run(
 ) -> Result<()> {
     let live = {
         let mut guard = inner
-            .by_chat
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?;
         if guard.get(chat_id).is_none_or(|live| live.run_id != run_id) {
@@ -173,7 +173,7 @@ pub(super) fn ensure_streaming_message(
     upstream_message_id: Option<&str>,
 ) -> Result<String> {
     let mut guard = inner
-        .by_chat
+        .state
         .lock()
         .map_err(|_| Error::msg("session lock poisoned"))?;
     let live = guard
@@ -219,7 +219,7 @@ pub(super) fn ensure_context_message(
 ) -> Result<String> {
     let last_message_id = {
         let guard = inner
-            .by_chat
+            .state
             .lock()
             .map_err(|_| Error::msg("session lock poisoned"))?;
         guard
@@ -238,7 +238,7 @@ pub(super) fn take_streaming_messages(
     run_id: &str,
     chat_id: &str,
 ) -> Vec<String> {
-    let Ok(mut guard) = inner.by_chat.lock() else {
+    let Ok(mut guard) = inner.state.lock() else {
         return Vec::new();
     };
     let Some(live) = guard.get_mut(chat_id).filter(|live| live.run_id == run_id) else {
@@ -248,8 +248,8 @@ pub(super) fn take_streaming_messages(
 }
 
 pub(super) fn remove_pending_requests_for_run(inner: &SessionInner, run_id: &str) {
-    if let Ok(mut pending) = inner.pending.lock() {
-        pending.retain(|_, request| request.run_id != run_id);
+    if let Ok(mut state) = inner.state.lock() {
+        state.remove_requests(run_id, &inner.events);
     }
 }
 
@@ -402,31 +402,34 @@ mod tests {
             store,
             events,
             prompt_locks: std::sync::Mutex::new(HashMap::new()),
-            by_chat: std::sync::Mutex::new(HashMap::from([(
-                "chat-1".to_owned(),
-                LiveRun {
-                    run_id: "new-run".to_owned(),
-                    agent_id: "agent".to_owned(),
-                    client: sleeping_client(),
-                    acp_session_id: Some("session".to_owned()),
-                    supports_images: false,
-                    session_configuration: Default::default(),
-                    commands: crate::protocol::SessionCommands {
-                        run_id: String::new(),
-                        agent_id: String::new(),
-                        revision: 0,
-                        commands: Vec::new(),
+            state: std::sync::Mutex::new(
+                HashMap::from([(
+                    "chat-1".to_owned(),
+                    LiveRun {
+                        run_id: "new-run".to_owned(),
+                        agent_id: "agent".to_owned(),
+                        client: sleeping_client(),
+                        acp_session_id: Some("session".to_owned()),
+                        supports_images: false,
+                        session_configuration: Default::default(),
+                        commands: crate::protocol::SessionCommands {
+                            run_id: String::new(),
+                            agent_id: String::new(),
+                            revision: 0,
+                            commands: Vec::new(),
+                        },
+                        history_hydration: HistoryHydration::None,
+                        streaming_message_ids: HashMap::from([(
+                            "upstream".to_owned(),
+                            "new-message".to_owned(),
+                        )]),
+                        last_streaming_message_id: Some("new-message".to_owned()),
+                        active_user_message_id: None,
                     },
-                    history_hydration: HistoryHydration::None,
-                    streaming_message_ids: HashMap::from([(
-                        "upstream".to_owned(),
-                        "new-message".to_owned(),
-                    )]),
-                    last_streaming_message_id: Some("new-message".to_owned()),
-                    active_user_message_id: None,
-                },
-            )])),
-            pending: std::sync::Mutex::new(HashMap::new()),
+                )])
+                .into(),
+            ),
+
             terminals: Default::default(),
         };
 
@@ -505,8 +508,8 @@ mod append_tests {
             store,
             events,
             prompt_locks: std::sync::Mutex::new(HashMap::new()),
-            by_chat: std::sync::Mutex::new(HashMap::new()),
-            pending: std::sync::Mutex::new(HashMap::new()),
+            state: std::sync::Mutex::new(HashMap::new().into()),
+
             terminals: Default::default(),
         };
         (inner, "msg-1".to_owned())

@@ -252,7 +252,7 @@ fn stale_pending_request_cannot_target_replacement_client() {
         PathBuf::from("/tmp/amarcode-test-attachments"),
     );
 
-    manager.inner.by_chat.lock().expect("live runs").insert(
+    manager.inner.state.lock().expect("live runs").insert(
         "chat-1".to_owned(),
         LiveRun {
             run_id: "new-run".to_owned(),
@@ -273,7 +273,7 @@ fn stale_pending_request_cannot_target_replacement_client() {
             active_user_message_id: None,
         },
     );
-    manager.inner.pending.lock().expect("pending").insert(
+    manager.inner.state.lock().expect("pending").pending.insert(
         "daemon-request".to_owned(),
         PendingAgentRequest {
             request_id: "daemon-request".to_owned(),
@@ -372,7 +372,7 @@ fn failed_prompt_interrupts_partial_messages() {
         events,
         PathBuf::from("/tmp/amarcode-test-attachments"),
     );
-    manager.inner.by_chat.lock().expect("live runs").insert(
+    manager.inner.state.lock().expect("live runs").insert(
         "chat-1".to_owned(),
         LiveRun {
             run_id: "run-1".to_owned(),
@@ -396,7 +396,7 @@ fn failed_prompt_interrupts_partial_messages() {
             active_user_message_id: Some("user-message".to_owned()),
         },
     );
-    manager.inner.pending.lock().expect("pending").insert(
+    manager.inner.state.lock().expect("pending").pending.insert(
         "pending".to_owned(),
         PendingAgentRequest {
             request_id: "pending".to_owned(),
@@ -509,7 +509,7 @@ fn cancel_interrupts_partial_messages() {
         events,
         PathBuf::from("/tmp/amarcode-test-attachments"),
     );
-    manager.inner.by_chat.lock().expect("live runs").insert(
+    manager.inner.state.lock().expect("live runs").insert(
         "chat-1".to_owned(),
         LiveRun {
             run_id: "run-1".to_owned(),

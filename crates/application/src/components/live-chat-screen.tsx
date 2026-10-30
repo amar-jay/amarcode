@@ -170,7 +170,7 @@ export function LiveChatScreen() {
 
   // Initial + id-change load.
   useEffect(() => {
-    if (!live?.chatId) return;
+    if (!live?.chatId || eventStream.status !== "connected") return;
     void loadLiveChat(live.chatId);
   }, [live?.chatId, loadLiveChat, eventStream.status]);
 
@@ -464,6 +464,7 @@ export function LiveChatScreen() {
       <div className="px-4 pb-4">
         {live.pendingRequest && (
           <PendingAgentRequestCard
+            key={live.pendingRequest.requestId}
             request={live.pendingRequest}
             onRespond={async (result) => {
               await respond(result);

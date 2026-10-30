@@ -235,6 +235,7 @@ fn get_chat(app: &App, params: Value) -> Result<Value> {
             compact_tool_parts(&mut detail);
         }
         let mut value = chat_detail_json(&detail)?;
+        value["session_state"] = serde_json::to_value(app.sessions.session_snapshot(&p.chat_id)?)?;
         value["session_commands"] =
             serde_json::to_value(app.sessions.session_commands(&p.chat_id)?)?;
         to_value(value)

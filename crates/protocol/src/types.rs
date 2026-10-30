@@ -218,8 +218,49 @@ pub struct MessageDetail {
     pub agent_id: Option<String>,
 }
 
+/// Authoritative runtime state. Revisions are comparable only within one daemon instance.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ChatSessionSnapshot {
+    pub daemon_instance_id: String,
+    pub chat_id: String,
+    #[ts(type = "number")]
+    pub revision: u64,
+    pub run_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub run_status: Option<RunStatus>,
+    pub turn: Option<SessionTurnSnapshot>,
+    pub pending_requests: Vec<SessionPendingRequest>,
+    pub error_message: Option<String>,
+    pub error_kind: Option<AgentFailureKind>,
+    pub context_restoration: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SessionTurnSnapshot {
+    pub user_message_id: String,
+    pub status: TurnStatus,
+    pub stop_reason: Option<String>,
+    pub error_message: Option<String>,
+    pub error_kind: Option<AgentFailureKind>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SessionPendingRequest {
+    pub request_id: String,
+    pub kind: SessionRequestKind,
+    pub details: Value,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionRequestKind {
+    Approval,
+    Input,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ChatDetail {
+    pub session_state: ChatSessionSnapshot,
     pub chat: Chat,
     pub messages: Vec<MessageDetail>,
     #[serde(default)]
@@ -296,7 +337,7 @@ pub struct SessionConfigAssignment {
 #[serde(untagged)]
 #[ts(untagged)]
 pub enum GetChatResult {
-    Detail(ChatDetail),
+    Detail(Box<ChatDetail>),
     Chat(Chat),
 }
 

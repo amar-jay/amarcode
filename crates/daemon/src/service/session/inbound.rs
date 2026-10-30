@@ -95,46 +95,31 @@ fn handle_inbound(
             };
             // Hold the live-run lock through insertion. A replacement must
             // wait, then removes this run's pending requests after detaching.
-            let live = inner
-                .by_chat
+            let mut state = inner
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
-            if live.get(chat_id).is_none_or(|live| live.run_id != run_id) {
+            if state.get(chat_id).is_none_or(|live| live.run_id != run_id) {
                 debug!(%run_id, %chat_id, %id, "ignoring request from replaced ACP run");
                 return Ok(());
             }
-            inner
-                .pending
-                .lock()
-                .map_err(|_| Error::msg("session lock poisoned"))?
-                .insert(request_id.clone(), pending);
-            drop(live);
-
-            let agent_method = AgentEventMethod::from(method.as_str());
-            match agent_method {
-                AgentEventMethod::InputRequested => {
-                    emit(
-                        inner,
-                        EditorEvent::QuestionRequired {
-                            run_id: run_id.to_owned(),
-                            request_id,
-                            details: params,
-                        },
-                    );
-                }
-                _ => {
-                    // Default: treat agent-initiated requests as approvals
-                    // (permissions, etc.).
-                    emit(
-                        inner,
-                        EditorEvent::ApprovalRequired {
-                            run_id: run_id.to_owned(),
-                            request_id,
-                            details: params,
-                        },
-                    );
-                }
-            }
+            state.pending.insert(request_id.clone(), pending);
+            let event =
+                if AgentEventMethod::from(method.as_str()) == AgentEventMethod::InputRequested {
+                    EditorEvent::QuestionRequired {
+                        run_id: run_id.to_owned(),
+                        request_id,
+                        details: params,
+                    }
+                } else {
+                    EditorEvent::ApprovalRequired {
+                        run_id: run_id.to_owned(),
+                        request_id,
+                        details: params,
+                    }
+                };
+            state.transition(&event, None, &inner.events);
+            let _ = inner.events.send(event);
         }
         AcpInbound::InvalidMessage { error, raw } => {
             warn!(%run_id, %error, %raw, "invalid ACP message");
@@ -152,7 +137,7 @@ fn handle_inbound(
             // replacement that became live between two lock acquisitions.
             let disconnected = {
                 let mut guard = inner
-                    .by_chat
+                    .state
                     .lock()
                     .map_err(|_| Error::msg("session lock poisoned"))?;
                 if guard.get(chat_id).is_some_and(|live| live.run_id == run_id) {
@@ -407,7 +392,7 @@ fn apply_notification(
 
 fn run_owns_chat(inner: &SessionInner, run_id: &str, chat_id: &str) -> Result<bool> {
     let guard = inner
-        .by_chat
+        .state
         .lock()
         .map_err(|_| Error::msg("session lock poisoned"))?;
     Ok(guard.get(chat_id).is_some_and(|live| live.run_id == run_id))
@@ -477,7 +462,7 @@ fn apply_session_update(
         "config_option_update" => {
             let configuration = super::session_config::SessionConfiguration::from_update(update);
             let mut guard = inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             let Some(live) = guard.get_mut(chat_id).filter(|live| live.run_id == run_id) else {
@@ -504,7 +489,7 @@ fn apply_session_update(
                 serde_json::from_value(value.clone())
                     .map_err(|error| Error::msg(format!("Invalid ACP command catalog: {error}")))?;
             let mut runs = inner
-                .by_chat
+                .state
                 .lock()
                 .map_err(|_| Error::msg("session lock poisoned"))?;
             let Some(live) = runs.get_mut(chat_id).filter(|live| live.run_id == run_id) else {
@@ -686,8 +671,8 @@ mod tests {
             store: std::sync::Arc::clone(&store),
             events,
             prompt_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
-            by_chat: std::sync::Mutex::new(std::collections::HashMap::new()),
-            pending: std::sync::Mutex::new(std::collections::HashMap::new()),
+            state: std::sync::Mutex::new(std::collections::HashMap::new().into()),
+
             terminals: Default::default(),
         };
 
@@ -764,8 +749,8 @@ mod tests {
             store: std::sync::Arc::clone(&store),
             events,
             prompt_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
-            by_chat: std::sync::Mutex::new(std::collections::HashMap::new()),
-            pending: std::sync::Mutex::new(std::collections::HashMap::new()),
+            state: std::sync::Mutex::new(std::collections::HashMap::new().into()),
+
             terminals: Default::default(),
         };
 
@@ -891,8 +876,8 @@ mod tests {
             store: std::sync::Arc::clone(&store),
             events,
             prompt_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
-            by_chat: std::sync::Mutex::new(std::collections::HashMap::new()),
-            pending: std::sync::Mutex::new(std::collections::HashMap::new()),
+            state: std::sync::Mutex::new(std::collections::HashMap::new().into()),
+
             terminals: Default::default(),
         };
 
@@ -1031,29 +1016,32 @@ mod tests {
             store: Arc::new(crate::store::Store::open(std::path::Path::new(":memory:")).unwrap()),
             events,
             prompt_locks: Mutex::new(HashMap::new()),
-            pending: Mutex::new(HashMap::new()),
+
             terminals: Default::default(),
-            by_chat: Mutex::new(HashMap::from([(
-                "chat".to_owned(),
-                LiveRun {
-                    run_id: "run".into(),
-                    agent_id: "agent".into(),
-                    client: Arc::clone(&client),
-                    acp_session_id: Some("session".into()),
-                    supports_images: false,
-                    session_configuration: Default::default(),
-                    commands: SessionCommands {
+            state: Mutex::new(
+                HashMap::from([(
+                    "chat".to_owned(),
+                    LiveRun {
                         run_id: "run".into(),
                         agent_id: "agent".into(),
-                        revision: 0,
-                        commands: vec![],
+                        client: Arc::clone(&client),
+                        acp_session_id: Some("session".into()),
+                        supports_images: false,
+                        session_configuration: Default::default(),
+                        commands: SessionCommands {
+                            run_id: "run".into(),
+                            agent_id: "agent".into(),
+                            revision: 0,
+                            commands: vec![],
+                        },
+                        history_hydration: HistoryHydration::None,
+                        streaming_message_ids: HashMap::new(),
+                        last_streaming_message_id: None,
+                        active_user_message_id: None,
                     },
-                    history_hydration: HistoryHydration::None,
-                    streaming_message_ids: HashMap::new(),
-                    last_streaming_message_id: None,
-                    active_user_message_id: None,
-                },
-            )])),
+                )])
+                .into(),
+            ),
         };
         let update = |session: &str, commands| {
             json!({ "sessionId": session, "update": {
@@ -1077,7 +1065,7 @@ mod tests {
             { "name": "plan", "description": "Updated plan", "input": { "hint": "new hint" } }
         ]))).unwrap();
         {
-            let runs = inner.by_chat.lock().unwrap();
+            let runs = inner.state.lock().unwrap();
             let catalog = &runs["chat"].commands;
             assert_eq!(catalog.commands.len(), 1);
             assert_eq!(catalog.commands[0].description, "Updated plan");
@@ -1085,12 +1073,12 @@ mod tests {
         }
         apply_session_update(&inner, "old-run", "chat", &update("session", json!([]))).unwrap();
         apply_session_update(&inner, "run", "chat", &update("old-session", json!([]))).unwrap();
-        assert_eq!(inner.by_chat.lock().unwrap()["chat"].commands.revision, 2);
+        assert_eq!(inner.state.lock().unwrap()["chat"].commands.revision, 2);
         assert!(
             apply_session_update(&inner, "run", "chat", &update("session", json!({}))).is_err()
         );
         apply_session_update(&inner, "run", "chat", &update("session", json!([]))).unwrap();
-        assert!(inner.by_chat.lock().unwrap()["chat"]
+        assert!(inner.state.lock().unwrap()["chat"]
             .commands
             .commands
             .is_empty());
