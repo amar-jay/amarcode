@@ -9,6 +9,9 @@ mod daemon;
 mod microphone;
 mod window;
 
+pub use daemon::ssh::{SshTunnelConfig, SshTunnelEndpoint, SshTunnelManager};
+use tauri::Manager;
+
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -24,6 +27,7 @@ pub fn run() {
         })
         .manage(daemon::DaemonManager::new())
         .manage(daemon::DaemonClient::new())
+        .manage(SshTunnelManager::new())
         .invoke_handler(tauri::generate_handler![
             commands::application::app_check_update,
             commands::application::app_install_update,
@@ -77,7 +81,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building amarcode");
 
-    // The native service manager exclusively owns the daemon lifecycle. The
-    // desktop application has no daemon child process to stop on exit.
-    app.run(|_, _| {});
+    // The remote daemon belongs to its host; only the local SSH tunnel is ours.
+    app.run(|app, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            tauri::async_runtime::block_on(app.state::<SshTunnelManager>().disconnect());
+        }
+    });
 }

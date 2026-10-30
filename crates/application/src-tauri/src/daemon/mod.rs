@@ -1,6 +1,7 @@
 mod bridge;
 mod client;
 mod manager;
+pub mod ssh;
 
 pub use bridge::EventSubscription;
 pub use client::DaemonClient;

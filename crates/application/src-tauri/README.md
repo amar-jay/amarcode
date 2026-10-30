@@ -13,6 +13,7 @@ to the daemon.
 | `src/daemon/client.rs` | Typed daemon API, response-envelope unwrapping, and protocol compatibility checks. Accept shared `amarcode-protocol::rpc` parameter types. |
 | `src/daemon/bridge.rs` | TCP connections, JSON-line encoding/decoding, and the event-subscription socket. This is the only request-serialization boundary. |
 | `src/daemon/manager.rs` | Invokes the bundled daemon CLI for bootstrap/repair/cleanup and observes daemon update jobs. |
+| `src/daemon/ssh.rs` | Owns a shared local OpenSSH forwarding process and verifies the remote daemon before returning its endpoint. |
 | `crates/daemon/src/update/bootstrap.rs` | Daemon-owned installation, startup, repair, and older-daemon update compatibility. |
 | `src/app_update.rs` | Native desktop updates. |
 | `src/commands/clipboard_files.rs` | Clipboard command, private native read/encoding helpers, and clipboard tests. |
@@ -87,6 +88,38 @@ changes. Native window, clipboard, update, and microphone integration can use
 Tauri APIs; daemon RPC and transport code must remain independent of Tauri.
 
 ## Verification
+
+### Native SSH tunnel manager
+
+`SshTunnelManager` is registered as native managed state. Its `connect(config,
+token)` API starts system `ssh`, forwarding a temporary IPv4 loopback port to the
+remote host's `127.0.0.1:<daemon_port>`. Concurrent callers for the same settings
+share one process. Readiness requires an authenticated WebSocket health response
+with the matching protocol; an open local port alone is insufficient. A failed
+replacement leaves the working tunnel intact. `disconnect()` cancels startup and
+terminates/reaps the owned process. Application exit calls it automatically;
+dropping or cancelling a startup also kills its child process.
+
+Authentication uses existing OpenSSH configuration, identity files, and the SSH
+agent. Batch mode prevents password/passphrase prompts. Strict host-key checking
+is mandatory: establish and verify host trust outside Amarcode first. Unknown or
+changed keys fail. Agent forwarding, interactive terminals, local commands,
+background forking, and reuse of external control sockets are disabled. SSH
+arguments are passed directly to the executable; the daemon token is sent only
+in the WebSocket handshake, never as a process argument. Stderr is drained into a
+bounded byte buffer and decoded safely for diagnostics.
+
+This is the native foundation for SSH connections. Saved SSH profiles, IPC/UI
+selection, automatic retry/status reporting, and remote daemon setup are later
+integration steps. The current settings screen still selects local TCP or remote
+WebSocket connections. The manager never installs or starts a remote daemon.
+
+On Unix, subprocess tests use a Python 3 forwarding fixture and an authenticated
+local WebSocket server. They require loopback socket access but no SSH server,
+keys, credentials, or external host. Actual SSH server interoperability and
+Windows/macOS runtime behavior need platform validation during integration.
+
+### Commands
 
 ```sh
 bun scripts/prepare-desktop-daemon.ts --debug
