@@ -5,7 +5,7 @@ use std::{
     collections::VecDeque,
     path::PathBuf,
     process::Stdio,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 use tokio::{
@@ -17,6 +17,11 @@ use tokio::{
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 const STDERR_LIMIT: usize = 8 * 1024;
+
+pub(crate) fn shared() -> &'static SshTunnelManager {
+    static MANAGER: OnceLock<SshTunnelManager> = OnceLock::new();
+    MANAGER.get_or_init(SshTunnelManager::new)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -155,6 +160,8 @@ pub struct SshTunnelManager {
     cancellation: watch::Sender<u64>,
     executable: PathBuf,
     startup_timeout: Duration,
+    #[cfg(test)]
+    test_script: Option<PathBuf>,
 }
 
 impl Default for SshTunnelManager {
@@ -164,6 +171,8 @@ impl Default for SshTunnelManager {
             cancellation: watch::channel(0).0,
             executable: "ssh".into(),
             startup_timeout: STARTUP_TIMEOUT,
+            #[cfg(test)]
+            test_script: None,
         }
     }
 }
@@ -180,6 +189,20 @@ impl SshTunnelManager {
         config: &SshTunnelConfig,
         token: &str,
     ) -> Result<SshTunnelEndpoint, String> {
+        self.connect_transaction(config, token, false, || Ok(()))
+            .await
+            .map(|(endpoint, ())| endpoint)
+    }
+
+    /// Commit settings synchronously while the candidate is still owned here.
+    /// An error preserves the previous tunnel and drops the candidate.
+    pub(crate) async fn connect_transaction<T>(
+        &self,
+        config: &SshTunnelConfig,
+        token: &str,
+        verify_reused: bool,
+        commit: impl FnOnce() -> Result<T, String>,
+    ) -> Result<(SshTunnelEndpoint, T), String> {
         config.validate()?;
         super::remote::validate("ws://127.0.0.1/rpc", token)?;
         let mut cancellation = self.cancellation.subscribe();
@@ -199,13 +222,29 @@ impl SshTunnelManager {
                     .map_err(|e| format!("Cannot check SSH process: {e}"))?
                     .is_none()
             {
-                return Ok(tunnel.endpoint.clone());
+                if verify_reused {
+                    tokio::select! {
+                        result = tokio::time::timeout(self.startup_timeout, verify_daemon(&tunnel.endpoint.url, token)) => {
+                            result.map_err(|_| "SSH daemon health check timed out")?.map_err(ProbeError::message)?;
+                        }
+                        _ = cancellation.changed() => return Err("SSH connection cancelled".into()),
+                    }
+                }
+                let result = commit()?;
+                return Ok((tunnel.endpoint.clone(), result));
             }
         }
         let candidate = self.start(config, token);
-        let tunnel = tokio::select! {
+        let mut tunnel = tokio::select! {
             result = candidate => result?,
             _ = cancellation.changed() => return Err("SSH connection cancelled".into()),
+        };
+        let result = match commit() {
+            Ok(result) => result,
+            Err(error) => {
+                tunnel.stop().await;
+                return Err(error);
+            }
         };
         let endpoint = tunnel.endpoint.clone();
         let previous = current.replace(tunnel);
@@ -214,17 +253,26 @@ impl SshTunnelManager {
         if let Some(mut previous) = previous {
             previous.stop().await;
         }
-        Ok(endpoint)
+        Ok((endpoint, result))
     }
 
     /// Cancels startup and terminates/reaps the owned tunnel, if present.
     pub async fn disconnect(&self) {
+        let _ = self.disconnect_transaction(|| Ok(())).await;
+    }
+
+    pub(crate) async fn disconnect_transaction<T>(
+        &self,
+        commit: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
         self.cancellation
             .send_modify(|generation| *generation = generation.wrapping_add(1));
         let mut current = self.current.lock().await;
+        let result = commit()?;
         if let Some(mut tunnel) = current.take() {
             tunnel.stop().await;
         }
+        Ok(result)
     }
 
     async fn start(&self, config: &SshTunnelConfig, token: &str) -> Result<Tunnel, String> {
@@ -235,6 +283,12 @@ impl SshTunnelManager {
         let local_port = reservation.local_addr().map_err(|e| e.to_string())?.port();
         drop(reservation);
         let mut command = Command::new(&self.executable);
+        // The test forwarding fixture is interpreted, avoiding ETXTBSY races
+        // when parallel subprocess tests inherit freshly written script files.
+        #[cfg(test)]
+        if let Some(script) = &self.test_script {
+            command.arg(script);
+        }
         command
             .args(config.arguments(local_port))
             .stdin(Stdio::null())
@@ -317,12 +371,20 @@ impl SshTunnelManager {
     }
 }
 
-enum ProbeError {
+pub(super) enum ProbeError {
     Retry(String),
     Fatal(String),
 }
 
-async fn verify_daemon(url: &str, token: &str) -> Result<(), ProbeError> {
+impl ProbeError {
+    pub(super) fn message(self) -> String {
+        match self {
+            Self::Retry(message) | Self::Fatal(message) => message,
+        }
+    }
+}
+
+pub(super) async fn verify_daemon(url: &str, token: &str) -> Result<(), ProbeError> {
     let mut connection = super::bridge::Connection::remote(url, token)
         .await
         .map_err(ProbeError::Retry)?;
@@ -332,12 +394,12 @@ async fn verify_daemon(url: &str, token: &str) -> Result<(), ProbeError> {
         .map_err(ProbeError::Retry)?;
     if !health.remote_auth_required {
         return Err(ProbeError::Fatal(
-            "SSH target does not enforce daemon authentication".into(),
+            "Remote daemon does not enforce authentication".into(),
         ));
     }
     if health.status != "ok" || health.protocol_version != amarcode_protocol::PROTOCOL_VERSION {
         return Err(ProbeError::Fatal(format!(
-            "SSH daemon must be healthy and use protocol {} (received {})",
+            "Remote daemon must be healthy and use protocol {} (received {})",
             amarcode_protocol::PROTOCOL_VERSION,
             health.protocol_version
         )));

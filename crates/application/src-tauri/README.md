@@ -91,7 +91,7 @@ Tauri APIs; daemon RPC and transport code must remain independent of Tauri.
 
 ### Native SSH tunnel manager
 
-`SshTunnelManager` is registered as native managed state. Its `connect(config,
+The native connection layer shares one `SshTunnelManager`. Its `connect(config,
 token)` API starts system `ssh`, forwarding a temporary IPv4 loopback port to the
 remote host's `127.0.0.1:<daemon_port>`. Concurrent callers for the same settings
 share one process. Readiness requires an authenticated WebSocket health response
@@ -109,10 +109,27 @@ arguments are passed directly to the executable; the daemon token is sent only
 in the WebSocket handshake, never as a process argument. Stderr is drained into a
 bounded byte buffer and decoded safely for diagnostics.
 
-This is the native foundation for SSH connections. Saved SSH profiles, IPC/UI
-selection, automatic retry/status reporting, and remote daemon setup are later
-integration steps. The current settings screen still selects local TCP or remote
-WebSocket connections. The manager never installs or starts a remote daemon.
+SSH profiles are now supported by native IPC: `set_ssh_daemon_connection(config,
+token)` verifies and saves a profile, while `get_daemon_connection` returns its
+mode, non-secret SSH configuration, token-presence flag, and stable host scope.
+An empty token reuses the saved credential only for the exact same target.
+Existing `{url, token}` connection files remain compatible; SSH adds an optional
+`ssh` field. Temporary tunnel URLs are never persisted. Subsequent RPC calls and
+event subscriptions use the saved SSH profile automatically, without requiring a
+local daemon.
+
+Saving verifies authentication and protocol compatibility before touching the
+saved file. A synchronous commit under the tunnel lock atomically replaces the
+private settings file, publishes the connection change, and activates the
+candidate. Verification or write failures retain the previous settings and
+tunnel. A stale RPC cannot reactivate a profile that was deselected while it
+waited for the tunnel lock. Switching to local or direct WebSocket stops the SSH
+tunnel only after the replacement settings commit succeeds.
+
+The current settings screen still selects local TCP or remote WebSocket
+connections; SSH fields, automatic retry/status reporting, and remote daemon
+setup are later integration steps. The manager never installs or starts a remote
+daemon.
 
 On Unix, subprocess tests use a Python 3 forwarding fixture and an authenticated
 local WebSocket server. They require loopback socket access but no SSH server,

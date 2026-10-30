@@ -87,17 +87,33 @@ export type { WorkspaceInfo, WorkspaceChange, WorkspaceDiff } from "./types";
  * This is intentionally a direct mirror of `src-tauri/src/commands/`; no
  * session-era compatibility methods live here.
  */
+export type SshConnectionConfig = {
+  host: string;
+  user: string | null;
+  port: number | null;
+  identityFile: string | null;
+  daemonPort: number;
+};
+
+export type DaemonConnectionInfo = {
+  remote: boolean;
+  url: string;
+  hasToken: boolean;
+  mode: "local" | "websocket" | "ssh";
+  ssh: SshConnectionConfig | null;
+  scope: string;
+};
+
 export const daemonApi = {
-  getConnection: (): Promise<{
-    remote: boolean;
-    url: string;
-    hasToken: boolean;
-  }> => invoke("get_daemon_connection"),
-  setConnection: (
-    url: string,
-    token: string,
-  ): Promise<{ remote: boolean; url: string; hasToken: boolean }> =>
+  getConnection: (): Promise<DaemonConnectionInfo> =>
+    invoke("get_daemon_connection"),
+  setConnection: (url: string, token: string): Promise<DaemonConnectionInfo> =>
     invoke("set_daemon_connection", { url, token }),
+  setSshConnection: (
+    config: SshConnectionConfig,
+    token: string,
+  ): Promise<DaemonConnectionInfo> =>
+    invoke("set_ssh_daemon_connection", { config, token }),
   bootstrap: async (
     onStatus: (status: DaemonBootstrapStatus) => void,
   ): Promise<Health | null> => {

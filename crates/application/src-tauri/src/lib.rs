@@ -10,7 +10,6 @@ mod microphone;
 mod window;
 
 pub use daemon::ssh::{SshTunnelConfig, SshTunnelEndpoint, SshTunnelManager};
-use tauri::Manager;
 
 pub fn run() {
     let app = tauri::Builder::default()
@@ -27,7 +26,6 @@ pub fn run() {
         })
         .manage(daemon::DaemonManager::new())
         .manage(daemon::DaemonClient::new())
-        .manage(SshTunnelManager::new())
         .invoke_handler(tauri::generate_handler![
             commands::application::app_check_update,
             commands::application::app_install_update,
@@ -37,6 +35,7 @@ pub fn run() {
             commands::daemon::daemon_bootstrap,
             commands::daemon::get_daemon_connection,
             commands::daemon::set_daemon_connection,
+            commands::daemon::set_ssh_daemon_connection,
             commands::daemon::daemon_install,
             commands::daemon::daemon_check_update,
             commands::daemon::daemon_update,
@@ -82,9 +81,9 @@ pub fn run() {
         .expect("error while building amarcode");
 
     // The remote daemon belongs to its host; only the local SSH tunnel is ours.
-    app.run(|app, event| {
+    app.run(|_, event| {
         if matches!(event, tauri::RunEvent::Exit) {
-            tauri::async_runtime::block_on(app.state::<SshTunnelManager>().disconnect());
+            tauri::async_runtime::block_on(daemon::ssh::shared().disconnect());
         }
     });
 }

@@ -93,7 +93,8 @@ mod processes {
         std::fs::write(&executable, include_str!("test-ssh.py")).unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
         let manager = SshTunnelManager {
-            executable,
+            executable: "python3".into(),
+            test_script: Some(executable),
             startup_timeout: timeout,
             ..Default::default()
         };
@@ -375,6 +376,193 @@ mod processes {
         attempt.abort();
         let _ = attempt.await;
         stopped(pid).await;
+    }
+
+    fn settings(config: SshTunnelConfig, token: &str) -> crate::daemon::remote::ConnectionSettings {
+        crate::daemon::remote::ConnectionSettings {
+            url: String::new(),
+            token: token.into(),
+            ssh: Some(config),
+        }
+    }
+
+    #[tokio::test]
+    async fn ssh_save_verifies_then_persists_a_private_profile_and_reuses_its_token() {
+        use crate::daemon::remote::save_at;
+        let server = server(true, amarcode_protocol::PROTOCOL_VERSION).await;
+        let (directory, manager) = manager(Duration::from_secs(3));
+        let path = directory.path().join("connection.json");
+        let (changes, receiver) = watch::channel(0);
+        let mut config = config();
+        config.daemon_port = server.port;
+        let info = save_at(&path, &manager, &changes, settings(config.clone(), TOKEN))
+            .await
+            .unwrap();
+        assert_eq!(*receiver.borrow(), 1);
+        let public = serde_json::to_value(info).unwrap();
+        assert_eq!(public["mode"], "ssh");
+        assert_eq!(public["remote"], true);
+        assert_eq!(public["hasToken"], true);
+        assert_eq!(public["url"], "");
+        assert!(!public.to_string().contains(TOKEN));
+        assert!(public["scope"].as_str().unwrap().starts_with("ssh:"));
+        let stored: crate::daemon::remote::ConnectionSettings =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(stored.ssh, Some(config.clone()));
+        assert_eq!(stored.token, TOKEN);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o077,
+            0
+        );
+        let pid = manager
+            .current
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .child
+            .id()
+            .unwrap();
+        save_at(&path, &manager, &changes, settings(config.clone(), ""))
+            .await
+            .unwrap();
+        assert_eq!(*receiver.borrow(), 2);
+        assert_eq!(
+            manager.current.lock().await.as_ref().unwrap().child.id(),
+            Some(pid)
+        );
+        config.user = Some("another-user".into());
+        assert!(save_at(&path, &manager, &changes, settings(config, ""))
+            .await
+            .is_err());
+        assert_eq!(*receiver.borrow(), 2);
+        assert!(alive(pid));
+        manager.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn rejected_ssh_save_preserves_settings_tunnel_and_change_generation() {
+        use crate::daemon::remote::save_at;
+        let server = server(true, amarcode_protocol::PROTOCOL_VERSION).await;
+        let (directory, manager) = manager(Duration::from_secs(3));
+        let path = directory.path().join("connection.json");
+        let (changes, receiver) = watch::channel(0);
+        let mut config = config();
+        config.daemon_port = server.port;
+        save_at(&path, &manager, &changes, settings(config.clone(), TOKEN))
+            .await
+            .unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let pid = manager
+            .current
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .child
+            .id()
+            .unwrap();
+        config.host = "reject".into();
+        assert!(save_at(&path, &manager, &changes, settings(config, TOKEN))
+            .await
+            .is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(*receiver.borrow(), 1);
+        assert_eq!(
+            manager.current.lock().await.as_ref().unwrap().child.id(),
+            Some(pid)
+        );
+        assert!(alive(pid));
+        manager.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn failed_commit_discards_candidate_and_keeps_previous_tunnel() {
+        let server = server(true, amarcode_protocol::PROTOCOL_VERSION).await;
+        let (directory, manager) = manager(Duration::from_secs(3));
+        let mut config = config();
+        config.daemon_port = server.port;
+        let endpoint = manager.connect(&config, TOKEN).await.unwrap();
+        let original_pid = manager
+            .current
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .child
+            .id()
+            .unwrap();
+        config.user = Some("new-user".into());
+        let result = manager
+            .connect_transaction(&config, TOKEN, true, || Err::<(), _>("disk full".into()))
+            .await;
+        assert_eq!(result.unwrap_err(), "disk full");
+        assert_eq!(
+            manager.current.lock().await.as_ref().unwrap().endpoint,
+            endpoint
+        );
+        assert!(alive(original_pid));
+        let candidate_pid = std::fs::read_to_string(directory.path().join("pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_ne!(candidate_pid, original_pid);
+        stopped(candidate_pid).await;
+        // The same guard rejects an RPC holding an obsolete selected profile.
+        let result = manager
+            .connect_transaction(&config, TOKEN, false, || {
+                Err::<(), _>("Daemon connection settings changed".into())
+            })
+            .await;
+        assert!(result.unwrap_err().contains("settings changed"));
+        assert!(alive(original_pid));
+        manager.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn switching_to_websocket_or_local_stops_ssh_only_after_success() {
+        use crate::daemon::remote::{save_at, ConnectionSettings};
+        let server = server(true, amarcode_protocol::PROTOCOL_VERSION).await;
+        let bad_server = self::server(false, amarcode_protocol::PROTOCOL_VERSION).await;
+        let (directory, manager) = manager(Duration::from_secs(3));
+        let path = directory.path().join("connection.json");
+        let (changes, receiver) = watch::channel(0);
+        let mut config = config();
+        config.daemon_port = server.port;
+        save_at(&path, &manager, &changes, settings(config, TOKEN))
+            .await
+            .unwrap();
+        let pid = manager
+            .current
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .child
+            .id()
+            .unwrap();
+        let direct = |port| ConnectionSettings {
+            url: format!("ws://127.0.0.1:{port}/rpc"),
+            token: TOKEN.into(),
+            ssh: None,
+        };
+        assert!(save_at(&path, &manager, &changes, direct(bad_server.port))
+            .await
+            .is_err());
+        assert!(alive(pid));
+        assert_eq!(*receiver.borrow(), 1);
+        save_at(&path, &manager, &changes, direct(server.port))
+            .await
+            .unwrap();
+        stopped(pid).await;
+        assert!(manager.current.lock().await.is_none());
+        save_at(&path, &manager, &changes, ConnectionSettings::default())
+            .await
+            .unwrap();
+        let stored: ConnectionSettings =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(stored.ssh.is_none() && stored.url.is_empty() && stored.token.is_empty());
+        assert_eq!(*receiver.borrow(), 3);
     }
 
     #[tokio::test]

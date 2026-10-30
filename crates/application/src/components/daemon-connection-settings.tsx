@@ -35,7 +35,7 @@ export function DaemonConnectionSettings() {
         remote ? token : "",
       );
       // Only the endpoint is exposed to JS; the credential remains in native storage.
-      localStorage.setItem("amarcode-connection-scope", value.url);
+      localStorage.setItem("amarcode-connection-scope", value.scope);
       window.location.reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

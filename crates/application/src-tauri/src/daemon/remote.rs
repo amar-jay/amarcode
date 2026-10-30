@@ -1,4 +1,5 @@
 //! Desktop connection preferences. Credentials never cross back into the webview.
+use super::ssh::{self, SshTunnelConfig, SshTunnelManager};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::OnceLock};
 use tauri::Manager;
@@ -15,12 +16,14 @@ pub fn changes() -> tokio::sync::watch::Receiver<u64> {
 
 static SETTINGS_PATH: OnceLock<PathBuf> = OnceLock::new();
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionSettings {
     #[serde(default)]
     pub url: String,
     #[serde(default)]
     pub token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh: Option<SshTunnelConfig>,
 }
 
 #[derive(Serialize)]
@@ -29,6 +32,46 @@ pub struct ConnectionInfo {
     pub remote: bool,
     pub url: String,
     pub has_token: bool,
+    pub mode: ConnectionMode,
+    pub ssh: Option<SshTunnelConfig>,
+    /// Stable host preference scope, independent of the temporary SSH port.
+    pub scope: String,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConnectionMode {
+    Local,
+    Websocket,
+    Ssh,
+}
+
+impl ConnectionSettings {
+    fn info(&self) -> ConnectionInfo {
+        let mode = if self.ssh.is_some() {
+            ConnectionMode::Ssh
+        } else if self.url.is_empty() {
+            ConnectionMode::Local
+        } else {
+            ConnectionMode::Websocket
+        };
+        let scope = match &self.ssh {
+            Some(ssh) => format!(
+                "ssh:{}",
+                serde_json::to_string(&(&ssh.host, &ssh.user, ssh.port, ssh.daemon_port))
+                    .expect("SSH profile identity")
+            ),
+            None => self.url.clone(),
+        };
+        ConnectionInfo {
+            remote: self.ssh.is_some() || !self.url.is_empty(),
+            url: self.url.clone(),
+            has_token: !self.token.is_empty(),
+            mode,
+            ssh: self.ssh.clone(),
+            scope,
+        }
+    }
 }
 
 pub fn initialize(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -43,9 +86,19 @@ pub fn load() -> Result<ConnectionSettings, String> {
     let Some(path) = SETTINGS_PATH.get() else {
         return Ok(ConnectionSettings::default());
     };
+    read_settings(path)
+}
+
+fn read_settings(path: &std::path::Path) -> Result<ConnectionSettings, String> {
     match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map_err(|_| "Cannot read saved daemon connection settings".into()),
+        Ok(bytes) => {
+            let settings: ConnectionSettings = serde_json::from_slice(&bytes)
+                .map_err(|_| "Cannot read saved daemon connection settings")?;
+            if settings.ssh.is_some() && !settings.url.is_empty() {
+                return Err("Saved settings contain conflicting SSH and WebSocket targets".into());
+            }
+            Ok(settings)
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(ConnectionSettings::default())
         }
@@ -54,16 +107,11 @@ pub fn load() -> Result<ConnectionSettings, String> {
 }
 
 pub fn info() -> Result<ConnectionInfo, String> {
-    let settings = load()?;
-    Ok(ConnectionInfo {
-        remote: !settings.url.is_empty(),
-        url: settings.url,
-        has_token: !settings.token.is_empty(),
-    })
+    Ok(load()?.info())
 }
 
 pub fn is_remote() -> Result<bool, String> {
-    Ok(!load()?.url.is_empty())
+    Ok(load()?.info().remote)
 }
 
 pub fn validate(url: &str, token: &str) -> Result<(), String> {
@@ -94,44 +142,86 @@ pub fn validate(url: &str, token: &str) -> Result<(), String> {
 }
 
 pub async fn save(url: String, token: String) -> Result<ConnectionInfo, String> {
+    save_target(url, None, token).await
+}
+
+pub async fn save_ssh(config: SshTunnelConfig, token: String) -> Result<ConnectionInfo, String> {
+    save_target(String::new(), Some(config), token).await
+}
+
+async fn save_target(
+    url: String,
+    ssh: Option<SshTunnelConfig>,
+    token: String,
+) -> Result<ConnectionInfo, String> {
     let _guard = SAVE_LOCK.lock().await;
-    let url = url.trim().to_owned();
-    let mut token = token.trim().to_owned();
-    if !url.is_empty() {
-        let previous = load()?;
-        if token.is_empty() && previous.url == url {
-            token = previous.token;
-        }
-        validate(&url, &token)?;
-        // Verify authentication and protocol before replacing a working connection.
-        let mut connection = super::bridge::Connection::remote(&url, &token).await?;
-        let health: amarcode_protocol::rpc::HealthResult = tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            connection.call("health", ()),
-        )
-        .await
-        .map_err(|_| "Remote daemon health check timed out")??;
-        if !health.remote_auth_required {
-            return Err("This daemon does not enforce remote authentication. Install a release with remote support and configure AMARCODE_WS_TOKEN_FILE on its host".into());
-        }
-        if health.status != "ok" || health.protocol_version != amarcode_protocol::PROTOCOL_VERSION {
-            return Err(format!(
-                "Remote daemon must use protocol {} (received {})",
-                amarcode_protocol::PROTOCOL_VERSION,
-                health.protocol_version
-            ));
-        }
-    } else {
-        token.clear();
-    }
-    let settings = ConnectionSettings { url, token };
     let path = SETTINGS_PATH
         .get()
         .ok_or("Connection settings are not initialized")?;
+    let changes = CHANGES.get_or_init(|| tokio::sync::watch::channel(0).0);
+    save_at(
+        path,
+        ssh::shared(),
+        changes,
+        ConnectionSettings { url, token, ssh },
+    )
+    .await
+}
+
+/// Caller serializes saves. Candidate verification never changes persisted state.
+pub(super) async fn save_at(
+    path: &std::path::Path,
+    manager: &SshTunnelManager,
+    changes: &tokio::sync::watch::Sender<u64>,
+    mut settings: ConnectionSettings,
+) -> Result<ConnectionInfo, String> {
+    settings.url = settings.url.trim().to_owned();
+    settings.token = settings.token.trim().to_owned();
+    if settings.ssh.is_some() && !settings.url.is_empty() {
+        return Err("Choose either an SSH or WebSocket target".into());
+    }
+    if settings.ssh.is_some() || !settings.url.is_empty() {
+        let previous = read_settings(path)?;
+        if settings.token.is_empty() && previous.url == settings.url && previous.ssh == settings.ssh
+        {
+            settings.token = previous.token;
+        }
+    } else {
+        settings.token.clear();
+    }
+    let commit = || {
+        persist_settings(path, &settings)?;
+        changes.send_modify(|generation| *generation = generation.wrapping_add(1));
+        Ok(settings.info())
+    };
+    if let Some(config) = &settings.ssh {
+        manager
+            .connect_transaction(config, &settings.token, true, commit)
+            .await
+            .map(|(_, info)| info)
+    } else {
+        if !settings.url.is_empty() {
+            validate(&settings.url, &settings.token)?;
+            tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                ssh::verify_daemon(&settings.url, &settings.token),
+            )
+            .await
+            .map_err(|_| "Remote daemon health check timed out")?
+            .map_err(ssh::ProbeError::message)?;
+        }
+        manager.disconnect_transaction(commit).await
+    }
+}
+
+fn persist_settings(path: &std::path::Path, settings: &ConnectionSettings) -> Result<(), String> {
+    use std::io::Write;
+    let bytes = serde_json::to_vec(settings).map_err(|e| e.to_string())?;
     let parent = path.parent().ok_or("Invalid settings path")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let temporary = path.with_extension(format!(
-        "{}.tmp",
+        "{}.{}.tmp",
+        std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| e.to_string())?
@@ -144,28 +234,96 @@ pub async fn save(url: String, token: String) -> Result<ConnectionInfo, String> 
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    use std::io::Write;
     let mut file = options.open(&temporary).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(fs::Permissions::from_mode(0o600))
-            .map_err(|e| e.to_string())?;
+    let result = (|| {
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        drop(file);
+        fs::rename(&temporary, path).map_err(|e| e.to_string())
+    })();
+    let _ = fs::remove_file(&temporary);
+    result
+}
+
+/// Reject an old RPC that loaded its profile before a connection switch.
+pub(super) fn ensure_selected(settings: &ConnectionSettings) -> Result<(), String> {
+    if load()? == *settings {
+        Ok(())
+    } else {
+        Err("Daemon connection settings changed".into())
     }
-    file.write_all(&serde_json::to_vec(&settings).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
-    drop(file);
-    fs::rename(&temporary, path).map_err(|e| e.to_string())?;
-    CHANGES
-        .get_or_init(|| tokio::sync::watch::channel(0).0)
-        .send_modify(|generation| *generation = generation.wrapping_add(1));
-    info()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_connection_files_keep_their_original_mode_and_scope() {
+        for (json, expected_mode, expected_scope) in [
+            (r#"{}"#, "local", ""),
+            (
+                r#"{"url":"wss://example.com/rpc","token":"secret"}"#,
+                "websocket",
+                "wss://example.com/rpc",
+            ),
+        ] {
+            let settings: ConnectionSettings = serde_json::from_str(json).unwrap();
+            let info = serde_json::to_value(settings.info()).unwrap();
+            assert_eq!(info["mode"], expected_mode);
+            assert_eq!(info["scope"], expected_scope);
+            assert!(info.get("token").is_none());
+        }
+    }
+
+    #[test]
+    fn failed_atomic_replacement_leaves_no_temporary_credential_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("connection.json");
+        fs::create_dir(&target).unwrap();
+        assert!(persist_settings(&target, &ConnectionSettings::default()).is_err());
+        assert!(target.is_dir());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn local_mode_can_repair_a_corrupt_settings_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("connection.json");
+        fs::write(&path, "invalid settings").unwrap();
+        let (changes, receiver) = tokio::sync::watch::channel(0);
+        save_at(
+            &path,
+            &SshTunnelManager::new(),
+            &changes,
+            ConnectionSettings::default(),
+        )
+        .await
+        .unwrap();
+        assert!(read_settings(&path).unwrap().token.is_empty());
+        assert_eq!(*receiver.borrow(), 1);
+    }
+
+    #[test]
+    fn ssh_scope_is_stable_across_key_rotation_and_excludes_credentials() {
+        let mut settings = ConnectionSettings {
+            ssh: Some(SshTunnelConfig {
+                host: "dev-box".into(),
+                user: Some("dev".into()),
+                port: None,
+                identity_file: None,
+                daemon_port: 43721,
+            }),
+            ..Default::default()
+        };
+        let scope = settings.info().scope;
+        settings.token = "private token".into();
+        settings.ssh.as_mut().unwrap().identity_file = Some("/new/key".into());
+        assert_eq!(settings.info().scope, scope);
+        settings.ssh.as_mut().unwrap().host = "different-box".into();
+        assert_ne!(settings.info().scope, scope);
+    }
+
     #[test]
     fn remote_urls_require_tls_and_credentials_are_not_in_urls() {
         let token = "a".repeat(64);

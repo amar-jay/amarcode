@@ -91,3 +91,11 @@ pub async fn set_daemon_connection(
 ) -> Result<daemon::remote::ConnectionInfo, String> {
     daemon::remote::save(url, token).await
 }
+
+#[tauri::command]
+pub async fn set_ssh_daemon_connection(
+    config: daemon::ssh::SshTunnelConfig,
+    token: String,
+) -> Result<daemon::remote::ConnectionInfo, String> {
+    daemon::remote::save_ssh(config, token).await
+}
