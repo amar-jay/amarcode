@@ -66,7 +66,9 @@ where
                     &RpcResponse::err(format!("invalid request: {err}")),
                 )
                 .await?;
-                continue;
+                // Invalid framing is fatal. In particular, never skip HTTP
+                // headers and then dispatch a JSON RPC hidden in the body.
+                return Ok(());
             }
         };
 
@@ -295,6 +297,76 @@ mod tests {
     };
 
     use super::*;
+
+    async fn test_app() -> (tempfile::TempDir, Arc<App>) {
+        let directory = tempfile::tempdir().unwrap();
+        let app = App::new(crate::Config {
+            app_dir: directory.path().to_owned(),
+            db_path: directory.path().join("store.sqlite3"),
+            transport: crate::config::DaemonTransport::Tcp,
+            daemon_addr: "127.0.0.1:0".into(),
+            acp_registry_source: None,
+            ws_token_file: None,
+            ws_tls_cert: None,
+            ws_tls_key: None,
+            ws_allowed_origins: vec![],
+        })
+        .await
+        .unwrap();
+        (directory, Arc::new(app))
+    }
+
+    async fn exchange(app: Arc<App>, input: &str) -> Vec<serde_json::Value> {
+        use tokio::io::AsyncReadExt;
+
+        let (mut client, server) = duplex(16 * 1024);
+        let (reader, writer) = tokio::io::split(server);
+        let handler = tokio::spawn(async move { handle_io(reader, writer, app, "test").await });
+        client.write_all(input.as_bytes()).await.unwrap();
+        client.shutdown().await.unwrap();
+        let mut output = String::new();
+        tokio::time::timeout(Duration::from_secs(2), client.read_to_string(&mut output))
+            .await
+            .expect("connection must close")
+            .unwrap();
+        handler.await.unwrap().unwrap();
+        output
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn malformed_input_closes_connection_without_dispatching_trailing_rpc() {
+        let (_directory, app) = test_app().await;
+        let body = "{\"method\":\"create_chat\",\"params\":{\"workspace_path\":\"/test\",\"title\":\"must not execute\"}}\n";
+        for prefix in [
+            format!("POST / HTTP/1.1\r\nHost: localhost\r\nOrigin: https://untrusted.example\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n", body.len()),
+            "OPTIONS / HTTP/1.1\r\n\r\n".into(),
+            "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".into(),
+            "not json\n".into(),
+            "{\"params\":{}}\n".into(),
+        ] {
+            let replies = exchange(Arc::clone(&app), &format!("{prefix}{body}")).await;
+            assert!(app.store.chats(None).unwrap().is_empty(), "trailing RPC executed after {prefix:?}");
+            assert_eq!(replies.len(), 1, "unexpected replies after {prefix:?}");
+            assert!(replies[0]["error"].as_str().unwrap().starts_with("invalid request:"));
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_rpc_connections_survive_dispatch_errors_and_accept_multiple_requests() {
+        let (_directory, app) = test_app().await;
+        let replies = exchange(
+            app,
+            "\n{\"method\":\"health\"}\n{\"method\":\"unknown_method\"}\n{\"method\":\"health\"}\n",
+        )
+        .await;
+        assert_eq!(replies.len(), 3);
+        assert_eq!(replies[0]["result"]["status"], "ok");
+        assert!(replies[1]["error"].is_string());
+        assert_eq!(replies[2]["result"]["status"], "ok");
+    }
 
     #[tokio::test]
     async fn lagged_subscriber_is_closed_for_snapshot_recovery() {
