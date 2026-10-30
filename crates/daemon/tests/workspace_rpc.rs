@@ -16,7 +16,12 @@ use tokio::{
     net::TcpStream,
     time::timeout,
 };
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{client::IntoClientRequest, Message},
+};
+
+const TEST_TOKEN: &str = "workspace-rpc-test-token-0123456789abcdef";
 
 struct Daemon {
     child: Child,
@@ -38,6 +43,13 @@ impl Daemon {
         let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = reservation.local_addr().unwrap();
         drop(reservation);
+        let token_path = directory.path().join("access-token");
+        fs::write(&token_path, TEST_TOKEN).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
         let child = Command::new(env!("CARGO_BIN_EXE_amarcode-daemon"))
             .args([
                 "run",
@@ -47,6 +59,7 @@ impl Daemon {
             .env("AMARCODE_APPDIR", directory.path())
             .env("AMARCODE_ACP_REGISTRY_SOURCE", "")
             .env("AMARCODE_DAEMON_ADDR", address.to_string())
+            .env("AMARCODE_WS_TOKEN_FILE", &token_path)
             .env_remove("AMARCODE_WS_TLS_CERT")
             .env_remove("AMARCODE_WS_TLS_KEY")
             .env_remove("AMARCODE_WS_ALLOW_ORIGIN")
@@ -81,9 +94,14 @@ impl Daemon {
         timeout(Duration::from_secs(10), async {
             let request = json!({ "method": method, "params": params }).to_string();
             let response = if self.websocket {
-                let (mut socket, _) = connect_async(format!("ws://{}/rpc", self.address))
-                    .await
+                let mut handshake = format!("ws://{}/rpc", self.address)
+                    .into_client_request()
                     .unwrap();
+                handshake.headers_mut().insert(
+                    "authorization",
+                    format!("Bearer {TEST_TOKEN}").parse().unwrap(),
+                );
+                let (mut socket, _) = connect_async(handshake).await.unwrap();
                 socket.send(Message::Text(request.into())).await.unwrap();
                 let response = socket
                     .next()

@@ -59,6 +59,8 @@ pub struct Config {
     pub transport: DaemonTransport,
     pub daemon_addr: String,
     pub db_path: PathBuf,
+    /// Required bearer token file for WebSocket RPC (AMARCODE_WS_TOKEN_FILE).
+    pub ws_token_file: Option<PathBuf>,
     /// PEM certificate chain for WSS (AMARCODE_WS_TLS_CERT).
     pub ws_tls_cert: Option<PathBuf>,
     /// Matching PEM private key (AMARCODE_WS_TLS_KEY).
@@ -97,7 +99,17 @@ impl Config {
             "AMARCODE_DAEMON_ADDR must be an IP address and port, e.g. 127.0.0.1:43822 or [::1]:43822"
         ))?;
         if self.transport == DaemonTransport::Tcp {
+            if !address.ip().is_loopback() {
+                return Err(Error::msg(
+                    "TCP RPC requires a loopback address; use authenticated WebSocket transport for remote access",
+                ));
+            }
             return Ok(());
+        }
+        if self.ws_token_file.is_none() {
+            return Err(Error::msg(
+                "WebSocket RPC requires AMARCODE_WS_TOKEN_FILE pointing to a private access token file",
+            ));
         }
         if self.ws_tls_cert.is_some() != self.ws_tls_key.is_some() {
             return Err(Error::msg(
@@ -135,11 +147,13 @@ impl Config {
                 .unwrap_or_else(|| transport.default_addr().to_owned()),
             db_path,
             acp_registry_source: (!acp_registry_source.is_empty()).then_some(acp_registry_source),
+            ws_token_file: None,
             ws_tls_cert: None,
             ws_tls_key: None,
             ws_allowed_origins: Vec::new(),
         };
         if transport == DaemonTransport::WebSocket {
+            config.ws_token_file = env_path("AMARCODE_WS_TOKEN_FILE");
             config.ws_tls_cert = env_path("AMARCODE_WS_TLS_CERT");
             config.ws_tls_key = env_path("AMARCODE_WS_TLS_KEY");
             config.ws_allowed_origins = env_text("AMARCODE_WS_ALLOW_ORIGIN")?

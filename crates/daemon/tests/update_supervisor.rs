@@ -48,6 +48,7 @@ async fn update_rpc_reports_unavailable_for_custom_services_without_touching_reg
         db_path: root.path().join("workspace.sqlite3"),
         daemon_addr: "127.0.0.1:0".into(),
         transport: Default::default(),
+        ws_token_file: None,
         ws_tls_cert: None,
         ws_tls_key: None,
         ws_allowed_origins: Vec::new(),

@@ -153,8 +153,7 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
 
 fn health(app: &App) -> Result<Value> {
     let body = HealthResult {
-        remote_auth_required: app.config.transport == crate::config::DaemonTransport::WebSocket
-            && std::env::var_os("AMARCODE_WS_TOKEN_FILE").is_some(),
+        remote_auth_required: app.config.transport == crate::config::DaemonTransport::WebSocket,
         status: "ok".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         protocol_version: amarcode_protocol::PROTOCOL_VERSION,

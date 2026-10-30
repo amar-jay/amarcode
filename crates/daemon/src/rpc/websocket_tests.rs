@@ -25,6 +25,7 @@ fn test_config() -> Config {
         db_path: Default::default(),
         daemon_addr: "127.0.0.1:0".into(),
         acp_registry_source: None,
+        ws_token_file: None,
         ws_tls_cert: None,
         ws_tls_key: None,
         ws_allowed_origins: Vec::new(),
@@ -39,12 +40,12 @@ async fn start(
     tokio::task::JoinHandle<Result<()>>,
     tempfile::TempDir,
 ) {
-    start_with_token(tls, None).await
+    start_with_token(tls, &"a".repeat(64)).await
 }
 
 async fn start_with_token(
     tls: bool,
-    token: Option<&str>,
+    token: &str,
 ) -> (
     Client,
     Arc<App>,
@@ -55,6 +56,9 @@ async fn start_with_token(
     let mut config = test_config();
     config.transport = crate::config::DaemonTransport::WebSocket;
     config.daemon_addr = "127.0.0.1:0".into();
+    let token_path = directory.path().join("access-token");
+    private_file(&token_path, token.as_bytes());
+    config.ws_token_file = Some(token_path);
     if tls {
         let cert = directory.path().join("cert.pem");
         let key = directory.path().join("key.pem");
@@ -63,8 +67,7 @@ async fn start_with_token(
         config.ws_tls_cert = Some(cert);
         config.ws_tls_key = Some(key);
     }
-    let mut listener = Listener::bind(&config).await.unwrap();
-    Arc::get_mut(&mut listener.state).unwrap().bearer_token = token.map(str::to_owned);
+    let listener = Listener::bind(&config).await.unwrap();
     let address = listener.socket.local_addr().unwrap();
     config.daemon_addr = address.to_string();
     config.app_dir = directory.path().to_owned();
@@ -108,11 +111,9 @@ async fn start_with_token(
     let mut request = format!("{scheme}://localhost:{}/rpc", address.port())
         .into_client_request()
         .unwrap();
-    if let Some(token) = token {
-        request
-            .headers_mut()
-            .insert("authorization", format!("Bearer {token}").parse().unwrap());
-    }
+    request
+        .headers_mut()
+        .insert("authorization", format!("Bearer {token}").parse().unwrap());
     let (client, _) = client_async(request, io).await.unwrap();
     (client, app, server, directory)
 }
@@ -194,7 +195,10 @@ fn origin_allowlist_and_rpc_path_are_enforced() {
                 .headers_mut()
                 .insert("origin", origin.parse().unwrap());
         }
-        validate_handshake(&request, Response::new(()), allowed, None).is_ok()
+        request
+            .headers_mut()
+            .insert("authorization", "Bearer test-token".parse().unwrap());
+        validate_handshake(&request, Response::new(()), allowed, "test-token").is_ok()
     }
     let origins = vec!["https://app.example.com".to_owned()];
     assert!(check("ws://localhost/rpc", None, &[]));
@@ -218,6 +222,8 @@ fn tls_configuration_is_required_only_for_remote_binds() {
     let mut config = test_config();
     assert!(config.validate().is_ok());
     config.transport = crate::config::DaemonTransport::WebSocket;
+    assert!(config.validate().is_err());
+    config.ws_token_file = Some("token".into());
     assert!(config.validate().is_ok());
     config.daemon_addr.clear();
     assert!(config.validate().is_err());
@@ -247,6 +253,9 @@ fn malformed_tls_credentials_are_rejected_before_binding() {
     let mut config = test_config();
     config.transport = crate::config::DaemonTransport::WebSocket;
     config.daemon_addr = "127.0.0.1:0".into();
+    let token = directory.path().join("access-token");
+    private_file(&token, "a".repeat(64).as_bytes());
+    config.ws_token_file = Some(token);
     assert!(State::prepare(&config).is_ok());
     let cert = directory.path().join("bad-cert");
     let key = directory.path().join("bad-key");
@@ -262,8 +271,7 @@ fn malformed_tls_credentials_are_rejected_before_binding() {
 fn authenticated_handshake_rejects_missing_wrong_and_duplicate_tokens() {
     let token = "a".repeat(64);
     let mut request = "ws://localhost/rpc".into_client_request().unwrap();
-    let check =
-        |request: &Request| validate_handshake(request, Response::new(()), &[], Some(&token));
+    let check = |request: &Request| validate_handshake(request, Response::new(()), &[], &token);
     assert_eq!(
         check(&request).unwrap_err().status(),
         StatusCode::UNAUTHORIZED
@@ -302,7 +310,7 @@ fn token_files_must_be_private_and_nonempty() {
 async fn authenticated_ws_and_wss_deliver_rpc_and_events() {
     for tls in [false, true] {
         let token = "a".repeat(64);
-        let (mut client, app, server, directory) = start_with_token(tls, Some(&token)).await;
+        let (mut client, app, server, directory) = start_with_token(tls, &token).await;
         assert_eq!(
             request(&mut client, json!({"method":"health"})).await["result"]["status"],
             "ok"
@@ -333,5 +341,60 @@ async fn authenticated_ws_and_wss_deliver_rpc_and_events() {
         drop(client);
         drop(app);
         directory.close().unwrap();
+    }
+}
+
+#[test]
+fn tcp_rpc_rejects_non_loopback_addresses() {
+    let mut config = test_config();
+    for address in ["127.0.0.1:0", "127.0.0.2:43821", "[::1]:43821"] {
+        config.daemon_addr = address.into();
+        assert!(config.validate().is_ok(), "{address}");
+    }
+    for address in [
+        "0.0.0.0:43821",
+        "192.0.2.1:43821",
+        "[::]:43821",
+        "[2001:db8::1]:43821",
+    ] {
+        config.daemon_addr = address.into();
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("loopback"),
+            "{address}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn websocket_requires_valid_token_before_binding() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = test_config();
+    config.transport = crate::config::DaemonTransport::WebSocket;
+    assert!(
+        matches!(Listener::bind(&config).await, Err(error) if error.to_string().contains("AMARCODE_WS_TOKEN_FILE"))
+    );
+    // State preparation also fails closed if called without config validation.
+    assert!(State::prepare(&config).is_err());
+    let path = directory.path().join("access-token");
+    config.ws_token_file = Some(path.clone());
+    assert!(Listener::bind(&config).await.is_err());
+    for invalid in ["", "short", &"a".repeat(513), &"!".repeat(64)] {
+        private_file(&path, invalid.as_bytes());
+        assert!(Listener::bind(&config).await.is_err());
+    }
+    config.ws_token_file = Some(directory.path().to_owned());
+    assert!(Listener::bind(&config).await.is_err());
+    config.ws_token_file = Some(path.clone());
+    private_file(&path, "a".repeat(64).as_bytes());
+    assert!(Listener::bind(&config).await.is_ok());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(Listener::bind(&config).await.is_err());
     }
 }

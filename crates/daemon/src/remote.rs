@@ -102,7 +102,9 @@ fn tunnel_url(line: &str) -> Option<String> {
 
 pub async fn run(config: Config, setup: Setup) -> Result<()> {
     validate(&config)?;
-    let token_path = env::var_os("AMARCODE_WS_TOKEN_FILE")
+    let token_path = config
+        .ws_token_file
+        .as_deref()
         .ok_or_else(|| Error::msg("Remote access token file is not configured"))?;
     let token = fs::read_to_string(token_path)
         .map_err(|error| Error::msg(format!("Cannot read remote access token file: {error}")))?

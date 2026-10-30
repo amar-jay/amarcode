@@ -37,7 +37,7 @@ pub struct Listener {
 pub(super) struct State {
     tls: Option<TlsAcceptor>,
     origins: Vec<String>,
-    bearer_token: Option<String>,
+    bearer_token: String,
 }
 
 impl Listener {
@@ -52,9 +52,10 @@ impl Listener {
 
 impl State {
     fn prepare(config: &Config) -> Result<Self> {
-        let bearer_token = std::env::var_os("AMARCODE_WS_TOKEN_FILE")
-            .map(|path| load_token(Path::new(&path)))
-            .transpose()?;
+        let token_path = config.ws_token_file.as_deref().ok_or_else(|| {
+            Error::msg("WebSocket RPC requires AMARCODE_WS_TOKEN_FILE pointing to a private access token file")
+        })?;
+        let bearer_token = load_token(token_path)?;
         let tls = match (&config.ws_tls_cert, &config.ws_tls_key) {
             (Some(cert_path), Some(key_path)) => {
                 check_private_file(key_path)?;
@@ -114,12 +115,7 @@ impl State {
         let handshake = accept_hdr_async_with_config(
             stream,
             |request: &Request, response: Response| {
-                validate_handshake(
-                    request,
-                    response,
-                    &self.origins,
-                    self.bearer_token.as_deref(),
-                )
+                validate_handshake(request, response, &self.origins, &self.bearer_token)
             },
             Some(config),
         );
@@ -189,21 +185,19 @@ fn validate_handshake(
     request: &Request,
     response: Response,
     origins: &[String],
-    bearer_token: Option<&str>,
+    bearer_token: &str,
 ) -> std::result::Result<Response, ErrorResponse> {
     if request.uri().path() != "/rpc" || request.uri().query().is_some() {
         return Err(reject(StatusCode::NOT_FOUND));
     }
-    if let Some(token) = bearer_token {
-        let expected = format!("Bearer {token}");
-        let mut headers = request.headers().get_all("authorization").iter();
-        let supplied = headers
-            .next()
-            .map(|value| value.as_bytes())
-            .unwrap_or_default();
-        if headers.next().is_some() || !constant_time_equal(supplied, expected.as_bytes()) {
-            return Err(reject(StatusCode::UNAUTHORIZED));
-        }
+    let expected = format!("Bearer {bearer_token}");
+    let mut headers = request.headers().get_all("authorization").iter();
+    let supplied = headers
+        .next()
+        .map(|value| value.as_bytes())
+        .unwrap_or_default();
+    if headers.next().is_some() || !constant_time_equal(supplied, expected.as_bytes()) {
+        return Err(reject(StatusCode::UNAUTHORIZED));
     }
     let mut supplied = request.headers().get_all("origin").iter();
     if let Some(origin) = supplied.next() {
