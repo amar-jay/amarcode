@@ -136,7 +136,7 @@ impl State {
     }
 }
 
-fn load_token(path: &Path) -> Result<String> {
+pub(crate) fn load_token(path: &Path) -> Result<String> {
     check_private_file(path)?;
     let token = std::fs::read_to_string(path)?.trim().to_owned();
     if token.len() < 32

@@ -32,6 +32,9 @@ struct Cli {
     /// Start the daemon with an authenticated Cloudflare tunnel (implies websocket).
     #[arg(long, global = true)]
     remote: bool,
+    /// Run remote mode on authenticated loopback for SSH, without Cloudflare.
+    #[arg(long, global = true, requires = "remote")]
+    no_tunnel: bool,
     /// Run in the foreground when no subcommand is supplied.
     #[command(subcommand)]
     command: Option<LifecycleCommand>,
@@ -103,7 +106,7 @@ fn main() {
             );
             std::process::exit(2);
         }
-        match amarcode_daemon::remote::prepare() {
+        match amarcode_daemon::remote::prepare(!cli.no_tunnel) {
             Ok(setup) => Some(setup),
             Err(error) => {
                 eprintln!("amarcode-daemon: {error}");
@@ -113,7 +116,7 @@ fn main() {
     } else {
         None
     };
-    async_main(command, transport, remote);
+    async_main(command, transport, remote, cli.no_tunnel);
 }
 
 #[tokio::main]
@@ -121,6 +124,7 @@ async fn async_main(
     command: LifecycleCommand,
     transport: DaemonTransport,
     remote: Option<amarcode_daemon::remote::Setup>,
+    no_tunnel: bool,
 ) {
     if let LifecycleCommand::Bootstrap { ref command } = command {
         if let Err(error) = amarcode_daemon::update::bootstrap::run(command.clone()).await {
@@ -177,7 +181,7 @@ async fn async_main(
     );
 
     let outcome = match remote {
-        Some(setup) => amarcode_daemon::remote::run(config.clone(), setup).await,
+        Some(setup) => amarcode_daemon::remote::run(config.clone(), setup, no_tunnel).await,
         None => run(config.clone()).await,
     };
     if let Err(err) = outcome {

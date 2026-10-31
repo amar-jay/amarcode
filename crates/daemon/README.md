@@ -745,7 +745,42 @@ variables in its systemd user unit / launchd job / Windows service environment
 and restart it. Set its startup command to `run --transport websocket` to select
 WebSocket mode. The flag defaults to TCP when omitted.
 
-## Remote installation and Cloudflare Tunnel
+## Remote startup over SSH or Cloudflare
 
-See [the remote daemon guide](../../docs/remote-daemon.md) for the signed registry
-installer, token configuration, loopback service, tunnels, and desktop setup.
+For an already installed daemon, start authenticated SSH-only loopback mode on
+the remote host:
+
+```sh
+amarcode-daemon --remote --no-tunnel
+```
+
+This implies WebSocket transport and requires `127.0.0.1` with a fixed port
+(default `43721`), a private access token file, and no origin TLS. It never starts
+or requires Cloudflare. The desktop's SSH connection supplies encryption and
+forwards to this loopback listener. Startup prints the address and token-file
+path after binding, without printing the token.
+
+Remote defaults use `${XDG_DATA_HOME:-$HOME/.local/share}/amarcode-remote/` on
+Linux, or `AMARCODE_REMOTE_ROOT` when set. Data remains under `data/` and the token
+under `access-token`. Existing `remote.json` runtime paths are honored; that file
+and its Cloudflare binary are optional for SSH-only startup. Without metadata,
+installed agent runtimes must be available on the launch environment's `PATH`.
+Explicit `AMARCODE_APPDIR`, `AMARCODE_STORE_PATH`, `AMARCODE_WS_TOKEN_FILE`, and
+`AMARCODE_DAEMON_ADDR` values retain precedence.
+
+For a custom existing deployment, the direct alternative is:
+
+```sh
+AMARCODE_APPDIR=/absolute/path/to/existing-data \
+AMARCODE_WS_TOKEN_FILE=/absolute/path/to/access-token \
+AMARCODE_DAEMON_ADDR=127.0.0.1:43721 \
+amarcode-daemon run --transport websocket
+```
+
+Both commands run in the foreground. They do not remotely install software or
+register a service. Do not start a second daemon against a database already in
+use. `--remote` without `--no-tunnel` retains its existing authenticated
+Cloudflare quick-tunnel workflow and requires the installed connector.
+
+See the landing docs for [SSH setup and connection](../landing/src/content/docs/docs/remote/ssh.md)
+and [the remote installer and Cloudflare mode](../landing/src/content/docs/docs/remote/setup.md).

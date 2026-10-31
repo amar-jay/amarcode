@@ -141,7 +141,9 @@ recovered SSH generation, including when the host was unavailable at launch.
 Settings → Connection offers Local daemon, Remote WebSocket, and SSH, including a
 native identity-file picker and target-specific token reuse. SSH setup still
 requires an already running remote daemon; the manager never installs or starts
-one. Dedicated SSH-only remote setup remains a separate step.
+one. On the host, an installed daemon can be started with
+`amarcode-daemon --remote --no-tunnel` to use authenticated loopback without
+Cloudflare. See the [SSH host guide](../../landing/src/content/docs/docs/remote/ssh.md).
 
 On Unix, subprocess tests use a Python 3 forwarding fixture and an authenticated
 local WebSocket server. They require loopback socket access but no SSH server,

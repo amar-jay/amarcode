@@ -9,6 +9,10 @@ This page describes the installer and Cloudflare quick-tunnel workflow. If you
 already run an authenticated WebSocket daemon and have SSH access to its host,
 follow [Connect over SSH](/docs/remote/ssh/) instead. SSH connections do not require
 a public daemon URL; the desktop does not provision or start the remote daemon.
+For an already installed daemon, use
+[`amarcode-daemon --remote --no-tunnel`](/docs/remote/ssh/#start-the-installed-daemon-without-cloudflare)
+on the host to start authenticated loopback mode without Cloudflare. Remote
+installation over SSH is not part of this workflow.
 
 ## Before you start
 

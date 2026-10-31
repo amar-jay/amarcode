@@ -1,4 +1,4 @@
-//! Foreground remote mode: one command owns the daemon and its Cloudflare tunnel.
+//! Foreground remote mode, with optional Cloudflare or SSH-only loopback access.
 use crate::{App, Config, Error, Result};
 use serde::Deserialize;
 use std::{env, fs, path::PathBuf, process::Stdio};
@@ -7,26 +7,31 @@ use tokio::{
     process::Command,
 };
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Setup {
-    pub cloudflared: PathBuf,
+    #[serde(default)]
+    pub cloudflared: Option<PathBuf>,
     #[serde(default)]
     pub tool_bin_dirs: Vec<PathBuf>,
 }
 
 /// Called before Tokio starts: the installed remote defaults never affect local runs.
-pub fn prepare() -> Result<Setup> {
+pub fn prepare(require_tunnel: bool) -> Result<Setup> {
     let root = env::var_os("AMARCODE_REMOTE_ROOT")
         .map(PathBuf::from)
         .or_else(|| dirs::data_local_dir().map(|path| path.join("amarcode-remote")))
         .ok_or_else(|| Error::msg("Cannot locate the remote installation directory"))?;
-    let setup: Setup =
-        serde_json::from_slice(&fs::read(root.join("remote.json")).map_err(|_| {
-            Error::msg(
-                "Remote setup is missing; run the Amarcode installer once before using --remote",
-            )
-        })?)?;
-    if !setup.cloudflared.is_absolute() || !setup.cloudflared.is_file() {
+    let setup: Setup = match fs::read(root.join("remote.json")) {
+        Ok(bytes) => serde_json::from_slice(&bytes)?,
+        Err(error) if !require_tunnel && error.kind() == std::io::ErrorKind::NotFound => Setup::default(),
+        Err(_) => return Err(Error::msg("Remote setup is missing or unreadable; use an existing remote installation, or --remote --no-tunnel with a configured token file")),
+    };
+    if require_tunnel
+        && setup
+            .cloudflared
+            .as_ref()
+            .is_none_or(|path| !path.is_absolute() || !path.is_file())
+    {
         return Err(Error::msg(
             "Installed cloudflared is missing; rerun the Amarcode installer",
         ));
@@ -69,7 +74,7 @@ pub fn prepare() -> Result<Setup> {
     Ok(setup)
 }
 
-pub fn validate(config: &Config) -> Result<()> {
+pub fn validate(config: &Config, no_tunnel: bool) -> Result<()> {
     let address: std::net::SocketAddr = config
         .daemon_addr
         .parse()
@@ -80,7 +85,10 @@ pub fn validate(config: &Config) -> Result<()> {
         || config.ws_tls_cert.is_some()
         || config.ws_tls_key.is_some()
     {
-        return Err(Error::msg("--remote requires a loopback WebSocket listener with a fixed port and no origin TLS; Cloudflare provides public TLS"));
+        return Err(Error::msg("Remote mode requires a loopback WebSocket listener with a fixed port and no origin TLS; SSH or Cloudflare provides transport encryption"));
+    }
+    if no_tunnel && address.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
+        return Err(Error::msg("--remote --no-tunnel requires 127.0.0.1 so the desktop SSH forward can reach the daemon"));
     }
     Ok(())
 }
@@ -100,16 +108,25 @@ fn tunnel_url(line: &str) -> Option<String> {
     })
 }
 
-pub async fn run(config: Config, setup: Setup) -> Result<()> {
-    validate(&config)?;
+pub async fn run(config: Config, setup: Setup, no_tunnel: bool) -> Result<()> {
+    validate(&config, no_tunnel)?;
+    let cloudflared = if no_tunnel {
+        None
+    } else {
+        Some(
+            setup
+                .cloudflared
+                .as_deref()
+                .ok_or_else(|| Error::msg("Installed cloudflared is missing"))?,
+        )
+    };
     let token_path = config
         .ws_token_file
         .as_deref()
-        .ok_or_else(|| Error::msg("Remote access token file is not configured"))?;
-    let token = fs::read_to_string(token_path)
-        .map_err(|error| Error::msg(format!("Cannot read remote access token file: {error}")))?
-        .trim()
+        .ok_or_else(|| Error::msg("Remote access token file is not configured"))?
         .to_owned();
+    // Validate before opening the database, including in SSH-only mode.
+    let token = crate::rpc::websocket::load_token(&token_path)?;
     let address = config.daemon_addr.clone();
     let app = App::new(config).await?;
     let (ready, listening) = tokio::sync::oneshot::channel();
@@ -117,7 +134,16 @@ pub async fn run(config: Config, setup: Setup) -> Result<()> {
     if listening.await.is_err() {
         return server.await.map_err(|e| Error::msg(e.to_string()))?;
     }
-    let mut tunnel = match Command::new(&setup.cloudflared)
+    let Some(cloudflared) = cloudflared else {
+        println!(
+            "SSH-only daemon listening on {address}\nAccess token file: {}",
+            token_path.display()
+        );
+        return server
+            .await
+            .map_err(|error| Error::msg(error.to_string()))?;
+    };
+    let mut tunnel = match Command::new(cloudflared)
         .args(["tunnel", "--url", &format!("http://{address}")])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

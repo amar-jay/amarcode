@@ -23,12 +23,95 @@ You need:
   remote host's IPv4 loopback address, usually `127.0.0.1:43721`.
 - That daemon's access token and a desktop release using the same protocol.
 
-Amarcode connects to an existing daemon. It does not install, start, or update a
-remote daemon over SSH. The [remote host setup guide](/docs/remote/setup/)
-describes the current installer and its Cloudflare mode. An existing loopback
-WebSocket daemon can also be used directly over SSH.
+The desktop connects to an existing daemon. It does not install, start, or update
+one over SSH. Start the daemon yourself on the remote machine as described below.
+The [remote host setup guide](/docs/remote/setup/) separately documents the
+installer and its Cloudflare mode.
 
-### Verify SSH access first
+## Start the installed daemon without Cloudflare
+
+Run this command **on the remote host**, using an already installed daemon that
+supports `--no-tunnel`:
+
+```sh
+amarcode-daemon --remote --no-tunnel
+```
+
+This starts an authenticated WebSocket listener on `127.0.0.1:43721`. It does not
+start, download, or require Cloudflare. Leave the command running while you use
+the connection, or run the same command and environment under your host's process
+supervisor. Ctrl+C stops the foreground daemon and interrupts its agent processes.
+
+The command reuses the remote installation root,
+`${XDG_DATA_HOME:-$HOME/.local/share}/amarcode-remote/` on Linux. Set
+`AMARCODE_REMOTE_ROOT` to an absolute path if your existing installation uses
+another root. By default:
+
+| Location       | Purpose                                                                     |
+| -------------- | --------------------------------------------------------------------------- |
+| `data/`        | Existing chats, attachments, agents, credentials, and logs                  |
+| `access-token` | Existing private daemon token                                               |
+| `remote.json`  | Optional managed runtime paths; the Cloudflare path is ignored in this mode |
+
+If `remote.json` exists, its managed runtime directories are added to the daemon's
+`PATH`. Without that file, the daemon uses the environment you launch it with;
+make sure the runtimes needed by your installed agents are available there.
+
+The command prints the listener address and token-file path after binding. It
+does not print the token itself. Enter the token from that private file in the
+desktop's **Daemon access token** field.
+
+### Use custom data and token paths
+
+For a daemon already configured outside the remote installation layout, keep
+using its existing data directory and token:
+
+```sh
+AMARCODE_APPDIR=/absolute/path/to/existing-daemon-data \
+AMARCODE_WS_TOKEN_FILE=/absolute/path/to/access-token \
+AMARCODE_DAEMON_ADDR=127.0.0.1:43721 \
+amarcode-daemon --remote --no-tunnel
+```
+
+`AMARCODE_APPDIR`, `AMARCODE_WS_TOKEN_FILE`, and `AMARCODE_DAEMON_ADDR` override the
+remote defaults. Keep any existing `AMARCODE_STORE_PATH` override too, so you
+continue using the same database. Stop a previous daemon that owns that database
+or listener before changing its startup command.
+
+An installed daemon supporting authenticated WebSockets can also run directly,
+without remote installer metadata:
+
+```sh
+AMARCODE_APPDIR=/absolute/path/to/existing-daemon-data \
+AMARCODE_WS_TOKEN_FILE=/absolute/path/to/access-token \
+AMARCODE_DAEMON_ADDR=127.0.0.1:43721 \
+amarcode-daemon run --transport websocket
+```
+
+The direct command uses your supplied environment and `PATH`; it does not load
+managed runtime directories from `remote.json`. Neither command installs anything
+on the host or starts a public tunnel.
+
+### Create a token only if one is missing
+
+Reuse your existing token when available. For a manual setup without one, this
+Python command creates a private token file in the current directory and refuses
+to overwrite an existing file:
+
+```sh
+python3 - <<'PYTOKEN'
+import os, secrets
+with os.fdopen(os.open("access-token", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as file:
+    file.write(secrets.token_hex(32) + "\n")
+PYTOKEN
+```
+
+Point `AMARCODE_WS_TOKEN_FILE` at that file's absolute path. On Unix it must be
+private to its owner, for example mode `0600`. Missing or invalid tokens prevent
+startup; SSH-only mode has no unauthenticated fallback. Both commands bind the
+daemon on remote loopback; the desktop opens the SSH tunnel from your machine.
+
+## Verify SSH access from your desktop
 
 If you use an SSH config alias, you can use the same alias in Amarcode. For
 example, your desktop's SSH config might contain:

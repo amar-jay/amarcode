@@ -42,6 +42,10 @@ An old quick-tunnel URL cannot be reused after the hostname changes.
 
 First confirm you can connect to the same host or SSH config alias with your SSH
 client. Then check the **Current SSH connection** status in **Settings → Connection**.
+On the host, confirm that `amarcode-daemon --remote --no-tunnel` is still running.
+It needs an existing private token file, but does not require Cloudflare or
+`remote.json`. If you use custom data or token paths, supply the same environment
+each time you restart it.
 
 | Error or symptom                     | What to check                                                                                                                                                                                                                        |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
