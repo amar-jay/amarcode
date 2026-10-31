@@ -60,6 +60,19 @@ Check these in order:
 
 An old quick-tunnel URL cannot be reused after the hostname changes.
 
+## Containers report Running but the tunnel is refused
+
+A container can have an old `amarcode-daemon.service` file without a working
+systemd user manager. Older Amarcode releases trusted a successful exit from
+`systemctl`, including wrappers that only print an unsupported-systemd message.
+Current releases require the actual `active` state before reporting Running.
+
+`amarcoded tunnel` checks the authenticated listener itself. A connection-refused
+error means that listener is not reachable. In Codespaces or containers without
+systemd, [start `amarcoded --remote` inside tmux](/docs/remote/setup/#codespaces-and-containers-without-systemd).
+Install `tmux` first if the shell reports `command not found`. A tunnel command
+does not start a daemon, and a service definition is not proof of a live process.
+
 ## Remote terminal will not connect
 
 Run `amarcoded ssh` from an interactive terminal on your own machine. Enter the

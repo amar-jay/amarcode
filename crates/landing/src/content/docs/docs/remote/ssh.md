@@ -61,6 +61,31 @@ Each terminal connection owns its own shell. Disconnecting closes that shell;
 reconnecting creates a new shell. Use a host-side multiplexer such as `tmux`
 when you need a terminal workload to survive disconnects.
 
+For Ubuntu or Debian, install it **on the remote host** with
+`sudo apt-get update` and `sudo apt-get install -y tmux`. After opening a remote
+terminal with `amarcoded ssh`, run:
+
+```sh
+tmux new-session -A -s work
+```
+
+After a dropped terminal connection, run `amarcoded ssh` again with the current
+URL and token, then run that same `tmux` command. It attaches to the existing
+`work` session, or creates it if none exists. Commands inside the session keep
+running while the terminal connection is down. Input sent immediately before a
+disconnect may already have executed; verify the terminal state before sending
+it again.
+
+The daemon's own host-side session is separate. See
+[Codespaces and containers](/docs/remote/setup/#codespaces-and-containers-without-systemd)
+for keeping the daemon and its connection helper running.
+
+Cloudflare can terminate WebSocket connections during network changes or edge
+maintenance. Amarcode sends heartbeat messages, but those cannot make a
+connection permanent. A connector restart may change the public URL. A new
+terminal connection needs the current URL, then the same `tmux` session name.
+See [Cloudflare's WebSocket connection guidance](https://developers.cloudflare.com/network/websockets/).
+
 Closing the terminal leaves the daemon and unrelated chat agent runs running.
 `amarcoded ssh` does not start, install, restart, or reconfigure the remote daemon
 or its public connection helper. Start the server on the host with

@@ -90,6 +90,11 @@ where
     #[cfg(unix)]
     command.arg("-l");
     command.env("TERM", "xterm-256color");
+    // This PTY is independent of the terminal that launched the daemon.
+    // Retaining these markers makes tmux/screen reject legitimate sessions.
+    for variable in ["TMUX", "TMUX_PANE", "STY"] {
+        command.env_remove(variable);
+    }
     if let Some(home) = dirs::home_dir() {
         command.cwd(home);
     }

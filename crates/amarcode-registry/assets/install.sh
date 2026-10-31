@@ -612,6 +612,8 @@ def main():
     print('Local and remote connections share the same daemon and data.')
     print('If already running, restart the existing service to apply access settings: amarcode-daemon restart')
     print('For a managed service: amarcode-daemon bootstrap install.')
+    print('Without systemd (Codespaces/containers), run the foreground command above inside tmux.')
+    print('See https://amarcode.amarjay.com/docs/remote/setup/#codespaces-and-containers-without-systemd')
     if not args.ssh_only:
         print('If the daemon is already running, attach remote access with: amarcode-daemon tunnel')
     if args.start or args.tunnel:

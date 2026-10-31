@@ -57,7 +57,7 @@ amarcode-daemon --remote
 ```
 
 Wait for the connection URL and access token to appear. In the desktop, open
-**Settings → Connection**, choose **Remote WebSocket**, and enter the URL and
+**Settings → Connection**, choose **Remote daemon**, and enter the URL and
 token. See [connect from the desktop](/docs/remote/connect/) for the full steps.
 
 Keep the command running while you use it. Ctrl+C stops this foreground daemon
@@ -74,6 +74,50 @@ second process.
 The access token authorizes access to your daemon and its host operations.
 Do not put it in a URL or share it with others.
 :::
+
+## Codespaces and containers without systemd
+
+Use a foreground daemon inside `tmux` when the host has no working systemd user
+manager. The installer does not start a daemon, and `amarcoded tunnel` only
+attaches to an already-running authenticated listener. A service definition file
+alone does not mean that listener is running.
+
+For Ubuntu or Debian containers, install `tmux` if the command is missing:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y tmux
+```
+
+Start a host-side session and run the daemon inside it:
+
+```sh
+tmux new-session -s amarcode
+amarcoded --remote
+```
+
+Wait for the URL and token, then press **Ctrl+B**, release both keys, and press
+**D** to detach. You can close your outer terminal while the daemon and its
+connection helper continue inside `tmux`. Return to the session with:
+
+```sh
+tmux attach-session -t amarcode
+```
+
+Keep the foreground command running. If it exits, run `amarcoded --remote` again
+in that session and copy the new URL into the app. A restarted quick tunnel may
+have a different hostname; the access token and database are reused.
+
+`tmux` preserves processes across terminal disconnects, but not container stops,
+Codespaces suspension/deletion, host reboots, or explicit process termination.
+It also does not restart an exited command automatically. For unattended
+operation, use a supported process supervisor on a persistent host.
+
+If a container's `systemctl` wrapper says systemd is unavailable, do not rely on
+`amarcoded start` or `restart` to manage a user service. Use the foreground
+workflow above. `status` describes native service state; `tunnel` verifies the
+actual authenticated listener before connecting. `Connection refused` means
+that listener is not reachable yet, even if an older build printed `Running`.
 
 ## Use an existing service
 

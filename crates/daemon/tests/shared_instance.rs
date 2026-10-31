@@ -772,3 +772,62 @@ async fn standalone_ssh_client_supports_tls_and_rejects_untrusted_certificates()
     assert!(!output.contains("panicked"), "{output}");
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn remote_shell_does_not_inherit_the_daemons_tmux_session() {
+    let base = tempfile::tempdir().unwrap();
+    let local = port();
+    let remote = port();
+    assert!(command(base.path(), &local, &remote)
+        .args(["access", "enable"])
+        .status()
+        .unwrap()
+        .success());
+    let token =
+        std::fs::read_to_string(base.path().join("com.amarcode.desktop/access-token")).unwrap();
+    let mut daemon = Process(
+        command(base.path(), &local, &remote)
+            .env("TMUX", "/tmp/daemon-tmux-session,123,0")
+            .env("TMUX_PANE", "%1")
+            .env("STY", "daemon-screen-session")
+            .spawn()
+            .unwrap(),
+    );
+    ready(&mut daemon, &local).await;
+    let mut socket = terminal_socket(&remote, token.trim()).await;
+    socket
+        .send(Message::Text(
+            json!({"type":"open","cols":80,"rows":24})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    socket
+        .send(Message::Binary(
+            b"printf 'MUX_%s:%s:%s_END\\n' \"$TMUX\" \"$TMUX_PANE\" \"$STY\"; exit 0\n"
+                .to_vec()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let output = tokio::time::timeout(Duration::from_secs(3), async {
+        let mut output = String::new();
+        loop {
+            match socket.next().await.unwrap().unwrap() {
+                Message::Binary(bytes) => output.push_str(&String::from_utf8_lossy(&bytes)),
+                Message::Text(text)
+                    if serde_json::from_str::<Value>(&text).unwrap()["type"] == "exit" =>
+                {
+                    break output
+                }
+                _ => (),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(output.contains("MUX_::_END"), "{output}");
+    assert!(!output.contains("daemon-tmux-session"));
+    assert!(!output.contains("daemon-screen-session"));
+}

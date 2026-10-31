@@ -312,15 +312,20 @@ mod platform {
             });
         }
         let active = Command::new("systemctl")
-            .args(["--user", "is-active", "--quiet", UNIT_NAME])
-            .status()
+            .args(["--user", "is-active", UNIT_NAME])
+            .output()
             .map_err(|error| Error::msg(format!("failed to query Amarcode service: {error}")))?;
         Ok(ServiceStatus {
             installed: true,
-            state: if active.success() {
-                ServiceState::Running
-            } else {
-                ServiceState::Stopped
+            // Container wrappers can exit successfully without querying a
+            // manager. Only systemd's actual state output establishes activity.
+            state: match (
+                active.status.success(),
+                String::from_utf8_lossy(&active.stdout).trim(),
+            ) {
+                (true, "active") => ServiceState::Running,
+                (_, "inactive" | "failed") => ServiceState::Stopped,
+                _ => ServiceState::Unknown,
             },
             definition_path: Some(path.display().to_string()),
         })
