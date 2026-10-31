@@ -22,16 +22,18 @@ pub async fn app_install_update(
 }
 
 #[tauri::command]
-pub async fn prepare_application_uninstall(
+pub async fn remove_local_daemon(
     app: AppHandle,
     manager: State<'_, daemon::DaemonManager>,
-    confirmed: bool,
-    on_status: Channel<daemon::ApplicationCleanupStatus>,
-) -> Result<daemon::ApplicationCleanupResult, String> {
+    confirmation: String,
+    on_status: Channel<daemon::DaemonRemovalStatus>,
+) -> Result<daemon::DaemonRemovalResult, String> {
     report_failure(
-        manager.prepare_uninstall(&app, confirmed, &on_status).await,
+        manager
+            .remove_local_daemon(&app, &confirmation, &on_status)
+            .await,
         &on_status,
-        |error| daemon::ApplicationCleanupStatus::Failed { error },
+        |error| daemon::DaemonRemovalStatus::Failed { error },
     )
 }
 

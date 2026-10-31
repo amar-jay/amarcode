@@ -83,6 +83,19 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: powershell -NoProfile -File scripts/test-windows-task-status.ps1
 
+      - name: Install NSIS for uninstall preservation tests
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (!(Test-Path "${env:ProgramFiles(x86)}/NSIS/makensis.exe")) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Test desktop uninstall preserves the shared daemon
+        if: matrix.platform == 'windows-latest'
+        run: powershell -NoProfile -File scripts/test-windows-uninstall.ps1
+
       - name: Build and publish signed desktop release
         uses: tauri-apps/tauri-action@v1
         env:

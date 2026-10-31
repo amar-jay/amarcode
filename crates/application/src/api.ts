@@ -67,14 +67,14 @@ export const appUpdateApi = {
   },
 };
 
-export type ApplicationCleanupStatus =
+export type DaemonRemovalStatus =
   | { status: "preparing" }
   | { status: "removingServiceAndData" }
   | { status: "removingReleaseCache" }
   | { status: "ready" }
   | { status: "failed"; error: string };
 
-export interface ApplicationCleanupResult {
+export interface DaemonRemovalResult {
   serviceAndDaemonDataRemoved: boolean;
   daemonReleaseCacheRemoved: boolean;
 }
@@ -147,14 +147,14 @@ export const daemonApi = {
     statusChannel.onmessage = onStatus;
     return invoke("daemon_update", { version, onStatus: statusChannel });
   },
-  prepareApplicationUninstall: async (
-    confirmed: boolean,
-    onStatus: (status: ApplicationCleanupStatus) => void,
-  ): Promise<ApplicationCleanupResult> => {
-    const statusChannel = new Channel<ApplicationCleanupStatus>();
+  removeLocalDaemon: async (
+    confirmation: string,
+    onStatus: (status: DaemonRemovalStatus) => void,
+  ): Promise<DaemonRemovalResult> => {
+    const statusChannel = new Channel<DaemonRemovalStatus>();
     statusChannel.onmessage = onStatus;
-    return invoke("prepare_application_uninstall", {
-      confirmed,
+    return invoke("remove_local_daemon", {
+      confirmation,
       onStatus: statusChannel,
     });
   },

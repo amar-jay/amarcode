@@ -23,7 +23,7 @@ import {
   Trash2,
   TriangleAlert,
 } from "lucide-react";
-import { daemonApi, type ApplicationCleanupStatus } from "@/api";
+import { daemonApi, type DaemonRemovalStatus } from "@/api";
 import type { Palette as AppPalette, Theme } from "@/state";
 import {
   latestTurnByChatAtom,
@@ -994,7 +994,7 @@ function GeneralPanel({
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [cleanupStatus, setCleanupStatus] =
-    useState<ApplicationCleanupStatus | null>(null);
+    useState<DaemonRemovalStatus | null>(null);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
   const cleaning =
     cleanupStatus !== null &&
@@ -1003,11 +1003,11 @@ function GeneralPanel({
   const cleanupComplete = cleanupStatus?.status === "ready";
 
   const beginCleanup = async () => {
-    if (confirmation !== "DELETE AMARCODE DATA" || cleaning) return;
+    if (confirmation !== "DELETE LOCAL DAEMON DATA" || cleaning) return;
     setCleanupError(null);
     setCleanupStatus({ status: "preparing" });
     try {
-      await daemonApi.prepareApplicationUninstall(true, setCleanupStatus);
+      await daemonApi.removeLocalDaemon(confirmation, setCleanupStatus);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setCleanupError(message);
@@ -1015,31 +1015,12 @@ function GeneralPanel({
       return;
     }
 
-    try {
-      localStorage.clear();
-      sessionStorage.clear();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setCleanupError(
-        `The service and native data were removed, but UI preferences could not be cleared: ${message}`,
-      );
-      setCleanupStatus({ status: "ready" });
-      return;
-    }
-
     setCleanupStatus({ status: "ready" });
-    try {
-      await daemonApi.exitApplication();
-    } catch {
-      setCleanupError(
-        "Cleanup is complete, but Amarcode could not exit automatically. Exit the application manually.",
-      );
-    }
   };
 
   const cleanupLabel =
     cleanupStatus?.status === "removingServiceAndData"
-      ? "Removing service and local data…"
+      ? "Removing this computer’s daemon and data…"
       : cleanupStatus?.status === "removingReleaseCache"
         ? "Removing downloaded daemon files…"
         : cleanupStatus?.status === "ready"
@@ -1101,11 +1082,11 @@ function GeneralPanel({
                 id="danger-zone-title"
                 className="text-xs font-medium text-destructive"
               >
-                Remove Amarcode data
+                Remove local daemon and data
               </h3>
               <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                Stop and remove the background service, then permanently delete
-                local chats, logs, settings, and downloaded daemon files.
+                Remove this computer’s shared daemon and its conversations.
+                Uninstalling the desktop application preserves the daemon.
               </p>
             </div>
             <Button
@@ -1120,6 +1101,7 @@ function GeneralPanel({
               }}
             >
               <Trash2 className="size-4" />
+              Remove daemon
             </Button>
           </div>
         </div>
@@ -1140,11 +1122,14 @@ function GeneralPanel({
             <AlertDialogMedia className="bg-destructive/10 text-destructive">
               <TriangleAlert />
             </AlertDialogMedia>
-            <AlertDialogTitle>Delete all local Amarcode data?</AlertDialogTitle>
+            <AlertDialogTitle>Remove this computer’s shared daemon?</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently removes local chats, daemon logs, settings, the
-              background service, and downloaded daemon versions. Project files
-              in your workspaces are not deleted.
+              This stops the daemon on this computer and interrupts work for
+              every connected client, including remote clients. It permanently
+              deletes its conversations, credentials, access token, and downloaded
+              daemon versions. Your desktop preferences, saved remote connections,
+              and workspace project files are preserved. A daemon on another host
+              is not removed, even when you are connected to it.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -1166,7 +1151,7 @@ function GeneralPanel({
                 htmlFor="cleanup-confirmation"
                 className="text-xs font-medium"
               >
-                Type <span className="font-mono">DELETE AMARCODE DATA</span> to
+                Type <span className="font-mono">DELETE LOCAL DAEMON DATA</span> to
                 continue
               </label>
               <Input
@@ -1192,25 +1177,21 @@ function GeneralPanel({
               variant="outline"
               disabled={cleaning}
               onClick={() => {
-                if (cleanupComplete) {
-                  void daemonApi.exitApplication();
-                } else {
-                  setCleanupOpen(false);
-                }
+                setCleanupOpen(false);
               }}
             >
-              {cleanupComplete ? "Exit Amarcode" : "Cancel"}
+              {cleanupComplete ? "Close" : "Cancel"}
             </Button>
             <Button
               variant="destructive"
               disabled={
-                confirmation !== "DELETE AMARCODE DATA" ||
+                confirmation !== "DELETE LOCAL DAEMON DATA" ||
                 cleaning ||
                 cleanupComplete
               }
               onClick={() => void beginCleanup()}
             >
-              {cleaning ? "Removing…" : "Permanently remove data"}
+              {cleaning ? "Removing…" : "Remove local daemon and data"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

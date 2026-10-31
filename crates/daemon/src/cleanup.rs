@@ -36,6 +36,22 @@ fn purge<C: ServiceController>(
         ));
     }
 
+    // A foreground instance can own the database even with no native service.
+    // Never remove its live SQLite/WAL files or attachments underneath it.
+    let _ownership = if requested_app_dir.is_dir() {
+        Some(
+            crate::instance_lock::InstanceLock::acquire(
+                &requested_app_dir.join(config::DEFAULT_DB_NAME),
+            )
+            .map_err(|error| {
+                Error::msg(format!(
+                    "stop the foreground daemon before removing its data: {error}"
+                ))
+            })?,
+        )
+    } else {
+        None
+    };
     remove_app_dir(requested_app_dir)?;
     // Access belongs to this instance too. A purge must not leave its bearer
     // credential or enabled-listener settings for a later fresh installation.
@@ -188,6 +204,22 @@ mod tests {
             .join("amarcode")
     }
 
+    #[test]
+    fn preserves_live_foreground_database_and_credentials_without_a_service() {
+        let directory = tempfile::tempdir().unwrap();
+        let data = directory.path().join("instance/data");
+        fs::create_dir_all(&data).unwrap();
+        let database = data.join(crate::config::DEFAULT_DB_NAME);
+        fs::write(&database, b"live database").unwrap();
+        let token = data.parent().unwrap().join("access-token");
+        fs::write(&token, b"private credential").unwrap();
+        let _owner = crate::instance_lock::InstanceLock::acquire(&database).unwrap();
+        let controller = FakeController::successful();
+        let error = purge(&controller, &data, &data).unwrap_err();
+        assert!(error.to_string().contains("stop the foreground daemon"));
+        assert_eq!(fs::read(database).unwrap(), b"live database");
+        assert_eq!(fs::read(token).unwrap(), b"private credential");
+    }
     #[test]
     fn purge_removes_instance_access_settings_and_credentials() {
         let directory = tempfile::tempdir().unwrap();

@@ -24,7 +24,7 @@ use tokio::{
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
-pub enum ApplicationCleanupStatus {
+pub enum DaemonRemovalStatus {
     Preparing,
     RemovingServiceAndData,
     RemovingReleaseCache,
@@ -34,7 +34,7 @@ pub enum ApplicationCleanupStatus {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApplicationCleanupResult {
+pub struct DaemonRemovalResult {
     pub service_and_daemon_data_removed: bool,
     pub daemon_release_cache_removed: bool,
 }
@@ -193,21 +193,19 @@ impl DaemonManager {
         Ok(health)
     }
 
-    /// Permanently remove the native service, daemon-owned data and cached
-    /// daemon releases after explicit user confirmation. A durable phase
+    /// Explicitly remove this computer's shared daemon, independent of desktop
+    /// uninstall or the selected remote connection. A durable phase
     /// marker makes the operation safe to retry after process interruption.
-    pub async fn prepare_uninstall(
+    pub async fn remove_local_daemon(
         &self,
         app: &AppHandle,
-        confirmed: bool,
-        on_status: &Channel<ApplicationCleanupStatus>,
-    ) -> Result<ApplicationCleanupResult, String> {
-        if !confirmed {
-            return Err("application cleanup requires explicit data-loss confirmation".into());
-        }
+        confirmation: &str,
+        on_status: &Channel<DaemonRemovalStatus>,
+    ) -> Result<DaemonRemovalResult, String> {
+        require_local_daemon_removal_confirmation(confirmation)?;
 
         let _guard = self.bootstrap_lock.lock().await;
-        send_cleanup(on_status, ApplicationCleanupStatus::Preparing);
+        send_cleanup(on_status, DaemonRemovalStatus::Preparing);
 
         let app_data_root = app
             .path()
@@ -224,7 +222,7 @@ impl DaemonManager {
                 .map(Ok)
                 .unwrap_or_else(bundled_executable)?;
             write_cleanup_phase(&marker, CleanupPhase::Started)?;
-            send_cleanup(on_status, ApplicationCleanupStatus::RemovingServiceAndData);
+            send_cleanup(on_status, DaemonRemovalStatus::RemovingServiceAndData);
             command_output(
                 &executable,
                 &["purge", "--confirm-data-loss"],
@@ -235,12 +233,12 @@ impl DaemonManager {
             write_cleanup_phase(&marker, CleanupPhase::DaemonPurged)?;
         }
 
-        send_cleanup(on_status, ApplicationCleanupStatus::RemovingReleaseCache);
+        send_cleanup(on_status, DaemonRemovalStatus::RemovingReleaseCache);
         remove_install_root(&install_root, &app_data_root)?;
         clear_cleanup_marker(&marker)?;
-        send_cleanup(on_status, ApplicationCleanupStatus::Ready);
+        send_cleanup(on_status, DaemonRemovalStatus::Ready);
 
-        Ok(ApplicationCleanupResult {
+        Ok(DaemonRemovalResult {
             service_and_daemon_data_removed: true,
             daemon_release_cache_removed: true,
         })
@@ -456,6 +454,13 @@ struct ServiceStatus {
     state: ServiceState,
 }
 
+fn require_local_daemon_removal_confirmation(confirmation: &str) -> Result<(), String> {
+    if confirmation != "DELETE LOCAL DAEMON DATA" {
+        return Err("Type DELETE LOCAL DAEMON DATA to remove this computer's shared daemon and interrupt all of its clients".into());
+    }
+    Ok(())
+}
+
 fn cleanup_marker(app_data_root: &Path) -> PathBuf {
     app_data_root.join(CLEANUP_MARKER)
 }
@@ -627,7 +632,7 @@ fn send_update(channel: &Channel<DaemonUpdateStatus>, status: DaemonUpdateStatus
     let _ = channel.send(status);
 }
 
-fn send_cleanup(channel: &Channel<ApplicationCleanupStatus>, status: ApplicationCleanupStatus) {
+fn send_cleanup(channel: &Channel<DaemonRemovalStatus>, status: DaemonRemovalStatus) {
     let _ = channel.send(status);
 }
 
@@ -670,7 +675,7 @@ async fn wait_for_health() -> Result<HealthResult, String> {
 mod tests {
     use super::{
         clear_cleanup_marker, ensure_expected_version, read_cleanup_phase, remove_install_root,
-        write_cleanup_phase, ApplicationCleanupResult, ApplicationCleanupStatus, CleanupPhase,
+        write_cleanup_phase, CleanupPhase, DaemonRemovalResult, DaemonRemovalStatus,
         DaemonUpdateCheck, ServiceState, ServiceStatus,
     };
     use amarcode_protocol::rpc::HealthResult;
@@ -685,6 +690,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn local_daemon_removal_requires_explicit_daemon_specific_confirmation() {
+        for confirmation in [
+            "",
+            "true",
+            "DELETE AMARCODE DATA",
+            "delete local daemon data",
+            "DELETE LOCAL DAEMON DATA ",
+        ] {
+            assert!(super::require_local_daemon_removal_confirmation(confirmation).is_err());
+        }
+        assert!(
+            super::require_local_daemon_removal_confirmation("DELETE LOCAL DAEMON DATA").is_ok()
+        );
+    }
     #[test]
     fn parses_native_service_status() {
         let status: ServiceStatus = serde_json::from_str(
@@ -777,11 +797,11 @@ mod tests {
 
     #[test]
     fn cleanup_ipc_contract_uses_camel_case_fields() {
-        let status = serde_json::to_value(ApplicationCleanupStatus::RemovingServiceAndData)
+        let status = serde_json::to_value(DaemonRemovalStatus::RemovingServiceAndData)
             .expect("serialize cleanup status");
         assert_eq!(status["status"], "removingServiceAndData");
 
-        let result = serde_json::to_value(ApplicationCleanupResult {
+        let result = serde_json::to_value(DaemonRemovalResult {
             service_and_daemon_data_removed: true,
             daemon_release_cache_removed: true,
         })

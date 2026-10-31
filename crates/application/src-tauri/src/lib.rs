@@ -32,7 +32,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::application::app_check_update,
             commands::application::app_install_update,
-            commands::application::prepare_application_uninstall,
+            commands::application::remove_local_daemon,
             commands::application::exit_application,
             commands::clipboard::read_pasted_files,
             commands::daemon::daemon_bootstrap,

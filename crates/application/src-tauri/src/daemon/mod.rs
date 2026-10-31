@@ -7,7 +7,7 @@ pub mod ssh;
 pub use bridge::EventSubscription;
 pub use client::DaemonClient;
 pub use manager::{
-    ApplicationCleanupResult, ApplicationCleanupStatus, DaemonBootstrapStatus, DaemonManager,
+    DaemonBootstrapStatus, DaemonManager, DaemonRemovalResult, DaemonRemovalStatus,
     DaemonUpdateCheck, DaemonUpdateStatus,
 };
 

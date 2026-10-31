@@ -51,6 +51,10 @@ SQLite uses WAL mode and foreign keys. A database instance lock prevents a secon
 
 Closing the desktop does not stop the managed daemon. Active agent work can continue. A foreground daemon must remain running; stopping it ends its agent processes. The optional `amarcode-daemon tunnel` connector has its own lifetime: stopping it closes public access and leaves the daemon running.
 
+Removing the desktop application also preserves the shared daemon, its service,
+and its data. Removing the daemon is a separate, explicit local action because
+other clients may still use it. See [desktop and daemon removal](/docs/getting-started/installation/#remove-the-desktop-or-daemon).
+
 ## Where your data lives
 
 The desktop stores its remote connection token and SSH profile locally. SSH
