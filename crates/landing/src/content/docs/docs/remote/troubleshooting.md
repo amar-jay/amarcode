@@ -30,6 +30,24 @@ Daemon updates verify the signed artifact, activate the candidate, and check its
 
 Managed daemon self-updates currently target supported Linux and Windows services with standard configuration. Custom transports, addresses, data paths, and development binaries can report updates as unavailable.
 
+## Installer reports a GitHub rate limit
+
+The installer downloads the daemon from Amarcode's registry and resolves its
+connection helper and agent runtimes through GitHub's release API. A shared
+outbound IP can exhaust GitHub's unauthenticated allowance even when your own
+installation made only a few requests. Reinstalling the daemon does not reset
+that limit.
+
+The installer uses an exported `GH_TOKEN` or `GITHUB_TOKEN` for GitHub API
+requests. `GH_TOKEN` takes precedence; tokens are not saved or sent to Amarcode's
+registry, binary download hosts, or cross-host redirects. In Codespaces, an
+existing exported `GITHUB_TOKEN` can be used automatically. Otherwise, export
+a GitHub token in your shell before running the installer, or wait for the
+rate-limit reset time shown in the error and retry.
+
+An invalid token produces a separate authentication error. Refresh it or unset
+it before retrying. Checksum and signature verification remain enabled.
+
 ## The WebSocket connection fails
 
 Check these in order:

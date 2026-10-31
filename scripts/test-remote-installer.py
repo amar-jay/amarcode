@@ -370,6 +370,68 @@ class RemoteInstallerTests(unittest.TestCase):
             subprocess.run([str(runtime), '--version'], check=True, capture_output=True)
         self.assertIn('export PATH=', launcher.read_text())
 
+    def test_download_authenticates_only_the_github_api(self):
+        cases = [
+            ('https://api.github.com/repos/cloudflare/cloudflared/releases/latest', 'primary-token'),
+            ('https://api.github.com:443/repos/oven-sh/bun/releases/latest', 'primary-token'),
+            ('https://github.com/cloudflare/cloudflared/releases/download/v1/asset', None),
+            ('https://updates.amarcode.amarjay.com/v1/daemon/latest', None),
+            ('https://api.github.com.evil.example/releases', None),
+        ]
+        for url, expected in cases:
+            with self.subTest(url=url):
+                response = io.BytesIO(b'fixture')
+                response.url = url
+                with patch.dict(os.environ, {'GH_TOKEN': 'primary-token', 'GITHUB_TOKEN': 'secondary-token'}), patch.object(self.module.urllib.request, 'build_opener') as build:
+                    build.return_value.open.return_value = response
+                    self.module.download(url, self.root / 'download', 100)
+                    request = build.return_value.open.call_args.args[0]
+                    self.assertEqual(request.get_header('Authorization'), 'Bearer ' + expected if expected else None)
+                    self.assertEqual((self.root / 'download').read_bytes(), b'fixture')
+
+    def test_download_uses_codespaces_token_when_gh_token_is_empty(self):
+        for token, expected in [('codespaces-token', 'Bearer codespaces-token'), ('', None)]:
+            response = io.BytesIO(b'fixture')
+            response.url = 'https://api.github.com/repos/astral-sh/uv/releases/latest'
+            with patch.dict(os.environ, {'GH_TOKEN': '', 'GITHUB_TOKEN': token}), patch.object(self.module.urllib.request, 'build_opener') as build:
+                build.return_value.open.return_value = response
+                self.module.download(response.url, self.root / 'download', 100)
+                request = build.return_value.open.call_args.args[0]
+                self.assertEqual(request.get_header('Authorization'), expected)
+
+    def test_redirects_strip_credentials_and_reject_https_downgrades(self):
+        request = self.module.urllib.request.Request('https://api.github.com/repos/example/release', headers={'Authorization': 'Bearer private-token'})
+        handler = self.module.DownloadRedirectHandler()
+        for url, expected in [('https://api.github.com/new-location', 'Bearer private-token'), ('https://release-assets.githubusercontent.com/asset', None), ('https://api.github.com.evil.example/asset', None)]:
+            redirected = handler.redirect_request(request, None, 302, 'Found', {}, url)
+            self.assertEqual(redirected.get_header('Authorization'), expected)
+        with self.assertRaisesRegex(ValueError, 'HTTPS'):
+            handler.redirect_request(request, None, 302, 'Found', {}, 'http://api.github.com/asset')
+
+    def test_rate_limit_error_explains_authentication_and_reset_without_exposing_tokens(self):
+        url = 'https://api.github.com/repos/cloudflare/cloudflared/releases/latest'
+        for status, headers in [(403, {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1700000000'}), (429, {}), (403, {'Retry-After': '60'})]:
+            with patch.dict(os.environ, {'GH_TOKEN': 'private-token'}), patch.object(self.module.urllib.request, 'build_opener') as build:
+                build.return_value.open.side_effect = self.module.urllib.error.HTTPError(url, status, 'Forbidden', headers, None)
+                with self.assertRaisesRegex(ValueError, 'GitHub API rate limit exceeded') as error:
+                    self.module.download(url, self.root / 'download', 100)
+                self.assertIn('GH_TOKEN or GITHUB_TOKEN', str(error.exception))
+                self.assertNotIn('private-token', str(error.exception))
+                if headers.get('X-RateLimit-Reset'):
+                    self.assertIn('2023-11-14 22:13:20 UTC', str(error.exception))
+
+    def test_invalid_tokens_and_auth_failures_never_print_the_token(self):
+        url = 'https://api.github.com/repos/example/release'
+        with patch.dict(os.environ, {'GH_TOKEN': 'private\nheader-injection'}), patch.object(self.module.urllib.request, 'build_opener') as build:
+            with self.assertRaisesRegex(ValueError, 'Invalid GH_TOKEN'):
+                self.module.download(url, self.root / 'download', 100)
+            build.assert_not_called()
+        with patch.dict(os.environ, {'GH_TOKEN': 'private-token'}), patch.object(self.module.urllib.request, 'build_opener') as build:
+            build.return_value.open.side_effect = self.module.urllib.error.HTTPError(url, 401, 'Unauthorized', {}, None)
+            with self.assertRaisesRegex(ValueError, 'GitHub rejected') as error:
+                self.module.download(url, self.root / 'download', 100)
+            self.assertNotIn('private-token', str(error.exception))
+
 
 if __name__ == '__main__':
     unittest.main()

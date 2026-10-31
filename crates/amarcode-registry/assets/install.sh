@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -23,11 +24,58 @@ PUBLIC_KEY = '5ef56cd7772e8c601ca9c5a15378b7088fc558e7edcde73770cbb116d9e255d2'
 REGISTRY = 'https://updates.amarcode.amarjay.com'
 
 
+def github_api(url):
+    parsed = urllib.parse.urlsplit(url)
+    return (parsed.scheme == 'https' and parsed.hostname == 'api.github.com'
+            and parsed.port in (None, 443) and not parsed.username and not parsed.password)
+
+
+class DownloadRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        if urllib.parse.urlsplit(new_url).scheme != 'https':
+            raise ValueError('Download redirected away from HTTPS')
+        redirected = super().redirect_request(request, response, code, message, headers, new_url)
+        # GitHub release assets redirect to storage hosts. Credentials belong
+        # only to the API, never to the registry, asset downloads, or redirects.
+        if redirected and not github_api(new_url):
+            redirected.remove_header('Authorization')
+        return redirected
+
+
 def download(url, destination, limit):
     if urllib.parse.urlsplit(url).scheme != 'https':
         raise ValueError('Downloads require HTTPS')
-    request = urllib.request.Request(url, headers={'User-Agent': 'Amarcode-remote-installer'})
-    with urllib.request.urlopen(request, timeout=60) as response:
+    headers = {'User-Agent': 'Amarcode-remote-installer'}
+    if github_api(url):
+        token = next((value.strip() for name in ('GH_TOKEN', 'GITHUB_TOKEN')
+                      if (value := os.environ.get(name, '')).strip()), '')
+        if token:
+            if not all(33 <= ord(character) <= 126 for character in token):
+                raise ValueError('Invalid GH_TOKEN or GITHUB_TOKEN value')
+            headers['Authorization'] = 'Bearer ' + token
+    request = urllib.request.Request(url, headers=headers)
+    opener = urllib.request.build_opener(DownloadRedirectHandler())
+    try:
+        response = opener.open(request, timeout=60)
+    except urllib.error.HTTPError as error:
+        error.close()
+        response_headers = error.headers or {}
+        if github_api(error.url):
+            if error.code == 429 or (error.code == 403 and (
+                    response_headers.get('X-RateLimit-Remaining') == '0'
+                    or response_headers.get('Retry-After')
+                    or 'rate limit' in str(error.reason).lower())):
+                wait = ''
+                reset = response_headers.get('X-RateLimit-Reset', '')
+                if reset.isdecimal():
+                    from datetime import datetime, timezone
+                    wait = ' The limit resets at ' + datetime.fromtimestamp(int(reset), timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC') + '.'
+                raise ValueError('GitHub API rate limit exceeded while resolving an installation dependency.'
+                                 ' Export GH_TOKEN or GITHUB_TOKEN with a GitHub token, or retry after the limit resets.' + wait) from None
+            if error.code == 401:
+                raise ValueError('GitHub rejected GH_TOKEN or GITHUB_TOKEN. Refresh the token or unset it and retry.') from None
+        raise
+    with response:
         if urllib.parse.urlsplit(response.url).scheme != 'https':
             raise ValueError('Download redirected away from HTTPS')
         with open(destination, 'wb') as output:
