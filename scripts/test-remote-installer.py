@@ -275,7 +275,7 @@ class RemoteInstallerTests(unittest.TestCase):
         self.assertEqual(record.read_bytes(), original)
         self.assertEqual((installed / 'daemon/bin/amarcode-daemon').resolve(), executable)
         self.assertEqual((installed / 'daemon/bin/amarcoded').resolve(), executable)
-        self.assertTrue((installed / 'run.sh').read_text().endswith(' ssh\n'))
+        self.assertTrue((installed / 'run.sh').read_text().endswith(' --remote --no-tunnel\n'))
         settings = json.loads((installed / 'remote.json').read_text())
         self.assertEqual(settings['enabled'], True)
         self.assertNotIn('cloudflared', settings)
@@ -328,11 +328,11 @@ class RemoteInstallerTests(unittest.TestCase):
             token = (installed / 'access-token').read_text()
             self.module.main()
             self.assertEqual(token, (installed / 'access-token').read_text())
-            for options, mode in [(['--start'], '--remote'), (['--start', '--ssh-only'], 'ssh'), (['--start', '--no-tunnel'], 'ssh'), (['--tunnel'], '--remote')]:
+            for options, mode in [(['--start'], '--remote'), (['--start', '--ssh-only'], '--remote --no-tunnel'), (['--start', '--no-tunnel'], '--remote --no-tunnel'), (['--tunnel'], '--remote')]:
                 with patch.object(sys, 'argv', ['installer'] + options), patch.object(self.module.os, 'execv') as execute:
                     self.module.main()
                 execute.assert_called_once_with(str(installed / 'daemon/bin/amarcode-daemon'),
-                                                [str(installed / 'daemon/bin/amarcode-daemon'), mode])
+                                                [str(installed / 'daemon/bin/amarcode-daemon')] + mode.split())
                 self.assertEqual(token, (installed / 'access-token').read_text())
                 self.assertTrue((installed / 'run.sh').read_text().endswith(' ' + mode + '\n'))
         self.assertEqual(captured.getvalue().count('Access token (save privately):'), 1)

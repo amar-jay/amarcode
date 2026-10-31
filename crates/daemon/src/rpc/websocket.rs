@@ -112,19 +112,41 @@ impl State {
         let config = WebSocketConfig::default()
             .max_message_size(Some(MAX_MESSAGE_BYTES))
             .max_frame_size(Some(MAX_MESSAGE_BYTES));
+        let mut terminal = false;
         #[allow(clippy::result_large_err)]
         // The handshake callback's HTTP response type is fixed by Tungstenite.
         let handshake = accept_hdr_async_with_config(
             stream,
             |request: &Request, response: Response| {
-                validate_handshake(request, response, &self.origins, &self.bearer_token)
+                let response =
+                    validate_handshake(request, response, &self.origins, &self.bearer_token)?;
+                terminal = request.uri().path() == "/terminal";
+                Ok(response)
             },
             Some(config),
         );
-        let socket = timeout(HANDSHAKE_TIMEOUT, handshake)
+        let mut socket = timeout(HANDSHAKE_TIMEOUT, handshake)
             .await
             .map_err(|_| Error::msg("WebSocket handshake timed out"))?
             .map_err(|error| Error::msg(error.to_string()))?;
+        if terminal {
+            let result = super::terminal::serve(&mut socket).await;
+            if let Err(error) = &result {
+                let _ = send(
+                    &mut socket,
+                    Message::Text(
+                        serde_json::json!({
+                            "type": "error", "message": error.to_string()
+                        })
+                        .to_string()
+                        .into(),
+                    ),
+                )
+                .await;
+            }
+            let _ = timeout(WRITE_TIMEOUT, socket.close(None)).await;
+            return result;
+        }
         // Bounded duplex keeps framing separate from RPC/subscription semantics.
         // Both futures are polled together, including during large uploads and long prompts.
         let (bridge, rpc) = tokio::io::duplex(64 * 1024);
@@ -195,7 +217,7 @@ fn validate_handshake(
     origins: &[String],
     bearer_token: &str,
 ) -> std::result::Result<Response, ErrorResponse> {
-    if request.uri().path() != "/rpc" || request.uri().query().is_some() {
+    if !matches!(request.uri().path(), "/rpc" | "/terminal") || request.uri().query().is_some() {
         return Err(reject(StatusCode::NOT_FOUND));
     }
     let expected = format!("Bearer {bearer_token}");

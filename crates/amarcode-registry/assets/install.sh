@@ -400,13 +400,13 @@ def main():
     parser = argparse.ArgumentParser(description='Install Amarcode with secure remote access and agent runtimes (Linux)')
     parser.add_argument('--version', help='Initial signed release; default: latest. Existing releases use the managed updater')
     access = parser.add_mutually_exclusive_group()
-    access.add_argument('--ssh-only', '--no-tunnel', dest='ssh_only', action='store_true', help='Set up private SSH-only access without downloading a public connection helper')
+    access.add_argument('--no-tunnel', '--ssh-only', dest='ssh_only', action='store_true', help='Set up authenticated loopback-only access without downloading a public connection helper')
     access.add_argument('--with-cloudflare', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--cloudflared-version', help='Install a specific official cloudflared release; default: latest')
     parser.add_argument('--bun-version', help='Official Bun release tag; default: latest')
     parser.add_argument('--uv-version', help='Official uv release tag; default: latest')
     parser.add_argument('--bin-dir', type=Path, help='Optional additional command alias directory; the managed command always lives in the instance daemon/bin directory')
-    parser.add_argument('--start', action='store_true', help='Start the daemon after installation and print its remote connection URL (SSH-only with --ssh-only)')
+    parser.add_argument('--start', action='store_true', help='Start the daemon after installation and print its remote connection URL (loopback-only with --no-tunnel)')
     parser.add_argument('--tunnel', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--no-service', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -534,7 +534,7 @@ def main():
     import shlex
     quote = lambda value: shlex.quote(str(value))
     # Existing helper paths continue to use the same native command and lifecycle.
-    for name, arguments in [('run.sh', 'ssh' if args.ssh_only else '--remote'), ('tunnel.sh', 'tunnel')]:
+    for name, arguments in [('run.sh', '--remote --no-tunnel' if args.ssh_only else '--remote'), ('tunnel.sh', 'tunnel')]:
         launcher = root / name
         private_write(launcher, '#!/bin/sh\nset -eu\n' +
                       'export PATH=' + quote(os.pathsep.join(tool_bin_dirs)) + ':"$PATH"\n' +
@@ -545,7 +545,7 @@ def main():
     print('\nAmarcode remote setup complete. No service or tunnel has been started.')
     print('Daemon version: ' + version)
     print('Command: ' + str(command))
-    print('Remote access: ' + ('ready' if cloudflared else 'SSH only'))
+    print('Remote access: ' + ('ready' if cloudflared else 'loopback only'))
     print('Bun / bunx: ' + str(bun_bin))
     print('uv / uvx: ' + str(uv_bin))
     print('Data directory: ' + str(root / 'data'))
@@ -558,7 +558,7 @@ def main():
         print('PATH saved for new Bash, Zsh, and Fish sessions. For this shell, run:')
         print('  export PATH=' + quote(bin_dir) + ':"$PATH"')
     print('\nStart whenever needed:')
-    print('  amarcoded ssh' if args.ssh_only else '  amarcode-daemon --remote')
+    print('  amarcoded --remote --no-tunnel' if args.ssh_only else '  amarcode-daemon --remote')
     if not args.ssh_only:
         print('Copy the connection URL and access token it prints into Amarcode connection settings.')
     print('Local and remote connections share the same daemon and data.')
@@ -572,7 +572,7 @@ def main():
         os.environ['AMARCODE_WS_TOKEN_FILE'] = str(token_path)
         os.environ['PATH'] = os.pathsep.join(tool_bin_dirs + [os.environ.get('PATH', '')])
         sys.stdout.flush()
-        os.execv(str(command), [str(command), 'ssh' if args.ssh_only else '--remote'])
+        os.execv(str(command), [str(command)] + (['--remote', '--no-tunnel'] if args.ssh_only else ['--remote']))
 
 
 if __name__ == '__main__':

@@ -22,9 +22,8 @@ The Rust daemon is the system of record. It owns:
 - Local service lifecycle and managed daemon update jobs.
 
 Local clients communicate over a TCP JSON-line API. Remote desktop connections
-use authenticated WebSockets, either through a public tunnel or through an
-[SSH tunnel owned by the desktop](/docs/remote/ssh/). The daemon can stay bound to
-remote loopback when using SSH. Enabling remote access adds a WebSocket listener
+use authenticated WebSockets through the remote daemon URL. Enabling remote
+access adds a WebSocket listener
 to the same process that serves local TCP. Both connections share the same RPC
 methods, sessions, pending approvals, event bus, and database.
 
@@ -57,9 +56,9 @@ other clients may still use it. See [desktop and daemon removal](/docs/getting-s
 
 ## Where your data lives
 
-The desktop stores its remote connection token and SSH profile locally. SSH
-private keys remain on the desktop and are handled by the SSH client or agent;
-the daemon does not receive the key file.
+The desktop stores its remote connection URL and token locally.
+[Remote terminal access](/docs/remote/ssh/) uses that host's authenticated daemon
+API to open an interactive shell from the CLI.
 
 The active daemon host owns its conversations, files, attachments, and provider keys. A remote connection does not move the local daemon's history to that host.
 

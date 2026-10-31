@@ -17,3 +17,5 @@ pub mod server;
 pub mod websocket;
 
 mod workspace;
+
+mod terminal;

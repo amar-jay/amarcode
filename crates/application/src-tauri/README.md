@@ -89,66 +89,29 @@ Tauri APIs; daemon RPC and transport code must remain independent of Tauri.
 
 ## Verification
 
-### Native SSH tunnel manager
+### Remote connections and terminal access
 
-The native connection layer shares one `SshTunnelManager`. Its `connect(config,
-token)` API starts system `ssh`, forwarding a temporary IPv4 loopback port to the
-remote host's `127.0.0.1:<daemon_port>`. Concurrent callers for the same settings
-share one process. Readiness requires an authenticated WebSocket health response
-with the matching protocol; an open local port alone is insufficient. A failed
-replacement leaves the working tunnel intact. `disconnect()` cancels startup and
-terminates/reaps the owned process. Application exit calls it automatically;
-dropping or cancelling a startup also kills its child process.
+Settings → Connection offers **Local daemon** and **Remote daemon**. A remote
+connection uses a WebSocket URL and access token. Native verification checks
+authentication, health, and protocol compatibility before saving. Failed
+verification keeps the current connection, and tokens never return to the
+webview.
 
-Authentication uses existing OpenSSH configuration, identity files, and the SSH
-agent. Batch mode prevents password/passphrase prompts. Strict host-key checking
-is mandatory: establish and verify host trust outside Amarcode first. Unknown or
-changed keys fail. Agent forwarding, interactive terminals, local commands,
-background forking, and reuse of external control sockets are disabled. SSH
-arguments are passed directly to the executable; the daemon token is sent only
-in the WebSocket handshake, never as a process argument. Stderr is drained into a
-bounded byte buffer and decoded safely for diagnostics.
+`amarcoded ssh` is a separate terminal client. It prompts for a remote daemon
+URL and hidden access token, or accepts a URL and `--token-file`. The daemon's
+`/terminal` endpoint shares the WebSocket listener's authentication and origin
+checks. One connection owns one interactive PTY on the daemon host. Resizing,
+Ctrl+C, binary terminal I/O, and exit status travel over that connection.
+Disconnecting closes its shell; the daemon and unrelated agent runs continue.
+See the [remote terminal guide](../../landing/src/content/docs/docs/remote/ssh.md).
 
-SSH profiles are now supported by native IPC: `set_ssh_daemon_connection(config,
-token)` verifies and saves a profile, while `get_daemon_connection` returns its
-mode, non-secret SSH configuration, token-presence flag, and stable host scope.
-An empty token reuses the saved credential only for the exact same target.
-Existing `{url, token}` connection files remain compatible; SSH adds an optional
-`ssh` field. Temporary tunnel URLs are never persisted. Subsequent RPC calls and
-event subscriptions use the saved SSH profile automatically, without requiring a
-local daemon.
-
-Saving verifies authentication and protocol compatibility before touching the
-saved file. A synchronous commit under the tunnel lock atomically replaces the
-private settings file, publishes the connection change, and activates the
-candidate. Verification or write failures retain the previous settings and
-tunnel. A stale RPC cannot reactivate a profile that was deselected while it
-waited for the tunnel lock. Switching to local or direct WebSocket stops the SSH
-tunnel only after the replacement settings commit succeeds.
-
-The native SSH supervisor starts with the app and owns reconnection timing. It
-checks process liveness and authenticated daemon health, retries from 250 ms up
-to 5 seconds, and resets retry state when the selected profile changes. RPCs wait
-for its verified endpoint rather than spawning competing tunnels; sent RPCs are
-never replayed automatically. Endpoint loss/replacement invalidates event
-subscriptions so the existing reconnect/snapshot flow restores active turns and
-pending approvals. Settings changes also cancel subscription setup that is
-still in flight. Application exit aborts supervision before disconnecting SSH.
-
-`get_daemon_connection_status` exposes non-secret lifecycle state, error, retry
-timing, and connection generation. The startup UI retries bootstrap once per
-recovered SSH generation, including when the host was unavailable at launch.
-Settings → Connection offers Local daemon, Remote WebSocket, and SSH, including a
-native identity-file picker and target-specific token reuse. SSH setup still
-requires an already running remote daemon; the manager never installs or starts
-one. On the host, an installed daemon can be started with
-`amarcode-daemon --remote --no-tunnel` to use authenticated loopback without
-Cloudflare. See the [SSH host guide](../../landing/src/content/docs/docs/remote/ssh.md).
-
-On Unix, subprocess tests use a Python 3 forwarding fixture and an authenticated
-local WebSocket server. They require loopback socket access but no SSH server,
-keys, credentials, or external host. Actual SSH server interoperability and
-Windows/macOS runtime behavior need platform validation during integration.
+The native OpenSSH forwarding manager remains only to read and operate previously
+saved profiles during migration. No IPC or settings form creates new SSH
+profiles. Existing users can replace a profile with the daemon's public URL and
+token; the old tunnel closes after the replacement is verified and committed.
+Compatibility tests use isolated Python forwarding fixtures without a real SSH
+server. Windows terminal code is cross-compiled; runtime behavior still needs
+Windows testing.
 
 ### Commands
 

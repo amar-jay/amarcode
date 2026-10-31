@@ -202,6 +202,13 @@ fn origin_allowlist_and_rpc_path_are_enforced() {
     }
     let origins = vec!["https://app.example.com".to_owned()];
     assert!(check("ws://localhost/rpc", None, &[]));
+    assert!(check("ws://localhost/terminal", None, &[]));
+    assert!(!check("ws://localhost/terminal?token=secret", None, &[]));
+    assert!(!check(
+        "ws://localhost/terminal",
+        Some("https://evil.example"),
+        &origins
+    ));
     assert!(!check(
         "ws://localhost/rpc",
         Some("https://evil.example"),

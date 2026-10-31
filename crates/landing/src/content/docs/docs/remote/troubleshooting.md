@@ -6,7 +6,7 @@ description: Update a remote daemon and resolve connection, authentication, and 
 ## Update a remote host
 
 Managed daemons use the same signed update lifecycle whether the desktop
-connects locally, over SSH, or over WebSocket. Use the desktop's daemon update
+connects locally or over WebSocket. Use the desktop's daemon update
 action while connected to that host. The host's supervisor performs activation
 and rollback; the desktop retries status over the remote connection while the
 listener restarts. It never reads the laptop's local journal for a remote update.
@@ -18,8 +18,7 @@ standard running user service. A foreground/custom daemon can report updates as
 unavailable; install the standard service on its host with
 `amarcode-daemon bootstrap install` when appropriate.
 
-Restarting the daemon interrupts active agent processes. The SSH profile keeps
-its host and port. A separate `amarcode-daemon tunnel` connector stays independent
+Restarting the daemon interrupts active agent processes and terminal sessions. A separate `amarcode-daemon tunnel` connector stays independent
 of the daemon, although a new connector run gets a new public hostname.
 
 ## Update a local installation
@@ -40,36 +39,20 @@ Check these in order:
 
 An old quick-tunnel URL cannot be reused after the hostname changes.
 
-## SSH will not connect
+## Remote terminal will not connect
 
-First confirm you can connect to the same host or SSH config alias with your SSH
-client. Then check the **Current SSH connection** status in **Settings → Connection**.
-On the host, run `amarcoded ssh`. It starts SSH access or reuses the existing
-authenticated listener. If it asks for a restart, run `amarcoded restart` (or
-restart the existing foreground daemon) when active work can be interrupted.
-It needs a valid private token file and does not require Cloudflare. Preserve
-custom environment settings when restarting a deliberately isolated instance.
+Run `amarcoded ssh` from an interactive terminal on your own machine. Enter the
+current remote daemon URL and paste its access token when prompted, or provide a
+private token file with `--token-file`.
 
-| Error or symptom                     | What to check                                                                                                                                                                                                                        |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| OpenSSH could not start              | Install the OpenSSH client on the desktop and make sure `ssh` is on its `PATH`.                                                                                                                                                      |
-| Host key could not be verified       | Verify the host fingerprint through a trusted channel and establish trust with your SSH client. For a changed key, confirm why it changed before updating known hosts.                                                               |
-| SSH authentication failed            | Check the username, identity file, and SSH agent. Unlock encrypted keys in the agent. Password and keyboard-interactive prompts are not supported.                                                                                   |
-| The daemon rejected the access token | Enter the daemon's bearer token, not an SSH key or passphrase. Changing target settings requires re-entering its token.                                                                                                              |
-| Timeout or connection refused        | Check both ports: the SSH port reaches the SSH server; **Daemon port** reaches `127.0.0.1` on the remote host. Confirm the daemon is running there in authenticated WebSocket mode and that the server permits local TCP forwarding. |
-| Protocol mismatch                    | Update the desktop and remote daemon to compatible releases. An SSH login alone does not establish protocol compatibility.                                                                                                           |
-| Local project path does not exist    | Choose an absolute directory on the remote host. The local identity-file picker and remote workspace picker refer to different machines.                                                                                             |
+- **Unauthorized:** verify the remote host’s token. The local daemon’s token may be different.
+- **Not found:** update the remote daemon to a release supporting `/terminal`.
+- **Connection refused or timeout:** confirm the host’s daemon and connection helper are still running and use the current URL.
+- **Token file error:** fix that file or unset `AMARCODE_WS_TOKEN_FILE` to use the hidden token prompt.
+- **Disconnected:** the shell closes with its connection. Start a new terminal session; use a host-side multiplexer for persistent work.
 
-The desktop retries a saved SSH connection automatically, with a maximum
-five-second delay between attempts. A connection attempt can take longer than
-the delay when the network or host is unresponsive. Fixing SSH access or bringing
-the daemon back online lets the desktop recover without replacing the saved
-profile.
-
-If the daemon is running, reconnecting restores current turns and pending
-approvals. If the daemon itself restarted, its agent processes and in-memory
-requests were interrupted; saved chat history is still available. See
-[Connect over SSH](/docs/remote/ssh/) for the full workflow.
+Remote access uses TLS and daemon token authentication. There is no SSH host,
+identity-file, or SSH-port form in the app. See [Remote terminal](/docs/remote/ssh/).
 
 ## Authentication is rejected
 

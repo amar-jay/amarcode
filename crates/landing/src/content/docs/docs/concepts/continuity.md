@@ -14,7 +14,7 @@ state, including the active turn and queued approval or input requests. A turn
 completed or a request answered by another client while you were offline is
 reflected in the recovered view. Reconnecting does not resend your prompt.
 
-[SSH connections](/docs/remote/ssh/) automatically recreate a lost desktop tunnel.
+[Remote terminal sessions](/docs/remote/ssh/) close on disconnect; start a new shell to reconnect.
 The remote daemon and its agents can continue working while the desktop is
 disconnected. Restarting the daemon is different: it interrupts agent processes
 and clears in-memory pending requests, while retaining saved conversation history.

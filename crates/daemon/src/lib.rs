@@ -26,3 +26,5 @@ pub mod windows;
 pub use app::App;
 pub use config::Config;
 pub use error::{Error, Result};
+
+pub mod shell;

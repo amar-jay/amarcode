@@ -136,7 +136,7 @@ export default defineConfig({
           label: "Remote daemon",
           items: [
             { label: "Set up a remote host", slug: "docs/remote/setup" },
-            { label: "Connect over SSH", slug: "docs/remote/ssh" },
+            { label: "Remote terminal", slug: "docs/remote/ssh" },
             { label: "Connect from the desktop", slug: "docs/remote/connect" },
             {
               label: "Updates and troubleshooting",

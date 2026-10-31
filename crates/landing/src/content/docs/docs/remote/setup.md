@@ -101,25 +101,26 @@ installer, use `amarcode-daemon access enable`, then restart it.
 preserving the database and token. Access settings survive managed updates and
 rollback.
 
-## SSH-only setup
+## Loopback-only setup
 
-If you prefer connecting through your own SSH access, opt out of the included
+For access through a private network path or a tunnel you manage, opt out of the included
 public connection helper:
 
 ```bash
-curl -fsSL https://amarcode.amarjay.com/install.sh | bash -s -- --ssh-only
+curl -fsSL https://amarcode.amarjay.com/install.sh | bash -s -- --no-tunnel
 ```
 
 This installs the same shared daemon and agent runtimes, and enables its
 private authenticated listener without downloading the public connection helper.
-Start it with `amarcoded ssh`, or use the existing user service.
-`--ssh-only --start` starts the foreground daemon immediately after installation.
-Follow [Connect over SSH](/docs/remote/ssh/) to configure the desktop's tunnel.
+Start it with `amarcoded --remote --no-tunnel`, or use the existing user service.
+`--no-tunnel --start` starts the foreground daemon immediately after installation.
+The app connects using the reachable daemon URL and token.
+For an interactive shell, see [Remote terminal](/docs/remote/ssh/).
 The desktop connects to an existing daemon and does not provision the host.
 
-`amarcoded ssh` creates or reuses the private token and starts authenticated
-loopback access. The older `amarcode-daemon --remote --no-tunnel` spelling is
-also supported. The WebSocket listener uses
+`amarcoded --remote --no-tunnel` starts authenticated loopback access using
+the private token created by the installer. `amarcode-daemon` is a compatible
+command name. The WebSocket listener uses
 `127.0.0.1:43721`; `AMARCODE_WS_ADDR` or `remote.json`'s `listen_addr` changes its
 port. Local TCP uses `127.0.0.1:43821` and is configured separately through
 `AMARCODE_DAEMON_ADDR`.

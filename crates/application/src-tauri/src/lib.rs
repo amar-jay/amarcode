@@ -39,7 +39,6 @@ pub fn run() {
             commands::daemon::get_daemon_connection,
             commands::daemon::get_daemon_connection_status,
             commands::daemon::set_daemon_connection,
-            commands::daemon::set_ssh_daemon_connection,
             commands::daemon::daemon_install,
             commands::daemon::daemon_check_update,
             commands::daemon::daemon_update,

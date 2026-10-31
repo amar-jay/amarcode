@@ -120,11 +120,6 @@ export const daemonApi = {
     invoke("get_daemon_connection"),
   setConnection: (url: string, token: string): Promise<DaemonConnectionInfo> =>
     invoke("set_daemon_connection", { url, token }),
-  setSshConnection: (
-    config: SshConnectionConfig,
-    token: string,
-  ): Promise<DaemonConnectionInfo> =>
-    invoke("set_ssh_daemon_connection", { config, token }),
   bootstrap: async (
     onStatus: (status: DaemonBootstrapStatus) => void,
   ): Promise<Health | null> => {

@@ -1,4 +1,4 @@
-//! Foreground remote mode, with optional Cloudflare or SSH-only loopback access.
+//! Foreground remote mode, with optional Cloudflare or private loopback access.
 use crate::{App, Config, Error, Result};
 use serde::Deserialize;
 use std::{env, fs, path::PathBuf, process::Stdio};
@@ -48,11 +48,6 @@ pub fn configured() -> Result<Option<Setup>> {
 /// Persist access settings without starting a second daemon or a tunnel.
 pub fn configure_access(enabled: bool) -> Result<()> {
     configure_access_with_notice(enabled, true)
-}
-
-/// Called before Tokio starts, after prepare(false) selected the instance.
-pub fn enable_ssh_access() -> Result<()> {
-    configure_access_with_notice(true, false)
 }
 
 fn configure_access_with_notice(enabled: bool, announce: bool) -> Result<()> {
@@ -266,45 +261,13 @@ async fn check_health(remote: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Reuse an authenticated live instance instead of creating a competing server.
-pub async fn ssh_is_running(local: &Config, setup: &Setup) -> Result<bool> {
-    let remote = if local.transport == crate::config::DaemonTransport::Tcp {
-        access_config(local, setup)?
-    } else {
-        local.clone()
-    };
-    validate(&remote, true)?;
-    crate::rpc::websocket::load_token(
-        remote
-            .ws_token_file
-            .as_deref()
-            .ok_or_else(|| Error::msg("SSH access token is not configured"))?,
-    )?;
-    if tokio::net::TcpStream::connect(&remote.daemon_addr)
-        .await
-        .is_ok()
-    {
-        check_health(&remote).await?;
-        announce_ssh(&remote)?;
-        return Ok(true);
-    }
-    if local.transport == crate::config::DaemonTransport::Tcp
-        && tokio::net::TcpStream::connect(&local.daemon_addr)
-            .await
-            .is_ok()
-    {
-        return Err(Error::msg("SSH access is configured, but the running daemon has not enabled its listener. Run amarcoded restart to apply; restarting interrupts active work."));
-    }
-    Ok(false)
-}
-
-fn announce_ssh(config: &Config) -> Result<()> {
+fn announce_loopback(config: &Config) -> Result<()> {
     let token_path = config
         .ws_token_file
         .as_deref()
-        .ok_or_else(|| Error::msg("SSH access token is not configured"))?;
+        .ok_or_else(|| Error::msg("Remote access token is not configured"))?;
     println!(
-        "SSH-only daemon listening on {}\nAccess token file: {}",
+        "Authenticated daemon listening on {}\nAccess token file: {}",
         config.daemon_addr,
         token_path.display()
     );
@@ -325,7 +288,9 @@ pub fn validate(config: &Config, no_tunnel: bool) -> Result<()> {
         return Err(Error::msg("Remote mode requires a loopback WebSocket listener with a fixed port and no origin TLS; SSH or Cloudflare provides transport encryption"));
     }
     if no_tunnel && address.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
-        return Err(Error::msg("--remote --no-tunnel requires 127.0.0.1 so the desktop SSH forward can reach the daemon"));
+        return Err(Error::msg(
+            "--remote --no-tunnel requires 127.0.0.1 for private loopback access",
+        ));
     }
     Ok(())
 }
@@ -385,7 +350,7 @@ async fn finish(
     let token = crate::rpc::websocket::load_token(token_path)?;
     let address = config.daemon_addr.clone();
     let Some(cloudflared) = cloudflared else {
-        announce_ssh(&config)?;
+        announce_loopback(&config)?;
         return server
             .await
             .map_err(|error| Error::msg(error.to_string()))?;

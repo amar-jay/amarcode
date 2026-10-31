@@ -145,10 +145,6 @@ pub async fn save(url: String, token: String) -> Result<ConnectionInfo, String> 
     save_target(url, None, token).await
 }
 
-pub async fn save_ssh(config: SshTunnelConfig, token: String) -> Result<ConnectionInfo, String> {
-    save_target(String::new(), Some(config), token).await
-}
-
 async fn save_target(
     url: String,
     ssh: Option<SshTunnelConfig>,

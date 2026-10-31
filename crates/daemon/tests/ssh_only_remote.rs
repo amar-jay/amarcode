@@ -141,7 +141,7 @@ async fn ssh_only_uses_remote_data_and_authentication_without_cloudflare_or_meta
             .await
             .unwrap()
             .unwrap();
-        assert!(announcement.contains(&format!("SSH-only daemon listening on {address}")));
+        assert!(announcement.contains(&format!("Authenticated daemon listening on {address}")));
         announcement.clear();
         stdout.read_line(&mut announcement).await.unwrap();
         assert!(announcement.contains("Access token file:"));
