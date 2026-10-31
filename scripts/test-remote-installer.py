@@ -213,7 +213,8 @@ class RemoteInstallerTests(unittest.TestCase):
         subprocess.run(['bash', '-n', str(SOURCE)], check=True)
         output = subprocess.run(['bash', '-s', '--', '--help'], input=SOURCE.read_bytes(), capture_output=True, check=True)
         self.assertIn(b'--cloudflared-version', output.stdout)
-        self.assertIn(b'--tunnel', output.stdout)
+        self.assertIn(b'--ssh-only', output.stdout)
+        self.assertIn(b'--start', output.stdout)
 
     def test_offline_migration_preserves_data_token_and_aliases_old_paths(self):
         legacy, root = self.root / 'amarcode-remote', self.root / 'com.amarcode.desktop'
@@ -247,7 +248,7 @@ class RemoteInstallerTests(unittest.TestCase):
         self.assertEqual(source.read_bytes(), b'legacy')
         self.assertEqual((root / 'data/workspace.sqlite3').read_bytes(), b'desktop')
 
-    def test_desktop_release_is_reused_without_daemon_or_cloudflare_download(self):
+    def test_ssh_only_reuses_desktop_release_without_daemon_or_connector_download(self):
         base = self.root / 'data'
         installed = base / 'com.amarcode.desktop'
         digest = hashlib.sha256(self.binary).hexdigest()
@@ -268,11 +269,13 @@ class RemoteInstallerTests(unittest.TestCase):
             (tools / name).chmod(0o700)
         environment = {'HOME': str(self.root / 'home'), 'XDG_DATA_HOME': str(base),
                        'XDG_CONFIG_HOME': str(self.root / 'config'), 'ZDOTDIR': str(self.root / 'zsh')}
-        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['installer']), patch.object(self.module, 'download') as download, patch.object(self.module, 'install_runtime', return_value=tools), patch.object(self.module.platform, 'system', return_value='Linux'), patch.object(self.module.platform, 'machine', return_value='x86_64'), contextlib.redirect_stdout(io.StringIO()):
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['installer', '--ssh-only']), patch.object(self.module, 'download') as download, patch.object(self.module, 'install_runtime', return_value=tools), patch.object(self.module.platform, 'system', return_value='Linux'), patch.object(self.module.platform, 'machine', return_value='x86_64'), contextlib.redirect_stdout(io.StringIO()):
             self.module.main()
         download.assert_not_called()
         self.assertEqual(record.read_bytes(), original)
         self.assertEqual((installed / 'daemon/bin/amarcode-daemon').resolve(), executable)
+        self.assertEqual((installed / 'daemon/bin/amarcoded').resolve(), executable)
+        self.assertTrue((installed / 'run.sh').read_text().endswith(' ssh\n'))
         settings = json.loads((installed / 'remote.json').read_text())
         self.assertEqual(settings['enabled'], True)
         self.assertNotIn('cloudflared', settings)
@@ -297,6 +300,14 @@ class RemoteInstallerTests(unittest.TestCase):
         self.assertEqual((legacy / 'data').resolve(), (root / 'data').resolve())
         self.assertEqual((root / 'data/workspace.sqlite3').read_bytes(), b'legacy database')
 
+    def test_ssh_only_rejects_conflicting_public_access_options_before_installing(self):
+        for options in [['--with-cloudflare'], ['--cloudflared-version', '2026.10.3'], ['--tunnel']]:
+            with patch.object(sys, 'argv', ['installer', '--ssh-only'] + options), patch.object(self.module, 'download') as download, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    self.module.main()
+                self.assertEqual(error.exception.code, 2)
+                download.assert_not_called()
+
     def test_install_and_reinstall_preserve_token_and_write_private_launchers(self):
         manifest, signature = self.signed()
         def download(url, destination, limit):
@@ -311,14 +322,21 @@ class RemoteInstallerTests(unittest.TestCase):
             Path(destination).write_bytes(payload)
         captured = io.StringIO()
         data = self.root / "data with ' spaces"
-        with patch.dict(os.environ, {'HOME': str(self.root / 'home'), 'XDG_DATA_HOME': str(data), 'XDG_CONFIG_HOME': str(self.root / 'config'), 'ZDOTDIR': str(self.root / 'zsh')}), patch.object(sys, 'argv', ['installer', '--bin-dir', str(self.root / 'bin'), '--with-cloudflare']), patch.object(self.module, 'download', download), patch.object(self.module.platform, 'system', return_value='Linux'), patch.object(self.module.platform, 'machine', return_value='x86_64'), contextlib.redirect_stdout(captured):
+        with patch.dict(os.environ, {'HOME': str(self.root / 'home'), 'XDG_DATA_HOME': str(data), 'XDG_CONFIG_HOME': str(self.root / 'config'), 'ZDOTDIR': str(self.root / 'zsh')}), patch.object(sys, 'argv', ['installer', '--bin-dir', str(self.root / 'bin')]), patch.object(self.module, 'download', download), patch.object(self.module.platform, 'system', return_value='Linux'), patch.object(self.module.platform, 'machine', return_value='x86_64'), contextlib.redirect_stdout(captured):
             self.module.main()
             installed = data / 'com.amarcode.desktop'
             token = (installed / 'access-token').read_text()
             self.module.main()
             self.assertEqual(token, (installed / 'access-token').read_text())
+            for options, mode in [(['--start'], '--remote'), (['--start', '--ssh-only'], 'ssh'), (['--start', '--no-tunnel'], 'ssh'), (['--tunnel'], '--remote')]:
+                with patch.object(sys, 'argv', ['installer'] + options), patch.object(self.module.os, 'execv') as execute:
+                    self.module.main()
+                execute.assert_called_once_with(str(installed / 'daemon/bin/amarcode-daemon'),
+                                                [str(installed / 'daemon/bin/amarcode-daemon'), mode])
+                self.assertEqual(token, (installed / 'access-token').read_text())
+                self.assertTrue((installed / 'run.sh').read_text().endswith(' ' + mode + '\n'))
         self.assertEqual(captured.getvalue().count('Access token (save privately):'), 1)
-        self.assertIn('amarcode-daemon run', captured.getvalue())
+        self.assertIn('amarcode-daemon --remote', captured.getvalue())
         self.assertIn('No service or tunnel has been started', captured.getvalue())
         for name in ['access-token', 'remote.json', 'run.sh', 'tunnel.sh']:
             self.assertEqual((installed / name).stat().st_mode & 0o077, 0)
@@ -327,7 +345,7 @@ class RemoteInstallerTests(unittest.TestCase):
         output = subprocess.run([str(launcher)], check=True, capture_output=True)
         self.assertIn(b'Amarcode run', output.stdout)
         self.assertIn('AMARCODE_WS_TOKEN_FILE', launcher.read_text())
-        self.assertIn(' run', launcher.read_text())
+        self.assertIn(' --remote', launcher.read_text())
         self.assertNotIn('AMARCODE_REMOTE_ROOT', launcher.read_text())
         tunnel = installed / 'tunnel.sh'
         output = subprocess.run([str(tunnel)], check=True, capture_output=True)
@@ -336,6 +354,8 @@ class RemoteInstallerTests(unittest.TestCase):
         executable = Path(shlex.split(next(line for line in tunnel.read_text().splitlines() if line.startswith('exec ')))[1])
         self.assertEqual(executable, installed / 'daemon/bin/amarcode-daemon')
         self.assertEqual((self.root / 'bin/amarcode-daemon').readlink(), executable)
+        self.assertEqual((self.root / 'bin/amarcoded').readlink(), installed / 'daemon/bin/amarcoded')
+        self.assertEqual((installed / 'daemon/bin/amarcoded').resolve(), executable.resolve())
         record = json.loads((installed / 'daemon/current-release.json').read_text())
         self.assertEqual(json.loads(record['manifest'])['version'], '1.2.3')
         self.assertTrue(executable.is_symlink())

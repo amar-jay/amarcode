@@ -222,3 +222,104 @@ async fn cloudflare_attaches_without_owning_the_daemon_lifetime() {
         "ok"
     );
 }
+
+#[tokio::test]
+async fn ssh_shortcut_creates_private_access_without_a_connector_and_reuses_running_daemon() {
+    let base = tempfile::tempdir().unwrap();
+    let local = port();
+    let remote = port();
+    let root = base.path().join("com.amarcode.desktop");
+    let mut daemon = Process(
+        command(base.path(), &local, &remote)
+            .arg("ssh")
+            .spawn()
+            .unwrap(),
+    );
+    ready(&mut daemon, &local).await;
+    let token_path = root.join("access-token");
+    let token = std::fs::read_to_string(&token_path)
+        .unwrap()
+        .trim()
+        .to_owned();
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&token_path).unwrap().permissions().mode() & 0o077,
+        0
+    );
+    assert!(
+        serde_json::from_slice::<Value>(&std::fs::read(root.join("remote.json")).unwrap()).unwrap()
+            ["enabled"]
+            == true
+    );
+    assert!(!root.join("cloudflared").exists());
+    assert_eq!(
+        ws(&remote, &token, json!({"method":"health"})).await["result"]["remote_auth_required"],
+        true
+    );
+    let output = command(base.path(), &local, &remote)
+        .arg("ssh")
+        .stdout(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let message = String::from_utf8(output.stdout).unwrap();
+    assert!(message.contains(&remote));
+    assert!(message.contains("Access token file:"));
+    assert!(!message.contains(&token));
+    assert!(daemon.0.try_wait().unwrap().is_none());
+    assert_eq!(std::fs::read_to_string(&token_path).unwrap().trim(), token);
+    assert!(
+        tokio_tungstenite::connect_async(format!("ws://{remote}/rpc"))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn ssh_shortcut_preserves_existing_work_when_access_needs_a_restart() {
+    let base = tempfile::tempdir().unwrap();
+    let local = port();
+    let remote = port();
+    let mut daemon = Process(command(base.path(), &local, &remote).spawn().unwrap());
+    ready(&mut daemon, &local).await;
+    let output = command(base.path(), &local, &remote)
+        .arg("ssh")
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("amarcoded restart"));
+    assert!(daemon.0.try_wait().unwrap().is_none());
+    assert_eq!(
+        tcp(&local, json!({"method":"health"})).await["result"]["status"],
+        "ok"
+    );
+    assert!(TcpStream::connect(&remote).await.is_err());
+}
+
+#[test]
+fn ssh_shortcut_rejects_public_mode_flags_and_invalid_tokens_without_opening_a_database() {
+    let base = tempfile::tempdir().unwrap();
+    let local = port();
+    let remote = port();
+    for args in [
+        vec!["ssh", "--remote"],
+        vec!["ssh", "--remote", "--no-tunnel"],
+    ] {
+        assert!(!command(base.path(), &local, &remote)
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    }
+    let root = base.path().join("com.amarcode.desktop");
+    assert!(!root.exists());
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("access-token"), "short").unwrap();
+    assert!(!command(base.path(), &local, &remote)
+        .arg("ssh")
+        .status()
+        .unwrap()
+        .success());
+    assert!(!root.join("data/workspace.sqlite3").exists());
+}

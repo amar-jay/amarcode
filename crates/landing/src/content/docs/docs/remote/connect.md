@@ -8,7 +8,7 @@ daemon exposed through a tunnel. Projects and agents run on the selected host.
 
 ## Connect over WebSocket
 
-First [start the shared daemon and attach a Cloudflare tunnel](/docs/remote/setup/#optional-cloudflare-access) on your Linux host, then copy the WebSocket URL and access token.
+First [install and start the daemon](/docs/remote/setup/#start-and-connect) on your Linux host, then copy the connection URL and access token it prints. Remote access is set up automatically.
 
 1. Open **Settings → Connection**, or **Connection settings** in the startup dialog.
 2. Choose **Remote WebSocket** under **Connection type**.

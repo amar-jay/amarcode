@@ -252,10 +252,7 @@ fn bundled_executable() -> Result<PathBuf, String> {
     let path = desktop
         .parent()
         .ok_or("desktop executable has no parent directory")?
-        .join(format!(
-            "amarcoded{}",
-            std::env::consts::EXE_SUFFIX
-        ));
+        .join(format!("amarcoded{}", std::env::consts::EXE_SUFFIX));
     if !path.is_file() {
         return Err("bundled daemon is missing; reinstall Amarcode (developers: run bun scripts/prepare-desktop-daemon.ts --debug)".into());
     }

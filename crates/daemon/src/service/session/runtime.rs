@@ -46,22 +46,22 @@ impl DerefMut for SessionState {
 impl SessionState {
     #[cfg(test)]
     pub fn record_running_turn(&mut self, chat_id: &str) {
-        let snapshot = self
-            .snapshots
-            .entry(chat_id.to_owned())
-            .or_insert_with(|| ChatSessionSnapshot {
-                daemon_instance_id: self.instance_id.clone(),
-                chat_id: chat_id.to_owned(),
-                revision: 0,
-                run_id: None,
-                agent_id: None,
-                run_status: None,
-                turn: None,
-                pending_requests: vec![],
-                error_message: None,
-                error_kind: None,
-                context_restoration: None,
-            });
+        let snapshot =
+            self.snapshots
+                .entry(chat_id.to_owned())
+                .or_insert_with(|| ChatSessionSnapshot {
+                    daemon_instance_id: self.instance_id.clone(),
+                    chat_id: chat_id.to_owned(),
+                    revision: 0,
+                    run_id: None,
+                    agent_id: None,
+                    run_status: None,
+                    turn: None,
+                    pending_requests: vec![],
+                    error_message: None,
+                    error_kind: None,
+                    context_restoration: None,
+                });
         snapshot.revision = 2;
         snapshot.run_id = Some("run-1".into());
         snapshot.run_status = Some(RunStatus::Running);
@@ -451,7 +451,10 @@ mod tests {
         }
         let retained = state.retained_snapshots();
         assert_eq!(retained.len(), 1);
-        assert_eq!(retained[0].turn.as_ref().unwrap().status, TurnStatus::Started);
+        assert_eq!(
+            retained[0].turn.as_ref().unwrap().status,
+            TurnStatus::Started
+        );
     }
     #[test]
     fn only_one_client_claims_a_request_and_every_client_observes_resolution() {

@@ -32,7 +32,7 @@ Managed daemon self-updates currently target supported Linux and Windows service
 
 Check these in order:
 
-1. The shared daemon and, for Cloudflare, its separate tunnel command are running.
+1. The host’s `amarcode-daemon --remote` command is still running, or its service and separate `amarcode-daemon tunnel` helper are both running.
 2. The URL is from the current run and ends in `/rpc`.
 3. You entered the access token separately, without query parameters in the URL.
 4. The desktop and daemon use the same protocol version.
@@ -44,8 +44,9 @@ An old quick-tunnel URL cannot be reused after the hostname changes.
 
 First confirm you can connect to the same host or SSH config alias with your SSH
 client. Then check the **Current SSH connection** status in **Settings → Connection**.
-On the host, enable access with `amarcode-daemon access enable` and restart the
-existing daemon with `amarcode-daemon restart` (or restart its foreground `run`).
+On the host, run `amarcoded ssh`. It starts SSH access or reuses the existing
+authenticated listener. If it asks for a restart, run `amarcoded restart` (or
+restart the existing foreground daemon) when active work can be interrupted.
 It needs a valid private token file and does not require Cloudflare. Preserve
 custom environment settings when restarting a deliberately isolated instance.
 

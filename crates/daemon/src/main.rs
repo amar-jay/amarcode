@@ -29,7 +29,7 @@ struct Cli {
     /// RPC transport; WebSocket address and TLS settings are read from the environment.
     #[arg(long, value_enum, global = true)]
     transport: Option<DaemonTransport>,
-    /// Start the daemon with an authenticated Cloudflare tunnel (implies websocket).
+    /// Start the shared daemon with public remote access.
     #[arg(long, global = true)]
     remote: bool,
     /// Run remote mode on authenticated loopback for SSH, without Cloudflare.
@@ -44,6 +44,8 @@ struct Cli {
 enum LifecycleCommand {
     /// Run the long-lived RPC server in the foreground.
     Run,
+    /// Start authenticated loopback access for SSH, without a public tunnel.
+    Ssh,
     /// Resume a durable update job in an independent native service/task.
     UpdateSupervisor {
         #[arg(long)]
@@ -94,7 +96,17 @@ enum AccessMode {
 fn main() {
     #[cfg(windows)]
     amarcode_daemon::windows::attach_parent_console();
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    let ssh_mode = cli.command == Some(LifecycleCommand::Ssh);
+    if ssh_mode {
+        if cli.remote || cli.no_tunnel {
+            eprintln!("amarcoded ssh selects SSH-only access; omit --remote and --no-tunnel");
+            std::process::exit(2);
+        }
+        cli.command = Some(LifecycleCommand::Run);
+        cli.remote = true;
+        cli.no_tunnel = true;
+    }
     let command = cli.command.unwrap_or(LifecycleCommand::Run);
     // Set the service environment before Tokio creates any worker threads.
     #[cfg(windows)]
@@ -124,7 +136,15 @@ fn main() {
             std::process::exit(2);
         }
         match amarcode_daemon::remote::prepare(!cli.no_tunnel) {
-            Ok(setup) => Some(setup),
+            Ok(setup) => {
+                if ssh_mode {
+                    if let Err(error) = amarcode_daemon::remote::enable_ssh_access() {
+                        eprintln!("amarcoded ssh: {error}");
+                        std::process::exit(1);
+                    }
+                }
+                Some(setup)
+            }
             Err(error) => {
                 eprintln!("amarcode-daemon: {error}");
                 std::process::exit(1);
@@ -150,7 +170,7 @@ fn main() {
         None
     };
     let no_tunnel = cli.no_tunnel || !cli.remote;
-    async_main(command, transport, remote, no_tunnel);
+    async_main(command, transport, remote, no_tunnel, ssh_mode);
 }
 
 #[tokio::main]
@@ -159,6 +179,7 @@ async fn async_main(
     transport: DaemonTransport,
     remote: Option<amarcode_daemon::remote::Setup>,
     no_tunnel: bool,
+    ssh_mode: bool,
 ) {
     if let LifecycleCommand::Bootstrap { ref command } = command {
         if let Err(error) = amarcode_daemon::update::bootstrap::run(command.clone()).await {
@@ -209,6 +230,18 @@ async fn async_main(
         }
     };
 
+    if ssh_mode {
+        match amarcode_daemon::remote::ssh_is_running(config, remote.as_ref().expect("SSH setup"))
+            .await
+        {
+            Ok(true) => return,
+            Ok(false) => (),
+            Err(error) => {
+                eprintln!("amarcoded ssh: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     let quiet_remote = remote.is_some();
     let logging = if quiet_remote {
         logging::init_remote(config)
@@ -253,6 +286,7 @@ fn run_lifecycle_command(command: LifecycleCommand) -> amarcode_daemon::Result<(
     let controller = NativeServiceController;
     match command {
         LifecycleCommand::Run
+        | LifecycleCommand::Ssh
         | LifecycleCommand::Tunnel
         | LifecycleCommand::UpdateSupervisor { .. }
         | LifecycleCommand::Bootstrap { .. } => {
@@ -341,6 +375,7 @@ mod tests {
     fn parses_every_lifecycle_command() {
         let cases = [
             ("run", LifecycleCommand::Run),
+            ("ssh", LifecycleCommand::Ssh),
             ("install", LifecycleCommand::Install),
             ("uninstall", LifecycleCommand::Uninstall),
             ("start", LifecycleCommand::Start),

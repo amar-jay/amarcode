@@ -47,6 +47,15 @@ pub fn configured() -> Result<Option<Setup>> {
 
 /// Persist access settings without starting a second daemon or a tunnel.
 pub fn configure_access(enabled: bool) -> Result<()> {
+    configure_access_with_notice(enabled, true)
+}
+
+/// Called before Tokio starts, after prepare(false) selected the instance.
+pub fn enable_ssh_access() -> Result<()> {
+    configure_access_with_notice(true, false)
+}
+
+fn configure_access_with_notice(enabled: bool, announce: bool) -> Result<()> {
     let root = instance_root()?;
     fs::create_dir_all(&root)?;
     let path = root.join("remote.json");
@@ -83,11 +92,13 @@ pub fn configure_access(enabled: bool) -> Result<()> {
     }
     crate::update::releases::atomic_write(&path, &serde_json::to_vec_pretty(&settings)?)
         .map_err(Error::msg)?;
-    println!(
-        "Remote access {}. Restart the existing daemon to apply.\nAccess token file: {}",
-        if enabled { "enabled" } else { "disabled" },
-        root.join("access-token").display()
-    );
+    if announce {
+        println!(
+            "Remote access {}. Restart the existing daemon to apply.\nAccess token file: {}",
+            if enabled { "enabled" } else { "disabled" },
+            root.join("access-token").display()
+        );
+    }
     Ok(())
 }
 
@@ -189,10 +200,15 @@ pub async fn run_shared(local: Config, setup: Setup, no_tunnel: bool) -> Result<
 
 /// Attach Cloudflare to a live authenticated listener; never opens a database.
 pub async fn tunnel(local: Config, setup: Setup) -> Result<()> {
-    use futures_util::{SinkExt, StreamExt};
-    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
     let remote = access_config(&local, &setup)?;
     validate(&remote, false)?;
+    check_health(&remote).await?;
+    finish(remote, setup, false, tokio::spawn(std::future::pending())).await
+}
+
+async fn check_health(remote: &Config) -> Result<()> {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
     let token = crate::rpc::websocket::load_token(
         remote
             .ws_token_file
@@ -231,7 +247,12 @@ pub async fn tunnel(local: Config, setup: Setup) -> Result<()> {
             serde_json::from_str(response.to_text().map_err(|e| Error::msg(e.to_string()))?)?;
         if reply["result"]["remote_auth_required"] != true || reply["result"]["status"] != "ok" {
             return Err(Error::msg(
-                "Tunnel origin is not an authenticated Amarcode daemon",
+                "Listener is not an authenticated Amarcode daemon",
+            ));
+        }
+        if reply["result"]["protocol_version"] != amarcode_protocol::PROTOCOL_VERSION {
+            return Err(Error::msg(
+                "The running daemon has an incompatible protocol version",
             ));
         }
         socket
@@ -242,7 +263,52 @@ pub async fn tunnel(local: Config, setup: Setup) -> Result<()> {
     })
     .await
     .map_err(|_| Error::msg("Daemon health check timed out"))??;
-    finish(remote, setup, false, tokio::spawn(std::future::pending())).await
+    Ok(())
+}
+
+/// Reuse an authenticated live instance instead of creating a competing server.
+pub async fn ssh_is_running(local: &Config, setup: &Setup) -> Result<bool> {
+    let remote = if local.transport == crate::config::DaemonTransport::Tcp {
+        access_config(local, setup)?
+    } else {
+        local.clone()
+    };
+    validate(&remote, true)?;
+    crate::rpc::websocket::load_token(
+        remote
+            .ws_token_file
+            .as_deref()
+            .ok_or_else(|| Error::msg("SSH access token is not configured"))?,
+    )?;
+    if tokio::net::TcpStream::connect(&remote.daemon_addr)
+        .await
+        .is_ok()
+    {
+        check_health(&remote).await?;
+        announce_ssh(&remote)?;
+        return Ok(true);
+    }
+    if local.transport == crate::config::DaemonTransport::Tcp
+        && tokio::net::TcpStream::connect(&local.daemon_addr)
+            .await
+            .is_ok()
+    {
+        return Err(Error::msg("SSH access is configured, but the running daemon has not enabled its listener. Run amarcoded restart to apply; restarting interrupts active work."));
+    }
+    Ok(false)
+}
+
+fn announce_ssh(config: &Config) -> Result<()> {
+    let token_path = config
+        .ws_token_file
+        .as_deref()
+        .ok_or_else(|| Error::msg("SSH access token is not configured"))?;
+    println!(
+        "SSH-only daemon listening on {}\nAccess token file: {}",
+        config.daemon_addr,
+        token_path.display()
+    );
+    Ok(())
 }
 
 pub fn validate(config: &Config, no_tunnel: bool) -> Result<()> {
@@ -319,10 +385,7 @@ async fn finish(
     let token = crate::rpc::websocket::load_token(token_path)?;
     let address = config.daemon_addr.clone();
     let Some(cloudflared) = cloudflared else {
-        println!(
-            "SSH-only daemon listening on {address}\nAccess token file: {}",
-            token_path.display()
-        );
+        announce_ssh(&config)?;
         return server
             .await
             .map_err(|error| Error::msg(error.to_string()))?;

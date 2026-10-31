@@ -19,19 +19,25 @@ pub fn install(executable: &Path) -> Result<()> {
 pub fn uninstall() -> Result<()> {
     let bin = bin_dir()?;
     configure_path(&bin, true)?;
-    match fs::remove_file(bin.join("amarcode-daemon")) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.into()),
+    for name in ["amarcode-daemon", "amarcoded"] {
+        match fs::remove_file(bin.join(name)) {
+            Ok(()) => (),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(e.into()),
+        }
     }
+    Ok(())
 }
 
 fn install_command(bin: &Path, executable: &Path) -> Result<()> {
-    let temporary = bin.join(format!(".command-{}", uuid::Uuid::new_v4()));
-    std::os::unix::fs::symlink(executable, &temporary)?;
-    let result = fs::rename(&temporary, bin.join("amarcode-daemon"));
-    let _ = fs::remove_file(temporary);
-    result.map_err(Into::into)
+    for name in ["amarcode-daemon", "amarcoded"] {
+        let temporary = bin.join(format!(".command-{}", uuid::Uuid::new_v4()));
+        std::os::unix::fs::symlink(executable, &temporary)?;
+        let result = fs::rename(&temporary, bin.join(name));
+        let _ = fs::remove_file(temporary);
+        result?;
+    }
+    Ok(())
 }
 
 fn configure_path(bin: &Path, remove: bool) -> Result<()> {
@@ -141,7 +147,7 @@ mod tests {
         assert_eq!(profile.matches("# >>> Amarcode").count(), 1);
         let output = std::process::Command::new("sh")
             .arg("-c")
-            .arg(". \"$1\"; amarcode-daemon 'two words' --version")
+            .arg(". \"$1\"; amarcoded 'two words' --version")
             .arg("sh")
             .arg(home.join(".profile"))
             .env("PATH", "/usr/bin:/bin")
@@ -157,6 +163,7 @@ mod tests {
         fs::copy(&executable, &next).unwrap();
         install_command(&bin, &next).unwrap();
         assert_eq!(fs::read_link(bin.join("amarcode-daemon")).unwrap(), next);
+        assert_eq!(fs::read_link(bin.join("amarcoded")).unwrap(), next);
         linux_profiles(home, home, &home.join("config"), &bin, true).unwrap();
         assert_eq!(
             fs::read_to_string(home.join(".bash_profile")).unwrap(),

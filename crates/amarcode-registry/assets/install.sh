@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install or reuse the shared daemon, Bun, uv, and optional Cloudflare connector.
+# Install or reuse the shared daemon, agent runtimes, and remote access connector.
 set -euo pipefail
 command -v python3 >/dev/null 2>&1 || { echo 'python3 is required' >&2; exit 1; }
 exec python3 - "$@" <<'PY'
@@ -107,14 +107,14 @@ def install_cloudflared(root, architecture, requested_version=None):
     with tempfile.TemporaryDirectory(dir=root) as temporary:
         directory = Path(temporary)
         metadata = directory / 'cloudflared-release.json'
-        print('Resolving official cloudflared release...', flush=True)
+        print('Resolving remote access connector...', flush=True)
         download(endpoint, metadata, 2 * 1024 * 1024)
         release = json.loads(metadata.read_bytes())
         version, url, size, checksum = select_cloudflared_asset(release, architecture, requested_version)
         destination = root / 'cloudflared' / version / checksum / 'cloudflared'
         if not destination.is_file() or destination.stat().st_size != size or hashlib.sha256(destination.read_bytes()).hexdigest() != checksum:
             binary = directory / 'cloudflared'
-            print('Downloading cloudflared ' + version + '...', flush=True)
+            print('Downloading remote access connector ' + version + '...', flush=True)
             download(url, binary, size)
             if binary.stat().st_size != size or hashlib.sha256(binary.read_bytes()).hexdigest() != checksum:
                 raise ValueError('Downloaded cloudflared size/checksum verification failed')
@@ -123,7 +123,7 @@ def install_cloudflared(root, architecture, requested_version=None):
             destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.replace(binary, destination)
         os.chmod(destination, 0o700)
-        print('Installed cloudflared ' + version, flush=True)
+        print('Installed remote access connector ' + version, flush=True)
         return destination
 
 
@@ -286,9 +286,9 @@ def persist_command_path(home, bin_dir):
             path.write_text(updated)
 
 
-def install_command(bin_dir, executable, root, legacy=None):
+def install_command(bin_dir, executable, root, legacy=None, name='amarcode-daemon'):
     bin_dir.mkdir(parents=True, exist_ok=True)
-    command = bin_dir / 'amarcode-daemon'
+    command = bin_dir / name
     if os.path.lexists(command):
         resolved = command.resolve()
         owned = resolved.is_relative_to((root / 'daemon').resolve())
@@ -397,17 +397,21 @@ def installed_release(root, temporary, target):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Install or reuse the shared Amarcode daemon, Bun, uv, and optional cloudflared (Linux)')
+    parser = argparse.ArgumentParser(description='Install Amarcode with secure remote access and agent runtimes (Linux)')
     parser.add_argument('--version', help='Initial signed release; default: latest. Existing releases use the managed updater')
-    parser.add_argument('--with-cloudflare', action='store_true', help='Install the optional Cloudflare connector')
+    access = parser.add_mutually_exclusive_group()
+    access.add_argument('--ssh-only', '--no-tunnel', dest='ssh_only', action='store_true', help='Set up private SSH-only access without downloading a public connection helper')
+    access.add_argument('--with-cloudflare', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--cloudflared-version', help='Install a specific official cloudflared release; default: latest')
     parser.add_argument('--bun-version', help='Official Bun release tag; default: latest')
     parser.add_argument('--uv-version', help='Official uv release tag; default: latest')
     parser.add_argument('--bin-dir', type=Path, help='Optional additional command alias directory; the managed command always lives in the instance daemon/bin directory')
-    parser.add_argument('--start', action='store_true', help='Run the shared daemon in the foreground after installation (SSH-only)')
-    parser.add_argument('--tunnel', action='store_true', help='Install Cloudflare and start the shared daemon with a foreground tunnel')
+    parser.add_argument('--start', action='store_true', help='Start the daemon after installation and print its remote connection URL (SSH-only with --ssh-only)')
+    parser.add_argument('--tunnel', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--no-service', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.ssh_only and (args.cloudflared_version or args.tunnel):
+        parser.error('--ssh-only cannot be combined with --cloudflared-version or --tunnel')
     if platform.system() != 'Linux':
         parser.error('The remote installer currently supports Linux hosts')
     architecture = {'x86_64': 'x86_64', 'amd64': 'x86_64', 'aarch64': 'aarch64', 'arm64': 'aarch64'}.get(platform.machine().lower())
@@ -499,12 +503,14 @@ def main():
             }))
         migrate_legacy(legacy, root)
         command = install_command(bin_dir, executable, root)
+        short_command = install_command(bin_dir, command, root, name='amarcoded')
         if alias_dir and alias_dir != bin_dir:
             install_command(alias_dir, command, root, legacy)
+            install_command(alias_dir, short_command, root, legacy, name='amarcoded')
         old_alias = Path.home() / '.local/bin/amarcode-daemon'
         if old_alias.is_symlink() and old_alias.resolve().is_relative_to((legacy / 'releases').resolve()):
             install_command(old_alias.parent, command, root, legacy)
-    cloudflared = install_cloudflared(root, architecture, args.cloudflared_version) if args.with_cloudflare or args.cloudflared_version or args.tunnel else None
+    cloudflared = install_cloudflared(root, architecture, args.cloudflared_version) if not args.ssh_only else None
     bun_bin = install_runtime(root, 'bun', architecture, args.bun_version)
     uv_bin = install_runtime(root, 'uv', architecture, args.uv_version)
     tool_bin_dirs = [str(bun_bin), str(uv_bin)]
@@ -528,7 +534,7 @@ def main():
     import shlex
     quote = lambda value: shlex.quote(str(value))
     # Existing helper paths continue to use the same native command and lifecycle.
-    for name, arguments in [('run.sh', 'run'), ('tunnel.sh', 'tunnel')]:
+    for name, arguments in [('run.sh', 'ssh' if args.ssh_only else '--remote'), ('tunnel.sh', 'tunnel')]:
         launcher = root / name
         private_write(launcher, '#!/bin/sh\nset -eu\n' +
                       'export PATH=' + quote(os.pathsep.join(tool_bin_dirs)) + ':"$PATH"\n' +
@@ -539,7 +545,7 @@ def main():
     print('\nAmarcode remote setup complete. No service or tunnel has been started.')
     print('Daemon version: ' + version)
     print('Command: ' + str(command))
-    print('Cloudflared: ' + (str(cloudflared) if cloudflared else 'optional; not installed'))
+    print('Remote access: ' + ('ready' if cloudflared else 'SSH only'))
     print('Bun / bunx: ' + str(bun_bin))
     print('uv / uvx: ' + str(uv_bin))
     print('Data directory: ' + str(root / 'data'))
@@ -552,17 +558,21 @@ def main():
         print('PATH saved for new Bash, Zsh, and Fish sessions. For this shell, run:')
         print('  export PATH=' + quote(bin_dir) + ':"$PATH"')
     print('\nStart whenever needed:')
-    print('  amarcode-daemon run')
-    print('One instance serves local TCP on 127.0.0.1:43821 and authenticated SSH-forwarded WebSocket on 127.0.0.1:43721.')
+    print('  amarcoded ssh' if args.ssh_only else '  amarcode-daemon --remote')
+    if not args.ssh_only:
+        print('Copy the connection URL and access token it prints into Amarcode connection settings.')
+    print('Local and remote connections share the same daemon and data.')
     print('If already running, restart the existing service to apply access settings: amarcode-daemon restart')
-    print('For a managed service: amarcode-daemon bootstrap install. Cloudflare is optional: install --with-cloudflare, then amarcode-daemon tunnel.')
+    print('For a managed service: amarcode-daemon bootstrap install.')
+    if not args.ssh_only:
+        print('If the daemon is already running, attach remote access with: amarcode-daemon tunnel')
     if args.start or args.tunnel:
         os.environ.pop('AMARCODE_REMOTE_ROOT', None)
         os.environ['AMARCODE_APPDIR'] = str(root / 'data')
         os.environ['AMARCODE_WS_TOKEN_FILE'] = str(token_path)
         os.environ['PATH'] = os.pathsep.join(tool_bin_dirs + [os.environ.get('PATH', '')])
         sys.stdout.flush()
-        os.execv(str(command), [str(command), '--remote' if args.tunnel else 'run'])
+        os.execv(str(command), [str(command), 'ssh' if args.ssh_only else '--remote'])
 
 
 if __name__ == '__main__':

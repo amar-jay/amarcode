@@ -26,22 +26,32 @@ You need:
 The desktop connects to an existing daemon. It does not install, start, or update
 one over SSH. Start the daemon yourself on the remote machine as described below.
 The [remote host setup guide](/docs/remote/setup/) separately documents the
-installer and optional Cloudflare access.
+installer and default remote connection workflow.
 
 ## Start the installed daemon without Cloudflare
 
-Enable access **on the remote host** using the existing managed installation:
+Run this **on the remote host**:
 
 ```sh
-amarcode-daemon access enable
-amarcode-daemon restart
+amarcoded ssh
 ```
 
-If you run without a native service, stop the old foreground process and use
-`amarcode-daemon run` after enabling access. The same daemon serves local TCP and
-authenticated WebSocket on `127.0.0.1:43721`, sharing its database and active work.
-It does not start, download, or require Cloudflare. Keep the foreground command
-running or use `amarcode-daemon bootstrap install` for a persistent user service.
+The command creates a private access token if one is missing, enables SSH access,
+and starts the shared daemon in the foreground. Local TCP and authenticated
+WebSocket on `127.0.0.1:43721` share its database and active work. No public
+connection helper is started or required.
+
+Leave the command running while you connect from the desktop. If the authenticated
+listener is already running, the command reuses it and prints its address and
+token-file path. It preserves that daemon and its running work.
+
+If an existing local daemon has not loaded the newly enabled access settings,
+the command asks you to run `amarcoded restart`. It does not automatically
+restart that daemon and interrupt active prompts. For a persistent user service,
+use `amarcoded bootstrap install` after enabling access.
+
+`amarcoded` is installed on Linux alongside the compatible `amarcode-daemon`
+command. Both names point to the same managed daemon and follow its updates.
 
 On Linux, the instance root is
 `${XDG_DATA_HOME:-$HOME/.local/share}/com.amarcode.desktop/`:
@@ -54,7 +64,7 @@ On Linux, the instance root is
 | `remote.json`  | Persistent access settings and managed runtime locations  |
 
 Read the token privately from `access-token` and enter it in the desktop's
-**Daemon access token** field. `access enable` prints the token-file path, not
+**Daemon access token** field. `amarcoded ssh` prints the token-file path, not
 the token. A missing, invalid, or publicly readable Unix token fails startup;
 there is no unauthenticated fallback.
 
@@ -74,7 +84,7 @@ Keep custom data paths explicit rather than relying on a separate remote default
 ```sh
 AMARCODE_APPDIR=/absolute/path/to/instance/data \
 AMARCODE_WS_TOKEN_FILE=/absolute/path/to/instance/access-token \
-amarcode-daemon --remote --no-tunnel
+amarcoded ssh
 ```
 
 Use `AMARCODE_WS_ADDR` to change the additional WebSocket listener; it defaults to
