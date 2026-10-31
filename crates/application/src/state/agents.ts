@@ -22,6 +22,7 @@ export const loadAgentsAtom = atom(null, async (get, set) => {
     const agents = await daemonApi.listAgents();
     set(agentsAtom, agents);
     set(agentsLoadStateAtom, "ready");
+    void set(ensureBuiltinAgentAtom);
     return agents;
   } catch (error) {
     set(agentsLoadStateAtom, "error");
@@ -36,6 +37,7 @@ export const reloadAgentsAtom = atom(null, async (_get, set) => {
     const agents = await daemonApi.listAgents();
     set(agentsAtom, agents);
     set(agentsLoadStateAtom, "ready");
+    void set(ensureBuiltinAgentAtom);
     return agents;
   } catch (error) {
     set(agentsLoadStateAtom, "error");
@@ -43,21 +45,53 @@ export const reloadAgentsAtom = atom(null, async (_get, set) => {
   }
 });
 
-/** Install a registry agent, then merge the updated row into the catalog. */
-export const installAgentAtom = atom(
-  null,
-  async (get, set, agentId: string) => {
-    const result = await daemonApi.installAgent(agentId);
-    const agents = get(agentsAtom);
-    const next = agents.some((candidate) => candidate.id === result.agent.id)
-      ? agents.map((candidate) =>
-          candidate.id === result.agent.id ? result.agent : candidate,
-        )
-      : [...agents, result.agent];
-    set(agentsAtom, next);
-    return result;
-  },
+type InstallResult = Awaited<ReturnType<typeof daemonApi.installAgent>>;
+const installRequestsAtom = atom<Record<string, Promise<InstallResult>>>({});
+export const installingAgentIdsAtom = atom((get) =>
+  Object.keys(get(installRequestsAtom)),
 );
+
+/** Share background/manual installations and merge completion into the catalog. */
+export const installAgentAtom = atom(null, (get, set, agentId: string) => {
+  const existing = get(installRequestsAtom)[agentId];
+  if (existing) return existing;
+  const request = Promise.resolve()
+    .then(() => daemonApi.installAgent(agentId))
+    .then((result) => {
+      const agents = get(agentsAtom);
+      const next = agents.some((candidate) => candidate.id === result.agent.id)
+        ? agents.map((candidate) =>
+            candidate.id === result.agent.id ? result.agent : candidate,
+          )
+        : [...agents, result.agent];
+      set(agentsAtom, next);
+      return result;
+    })
+    .finally(() => {
+      const pending = { ...get(installRequestsAtom) };
+      delete pending[agentId];
+      set(installRequestsAtom, pending);
+    });
+  set(installRequestsAtom, { ...get(installRequestsAtom), [agentId]: request });
+  return request;
+});
+
+/** First-run installation is best-effort and never holds up startup/catalogs. */
+const ensureBuiltinAgentAtom = atom(null, async (get, set) => {
+  const builtin = get(agentsAtom).find(
+    (agent) => agent.id === "amarcode-acp" && agent.is_builtin,
+  );
+  if (!builtin || builtin.available) return;
+  try {
+    await set(installAgentAtom, builtin.id);
+  } catch (error) {
+    // Keep the catalog usable offline and leave the Install button as a retry.
+    console.info(
+      "Automatic Amarcode ACP installation failed; manual retry is available:",
+      error,
+    );
+  }
+});
 
 /**
  * Agent currently selected in the home/chat composer.

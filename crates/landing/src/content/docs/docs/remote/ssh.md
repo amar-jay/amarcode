@@ -3,16 +3,11 @@ title: Remote terminal
 description: Open an interactive shell on a remote machine through its authenticated Amarcode daemon.
 ---
 
-`amarcoded ssh` opens an interactive terminal on a machine where the Amarcode
-daemon is already running. Use it from your own terminal to work directly on the
-remote device. Desktop daemon connections use a remote URL and access token;
-there is no separate SSH connection type to configure in the app.
+Use `amarcoded ssh` from your terminal to open a shell on a remote Amarcode host.
 
 ## Open a remote shell
 
-First [install and start the daemon](/docs/remote/setup/#start-and-connect) on the
-remote host. Public remote access is configured by the installer. Leave the
-remote daemon running and copy its URL and access token.
+First [install and start the daemon](/docs/remote/setup/#start-and-connect) on the remote host and copy its URL and access token.
 
 On your own machine, run:
 
@@ -20,86 +15,42 @@ On your own machine, run:
 amarcoded ssh
 ```
 
-Enter the remote daemon URL when prompted, then paste its access token. Token
-input is hidden. The token is used for this connection and is not saved.
-You can also provide the URL directly:
+Enter the URL and paste the token when prompted. Token input is hidden and is not saved.
+
+You can also pass the URL directly:
 
 ```sh
 amarcoded ssh wss://your-host/rpc
 ```
 
-The command opens the remote user's shell in their home directory. Commands,
-files, and processes belong to the remote machine. Interactive programs,
-terminal resizing, and Ctrl+C work through a pseudo-terminal. Type `exit` or
-press Ctrl+D to close the shell. The CLI returns the shell's exit status.
+Commands run as the daemon's user on the remote host. Type `exit` or press Ctrl+D to close the shell.
 
-This is a terminal connection through Amarcode's authenticated WebSocket API,
-not the OpenSSH wire protocol. It uses the existing daemon URL and token; it
-does not require an SSH server, SSH keys, or a separately exposed SSH port.
-The daemon runs the shell with its own operating-system account and permissions.
+This uses your Amarcode connection; no SSH server or SSH keys are needed.
 
 ## Use a token file
 
-For repeated connections, keep the remote daemon's token in a private local file:
+For repeated connections, keep the remote host's token in a private local file:
 
 ```sh
 amarcoded ssh wss://your-host/rpc --token-file /absolute/path/to/remote-token
 ```
 
-`AMARCODE_WS_TOKEN_FILE` is also supported. An explicit `--token-file` takes
-precedence over that environment variable. If neither is set, the command asks
-you to paste a token. A configured but missing, invalid, or publicly readable
-Unix token file fails instead of silently choosing another credential.
+On Unix, restrict the file with `chmod 600 /absolute/path/to/remote-token`.
 
-A remote token file is separate from the access token for your own local daemon.
-Tokens are sent in an authorization header, never as URL parameters.
-Remote connections require `wss://`; `ws://` is accepted only for loopback.
+You can set `AMARCODE_WS_TOKEN_FILE` instead. If neither is supplied, the command prompts for a token.
 
 ## Connection lifetime
 
-Each terminal connection owns its own shell. Disconnecting closes that shell;
-reconnecting creates a new shell. Use a host-side multiplexer such as `tmux`
-when you need a terminal workload to survive disconnects.
-
-For Ubuntu or Debian, install it **on the remote host** with
-`sudo apt-get update` and `sudo apt-get install -y tmux`. After opening a remote
-terminal with `amarcoded ssh`, run:
+Disconnecting closes the shell. To keep work running, install `tmux` on the remote host and run:
 
 ```sh
 tmux new-session -A -s work
 ```
 
-After a dropped terminal connection, run `amarcoded ssh` again with the current
-URL and token, then run that same `tmux` command. It attaches to the existing
-`work` session, or creates it if none exists. Commands inside the session keep
-running while the terminal connection is down. Input sent immediately before a
-disconnect may already have executed; verify the terminal state before sending
-it again.
+After a disconnect, run `amarcoded ssh` again and enter the same `tmux` command to return to your work. Use the current daemon URL if it has changed.
 
-The daemon's own host-side session is separate. See
-[Codespaces and containers](/docs/remote/setup/#codespaces-and-containers-without-systemd)
-for keeping the daemon and its connection helper running.
-
-Cloudflare can terminate WebSocket connections during network changes or edge
-maintenance. Amarcode sends heartbeat messages, but those cannot make a
-connection permanent. A connector restart may change the public URL. A new
-terminal connection needs the current URL, then the same `tmux` session name.
-See [Cloudflare's WebSocket connection guidance](https://developers.cloudflare.com/network/websockets/).
-
-Closing the terminal leaves the daemon and unrelated chat agent runs running.
-`amarcoded ssh` does not start, install, restart, or reconfigure the remote daemon
-or its public connection helper. Start the server on the host with
-`amarcoded --remote`; use `amarcoded tunnel` for public access to an already
-running authenticated daemon.
-
-Both client and host need a daemon release that supports the terminal endpoint.
-The CLI requires an interactive local terminal. This command does not execute a
-single supplied command or automatically resume an earlier terminal session.
+Closing a remote terminal leaves the daemon and unrelated agent work running. See [keeping the daemon running in a container](/docs/remote/setup/#codespaces-and-containers-without-systemd).
 
 ## Loopback-only deployment
 
-To start the server without its public connection helper, use the advanced
-[loopback-only setup](/docs/remote/setup/#loopback-only-setup). Access that loopback
-listener through a network path you manage, then pass its reachable loopback URL
-to `amarcoded ssh`. This server deployment option is separate from opening an
-interactive shell.
+For a connection through a network path you manage, see [loopback-only setup](/docs/remote/setup/#loopback-only-setup).

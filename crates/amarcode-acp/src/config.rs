@@ -49,7 +49,7 @@ impl Config {
             return Err("name must start with an ASCII lowercase letter or digit and contain only lowercase letters, digits, '.', '_', or '-'".into());
         }
         if config.provider.base_url.is_empty()
-            || config.provider.api_key.trim().is_empty()
+            || (!config.provider.is_amarcode_free() && config.provider.api_key.trim().is_empty())
             || config.provider.model.trim().is_empty()
         {
             return Err(
@@ -216,7 +216,7 @@ fn default_ttl_seconds() -> u64 {
 pub struct ProviderConfig {
     #[serde(alias = "baseUrl")]
     pub base_url: String,
-    #[serde(alias = "apiKey")]
+    #[serde(default, alias = "apiKey")]
     pub api_key: String,
     pub model: String,
     /// Optional OpenAI-compatible reasoning request configuration.
@@ -225,7 +225,17 @@ pub struct ProviderConfig {
 }
 
 impl ProviderConfig {
+    pub fn is_amarcode_free(&self) -> bool {
+        matches!(
+            self.base_url.trim_end_matches('/'),
+            "https://free.amarcode.amarjay.com" | "https://free.amarcode.amarjay.com/v1"
+        )
+    }
+
     pub fn endpoint(&self) -> String {
+        if self.is_amarcode_free() {
+            return "https://free.amarcode.amarjay.com/v1/chat/completions".into();
+        }
         format!("{}/chat/completions", self.base_url)
     }
 
@@ -260,6 +270,26 @@ mod tests {
             value[key] = value_option.clone();
         }
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn free_config_loads_without_a_key_but_custom_still_requires_one() {
+        let path =
+            std::env::temp_dir().join(format!("amarcode-config-{}.json", uuid::Uuid::new_v4()));
+        let value = json!({"name":"amarcode-acp","provider":{
+            "base_url":"https://free.amarcode.amarjay.com","model":"default"
+        }});
+        std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let config = Config::from_file(&path).unwrap();
+        assert!(config.provider.api_key.is_empty());
+        assert!(config.provider.is_amarcode_free());
+        let mut value = value;
+        value["provider"]["base_url"] = json!("https://custom.example/v1");
+        std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(Config::from_file(&path)
+            .unwrap_err()
+            .contains("provider.api_key"));
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

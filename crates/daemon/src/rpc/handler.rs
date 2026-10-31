@@ -203,12 +203,7 @@ async fn authenticate_agent(app: &App, params: Value) -> Result<Value> {
 
 fn set_amarcode_acp_config(app: &App, params: Value) -> Result<Value> {
     let params: SetAmarcodeAcpConfigParams = parse_params(params)?;
-    to_value(app.agents.set_amarcode_acp_config(
-        params.base_url,
-        params.model,
-        params.api_key,
-        params.clear_api_key,
-    )?)
+    to_value(app.agents.update_amarcode_acp_config(params)?)
 }
 
 // --- chats -----------------------------------------------------------------
@@ -530,9 +525,9 @@ async fn cancel(app: &App, params: Value) -> Result<Value> {
     })
 }
 
-async fn transcribe_audio_rpc(app: &App, params: Value) -> Result<Value> {
+async fn transcribe_audio_rpc(_app: &App, params: Value) -> Result<Value> {
     let p: crate::protocol::rpc::TranscribeAudioParams = parse_params(params)?;
-    let text = tokio::task::block_in_place(|| crate::service::transcribe_audio(&app.agents, p))?;
+    let text = tokio::task::block_in_place(|| crate::service::transcribe_audio(p))?;
     to_value(crate::protocol::rpc::TranscribeAudioResult { text })
 }
 

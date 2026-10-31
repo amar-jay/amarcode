@@ -1,20 +1,21 @@
-//! Dictation transcription via the configured Amarcode ACP provider.
+//! Dictation transcription through Amarcode's fixed, keyless audio service.
 //!
-//! Audio arrives base64-encoded over RPC, is forwarded in memory to the
-//! provider's OpenAI-compatible `/audio/transcriptions` endpoint, and is
-//! never written to disk. The provider API key stays daemon-side.
+//! Audio arrives base64-encoded over RPC and is forwarded in memory. Chat
+//! provider profiles and their credentials are never used for transcription.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
-use crate::{protocol::rpc::TranscribeAudioParams, service::AgentManager, Error, Result};
+use crate::{protocol::rpc::TranscribeAudioParams, Error, Result};
 
-/// Whisper model requested from the provider (OpenRouter-style id).
+/// Dictation is independent of user-configured chat providers.
+pub const TRANSCRIPTION_ENDPOINT: &str =
+    "https://free.amarcode.amarjay.com/api/v1/audio/transcriptions";
+/// Whisper model requested from the audio service.
 pub const TRANSCRIPTION_MODEL: &str = "openai/whisper-large-v3-turbo";
 /// Provider-side upload limit for transcription audio.
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
 
-pub fn transcribe_audio(agents: &AgentManager, params: TranscribeAudioParams) -> Result<String> {
-    let (base_url, api_key) = agents.openai_compatible_provider()?;
+pub fn transcribe_audio(params: TranscribeAudioParams) -> Result<String> {
     let mime_type = params.mime_type.split(';').next().unwrap_or("").trim();
     let extension = extension_for_mime(mime_type)?;
     if params.audio_base64.trim().is_empty() {
@@ -39,17 +40,16 @@ pub fn transcribe_audio(agents: &AgentManager, params: TranscribeAudioParams) ->
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    request_transcription(&base_url, &api_key, &audio, mime_type, extension, language)
+    request_transcription(&audio, mime_type, extension, language)
 }
 
-fn request_transcription(
-    base_url: &str,
-    api_key: &str,
+fn transcription_request(
+    client: &reqwest::blocking::Client,
     audio: &[u8],
     mime_type: &str,
     extension: &str,
     language: Option<&str>,
-) -> Result<String> {
+) -> Result<reqwest::blocking::RequestBuilder> {
     let file = reqwest::blocking::multipart::Part::bytes(audio.to_vec())
         .file_name(format!("dictation.{extension}"))
         .mime_str(mime_type)
@@ -61,14 +61,20 @@ fn request_transcription(
     if let Some(language) = language {
         form = form.text("language", language.to_owned());
     }
+    Ok(client.post(TRANSCRIPTION_ENDPOINT).multipart(form))
+}
+
+fn request_transcription(
+    audio: &[u8],
+    mime_type: &str,
+    extension: &str,
+    language: Option<&str>,
+) -> Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|error| Error::msg(error.to_string()))?;
-    let response = client
-        .post(transcription_endpoint(base_url))
-        .bearer_auth(api_key)
-        .multipart(form)
+    let response = transcription_request(&client, audio, mime_type, extension, language)?
         .send()
         .map_err(|error| {
             Error::msg(format!(
@@ -83,10 +89,6 @@ fn request_transcription(
         return Err(Error::msg(provider_error_message(status.as_u16(), &body)));
     }
     parse_transcript(&body)
-}
-
-fn transcription_endpoint(base_url: &str) -> String {
-    format!("{}/audio/transcriptions", base_url.trim_end_matches('/'))
 }
 
 fn extension_for_mime(mime_type: &str) -> Result<&'static str> {
@@ -137,7 +139,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn uploads_audio_with_private_auth_and_requested_model() {
+    fn uploads_audio_to_the_fixed_service_without_auth_and_with_requested_model() {
         use std::{
             io::{Read, Write},
             net::TcpListener,
@@ -173,10 +175,8 @@ mod tests {
                 }
             }
             let request = String::from_utf8(request).unwrap();
-            assert!(request.starts_with("POST /v1/audio/transcriptions HTTP/1.1"));
-            assert!(request
-                .to_ascii_lowercase()
-                .contains("authorization: bearer test-only-key"));
+            assert!(request.starts_with("POST /api/v1/audio/transcriptions HTTP/1.1"));
+            assert!(!request.to_ascii_lowercase().contains("authorization:"));
             assert!(request.contains("multipart/form-data; boundary="));
             assert!(request.contains("name=\"file\"; filename=\"dictation.webm\""));
             assert!(request.contains("sample audio bytes"));
@@ -185,24 +185,96 @@ mod tests {
             let body = r#"{"text":"  dictated draft  "}"#;
             write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
         });
-        let result = request_transcription(
-            &format!("http://{address}/v1"),
-            "test-only-key",
+        let client = reqwest::blocking::Client::new();
+        let mut request = transcription_request(
+            &client,
             b"sample audio bytes",
             "audio/webm",
             "webm",
             Some("tr"),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        assert_eq!(request.url().as_str(), TRANSCRIPTION_ENDPOINT);
+        assert_eq!(
+            TRANSCRIPTION_ENDPOINT,
+            "https://free.amarcode.amarjay.com/api/v1/audio/transcriptions"
         );
+        assert!(!request.headers().contains_key("authorization"));
+        // Only the test redirects the built request to a local HTTP fixture.
+        *request.url_mut() = format!("http://{address}/api/v1/audio/transcriptions")
+            .parse()
+            .unwrap();
+        let result = client.execute(request).unwrap();
+        assert!(result.status().is_success());
+        let result = parse_transcript(&result.text().unwrap());
         server.join().expect("provider assertions");
         assert_eq!(result.expect("transcribe"), "dictated draft");
     }
 
     #[test]
-    fn endpoint_appends_transcriptions_path() {
-        assert_eq!(
-            transcription_endpoint("https://openrouter.ai/api/v1/"),
-            "https://openrouter.ai/api/v1/audio/transcriptions"
+    fn changing_chat_profiles_cannot_change_the_audio_endpoint_or_credentials() {
+        use crate::{
+            protocol::rpc::{AcpProfileAction, SetAmarcodeAcpConfigParams},
+            service::AgentManager,
+            store::Store,
+        };
+        use std::sync::Arc;
+        let root = tempfile::tempdir().unwrap();
+        let agents = AgentManager::new(
+            Arc::new(Store::open(&root.path().join("store.sqlite3")).unwrap()),
+            root.path(),
         );
+        agents.sync_builtin_preset().unwrap();
+        let client = reqwest::blocking::Client::new();
+        for params in [
+            SetAmarcodeAcpConfigParams {
+                base_url: "https://custom.example/v1".into(),
+                model: "chat-only".into(),
+                api_key: "private-chat-key".into(),
+                ..Default::default()
+            },
+            SetAmarcodeAcpConfigParams {
+                action: AcpProfileAction::Reset,
+                ..Default::default()
+            },
+            SetAmarcodeAcpConfigParams {
+                base_url: "https://other.example/v1".into(),
+                model: "another-chat".into(),
+                clear_api_key: true,
+                ..Default::default()
+            },
+        ] {
+            agents.update_amarcode_acp_config(params).unwrap();
+            let request = transcription_request(&client, b"audio", "audio/webm", "webm", None)
+                .unwrap()
+                .build()
+                .unwrap();
+            assert_eq!(request.url().as_str(), TRANSCRIPTION_ENDPOINT);
+            assert!(!request.headers().contains_key("authorization"));
+        }
+    }
+
+    #[test]
+    fn invalid_recordings_are_rejected_without_provider_setup_or_network() {
+        let params = |audio: &str, mime: &str| TranscribeAudioParams {
+            audio_base64: audio.into(),
+            mime_type: mime.into(),
+            language: None,
+        };
+        assert!(transcribe_audio(params("", "audio/webm"))
+            .unwrap_err()
+            .to_string()
+            .contains("No audio"));
+        assert!(transcribe_audio(params("invalid!", "audio/webm"))
+            .unwrap_err()
+            .to_string()
+            .contains("could not be read"));
+        assert!(transcribe_audio(params("YQ==", "video/mp4"))
+            .unwrap_err()
+            .to_string()
+            .contains("Unsupported"));
     }
 
     #[test]

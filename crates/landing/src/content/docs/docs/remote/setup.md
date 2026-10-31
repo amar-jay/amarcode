@@ -3,209 +3,100 @@ title: Set up a remote host
 description: Install Amarcode on Linux and connect your desktop using its secure remote URL.
 ---
 
-A remote connection uses the daemon on the selected host. The desktop and
-headless installer share one daemon installation, release store, and database
-per user on that host. Project files, chats, agent processes, and provider
-credentials stay there. Connecting from another machine does not create a second
-instance or copy its database.
+Install the daemon on a Linux machine to work with its projects from Amarcode. Files, conversations, agents, and credentials stay on that host.
 
 ## Before you start
 
-The installer needs Linux, Bash, Python 3, OpenSSL with Ed25519 support, and
-outbound internet access. You do not need root, a systemd user session, or
-preinstalled Rust, Bun, or uv. A signed release advertising `unified-instance`
-support must be available for the host architecture; older releases are rejected.
-
-If both the old remote daemon and a desktop daemon contain data, see
-[migrate an existing remote installation](#migrate-an-existing-remote-installation)
-before continuing.
+You need Linux, Bash, Python 3, OpenSSL with Ed25519 support, and internet access. The installer sets up the daemon and the tools needed to install agents.
 
 ## Install or reuse the daemon
+
+On the remote host, run:
 
 ```bash
 curl -fsSL https://amarcode.amarjay.com/install.sh | bash
 ```
 
-The installer verifies the daemon and managed Bun and uv runtimes. If a managed
-daemon is already installed, it verifies and reuses its current release instead
-of replacing a running service. The current release record and immutable binary
-layout are the same ones used by desktop bootstrap and the managed updater.
+Remote access is included. The installer creates an access token and prints the next steps; it does not start the daemon.
 
-Remote access is included by default. The installer sets up the connection
-helper and creates a private access token if one is missing. You do not need to
-choose or configure a tunnel provider.
-
-Installation does not start the daemon. To install and start a foreground remote
-session in one command, use:
-
-```bash
-curl -fsSL https://amarcode.amarjay.com/install.sh | bash -s -- --start
-```
-
-The stable commands `amarcoded` and `amarcode-daemon` share the same managed
-executable in `daemon/bin/` under the instance root.
-The installer adds that directory to Bash, Zsh, and Fish startup configuration.
-Open a new terminal or use the PATH command it prints. `--bin-dir` creates an
-additional alias pointing to the stable command, so it follows managed updates.
+Open a new terminal if `amarcoded` is not found, or use the PATH command printed by the installer. `amarcode-daemon` is an alternative name for the same command.
 
 ## Start and connect
 
-On the remote host, run:
+Run:
 
 ```sh
-amarcode-daemon --remote
+amarcoded --remote
 ```
 
-Wait for the connection URL and access token to appear. In the desktop, open
-**Settings → Connection**, choose **Remote daemon**, and enter the URL and
-token. See [connect from the desktop](/docs/remote/connect/) for the full steps.
+Copy the connection URL and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, and select **Verify and apply** after entering both.
 
-Keep the command running while you use it. Ctrl+C stops this foreground daemon
-and its connection helper, interrupting active agent processes. Closing the
-desktop connection leaves the host command and its work running. The connection
-URL changes each time you start a new helper; your token and conversations are
-preserved.
+Keep this command running while you work. Ctrl+C stops the daemon and interrupts active agents. A new connection-helper session may print a different URL; update the app's connection settings if it changes.
 
-If the daemon already runs as a service, use the
-[existing-service workflow](#use-an-existing-service) below instead of starting a
-second process.
+See [connect from the desktop](/docs/remote/connect/) for choosing a remote project.
 
 :::caution[Keep the token private]
-The access token authorizes access to your daemon and its host operations.
-Do not put it in a URL or share it with others.
+Anyone with the access token can access your daemon and perform operations on its host.
 :::
 
 ## Codespaces and containers without systemd
 
-Use a foreground daemon inside `tmux` when the host has no working systemd user
-manager. The installer does not start a daemon, and `amarcoded tunnel` only
-attaches to an already-running authenticated listener. A service definition file
-alone does not mean that listener is running.
+Run the daemon inside `tmux` to keep it running when you close your terminal.
 
-For Ubuntu or Debian containers, install `tmux` if the command is missing:
+On Ubuntu or Debian, install `tmux` if needed:
 
 ```sh
 sudo apt-get update
 sudo apt-get install -y tmux
 ```
 
-Start a host-side session and run the daemon inside it:
+Start a session and run the daemon inside it:
 
 ```sh
 tmux new-session -s amarcode
 amarcoded --remote
 ```
 
-Wait for the URL and token, then press **Ctrl+B**, release both keys, and press
-**D** to detach. You can close your outer terminal while the daemon and its
-connection helper continue inside `tmux`. Return to the session with:
+Copy the URL and token, then press **Ctrl+B**, release both keys, and press **D** to detach. Return with:
 
 ```sh
 tmux attach-session -t amarcode
 ```
 
-Keep the foreground command running. If it exits, run `amarcoded --remote` again
-in that session and copy the new URL into the app. A restarted quick tunnel may
-have a different hostname; the access token and database are reused.
-
-`tmux` preserves processes across terminal disconnects, but not container stops,
-Codespaces suspension/deletion, host reboots, or explicit process termination.
-It also does not restart an exited command automatically. For unattended
-operation, use a supported process supervisor on a persistent host.
-
-If a container's `systemctl` wrapper says systemd is unavailable, do not rely on
-`amarcoded start` or `restart` to manage a user service. Use the foreground
-workflow above. `status` describes native service state; `tunnel` verifies the
-actual authenticated listener before connecting. `Connection refused` means
-that listener is not reachable yet, even if an older build printed `Running`.
+If the daemon exits, start it again and copy its new URL. `tmux` keeps work running across terminal disconnects, but not container stops, suspension, or host reboots.
 
 ## Use an existing service
 
-For a persistent daemon on a host with a systemd user manager:
+On a host with a working systemd user manager, install a persistent service and open remote access with:
 
 ```sh
-amarcode-daemon bootstrap install
-amarcode-daemon tunnel
+amarcoded bootstrap install
+amarcoded tunnel
 ```
 
-If the service was already running before installation enabled remote access,
-apply the new settings with `amarcode-daemon restart`, then run
-`amarcode-daemon tunnel`. The connection helper attaches to the existing daemon
-and prints the connection URL and token. It authenticates to that daemon before
-opening remote access. Ctrl+C stops the helper and leaves the daemon and its
-work running. If the helper fails, the daemon also remains running.
+If the service was running before remote access was configured, run `amarcoded restart` before starting the tunnel.
 
-One process serves local TCP and authenticated remote WebSocket connections.
-Both share the same live sessions, approvals, and database. Restarting that
-process interrupts active agent work, so restart only when appropriate.
-
-To enable remote connections on an existing daemon without rerunning the
-installer, use `amarcode-daemon access enable`, then restart it.
-`access disable` disables remote connections after the next restart while
-preserving the database and token. Access settings survive managed updates and
-rollback.
+Keep the tunnel command running. Stopping it closes remote access while the daemon keeps running. The tunnel command requires an already-running daemon.
 
 ## Loopback-only setup
 
-For access through a private network path or a tunnel you manage, opt out of the included
-public connection helper:
+For access through a private network path or tunnel you manage:
 
 ```bash
 curl -fsSL https://amarcode.amarjay.com/install.sh | bash -s -- --no-tunnel
+amarcoded --remote --no-tunnel
 ```
 
-This installs the same shared daemon and agent runtimes, and enables its
-private authenticated listener without downloading the public connection helper.
-Start it with `amarcoded --remote --no-tunnel`, or use the existing user service.
-`--no-tunnel --start` starts the foreground daemon immediately after installation.
-The app connects using the reachable daemon URL and token.
-For an interactive shell, see [Remote terminal](/docs/remote/ssh/).
-The desktop connects to an existing daemon and does not provision the host.
-
-`amarcoded --remote --no-tunnel` starts authenticated loopback access using
-the private token created by the installer. `amarcode-daemon` is a compatible
-command name. The WebSocket listener uses
-`127.0.0.1:43721`; `AMARCODE_WS_ADDR` or `remote.json`'s `listen_addr` changes its
-port. Local TCP uses `127.0.0.1:43821` and is configured separately through
-`AMARCODE_DAEMON_ADDR`.
-
-The included public connection helper uses Cloudflare Tunnel. Its installation
-and configuration are handled automatically; the normal setup requires no
-provider-specific options.
+The authenticated listener uses `127.0.0.1:43721`. Make it reachable through your chosen network path, then connect using its URL and access token.
 
 ## Installation layout
 
-On Linux the shared instance root is
-`${XDG_DATA_HOME:-$HOME/.local/share}/com.amarcode.desktop/`:
+The default Linux installation is `${XDG_DATA_HOME:-$HOME/.local/share}/com.amarcode.desktop/`. Its `data/` directory contains conversations, attachments, agent installations, credentials, and logs. Project folders stay where you created them.
 
-| Path           | Purpose                                                                       |
-| -------------- | ----------------------------------------------------------------------------- |
-| `data/`        | Chats, attachments, agent installations, credentials, and logs                |
-| `daemon/`      | Verified releases, current release record, update journal, and stable command |
-| `access-token` | Private remote bearer credential                                              |
-| `remote.json`  | Optional access settings and runtime/connector locations                      |
-| `runtimes/`    | Managed Bun and uv tools                                                      |
-| `cloudflared/` | Managed remote connection helper                                                            |
-
-Project directories stay wherever you created them on the host. The application
-on your laptop can have its own local daemon and database; it is a different host.
+The desktop and command-line tools share one installation per user on each host.
 
 ## Migrate an existing remote installation
 
-Stop the old foreground daemon or `amarcode-remote.service`, then rerun this
-installer. When the old `amarcode-remote/data` is the only populated instance,
-it moves the complete data directory to the shared root and preserves the
-access token. The old data path becomes an alias of the new one, so old launchers
-cannot silently open a second database. Old owned command aliases are redirected
-to the stable managed command. Legacy runtime and binary files are retained.
+Back up your data and stop the old daemon before rerunning the installer. It can migrate an older remote installation while preserving conversations and the access token.
 
-Migration refuses a database held by a running daemon, conflicting access tokens,
-or a populated target data directory. If both installations contain data, both
-are preserved: stop both daemons, back up the directories, and choose the instance
-you want to keep before migrating. Databases are not automatically merged.
-An interrupted migration is detected at startup; rerunning the installer resumes it.
-
-Advanced isolated setups can explicitly select `AMARCODE_APPDIR` and
-`AMARCODE_STORE_PATH`. Legacy `AMARCODE_REMOTE_ROOT` with `--remote` still selects
-that explicit installation; it is not the default. Custom instances are outside
-the standard service updater and need their own process supervision and lifecycle.
+If the installer reports conflicting data directories or tokens, keep both backups and resolve the conflict before continuing. Separate conversation databases are not merged automatically.

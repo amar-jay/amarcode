@@ -5,9 +5,7 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { useAtomValue } from "jotai";
 import { daemonApi } from "@/api";
-import { agentsAtom } from "@/state/agents";
 import { mergeDictatedText } from "@/lib/dictation";
 
 export type DictationStatus =
@@ -50,8 +48,6 @@ export function useDictation({
 }: UseDictationOptions) {
   const [status, setStatus] = useState<DictationStatus>("idle");
   const [seconds, setSeconds] = useState(0);
-  const [configured, setConfigured] = useState<boolean | null>(null);
-  const catalog = useAtomValue(agentsAtom);
   const statusRef = useRef<DictationStatus>("idle");
   const generationRef = useRef(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -93,22 +89,6 @@ export function useDictation({
     typeof MediaRecorder !== "undefined" &&
     typeof navigator !== "undefined" &&
     Boolean(navigator.mediaDevices?.getUserMedia);
-
-  // Settings refreshes the agent catalog after saving provider credentials.
-  useEffect(() => {
-    let cancelled = false;
-    void daemonApi
-      .getAmarcodeAcpConfig()
-      .then((config) => {
-        if (!cancelled) setConfigured(config.configured);
-      })
-      .catch(() => {
-        if (!cancelled) setConfigured(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [catalog]);
 
   const changeStatus = useCallback((next: DictationStatus) => {
     statusRef.current = next;
@@ -186,14 +166,7 @@ export function useDictation({
     changeStatus("requesting");
     let stream: MediaStream | null = null;
     try {
-      // Recheck immediately before capture so cleared credentials are respected.
-      const config = await daemonApi.getAmarcodeAcpConfig();
-      if (generation !== generationRef.current) return;
-      setConfigured(config.configured);
-      if (!config.configured)
-        throw new Error(
-          "Set up Amarcode ACP in Settings before using dictation.",
-        );
+      // Dictation uses the fixed keyless service, independently of chat settings.
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (generation !== generationRef.current) {
         for (const track of stream.getTracks()) track.stop();
@@ -290,5 +263,5 @@ export function useDictation({
     else if (statusRef.current === "idle") void start();
   }, [start, stopAndTranscribe, transcribe]);
 
-  return { status, seconds, configured, supported, toggle, cancel };
+  return { status, seconds, supported, toggle, cancel };
 }

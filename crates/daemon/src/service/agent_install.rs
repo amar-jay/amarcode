@@ -709,15 +709,11 @@ mod tests {
         assert!(result.runtime_message.is_none());
         assert!(result.agent.available);
         assert!(result.agent.unavailable_reason.is_none());
-        assert!(!manager.amarcode_acp_config_path().exists());
-        // Readiness for download/selection is separate from chat configuration.
-        let error = manager
+        assert!(manager.amarcode_acp_config_path().exists());
+        // Fresh installations can chat through the keyless default immediately.
+        assert!(manager
             .resolve(super::super::amarcode_acp::AGENT_ID)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("Settings → ACP provider"));
-        assert!(!error.contains("sign in"));
-        assert!(!error.contains("authenticate"));
+            .is_ok());
         manager
             .set_amarcode_acp_config(
                 "https://example.com/v1".into(),

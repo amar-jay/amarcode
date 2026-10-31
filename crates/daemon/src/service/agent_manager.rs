@@ -39,6 +39,7 @@ pub struct AgentManager {
     tools_dir: PathBuf,
     registry_dir: PathBuf,
     amarcode_acp_install_lock: Arc<Mutex<()>>,
+    pub(super) acp_provider_lock: Arc<Mutex<()>>,
 }
 
 impl AgentManager {
@@ -52,6 +53,7 @@ impl AgentManager {
             tools_dir,
             registry_dir,
             amarcode_acp_install_lock: Arc::new(Mutex::new(())),
+            acp_provider_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -115,6 +117,10 @@ impl AgentManager {
     }
 
     pub fn sync_builtin_preset(&self) -> Result<()> {
+        if let Err(error) = self.amarcode_acp_config() {
+            // Invalid custom credentials should not stop the entire daemon.
+            tracing::warn!(%error, "could not initialize ACP provider configuration");
+        }
         let existing = self.get(super::amarcode_acp::AGENT_ID)?;
         let now = timestamp();
         let executable = existing

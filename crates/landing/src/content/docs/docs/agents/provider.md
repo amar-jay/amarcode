@@ -3,38 +3,27 @@ title: Configure a provider
 description: Connect Amarcode ACP to an OpenAI-compatible model provider.
 ---
 
-The built-in **Amarcode ACP** agent uses an OpenAI-compatible chat-completion API. You supply the provider endpoint, model ID, and API key.
+The built-in **Amarcode ACP** agent is ready to use with Amarcode Free. You only need these settings if you want to use your own model provider.
 
-Downloading and installing Amarcode ACP requires no sign-in, API key, or provider
-configuration. Once downloaded, it remains installed and selectable. Configure
-a provider before starting a chat; these settings are separate from installation.
+## Add a provider
 
-## Save your provider settings
+1. Open **Settings → ACP provider** and choose **Add provider**.
+2. Give it a name.
+3. Enter your provider's **Base URL**, **Model ID**, and **API key**.
+4. Choose **Save and use**, then start a new chat.
 
-1. Open **Settings → ACP provider**.
-2. Enter the provider's **Base URL**, including its API prefix when required, such as `https://provider.example/v1`.
-3. Enter the exact **Model ID** accepted by your provider.
-4. Enter your **API key** and save the settings.
-5. Select **Amarcode ACP** in the agent picker.
+Use the endpoint and model ID from your provider's documentation. For example, a base URL may include an API prefix such as `https://provider.example/v1`.
 
-Use your provider's documentation for its endpoint, model IDs, pricing, and account requirements. Chat-completion compatibility alone does not guarantee that a model supports tool calls or images.
+## Switch providers
 
-## Where the key lives
+Choose a saved provider from the **Provider** selector. Choose **Use default** to return to Amarcode Free; your saved providers remain available.
 
-The daemon stores the provider configuration in its private credentials directory as `amarcode-acp.json`. The UI receives whether a key is present, rather than receiving the saved key back.
+**Delete provider** removes a saved provider and its key. Deleting the active provider returns to the default. Provider changes apply to new chats.
 
-With a remote connection, these settings and credentials belong to the **remote daemon**. Switching back to a local daemon uses that host's own configuration.
+## Manage keys
 
-Leaving the API-key field empty preserves an existing key unless you explicitly clear it.
+Keys are saved on the computer running the daemon. When connected remotely, you are changing that remote host's provider settings.
 
-## Model selection
+Leave the key field blank to keep its saved value. If you change the base URL, enter the key again.
 
-The adapter attempts to discover models from the provider. When discovery succeeds, its session configuration can expose model choices. If the catalog is unavailable or invalid, the configured model remains the fallback.
-
-Context lengths and completion limits may come from provider metadata; the adapter uses defaults when metadata is absent. It estimates usage when the provider does not report it.
-
-## Dictation uses this provider too
-
-Dictation sends audio to this provider's `/audio/transcriptions` endpoint using the configured API key. It currently requests `openai/whisper-large-v3-turbo`, so the provider must support that endpoint and model even if your chat model works.
-
-[Attachments and dictation →](/docs/workspace/attachments-and-dictation/)
+Dictation works without provider setup and is unaffected by these settings. See [attachments and dictation](/docs/workspace/attachments-and-dictation/).

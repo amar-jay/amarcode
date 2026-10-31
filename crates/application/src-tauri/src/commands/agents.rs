@@ -44,17 +44,7 @@ pub async fn get_amarcode_acp_config(
 #[tauri::command]
 pub async fn set_amarcode_acp_config(
     client: State<'_, DaemonClient>,
-    base_url: String,
-    model: String,
-    api_key: String,
-    clear_api_key: bool,
+    params: SetAmarcodeAcpConfigParams,
 ) -> Result<AmarcodeAcpConfigResult, String> {
-    client
-        .set_amarcode_acp_config(SetAmarcodeAcpConfigParams {
-            base_url,
-            model,
-            api_key,
-            clear_api_key,
-        })
-        .await
+    client.set_amarcode_acp_config(params).await
 }

@@ -1,5 +1,15 @@
+import { daemonConnectionGenerationAtom } from "@/state/daemon-events";
+import type {
+  AmarcodeAcpConfigResult,
+  AmarcodeAcpProfile,
+  AcpProfileAction,
+} from "@/generated/protocol";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
 import { getPreferredAgent } from "@/lib/agent";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useWorkspacePicker } from "@/hooks/use-workspace-picker";
 import { DaemonConnectionSettings } from "@/components/daemon-connection-settings";
@@ -104,7 +114,7 @@ import {
 import type { AgentInfo } from "@/types";
 import { AgentLogo } from "@/components/agent-logo";
 import { Badge } from "@/components/ui/badge";
-import { installAgentAtom, reloadAgentsAtom } from "@/state/agents";
+import { installAgentAtom, installingAgentIdsAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 
 type SettingsPage =
@@ -518,73 +528,81 @@ function DaemonDataPanel() {
 }
 
 function AcpProviderPanel() {
-  const reloadAgents = useSetAtom(reloadAgentsAtom);
-  const installAgent = useSetAtom(installAgentAtom);
-  const [config, setConfig] = useState<{
-    base_url: string;
-    model: string;
-    has_api_key: boolean;
-  } | null>(null);
+  const generation = useAtomValue(daemonConnectionGenerationAtom);
+  return <AcpProviderSettings key={generation} />;
+}
+
+function AcpProviderSettings() {
+  const [config, setConfig] = useState<AmarcodeAcpConfigResult | null>(null);
+  const [draft, setDraft] = useState<AmarcodeAcpProfile | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isDefault = draft?.id === "amarcode-free";
+  const activeRef = useRef(true);
+  const savedDraft = config?.profiles.find((p) => p.id === draft?.id);
+  const hasSavedKey = Boolean(
+    savedDraft?.has_api_key &&
+    savedDraft.base_url === draft?.base_url.trim().replace(/\/+$/, ""),
+  );
 
   useEffect(() => {
     let cancelled = false;
+    activeRef.current = true;
     void daemonApi
       .getAmarcodeAcpConfig()
       .then((value) => {
-        if (!cancelled) setConfig(value);
+        if (cancelled) return;
+        if (!value.profiles.length) {
+          setError("Update the connected daemon to manage saved providers.");
+          return;
+        }
+        setConfig(value);
+        setDraft(
+          value.profiles.find((p) => p.id === value.active_profile_id) ?? null,
+        );
       })
       .catch((cause: unknown) => {
-        if (!cancelled) {
-          setError(
-            cause instanceof Error
-              ? cause.message
-              : "Could not load Amarcode provider settings.",
-          );
-        }
+        if (!cancelled) setError(String(cause));
       });
     return () => {
       cancelled = true;
+      activeRef.current = false;
     };
   }, []);
 
-  const save = async () => {
-    if (!config || saving) return;
+  const update = async (action: AcpProfileAction, profileId = draft?.id) => {
+    if (saving) return;
+    const saveProfile = action === "save" || action === "create";
     setSaving(true);
     setError(null);
-    let settingsSaved = false;
     try {
-      const value = await daemonApi.setAmarcodeAcpConfig(
-        config.base_url,
-        config.model,
-        apiKey,
-      );
-      settingsSaved = true;
+      const value = await daemonApi.updateAmarcodeAcpProfile({
+        action,
+        profile_id: profileId || null,
+        name: saveProfile ? (draft?.name ?? null) : null,
+        base_url: saveProfile ? (draft?.base_url ?? "") : "",
+        model: saveProfile ? (draft?.model ?? "") : "",
+        api_key: saveProfile ? apiKey : "",
+        clear_api_key: false,
+      });
+      if (!activeRef.current) return;
       setConfig(value);
-      setApiKey("");
-      const agents = await reloadAgents();
-      const amarcodeAgent = agents.find((agent) => agent.is_builtin);
-      if (!amarcodeAgent)
-        throw new Error(
-          "The built-in agent is missing from the daemon catalog.",
-        );
-      if (!amarcodeAgent.available) {
-        await installAgent(amarcodeAgent.id);
-      }
-      await reloadAgents();
-      notify("Amarcode provider settings saved", "success");
-    } catch (cause) {
-      setError(
-        settingsSaved
-          ? "Settings saved, but the Amarcode agent could not be installed."
-          : cause instanceof Error
-            ? cause.message
-            : "Could not save Amarcode provider settings.",
+      setDraft(
+        value.profiles.find((p) => p.id === value.active_profile_id) ?? null,
       );
+      setApiKey("");
+      notify(
+        action === "delete"
+          ? "Provider deleted"
+          : "Provider saved and selected",
+        "success",
+      );
+    } catch (cause) {
+      if (!activeRef.current) return;
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setSaving(false);
+      if (activeRef.current) setSaving(false);
     }
   };
 
@@ -592,81 +610,152 @@ function AcpProviderPanel() {
     <div className="mx-auto w-full max-w-132">
       <h2 className="text-base font-medium">ACP provider</h2>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        Configure the provider used by the built-in Amarcode agent.
+        Use Amarcode Free or save your own chat model providers. Dictation
+        always uses Amarcode Free.
       </p>
       <Separator className="my-6" />
-      {config === null ? (
-        <div className="grid min-h-9 gap-2">
-          {!error && (
-            <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
-          )}
-          {error && (
-            <p className="text-[11px] text-destructive" role="alert">
-              {error}
-            </p>
-          )}
-        </div>
-      ) : (
-        <FieldSet className="gap-5">
-          <div className="grid grid-cols-2 gap-3">
-            <Field>
-              <FieldLabel htmlFor="acp-provider-url">Base URL</FieldLabel>
-              <Input
-                id="acp-provider-url"
-                placeholder="https://openrouter.ai/api/v1"
-                value={config.base_url}
-                onChange={(event) =>
-                  setConfig({ ...config, base_url: event.target.value })
-                }
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="acp-provider-model">Model ID</FieldLabel>
-              <Input
-                id="acp-provider-model"
-                value={config.model}
-                onChange={(event) =>
-                  setConfig({ ...config, model: event.target.value })
-                }
-              />
-            </Field>
-          </div>
+      {config && draft ? (
+        <FieldSet className="gap-5" disabled={saving}>
           <Field>
-            <FieldLabel htmlFor="acp-provider-key">API key</FieldLabel>
-            <div className="flex gap-2">
-              <Input
-                id="acp-provider-key"
-                type="password"
-                autoComplete="off"
-                placeholder={
-                  config.has_api_key
-                    ? "API key saved: enter to replace"
-                    : "API key"
+            <FieldLabel htmlFor="acp-provider-profile">Provider</FieldLabel>
+            <div className="flex flex-wrap gap-2">
+              <NativeSelect
+                id="acp-provider-profile"
+                className="min-w-40 flex-1"
+                value={draft.id}
+                onChange={(event) =>
+                  void update("activate", event.target.value)
                 }
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-              />
+              >
+                {!draft.id && (
+                  <NativeSelectOption value="">New provider</NativeSelectOption>
+                )}
+                {config.profiles.map((p) => (
+                  <NativeSelectOption key={p.id} value={p.id}>
+                    {p.name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
               <Button
                 type="button"
-                disabled={
-                  saving ||
-                  !config.base_url.trim() ||
-                  !config.model.trim() ||
-                  (!config.has_api_key && !apiKey.trim())
-                }
-                onClick={() => void save()}
+                variant="outline"
+                onClick={() => {
+                  setDraft({
+                    id: "",
+                    name: "",
+                    base_url: "",
+                    model: "",
+                    has_api_key: false,
+                  });
+                  setApiKey("");
+                  setError(null);
+                }}
               >
-                {saving && <LoaderCircle className="size-4 animate-spin" />}
-                Save
+                Add provider
               </Button>
+              {!isDefault && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void update("reset")}
+                >
+                  Use default
+                </Button>
+              )}
             </div>
           </Field>
+          {isDefault ? (
+            <div className="space-y-2 text-xs leading-5">
+              <p className="font-medium">Amarcode Free</p>
+              <p className="break-all text-muted-foreground">
+                {draft.base_url}
+              </p>
+              <p className="text-muted-foreground">No API key needed.</p>
+            </div>
+          ) : (
+            <>
+              <Field>
+                <FieldLabel htmlFor="acp-provider-name">Name</FieldLabel>
+                <Input
+                  id="acp-provider-name"
+                  value={draft.name}
+                  placeholder="My provider"
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="acp-provider-url">Base URL</FieldLabel>
+                  <Input
+                    id="acp-provider-url"
+                    placeholder="https://provider.example/v1"
+                    value={draft.base_url}
+                    onChange={(e) =>
+                      setDraft({ ...draft, base_url: e.target.value })
+                    }
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="acp-provider-model">Model ID</FieldLabel>
+                  <Input
+                    id="acp-provider-model"
+                    value={draft.model}
+                    onChange={(e) =>
+                      setDraft({ ...draft, model: e.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field>
+                <FieldLabel htmlFor="acp-provider-key">API key</FieldLabel>
+                <Input
+                  id="acp-provider-key"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={
+                    hasSavedKey ? "Key saved: leave blank to keep" : "API key"
+                  }
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                />
+              </Field>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  disabled={
+                    !draft.base_url.trim() ||
+                    !draft.model.trim() ||
+                    (!hasSavedKey && !apiKey.trim())
+                  }
+                  onClick={() => void update(draft.id ? "save" : "create")}
+                >
+                  {saving && <LoaderCircle className="size-4 animate-spin" />}
+                  Save and use
+                </Button>
+                {draft.id && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void update("delete")}
+                  >
+                    Delete provider
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
           {error && (
             <p className="text-[11px] text-destructive" role="alert">
               {error}
             </p>
           )}
         </FieldSet>
+      ) : error ? (
+        <p className="text-[11px] text-destructive" role="alert">
+          {error}
+        </p>
+      ) : (
+        <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
       )}
     </div>
   );
@@ -690,6 +779,7 @@ function AgentDefaultsPanel({
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const installAgent = useSetAtom(installAgentAtom);
+  const installingAgentIds = useAtomValue(installingAgentIdsAtom);
   const selectedAgent = getPreferredAgent(agents, defaultAgentId);
   const availableAgents = agents.filter((agent) => agent.available);
   const installableAgents = agents.filter((agent) => !agent.available);
@@ -729,7 +819,8 @@ function AgentDefaultsPanel({
   };
 
   const renderAgent = (agent: AgentInfo) => {
-    const installing = installingId === agent.id;
+    const installing =
+      installingId === agent.id || installingAgentIds.includes(agent.id);
     return (
       <CommandItem
         className="grid w-full! cursor-pointer grid-cols-[1rem_minmax(0,1fr)_2rem] items-center gap-2 rounded-none [&>svg:last-child]:hidden data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
@@ -760,7 +851,7 @@ function AgentDefaultsPanel({
             className="inline-flex size-6 items-center justify-center justify-self-end rounded-md text-primary hover:bg-foreground/10 disabled:opacity-50"
             aria-label={`Install ${agent.name.replace(/\s*\bACP\s*$/i, "")}`}
             title={`Install ${agent.name.replace(/\s*\bACP\s*$/i, "")}`}
-            disabled={installingId !== null}
+            disabled={installingId !== null || installing}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();

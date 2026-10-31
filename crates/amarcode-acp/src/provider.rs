@@ -388,6 +388,26 @@ pub async fn stream_completion(
     Ok(Completion::Completed(turn))
 }
 
+// The free service selects its model and never receives a saved custom key.
+// Apply this to streaming, fallback, and compaction requests alike.
+fn completion_request(
+    client: &HttpClient,
+    config: &Config,
+    body: &Value,
+) -> reqwest::RequestBuilder {
+    let mut body = body.clone();
+    if config.provider.is_amarcode_free() {
+        if let Some(object) = body.as_object_mut() {
+            object.remove("model");
+        }
+    }
+    let mut request = client.post(config.provider.endpoint()).json(&body);
+    if !config.provider.is_amarcode_free() && !config.provider.api_key.is_empty() {
+        request = request.bearer_auth(&config.provider.api_key);
+    }
+    request
+}
+
 /// Retry requests only before a response is published. Every wait is cancellable.
 async fn send_with_retry(
     client: &HttpClient,
@@ -399,8 +419,9 @@ async fn send_with_retry(
         if *cancellation.borrow() {
             return Ok(Completion::Cancelled);
         }
+        let request = completion_request(client, config, body);
         let response = tokio::select! {
-            response = client.post(config.provider.endpoint()).bearer_auth(&config.provider.api_key).json(body).send() => response,
+            response = request.send() => response,
             _ = cancellation.changed() => return Ok(Completion::Cancelled),
         };
         let delay = match response {
@@ -684,6 +705,13 @@ pub async fn fetch_models(
     client: &HttpClient,
     config: &Config,
 ) -> Result<Vec<DiscoveredModel>, String> {
+    if config.provider.is_amarcode_free() {
+        return Ok(vec![DiscoveredModel {
+            id: config.provider.model.clone(),
+            context_length: None,
+            max_completion_tokens: None,
+        }]);
+    }
     let response = client
         .get(config.provider.models_endpoint())
         .bearer_auth(&config.provider.api_key)
@@ -1030,6 +1058,59 @@ fn error_message(body: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn free_requests_have_no_key_or_model_override_but_custom_requests_keep_both() {
+        let mut config: Config = serde_json::from_value(json!({
+            "name": "test",
+            "provider": {
+                "base_url": "https://free.amarcode.amarjay.com",
+                "api_key": "must-not-be-forwarded",
+                "model": "default"
+            }
+        }))
+        .unwrap();
+        let http = reqwest::Client::new();
+        for stream in [true, false] {
+            let body = json!({"model":"old-custom-model","stream":stream,"messages":[]});
+            let request = completion_request(&http, &config, &body).build().unwrap();
+            assert_eq!(
+                request.url().as_str(),
+                "https://free.amarcode.amarjay.com/v1/chat/completions"
+            );
+            assert!(!request.headers().contains_key("authorization"));
+            let sent: Value =
+                serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+            assert!(sent.get("model").is_none());
+            assert_eq!(sent["stream"], stream);
+        }
+        config.provider.base_url = "https://provider.example/v1".into();
+        let request = completion_request(&http, &config, &json!({"model":"custom"}))
+            .build()
+            .unwrap();
+        assert_eq!(
+            request.headers()["authorization"],
+            "Bearer must-not-be-forwarded"
+        );
+        let sent: Value =
+            serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+        assert_eq!(sent["model"], "custom");
+    }
+
+    #[tokio::test]
+    async fn free_model_discovery_keeps_the_service_default() {
+        let config: Config = serde_json::from_value(json!({
+            "name":"test", "provider": {
+                "base_url":"https://free.amarcode.amarjay.com", "model":"default"
+            }
+        }))
+        .unwrap();
+        let models = fetch_models(&reqwest::Client::new(), &config)
+            .await
+            .unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "default");
+    }
+
     use super::*;
 
     #[test]

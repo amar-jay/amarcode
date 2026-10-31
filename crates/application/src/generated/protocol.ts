@@ -139,9 +139,13 @@ export type AuthenticateAgentParams = { agent_id: string, method_id: string | nu
 
 export type AuthenticateAgentResult = { ok: boolean, };
 
-export type AmarcodeAcpConfigResult = { base_url: string, model: string, has_api_key: boolean, configured: boolean, };
+export type AmarcodeAcpProfile = { id: string, name: string, base_url: string, model: string, has_api_key: boolean, };
 
-export type SetAmarcodeAcpConfigParams = { base_url: string, model: string, api_key: string, clear_api_key: boolean, };
+export type AcpProfileAction = "save" | "create" | "activate" | "delete" | "reset";
+
+export type AmarcodeAcpConfigResult = { base_url: string, model: string, has_api_key: boolean, configured: boolean, active_profile_id: string, profiles: Array<AmarcodeAcpProfile>, };
+
+export type SetAmarcodeAcpConfigParams = { base_url: string, model: string, api_key: string, clear_api_key: boolean, action: AcpProfileAction, profile_id: string | null, name: string | null, };
 
 export type CreateChatParams = { workspace_path: string, title: string | null, };
 

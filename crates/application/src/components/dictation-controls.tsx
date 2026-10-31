@@ -29,25 +29,22 @@ export function DictationControls({ dictation }: DictationControlsProps) {
         }
         disabled={
           !dictation.supported ||
-          dictation.configured === false ||
           dictation.status === "transcribing" ||
           dictation.status === "requesting"
         }
         onClick={dictation.toggle}
         tooltip={
-          dictation.configured === false
-            ? "Set up Amarcode ACP first to use dictation"
-            : !dictation.supported
-              ? "Dictation is not available on this system"
-              : dictation.status === "recording"
-                ? "Stop dictation"
-                : dictation.status === "transcribing"
-                  ? "Transcribing…"
-                  : dictation.status === "error"
-                    ? "Retry transcription"
-                    : dictation.status === "requesting"
-                      ? "Requesting microphone access…"
-                      : "Dictate with Whisper"
+          !dictation.supported
+            ? "Dictation is not available on this system"
+            : dictation.status === "recording"
+              ? "Stop dictation"
+              : dictation.status === "transcribing"
+                ? "Transcribing…"
+                : dictation.status === "error"
+                  ? "Retry transcription"
+                  : dictation.status === "requesting"
+                    ? "Requesting microphone access…"
+                    : "Dictate with Amarcode Free"
         }
       >
         {dictation.status === "transcribing" ||

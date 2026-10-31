@@ -1,3 +1,7 @@
+import type {
+  AmarcodeAcpConfigResult,
+  SetAmarcodeAcpConfigParams,
+} from "./generated/protocol";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AgentInfo,
@@ -237,29 +241,12 @@ export const daemonApi = {
     methodId?: string,
   ): Promise<{ ok: boolean }> =>
     invoke("authenticate_agent", { agentId, methodId }),
-  getAmarcodeAcpConfig: (): Promise<{
-    base_url: string;
-    model: string;
-    has_api_key: boolean;
-    configured: boolean;
-  }> => invoke("get_amarcode_acp_config"),
-  setAmarcodeAcpConfig: (
-    baseUrl: string,
-    model: string,
-    apiKey: string,
-    clearApiKey = false,
-  ): Promise<{
-    base_url: string;
-    model: string;
-    has_api_key: boolean;
-    configured: boolean;
-  }> =>
-    invoke("set_amarcode_acp_config", {
-      baseUrl,
-      model,
-      apiKey,
-      clearApiKey,
-    }),
+  getAmarcodeAcpConfig: (): Promise<AmarcodeAcpConfigResult> =>
+    invoke("get_amarcode_acp_config"),
+  updateAmarcodeAcpProfile: (
+    params: SetAmarcodeAcpConfigParams,
+  ): Promise<AmarcodeAcpConfigResult> =>
+    invoke("set_amarcode_acp_config", { params }),
 
   discoverCommands: (
     chatId: string,

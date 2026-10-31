@@ -241,21 +241,53 @@ pub struct AuthenticateAgentResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AmarcodeAcpProfile {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub model: String,
+    pub has_api_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct AmarcodeAcpConfigResult {
     pub base_url: String,
     pub model: String,
     pub has_api_key: bool,
     pub configured: bool,
+    #[serde(default)]
+    pub active_profile_id: String,
+    #[serde(default)]
+    pub profiles: Vec<AmarcodeAcpProfile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpProfileAction {
+    #[default]
+    Save,
+    Create,
+    Activate,
+    Delete,
+    Reset,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 pub struct SetAmarcodeAcpConfigParams {
+    #[serde(default)]
     pub base_url: String,
+    #[serde(default)]
     pub model: String,
     #[serde(default)]
     pub api_key: String,
     #[serde(default)]
     pub clear_api_key: bool,
+    #[serde(default)]
+    pub action: AcpProfileAction,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

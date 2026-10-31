@@ -11,12 +11,12 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { useState } from "react";
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { PromptInputButton } from "@/components/ai-elements/prompt-input";
 import { Check, Download, LoaderCircle } from "lucide-react";
 import { AgentLogo } from "@/components/agent-logo";
 import { Badge } from "@/components/ui/badge";
-import { installAgentAtom } from "@/state/agents";
+import { installAgentAtom, installingAgentIdsAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 
 function stripAcpSuffix(value: string): string {
@@ -35,6 +35,7 @@ export function AgentSelectionDialog({
   const [open, setOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const installAgent = useSetAtom(installAgentAtom);
+  const installingAgentIds = useAtomValue(installingAgentIdsAtom);
 
   const selectedName =
     agents.find((agent) => agent.id === selectedAgent)?.name ?? "Agent";
@@ -75,7 +76,8 @@ export function AgentSelectionDialog({
   };
 
   const renderAgent = (agent: AgentInfo) => {
-    const installing = installingId === agent.id;
+    const installing =
+      installingId === agent.id || installingAgentIds.includes(agent.id);
     return (
       <CommandItem
         key={agent.id}
@@ -101,7 +103,7 @@ export function AgentSelectionDialog({
             className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-primary hover:bg-foreground/10 disabled:opacity-50"
             aria-label={`Install ${stripAcpSuffix(agent.name)}`}
             title={`Install ${stripAcpSuffix(agent.name)}`}
-            disabled={installingId !== null}
+            disabled={installingId !== null || installing}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
