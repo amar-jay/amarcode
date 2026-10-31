@@ -1,32 +1,26 @@
 ---
 title: Set up a remote host
-description: Install the Amarcode daemon on Linux and expose it through an authenticated Cloudflare tunnel.
+description: Install one managed Amarcode daemon on Linux and enable authenticated SSH or optional Cloudflare access.
 ---
 
-Remote mode keeps project files, chats, agents, and provider credentials on a Linux machine. Your desktop connects to it through an authenticated WebSocket connection.
-
-This page describes the installer and Cloudflare quick-tunnel workflow. If you
-already run an authenticated WebSocket daemon and have SSH access to its host,
-follow [Connect over SSH](/docs/remote/ssh/) instead. SSH connections do not require
-a public daemon URL; the desktop does not provision or start the remote daemon.
-For an already installed daemon, use
-[`amarcode-daemon --remote --no-tunnel`](/docs/remote/ssh/#start-the-installed-daemon-without-cloudflare)
-on the host to start authenticated loopback mode without Cloudflare. Remote
-installation over SSH is not part of this workflow.
+A remote connection uses the daemon on the selected host. The desktop and
+headless installer share one daemon installation, release store, and database
+per user on that host. Project files, chats, agent processes, and provider
+credentials stay there. Connecting from another machine does not create a second
+instance or copy its database.
 
 ## Before you start
 
-The host needs Linux, Bash, Python 3, OpenSSL with Ed25519 support, and outbound internet access. You do not need root, a systemd user session, or preinstalled Rust, Bun, or uv.
+The installer needs Linux, Bash, Python 3, OpenSSL with Ed25519 support, and
+outbound internet access. You do not need root, a systemd user session, or
+preinstalled Rust, Bun, or uv. A signed release advertising `unified-instance`
+support must be available for the host architecture; older releases are rejected.
 
-A signed daemon release must be available for the host architecture. The installer requires a release advertising authenticated WebSocket and remote CLI support; it rejects older incompatible releases.
+If both the old remote daemon and a desktop daemon contain data, see
+[migrate an existing remote installation](#migrate-an-existing-remote-installation)
+before continuing.
 
-## Run the installer
-
-```bash
-curl -fsSL https://amarcode.amarjay.com/install.sh | bash
-```
-
-To inspect the script first:
+## Install or reuse the daemon
 
 ```bash
 curl -fsSL https://amarcode.amarjay.com/install.sh -o install.sh
@@ -34,46 +28,128 @@ less install.sh
 bash install.sh
 ```
 
-The installer downloads and verifies the daemon, Cloudflare connector, and managed Bun and uv runtimes. It creates a private access token and links the daemon into `~/.local/bin`.
+The installer verifies the daemon and managed Bun and uv runtimes. If a managed
+daemon is already installed, it verifies and reuses its current release instead
+of replacing a running service. The current release record and immutable binary
+layout are the same ones used by desktop bootstrap and the managed updater.
 
-The installer adds the command directory to your Bash, Zsh, and Fish startup configuration. Open a new terminal, or apply the command printed by the installer in your current shell:
+It creates a private access token if one is missing and enables authenticated
+loopback access in `remote.json`. Cloudflare is optional and is not downloaded
+by default. The installer starts no service or tunnel unless you pass `--start`;
+that option runs the shared daemon in the foreground.
 
-```bash
-export PATH="$HOME/.local/bin:$PATH"
+The stable command lives in `daemon/bin/amarcode-daemon` under the instance root.
+The installer adds that directory to Bash, Zsh, and Fish startup configuration.
+Open a new terminal or use the PATH command it prints. `--bin-dir` creates an
+additional alias pointing to the stable command, so it follows managed updates.
+
+## Start the shared instance
+
+For a foreground daemon:
+
+```sh
+amarcode-daemon run
 ```
 
-PATH setup is idempotent and preserves existing configuration. A custom `--bin-dir` is added in the same way. The installer does not start the daemon or tunnel unless you pass `--start`.
+For a persistent per-user service on a host with a systemd user manager:
 
-## Start remote mode
-
-```bash
-amarcode-daemon --remote
+```sh
+amarcode-daemon bootstrap install
 ```
 
-The daemon binds its loopback listener before it starts the Cloudflare connector. When the tunnel is ready, it prints a WebSocket URL and access token.
+If the existing service is already running, apply the newly enabled access with:
 
-Keep the command running while you use the connection. Ctrl+C stops both the daemon and connector. If the connector fails, the daemon stops with an error.
+```sh
+amarcode-daemon restart
+```
+
+One process serves local TCP on `127.0.0.1:43821` and authenticated WebSocket on
+`127.0.0.1:43721`. Both connections share the same live sessions, approvals, and
+database. Do not start a second foreground daemon while the service is running.
+Restarting the daemon interrupts active agent processes; closing a desktop
+connection does not.
+
+Follow [Connect over SSH](/docs/remote/ssh/) to reach that loopback WebSocket
+listener through the desktop's SSH tunnel. The desktop connects to an already
+running daemon; it does not provision the host over SSH.
+
+To change access on an existing installation without rerunning the installer:
+
+```sh
+amarcode-daemon access enable
+amarcode-daemon restart
+```
+
+`access disable` disables the additional listener after the next restart. It
+preserves the database and token. Access settings survive managed daemon updates
+and rollback. The standard listener is fixed to remote IPv4 loopback for SSH;
+`AMARCODE_WS_ADDR` or `remote.json`'s `listen_addr` changes its port. The local
+TCP address remains controlled separately by `AMARCODE_DAEMON_ADDR`.
+
+## Optional Cloudflare access
+
+Install the connector explicitly:
+
+```sh
+bash install.sh --with-cloudflare
+```
+
+Start or restart the shared daemon as above, then attach a tunnel:
+
+```sh
+amarcode-daemon tunnel
+```
+
+The command authenticates to the running WebSocket listener before starting
+Cloudflare. It prints a `wss://…/rpc` URL and the access token for
+[the desktop's WebSocket connection settings](/docs/remote/connect/).
+Ctrl+C stops the connector and leaves the daemon and its work running. If the
+connector fails, the daemon also remains running. Quick-tunnel hostnames change
+between runs; the token and conversations stay on disk.
 
 :::caution[Keep the token private]
-The access token authorizes access to your daemon and its host operations. Enter it in the desktop's access-token field. Do not put it in a URL or share it with others.
+The access token authorizes access to your daemon and its host operations.
+Do not put it in a URL or share it with others.
 :::
 
-## Connect your desktop
+`--remote` remains a foreground convenience for starting the shared daemon and
+Cloudflare together; `--remote --no-tunnel` starts its authenticated loopback
+access without Cloudflare. Prefer the separate `run` / service and `tunnel`
+commands when work should outlive the connector.
 
-Follow [connect from the desktop](/docs/remote/connect/) using the printed `wss://…/rpc` URL and token.
+## Installation layout
 
-## Know what changes on restart
+On Linux the shared instance root is
+`${XDG_DATA_HOME:-$HOME/.local/share}/com.amarcode.desktop/`:
 
-The quick-tunnel hostname changes between runs. The access token and chat history stay on disk and are preserved when you rerun the installer.
+| Path | Purpose |
+| --- | --- |
+| `data/` | Chats, attachments, agent installations, credentials, and logs |
+| `daemon/` | Verified releases, current release record, update journal, and stable command |
+| `access-token` | Private remote bearer credential |
+| `remote.json` | Optional access settings and runtime/connector locations |
+| `runtimes/` | Managed Bun and uv tools |
+| `cloudflared/` | Optional connector |
 
-Files live under `${XDG_DATA_HOME:-$HOME/.local/share}/amarcode-remote/`:
+Project directories stay wherever you created them on the host. The application
+on your laptop can have its own local daemon and database; it is a different host.
 
-| Path           | Purpose                                                        |
-| -------------- | -------------------------------------------------------------- |
-| `access-token` | Private bearer credential                                      |
-| `remote.json`  | Connector and runtime locations                                |
-| `data/`        | Chats, attachments, agent installations, credentials, and logs |
-| `releases/`    | Verified daemon releases                                       |
-| `runtimes/`    | Managed Bun and uv tools                                       |
+## Migrate an existing remote installation
 
-Project directories stay wherever you created them on the host.
+Stop the old foreground daemon or `amarcode-remote.service`, then rerun this
+installer. When the old `amarcode-remote/data` is the only populated instance,
+it moves the complete data directory to the shared root and preserves the
+access token. The old data path becomes an alias of the new one, so old launchers
+cannot silently open a second database. Old owned command aliases are redirected
+to the stable managed command. Legacy runtime and binary files are retained.
+
+Migration refuses a database held by a running daemon, conflicting access tokens,
+or a populated target data directory. If both installations contain data, both
+are preserved: stop both daemons, back up the directories, and choose the instance
+you want to keep before migrating. Databases are not automatically merged.
+An interrupted migration is detected at startup; rerunning the installer resumes it.
+
+Advanced isolated setups can explicitly select `AMARCODE_APPDIR` and
+`AMARCODE_STORE_PATH`. Legacy `AMARCODE_REMOTE_ROOT` with `--remote` still selects
+that explicit installation; it is not the default. Custom instances are outside
+the standard service updater and need their own process supervision and lifecycle.

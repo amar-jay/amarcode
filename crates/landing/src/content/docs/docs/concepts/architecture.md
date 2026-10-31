@@ -24,7 +24,16 @@ The Rust daemon is the system of record. It owns:
 Local clients communicate over a TCP JSON-line API. Remote desktop connections
 use authenticated WebSockets, either through a public tunnel or through an
 [SSH tunnel owned by the desktop](/docs/remote/ssh/). The daemon can stay bound to
-remote loopback when using SSH. Both transports share the same RPC methods.
+remote loopback when using SSH. Enabling remote access adds a WebSocket listener
+to the same process that serves local TCP. Both connections share the same RPC
+methods, sessions, pending approvals, event bus, and database.
+
+There is one managed installation per user per host: desktop bootstrap and the
+headless installer share the current release, immutable binaries, stable command,
+and service updater. "Remote" selects a connection to that host, rather than a
+second database or binary installation. An application configured for a remote
+host does not need to install a local daemon. Explicit custom instance paths
+remain available for isolation; two processes cannot own the same database.
 
 ## Coding agents
 
@@ -40,7 +49,7 @@ SQLite uses WAL mode and foreign keys. A database instance lock prevents a secon
 
 ## Closing the window
 
-Closing the desktop does not stop the managed daemon. Active agent work can continue. In foreground remote mode, the host command must remain running; stopping it ends the daemon and its agent processes.
+Closing the desktop does not stop the managed daemon. Active agent work can continue. A foreground daemon must remain running; stopping it ends its agent processes. The optional `amarcode-daemon tunnel` connector has its own lifetime: stopping it closes public access and leaves the daemon running.
 
 ## Where your data lives
 

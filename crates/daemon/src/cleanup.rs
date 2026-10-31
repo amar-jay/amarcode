@@ -36,7 +36,19 @@ fn purge<C: ServiceController>(
         ));
     }
 
-    remove_app_dir(requested_app_dir)
+    remove_app_dir(requested_app_dir)?;
+    // Access belongs to this instance too. A purge must not leave its bearer
+    // credential or enabled-listener settings for a later fresh installation.
+    if let Some(root) = requested_app_dir.parent() {
+        for name in ["access-token", "remote.json", "run.sh", "tunnel.sh"] {
+            match fs::remove_file(root.join(name)) {
+                Ok(()) => (),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_target(requested: &Path, expected: &Path) -> Result<()> {
@@ -176,6 +188,21 @@ mod tests {
             .join("amarcode")
     }
 
+    #[test]
+    fn purge_removes_instance_access_settings_and_credentials() {
+        let directory = tempfile::tempdir().unwrap();
+        let data = directory.path().join("instance/data");
+        fs::create_dir_all(&data).unwrap();
+        for name in ["access-token", "remote.json", "run.sh", "tunnel.sh"] {
+            fs::write(data.parent().unwrap().join(name), "instance owned").unwrap();
+        }
+        let controller = FakeController::successful();
+        purge(&controller, &data, &data).unwrap();
+        assert!(!data.exists());
+        for name in ["access-token", "remote.json", "run.sh", "tunnel.sh"] {
+            assert!(!data.parent().unwrap().join(name).exists());
+        }
+    }
     #[test]
     fn unregisters_and_verifies_before_removing_data() {
         let app_dir = test_dir();

@@ -145,6 +145,16 @@ fn ensure(
         std::fs::remove_file(root.join(LEGACY_ACTIVATING)).map_err(|e| e.to_string())?;
     }
     if !root.join(INSTALLED).is_file() {
+        // A headless foreground instance may already be serving the desktop.
+        // Reuse it without registering/restarting a competing native service.
+        if let Some(health) = foreground_health(root, &|version| {
+            super::supervisor::health_once(DEFAULT_DAEMON_ADDR, version)
+        }) {
+            progress(DaemonBootstrapStatus::Ready {
+                version: health.version.clone(),
+            })?;
+            return Ok(Some(health));
+        }
         progress(DaemonBootstrapStatus::InstallRequired {
             reason: "The per-user background service has not been installed yet.".into(),
         })?;
@@ -181,6 +191,20 @@ fn ensure(
         version: health.version.clone(),
     })?;
     Ok(Some(health))
+}
+
+fn foreground_health(
+    root: &Path,
+    probe: &impl Fn(&str) -> Result<HealthResult, String>,
+) -> Option<HealthResult> {
+    let current = releases::load_installed(root).ok()?;
+    super::compatible_installed(&current).ok()?;
+    current.installed_executable(root).ok()?;
+    let health = probe(current.version()).ok()?;
+    (health.status == "ok"
+        && health.version == current.version()
+        && health.protocol_version == amarcode_protocol::PROTOCOL_VERSION)
+        .then_some(health)
 }
 
 fn wait_for_job(root: &Path, id: &str) -> Result<(), String> {
@@ -351,6 +375,20 @@ mod tests {
         let bundle = releases::stage_bundle_from(root, &source).unwrap();
         std::fs::remove_file(source).unwrap();
         bundle
+    }
+    #[test]
+    fn foreground_reuse_requires_a_verified_release_and_matching_live_health() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let probe = |version: &str| host(false).health(DEFAULT_DAEMON_ADDR, version);
+        assert!(foreground_health(root, &probe).is_none());
+        let release = bundle(root, b"headless verified daemon");
+        release.save_as_current(root).unwrap();
+        assert!(foreground_health(root, &probe).is_some());
+        assert!(foreground_health(root, &|_| Err("not listening".into())).is_none());
+        assert!(!root.join(INSTALLED).exists());
+        std::fs::write(release.installed_executable(root).unwrap(), b"damaged").unwrap();
+        assert!(foreground_health(root, &probe).is_none());
     }
     #[test]
     fn first_install_and_repair_work_offline_without_desktop_source_or_downloads() {

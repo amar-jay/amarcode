@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the remote daemon, cloudflared, Bun, and uv without administrator privileges.
+# Install or reuse the shared daemon, Bun, uv, and optional Cloudflare connector.
 set -euo pipefail
 command -v python3 >/dev/null 2>&1 || { echo 'python3 is required' >&2; exit 1; }
 exec python3 - "$@" <<'PY'
@@ -311,10 +311,13 @@ def migrate_legacy(legacy, root):
     import fcntl
     source, target = legacy / 'data', root / 'data'
     pending = root / 'remote-migration-pending.json'
+    old_token, new_token = legacy / 'access-token', root / 'access-token'
     if pending.exists():
         saved = json.loads(pending.read_text())
         if saved != {'source': str(source), 'target': str(target)}:
             raise ValueError('Unexpected pending remote migration')
+        if old_token.exists() and not new_token.exists():
+            private_write(new_token, old_token.read_text())
         if not source.exists() and target.is_dir():
             source.symlink_to(target, target_is_directory=True)
         if source.is_symlink() and source.resolve() == target.resolve():
@@ -327,7 +330,6 @@ def migrate_legacy(legacy, root):
         return
     if target.exists() and any(target.iterdir()):
         raise ValueError('Both desktop and legacy remote data exist. Stop both daemons and choose which instance to keep; automatic database merging is not supported. Both directories were preserved.')
-    old_token, new_token = legacy / 'access-token', root / 'access-token'
     if old_token.exists() and new_token.exists() and old_token.read_bytes() != new_token.read_bytes():
         raise ValueError('Desktop and legacy remote access tokens conflict; both were preserved')
     lock = source / 'workspace.sqlite3.amarcode.lock'
@@ -338,6 +340,9 @@ def migrate_legacy(legacy, root):
             raise ValueError('Stop the legacy remote daemon before migrating its database')
         if old_token.exists() and not new_token.exists():
             private_write(new_token, old_token.read_text())
+        settings = legacy / 'remote.json'
+        if settings.exists() and not (root / 'remote.json').exists():
+            private_write(root / 'remote.json', json.dumps(json.loads(settings.read_text())))
         private_write(pending, json.dumps({'source': str(source), 'target': str(target)}))
         if target.exists():
             target.rmdir()
@@ -350,9 +355,14 @@ def migrate_legacy(legacy, root):
 def installed_release(root, temporary, target):
     """Verify and reuse the same current release consumed by desktop bootstrap."""
     record = root / 'daemon/current-release.json'
-    if not record.exists():
+    if record.exists():
+        saved = json.loads(record.read_text())
+    elif (root / 'daemon/current-manifest.json').exists():
+        saved = {'manifest': (root / 'daemon/current-manifest.json').read_text(),
+                 'signature': (root / 'daemon/current-manifest.json.sig').read_text(),
+                 'source_url': REGISTRY + '/v1/daemon/latest.json'}
+    else:
         return None
-    saved = json.loads(record.read_text())
     if 'bundled' in saved:
         release = saved['bundled']
         if release['target'] != target:
@@ -387,14 +397,15 @@ def installed_release(root, temporary, target):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Install Amarcode, cloudflared, Bun, and uv (Linux)')
-    parser.add_argument('--version', help='Install a specific signed release; default: latest')
+    parser = argparse.ArgumentParser(description='Install or reuse the shared Amarcode daemon, Bun, uv, and optional cloudflared (Linux)')
+    parser.add_argument('--version', help='Initial signed release; default: latest. Existing releases use the managed updater')
     parser.add_argument('--with-cloudflare', action='store_true', help='Install the optional Cloudflare connector')
     parser.add_argument('--cloudflared-version', help='Install a specific official cloudflared release; default: latest')
     parser.add_argument('--bun-version', help='Official Bun release tag; default: latest')
     parser.add_argument('--uv-version', help='Official uv release tag; default: latest')
     parser.add_argument('--bin-dir', type=Path, help='Optional additional command alias directory; the managed command always lives in the instance daemon/bin directory')
-    parser.add_argument('--start', '--tunnel', dest='start', action='store_true', help='Run the shared daemon in the foreground after installation (SSH-only)')
+    parser.add_argument('--start', action='store_true', help='Run the shared daemon in the foreground after installation (SSH-only)')
+    parser.add_argument('--tunnel', action='store_true', help='Install Cloudflare and start the shared daemon with a foreground tunnel')
     parser.add_argument('--no-service', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if platform.system() != 'Linux':
@@ -418,6 +429,12 @@ def main():
     root = data_home / 'com.amarcode.desktop'
     if not root.is_absolute() or any(c in str(root) for c in '\n\r\0'):
         parser.error('XDG_DATA_HOME must be an absolute path without control characters')
+    for name, expected in [('AMARCODE_APPDIR', root / 'data'),
+                           ('AMARCODE_STORE_PATH', root / 'data/workspace.sqlite3'),
+                           ('AMARCODE_REMOTE_ROOT', root),
+                           ('AMARCODE_WS_TOKEN_FILE', root / 'access-token')]:
+        if os.environ.get(name) and Path(os.environ[name]).expanduser().absolute() != expected:
+            parser.error('Unset ' + name + ' before configuring the standard instance; use explicit manual setup for isolated instances')
     bin_dir = root / 'daemon/bin'
     alias_dir = args.bin_dir.expanduser().absolute() if args.bin_dir else None
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -435,7 +452,13 @@ def main():
                 raise ValueError('A daemon install or update is active; retry when it finishes')
         if (release_root / 'bootstrap-activation-pending-v1').exists():
             raise ValueError('Finish or repair the interrupted desktop installation first')
-        job = release_root / 'update-job.json'
+        latest = release_root / 'updates/latest'
+        if latest.exists():
+            import uuid
+            identifier = str(uuid.UUID(latest.read_text().strip()))
+            job = json.loads((release_root / 'updates' / identifier / 'job.json').read_text())
+            if not job['job']['finished']:
+                raise ValueError('A daemon update is pending; finish it before running the installer')
         # Native request/supervisor locks protect the current release throughout.
         directory = Path(temporary)
         current = installed_release(root, directory, target)
@@ -481,7 +504,7 @@ def main():
         old_alias = Path.home() / '.local/bin/amarcode-daemon'
         if old_alias.is_symlink() and old_alias.resolve().is_relative_to((legacy / 'releases').resolve()):
             install_command(old_alias.parent, command, root, legacy)
-    cloudflared = install_cloudflared(root, architecture, args.cloudflared_version) if args.with_cloudflare or args.cloudflared_version else None
+    cloudflared = install_cloudflared(root, architecture, args.cloudflared_version) if args.with_cloudflare or args.cloudflared_version or args.tunnel else None
     bun_bin = install_runtime(root, 'bun', architecture, args.bun_version)
     uv_bin = install_runtime(root, 'uv', architecture, args.uv_version)
     tool_bin_dirs = [str(bun_bin), str(uv_bin)]
@@ -533,10 +556,13 @@ def main():
     print('One instance serves local TCP on 127.0.0.1:43821 and authenticated SSH-forwarded WebSocket on 127.0.0.1:43721.')
     print('If already running, restart the existing service to apply access settings: amarcode-daemon restart')
     print('For a managed service: amarcode-daemon bootstrap install. Cloudflare is optional: install --with-cloudflare, then amarcode-daemon tunnel.')
-    if args.start:
+    if args.start or args.tunnel:
+        os.environ.pop('AMARCODE_REMOTE_ROOT', None)
+        os.environ['AMARCODE_APPDIR'] = str(root / 'data')
+        os.environ['AMARCODE_WS_TOKEN_FILE'] = str(token_path)
         os.environ['PATH'] = os.pathsep.join(tool_bin_dirs + [os.environ.get('PATH', '')])
         sys.stdout.flush()
-        os.execv(str(command), [str(command), 'run'])
+        os.execv(str(command), [str(command), '--remote' if args.tunnel else 'run'])
 
 
 if __name__ == '__main__':

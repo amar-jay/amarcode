@@ -26,90 +26,65 @@ You need:
 The desktop connects to an existing daemon. It does not install, start, or update
 one over SSH. Start the daemon yourself on the remote machine as described below.
 The [remote host setup guide](/docs/remote/setup/) separately documents the
-installer and its Cloudflare mode.
+installer and optional Cloudflare access.
 
 ## Start the installed daemon without Cloudflare
 
-Run this command **on the remote host**, using an already installed daemon that
-supports `--no-tunnel`:
+Enable access **on the remote host** using the existing managed installation:
 
 ```sh
+amarcode-daemon access enable
+amarcode-daemon restart
+```
+
+If you run without a native service, stop the old foreground process and use
+`amarcode-daemon run` after enabling access. The same daemon serves local TCP and
+authenticated WebSocket on `127.0.0.1:43721`, sharing its database and active work.
+It does not start, download, or require Cloudflare. Keep the foreground command
+running or use `amarcode-daemon bootstrap install` for a persistent user service.
+
+On Linux, the instance root is
+`${XDG_DATA_HOME:-$HOME/.local/share}/com.amarcode.desktop/`:
+
+| Location | Purpose |
+| --- | --- |
+| `data/` | Conversations, attachments, agents, credentials, and logs |
+| `daemon/` | One managed binary/release store for local and remote use |
+| `access-token` | Private bearer token; reused when enabling access again |
+| `remote.json` | Persistent access settings and managed runtime locations |
+
+Read the token privately from `access-token` and enter it in the desktop's
+**Daemon access token** field. `access enable` prints the token-file path, not
+the token. A missing, invalid, or publicly readable Unix token fails startup;
+there is no unauthenticated fallback.
+
+Access settings survive service restart and managed updates. To disable the
+listener, run `amarcode-daemon access disable`, then restart. Local access and
+saved conversations remain available.
+
+The old foreground spelling `amarcode-daemon --remote --no-tunnel` still works
+with an installed token. It uses the shared instance by default. For migration
+from `amarcode-remote/`, follow [remote host setup](/docs/remote/setup/#migrate-an-existing-remote-installation)
+instead of starting a second daemon.
+
+### Explicit isolated instances
+
+Keep custom data paths explicit rather than relying on a separate remote default:
+
+```sh
+AMARCODE_APPDIR=/absolute/path/to/instance/data \
+AMARCODE_WS_TOKEN_FILE=/absolute/path/to/instance/access-token \
 amarcode-daemon --remote --no-tunnel
 ```
 
-This starts an authenticated WebSocket listener on `127.0.0.1:43721`. It does not
-start, download, or require Cloudflare. Leave the command running while you use
-the connection, or run the same command and environment under your host's process
-supervisor. Ctrl+C stops the foreground daemon and interrupts its agent processes.
+Use `AMARCODE_WS_ADDR` to change the additional WebSocket listener; it defaults to
+`127.0.0.1:43721`. `AMARCODE_DAEMON_ADDR` configures local TCP separately. Preserve
+an existing `AMARCODE_STORE_PATH` override when selecting an existing database.
+Custom instances need their own supervisor and are outside the standard updater.
 
-The command reuses the remote installation root,
-`${XDG_DATA_HOME:-$HOME/.local/share}/amarcode-remote/` on Linux. Set
-`AMARCODE_REMOTE_ROOT` to an absolute path if your existing installation uses
-another root. By default:
-
-| Location       | Purpose                                                                     |
-| -------------- | --------------------------------------------------------------------------- |
-| `data/`        | Existing chats, attachments, agents, credentials, and logs                  |
-| `access-token` | Existing private daemon token                                               |
-| `remote.json`  | Optional managed runtime paths; the Cloudflare path is ignored in this mode |
-
-If `remote.json` exists, its managed runtime directories are added to the daemon's
-`PATH`. Without that file, the daemon uses the environment you launch it with;
-make sure the runtimes needed by your installed agents are available there.
-
-The command prints the listener address and token-file path after binding. It
-does not print the token itself. Enter the token from that private file in the
-desktop's **Daemon access token** field.
-
-### Use custom data and token paths
-
-For a daemon already configured outside the remote installation layout, keep
-using its existing data directory and token:
-
-```sh
-AMARCODE_APPDIR=/absolute/path/to/existing-daemon-data \
-AMARCODE_WS_TOKEN_FILE=/absolute/path/to/access-token \
-AMARCODE_DAEMON_ADDR=127.0.0.1:43721 \
-amarcode-daemon --remote --no-tunnel
-```
-
-`AMARCODE_APPDIR`, `AMARCODE_WS_TOKEN_FILE`, and `AMARCODE_DAEMON_ADDR` override the
-remote defaults. Keep any existing `AMARCODE_STORE_PATH` override too, so you
-continue using the same database. Stop a previous daemon that owns that database
-or listener before changing its startup command.
-
-An installed daemon supporting authenticated WebSockets can also run directly,
-without remote installer metadata:
-
-```sh
-AMARCODE_APPDIR=/absolute/path/to/existing-daemon-data \
-AMARCODE_WS_TOKEN_FILE=/absolute/path/to/access-token \
-AMARCODE_DAEMON_ADDR=127.0.0.1:43721 \
-amarcode-daemon run --transport websocket
-```
-
-The direct command uses your supplied environment and `PATH`; it does not load
-managed runtime directories from `remote.json`. Neither command installs anything
-on the host or starts a public tunnel.
-
-### Create a token only if one is missing
-
-Reuse your existing token when available. For a manual setup without one, this
-Python command creates a private token file in the current directory and refuses
-to overwrite an existing file:
-
-```sh
-python3 - <<'PYTOKEN'
-import os, secrets
-with os.fdopen(os.open("access-token", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as file:
-    file.write(secrets.token_hex(32) + "\n")
-PYTOKEN
-```
-
-Point `AMARCODE_WS_TOKEN_FILE` at that file's absolute path. On Unix it must be
-private to its owner, for example mode `0600`. Missing or invalid tokens prevent
-startup; SSH-only mode has no unauthenticated fallback. Both commands bind the
-daemon on remote loopback; the desktop opens the SSH tunnel from your machine.
+The lower-level `run --transport websocket` remains available for a custom,
+single-listener setup with explicit token and data environment. It does not load
+the standard additional-listener settings or start Cloudflare.
 
 ## Verify SSH access from your desktop
 

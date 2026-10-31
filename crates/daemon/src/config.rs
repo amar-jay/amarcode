@@ -143,7 +143,11 @@ impl Config {
         }
         if env_path("AMARCODE_APPDIR").is_none() && !app_dir.join(DEFAULT_DB_NAME).exists() {
             if let Some(base) = dirs::data_local_dir() {
-                if base.join("amarcode-remote/data").is_dir() {
+                if base
+                    .join("amarcode-remote/data")
+                    .join(DEFAULT_DB_NAME)
+                    .exists()
+                {
                     return Err(Error::msg("Legacy remote data found. Stop the old daemon and rerun the installer to migrate it into the shared instance, or explicitly select its data directory with AMARCODE_APPDIR"));
                 }
             }

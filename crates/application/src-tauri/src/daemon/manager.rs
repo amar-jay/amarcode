@@ -113,9 +113,16 @@ impl DaemonManager {
 
     pub async fn check_update(&self) -> Result<DaemonUpdateCheck, String> {
         if super::remote::is_remote()? {
-            return Ok(DaemonUpdateCheck::Unavailable {
-                reason: "Update the remote daemon using its host installer".into(),
-            });
+            return match DaemonClient::new().check_daemon_update().await {
+                Ok(result) => Ok(result),
+                Err(error) if error.contains("unknown method: check_daemon_update") => {
+                    Ok(DaemonUpdateCheck::Unavailable {
+                        reason: "Upgrade the daemon on its host to enable managed remote updates"
+                            .into(),
+                    })
+                }
+                Err(error) => Err(error),
+            };
         }
         if Config::get().daemon_service_executable.is_some() {
             return Ok(DaemonUpdateCheck::Unavailable {
@@ -138,7 +145,13 @@ impl DaemonManager {
         on_status: &Channel<DaemonUpdateStatus>,
     ) -> Result<HealthResult, String> {
         if super::remote::is_remote()? {
-            return Err("Update the remote daemon on its host".into());
+            let job = DaemonClient::new()
+                .start_daemon_update(StartDaemonUpdateParams { version })
+                .await?;
+            wait_for_update(None, &job.id, |status| send_update(on_status, status)).await?;
+            let health = DaemonClient::new().health().await?;
+            ensure_expected_version(Some(&job.version), &health)?;
+            return Ok(health);
         }
         if Config::get().daemon_service_executable.is_some() {
             return Err("updates are disabled for a development daemon".into());
@@ -171,7 +184,7 @@ impl DaemonManager {
                 _ => return Err(error),
             },
         };
-        wait_for_update(&executable, &job.id, |status| {
+        wait_for_update(Some(&executable), &job.id, |status| {
             send_update(on_status, status)
         })
         .await?;
@@ -358,7 +371,7 @@ async fn cli_update_job(
     }
 }
 async fn wait_for_update(
-    executable: &Path,
+    executable: Option<&Path>,
     id: &str,
     progress: impl Fn(DaemonUpdateStatus),
 ) -> Result<(), String> {
@@ -373,16 +386,24 @@ async fn wait_for_update(
         .await;
         let job = match rpc {
             Ok(Ok(Some(job))) => Some(job),
-            _ => cli_update_job(executable, Some(id)).await?,
-        }
-        .ok_or("daemon update job disappeared")?;
-        progress(job.status.clone());
-        if job.finished {
-            return match job.status {
-                DaemonUpdateStatus::Ready { .. } => Ok(()),
-                DaemonUpdateStatus::Failed { error } => Err(error),
-                _ => Err("invalid terminal daemon update state".into()),
-            };
+            // Only a local connection may read the local supervisor journal.
+            Ok(Ok(None)) if executable.is_none() => {
+                return Err("daemon update job disappeared".into())
+            }
+            _ => match executable {
+                Some(executable) => cli_update_job(executable, Some(id)).await?,
+                None => None, // The remote service may be restarting; its supervisor continues.
+            },
+        };
+        if let Some(job) = job {
+            progress(job.status.clone());
+            if job.finished {
+                return match job.status {
+                    DaemonUpdateStatus::Ready { .. } => Ok(()),
+                    DaemonUpdateStatus::Failed { error } => Err(error),
+                    _ => Err("invalid terminal daemon update state".into()),
+                };
+            }
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(

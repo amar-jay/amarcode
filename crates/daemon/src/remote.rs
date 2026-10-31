@@ -144,13 +144,8 @@ fn apply_environment(root: &std::path::Path, setup: &Setup, isolated: bool) -> R
     if isolated && env::var_os("AMARCODE_APPDIR").is_none() {
         env::set_var("AMARCODE_APPDIR", root.join("data"));
     }
-    for (key, value) in [(
-        "AMARCODE_WS_TOKEN_FILE",
-        root.join("access-token").into_os_string(),
-    )] {
-        if env::var_os(key).is_none() {
-            env::set_var(key, value);
-        }
+    if env::var_os("AMARCODE_WS_TOKEN_FILE").is_none() {
+        env::set_var("AMARCODE_WS_TOKEN_FILE", root.join("access-token"));
     }
     Ok(())
 }

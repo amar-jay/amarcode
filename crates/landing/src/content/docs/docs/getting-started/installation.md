@@ -21,6 +21,8 @@ After service installation on Linux, `amarcode-daemon` is available from a new t
 
 On Linux, the command follows daemon updates and rollbacks. Existing installations gain it when the desktop next connects to the local service. Running `amarcode-daemon uninstall` removes the terminal command and its PATH registration along with the service.
 
+The desktop and headless installer share the same per-user installation on a host. Enabling remote access adds an authenticated listener to that daemon and preserves its existing database.
+
 The daemon runs as a service for your user account. Closing the desktop does not stop it. On Linux it uses the systemd user manager; on Windows it uses Task Scheduler.
 
 :::tip[Using a remote machine?]

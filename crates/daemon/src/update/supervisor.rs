@@ -48,7 +48,7 @@ impl Host for NativeHost {
         Err(error)
     }
 }
-fn health_once(address: &str, expected: &str) -> Result<HealthResult, String> {
+pub(super) fn health_once(address: &str, expected: &str) -> Result<HealthResult, String> {
     let address = address
         .parse()
         .map_err(|_| "invalid daemon health address")?;

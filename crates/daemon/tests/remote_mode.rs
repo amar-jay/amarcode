@@ -198,13 +198,15 @@ fn occupied_listener_never_starts_a_tunnel_to_the_other_process() {
 }
 
 #[test]
-fn remote_rejects_tcp_and_lifecycle_commands_before_setup() {
+fn isolated_remote_rejects_tcp_and_lifecycle_commands_before_setup() {
+    let directory = tempfile::tempdir().unwrap();
     for arguments in [
         vec!["--transport", "tcp", "--remote"],
         vec!["install", "--remote"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_amarcode-daemon"))
             .args(arguments)
+            .env("AMARCODE_REMOTE_ROOT", directory.path())
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(2));

@@ -63,7 +63,7 @@ async fn update_rpc_reports_unavailable_for_custom_services_without_touching_reg
     let error = dispatch(&app, "start_daemon_update", json!({"version":"99.0.0"}))
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("standard managed desktop"));
+    assert!(error.to_string().contains("standard managed daemon"));
     let error = dispatch(&app, "get_daemon_update", json!({"job_id":"../escape"}))
         .await
         .unwrap_err();

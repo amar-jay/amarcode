@@ -5,20 +5,22 @@ description: Update a remote daemon and resolve connection, authentication, and 
 
 ## Update a remote host
 
-Rerun the installer on the remote machine:
+Managed daemons use the same signed update lifecycle whether the desktop
+connects locally, over SSH, or over WebSocket. Use the desktop's daemon update
+action while connected to that host. The host's supervisor performs activation
+and rollback; the desktop retries status over the remote connection while the
+listener restarts. It never reads the laptop's local journal for a remote update.
 
-```bash
-curl -fsSL https://amarcode.amarjay.com/install.sh | bash
-```
+The headless installer reuses an existing verified current release. Rerun it to
+configure access, install runtimes, or migrate an old remote layout; it does not
+silently switch a running service to another binary. Managed updates require the
+standard running user service. A foreground/custom daemon can report updates as
+unavailable; install the standard service on its host with
+`amarcode-daemon bootstrap install` when appropriate.
 
-Restart the daemon using the same transport, token file, and data directory as
-before. For Cloudflare remote mode, stop the old `amarcode-daemon --remote`
-process, then run it again and use the newly printed hostname. An SSH profile
-keeps its host and port unless you change the host configuration. The installer
-preserves its access token and data; restarting the daemon stops its active agent
-processes.
-
-Desktop-managed daemon updates and repairs apply to local services. Remote hosts are updated with their installer.
+Restarting the daemon interrupts active agent processes. The SSH profile keeps
+its host and port. A separate `amarcode-daemon tunnel` connector stays independent
+of the daemon, although a new connector run gets a new public hostname.
 
 ## Update a local installation
 
@@ -30,7 +32,7 @@ Managed daemon self-updates currently target supported Linux and Windows service
 
 Check these in order:
 
-1. The foreground remote command is still running on the host.
+1. The shared daemon and, for Cloudflare, its separate tunnel command are running.
 2. The URL is from the current run and ends in `/rpc`.
 3. You entered the access token separately, without query parameters in the URL.
 4. The desktop and daemon use the same protocol version.
@@ -42,10 +44,10 @@ An old quick-tunnel URL cannot be reused after the hostname changes.
 
 First confirm you can connect to the same host or SSH config alias with your SSH
 client. Then check the **Current SSH connection** status in **Settings → Connection**.
-On the host, confirm that `amarcode-daemon --remote --no-tunnel` is still running.
-It needs an existing private token file, but does not require Cloudflare or
-`remote.json`. If you use custom data or token paths, supply the same environment
-each time you restart it.
+On the host, enable access with `amarcode-daemon access enable` and restart the
+existing daemon with `amarcode-daemon restart` (or restart its foreground `run`).
+It needs a valid private token file and does not require Cloudflare. Preserve
+custom environment settings when restarting a deliberately isolated instance.
 
 | Error or symptom                     | What to check                                                                                                                                                                                                                        |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -82,7 +84,12 @@ Verify outbound network access and agent platform support. If the installation p
 
 ## The port is already in use
 
-Remote mode normally uses loopback port `43721`. Stop the previous daemon process before starting another. If you used an earlier installer that registered `amarcode-remote.service`, stop that service before using foreground remote mode on the same port.
+The shared daemon uses local TCP port `43821` and authenticated loopback
+WebSocket port `43721`. If its service is running, restart it instead of starting
+a second foreground process. Stop the old `amarcode-remote.service` before
+migrating an earlier installation. A database ownership error means another
+process owns the same instance; do not bypass its lock or select a new database
+to hide that error.
 
 ## Share a useful issue report
 

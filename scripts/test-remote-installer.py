@@ -247,6 +247,56 @@ class RemoteInstallerTests(unittest.TestCase):
         self.assertEqual(source.read_bytes(), b'legacy')
         self.assertEqual((root / 'data/workspace.sqlite3').read_bytes(), b'desktop')
 
+    def test_desktop_release_is_reused_without_daemon_or_cloudflare_download(self):
+        base = self.root / 'data'
+        installed = base / 'com.amarcode.desktop'
+        digest = hashlib.sha256(self.binary).hexdigest()
+        executable = installed / 'daemon/bundled/9.0.0' / digest / 'amarcode-daemon'
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(self.binary)
+        executable.chmod(0o700)
+        record = installed / 'daemon/current-release.json'
+        record.write_text(json.dumps({'bundled': {
+            'version': '9.0.0', 'protocol_version': 13,
+            'target': 'x86_64-unknown-linux-gnu', 'sha256': digest, 'size': len(self.binary),
+        }}))
+        original = record.read_bytes()
+        tools = installed / 'runtimes/fixture/bin'
+        tools.mkdir(parents=True)
+        for name in ['bun', 'bunx', 'uv', 'uvx']:
+            (tools / name).write_text('#!/bin/sh\nexit 0\n')
+            (tools / name).chmod(0o700)
+        environment = {'HOME': str(self.root / 'home'), 'XDG_DATA_HOME': str(base),
+                       'XDG_CONFIG_HOME': str(self.root / 'config'), 'ZDOTDIR': str(self.root / 'zsh')}
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['installer']), patch.object(self.module, 'download') as download, patch.object(self.module, 'install_runtime', return_value=tools), patch.object(self.module.platform, 'system', return_value='Linux'), patch.object(self.module.platform, 'machine', return_value='x86_64'), contextlib.redirect_stdout(io.StringIO()):
+            self.module.main()
+        download.assert_not_called()
+        self.assertEqual(record.read_bytes(), original)
+        self.assertEqual((installed / 'daemon/bin/amarcode-daemon').resolve(), executable)
+        settings = json.loads((installed / 'remote.json').read_text())
+        self.assertEqual(settings['enabled'], True)
+        self.assertNotIn('cloudflared', settings)
+
+    def test_interrupted_migration_resumes_and_token_conflicts_are_preserved(self):
+        legacy, root = self.root / 'legacy', self.root / 'shared'
+        (legacy / 'data').mkdir(parents=True)
+        root.mkdir()
+        (legacy / 'data/workspace.sqlite3').write_bytes(b'legacy database')
+        (legacy / 'access-token').write_text('a' * 64)
+        (root / 'access-token').write_text('b' * 64)
+        with self.assertRaisesRegex(ValueError, 'access tokens conflict'):
+            self.module.migrate_legacy(legacy, root)
+        self.assertEqual((root / 'access-token').read_text(), 'b' * 64)
+        (root / 'access-token').unlink()
+        pending = root / 'remote-migration-pending.json'
+        pending.write_text(json.dumps({'source': str(legacy / 'data'), 'target': str(root / 'data')}))
+        (legacy / 'data').rename(root / 'data')
+        self.module.migrate_legacy(legacy, root)
+        self.assertFalse(pending.exists())
+        self.assertEqual((root / 'access-token').read_text(), 'a' * 64)
+        self.assertEqual((legacy / 'data').resolve(), (root / 'data').resolve())
+        self.assertEqual((root / 'data/workspace.sqlite3').read_bytes(), b'legacy database')
+
     def test_install_and_reinstall_preserve_token_and_write_private_launchers(self):
         manifest, signature = self.signed()
         def download(url, destination, limit):

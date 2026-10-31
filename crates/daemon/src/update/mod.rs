@@ -63,15 +63,16 @@ pub(crate) fn compatible_installed(release: &releases::InstalledRelease) -> Resu
     Ok(())
 }
 fn installed(config: &Config) -> Result<(PathBuf, releases::InstalledRelease, PathBuf), String> {
-    // Native service registration currently supports the desktop's standard TCP
-    // environment. Do not re-register a custom/remote service with lost settings.
+    // Both local and remote clients update the same managed TCP instance.
+    // Optional WebSocket access is persisted in remote.json and survives activation.
+    // Custom instances must not be re-registered with lost environment overrides.
     if config.transport != DaemonTransport::Tcp
         || config.daemon_addr != DEFAULT_DAEMON_ADDR
         || config.app_dir != crate::config::resolve_default().map_err(|e| e.to_string())?
         || config.db_path != config.app_dir.join(crate::config::DEFAULT_DB_NAME)
         || config.acp_registry_source.as_deref() != Some(crate::config::DEFAULT_ACP_REGISTRY_SOURCE)
     {
-        return Err("updates require the standard managed desktop daemon service".into());
+        return Err("updates require the standard managed daemon service".into());
     }
     let service = crate::service_control::ServiceController::status(
         &crate::service_control::NativeServiceController,
