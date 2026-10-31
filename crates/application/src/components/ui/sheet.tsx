@@ -107,7 +107,7 @@ function SheetContent({
       <aside
         aria-label="Workspace panel"
         data-slot="docked-workspace-panel"
-        style={{ ...style, ...(width ? { width: `${width}px` } : {}) }}
+        style={{ ...(width ? { width: `${width}px` } : {}), ...style }}
         className={cn(
           "relative flex min-h-0 shrink-0 flex-col border-l bg-popover text-xs/relaxed text-popover-foreground",
           className,

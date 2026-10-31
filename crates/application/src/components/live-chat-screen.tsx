@@ -45,6 +45,7 @@ import {
   subscribeDaemonEvents,
   daemonEventStreamStateAtom,
   verboseReasoningAtom,
+  sidePanelMaximizedAtom,
 } from "@/state";
 import { groupChatBlocks, type ChatBlock } from "@/lib/message-parsing";
 import { UserMessage } from "./user-message";
@@ -95,6 +96,7 @@ export function LiveChatScreen() {
   const [activityError, setActivityError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const session = useAtomValue(activeSessionAtom);
+  const workspaceMaximized = useAtomValue(sidePanelMaximizedAtom);
   const live = useAtomValue(liveChatAtom);
   const eventStream = useAtomValue(daemonEventStreamStateAtom);
   const isWorking = useAtomValue(liveChatIsWorkingAtom);
@@ -251,9 +253,9 @@ export function LiveChatScreen() {
   );
 
   useEffect(() => {
-    if (!showSearch) return;
+    if (!showSearch || workspaceMaximized) return;
     searchInputRef.current?.focus();
-  }, [showSearch]);
+  }, [showSearch, workspaceMaximized]);
 
   useEffect(() => {
     if (!activeMatchKey) return;
@@ -265,6 +267,7 @@ export function LiveChatScreen() {
   }, [activeMatchKey]);
 
   useEffect(() => {
+    if (workspaceMaximized) return;
     const handleFindShortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
@@ -273,7 +276,7 @@ export function LiveChatScreen() {
     };
     window.addEventListener("keydown", handleFindShortcut);
     return () => window.removeEventListener("keydown", handleFindShortcut);
-  }, [openSearch]);
+  }, [openSearch, workspaceMaximized]);
 
   if (!session || !live || live.chatId !== session.chat.id) {
     return (

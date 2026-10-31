@@ -9,6 +9,8 @@ import {
   liveChatAtom,
   liveChatIsWorkingAtom,
   sidePanelOpenAtom,
+  sidePanelMaximizedAtom,
+  sidePanelPinnedAtom,
   workspacePathAtom,
 } from "@/state";
 
@@ -23,6 +25,10 @@ export function TopBar() {
       .catch(() => {});
   }, []);
   const [, setSheetOpen] = useAtom(sidePanelOpenAtom);
+  const [workspaceMaximized, setWorkspaceMaximized] = useAtom(
+    sidePanelMaximizedAtom,
+  );
+  const workspacePinned = useAtomValue(sidePanelPinnedAtom);
   const workspacePath = useAtomValue(workspacePathAtom);
   const live = useAtomValue(liveChatAtom);
   const isWorking = useAtomValue(liveChatIsWorkingAtom);
@@ -81,6 +87,26 @@ export function TopBar() {
           </div>
         )}
         <div className="flex h-full">
+          {workspaceMaximized && (
+            <button
+              type="button"
+              className="flex h-9 items-center gap-2 px-3 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => {
+                setWorkspaceMaximized(false);
+                if (!workspacePinned) setSheetOpen(false);
+              }}
+            >
+              {live?.pendingRequest && (
+                <span
+                  className="size-2 rounded-full bg-orange-500"
+                  aria-hidden="true"
+                />
+              )}
+              {live?.pendingRequest
+                ? "Agent needs attention · Return to chat"
+                : "Return to chat"}
+            </button>
+          )}
           <button
             type="button"
             className="grid h-9 w-10 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

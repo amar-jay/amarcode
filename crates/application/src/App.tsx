@@ -28,6 +28,7 @@ import {
   selectChatAtom,
   setWorkspacePathAtom,
   settingsOpenAtom,
+  sidePanelMaximizedAtom,
   startNewChatAtom,
   themeAtom,
   useAppBootstrap,
@@ -60,6 +61,7 @@ export default function App() {
   const [palette, setPalette] = useAtom(paletteAtom);
   const [settingsOpen, setSettingsOpen] = useAtom(settingsOpenAtom);
   const workspacePath = useAtomValue(workspacePathAtom);
+  const workspaceMaximized = useAtomValue(sidePanelMaximizedAtom);
   const setWorkspacePath = useSetAtom(setWorkspacePathAtom);
   const agents = useAtomValue(agentsAtom);
   const selectedAgent = useAtomValue(selectedAgentAtom);
@@ -119,33 +121,42 @@ export default function App() {
           onCheckForUpdates={() => void checkAppUpdate(true)}
         />
         <div className="flex min-h-0 min-w-0 flex-1">
-          {activeSession ? (
-            <LiveChatScreen />
-          ) : (
-            <main
-              data-home-stage
-              className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden px-8 py-12"
-            >
-              <HomeWatermark />
-              <div data-prompt-shell className="relative z-10 w-full max-w-2xl">
-                <MainPromptInput
-                  workspacePath={workspacePath}
-                  onWorkspacePathChange={setWorkspacePath}
-                  selectedAgentId={selectedAgent?.id ?? ""}
-                  onAgentSelected={(agent) => selectAgentById(agent.id)}
-                  onChatStarted={(chat, agent) => {
-                    openStartedChat({ chat, agent });
-                    void refreshChats();
-                  }}
-                  onStartedPromptFailed={(chatId, error) => {
-                    failStartedPrompt({ chatId, error });
-                    startNewChat();
-                    void refreshChats();
-                  }}
-                />
-              </div>
-            </main>
-          )}
+          <div
+            className={
+              workspaceMaximized ? "hidden" : "flex min-h-0 min-w-0 flex-1"
+            }
+          >
+            {activeSession ? (
+              <LiveChatScreen />
+            ) : (
+              <main
+                data-home-stage
+                className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden px-8 py-12"
+              >
+                <HomeWatermark />
+                <div
+                  data-prompt-shell
+                  className="relative z-10 w-full max-w-2xl"
+                >
+                  <MainPromptInput
+                    workspacePath={workspacePath}
+                    onWorkspacePathChange={setWorkspacePath}
+                    selectedAgentId={selectedAgent?.id ?? ""}
+                    onAgentSelected={(agent) => selectAgentById(agent.id)}
+                    onChatStarted={(chat, agent) => {
+                      openStartedChat({ chat, agent });
+                      void refreshChats();
+                    }}
+                    onStartedPromptFailed={(chatId, error) => {
+                      failStartedPrompt({ chatId, error });
+                      startNewChat();
+                      void refreshChats();
+                    }}
+                  />
+                </div>
+              </main>
+            )}
+          </div>
           <AppSidePanel workspacePath={workspacePath} />
         </div>
       </div>

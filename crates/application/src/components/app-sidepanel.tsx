@@ -6,6 +6,8 @@ import {
   FoldVertical,
   GitBranch,
   ListFilter,
+  Maximize2,
+  Minimize2,
   Pin,
   PinOff,
   RefreshCw,
@@ -17,6 +19,7 @@ import { toast } from "sonner";
 import { daemonApi, WorkspaceDiff, type WorkspaceChange } from "@/api";
 import {
   sidePanelOpenAtom,
+  sidePanelMaximizedAtom,
   sidePanelPinnedAtom,
   workspaceFileOpenRequestAtom,
 } from "@/state";
@@ -52,7 +55,9 @@ interface AppSidePanelProps {
 function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [sheetOpen, setSheetOpen] = useAtom(sidePanelOpenAtom);
   const [pinned, setPinned] = useAtom(sidePanelPinnedAtom);
-  const PanelTitle = pinned ? "h2" : SheetTitle;
+  const [maximized, setMaximized] = useAtom(sidePanelMaximizedAtom);
+  const docked = pinned || maximized;
+  const PanelTitle = docked ? "h2" : SheetTitle;
   const [fileOpenRequest, setFileOpenRequest] = useAtom(
     workspaceFileOpenRequestAtom,
   );
@@ -316,20 +321,23 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   return (
     <Sheet open={sheetOpen} onOpenChange={setSheetOpen} modal={false}>
       {/* Keep resize drags from being treated as outside clicks by the sheet. */}
-      {(!pinned || sheetOpen) && (
+      {(!docked || sheetOpen) && (
         <SheetContent
-          docked={pinned}
+          docked={docked}
           side="right"
-          resizable
+          resizable={!maximized}
+          style={maximized ? { width: "100%" } : undefined}
           onPointerDownOutside={(event) => event.preventDefault()}
           className={cn(
-            pinned
-              ? workspaceFileTree.selectedPath
-                ? "w-[50%] min-w-0 max-w-[60%]!"
-                : "w-72 min-w-0 max-w-[60%]!"
-              : workspaceFileTree.selectedPath
-                ? "w-280 min-w-[33vw] max-w-[80vw]!"
-                : "w-40 min-w-[min(100vw-30rem,10rem)] max-w-[33vw]!",
+            maximized
+              ? "w-full min-w-0 max-w-none!"
+              : pinned
+                ? workspaceFileTree.selectedPath
+                  ? "w-[50%] min-w-0 max-w-[60%]!"
+                  : "w-72 min-w-0 max-w-[60%]!"
+                : workspaceFileTree.selectedPath
+                  ? "w-280 min-w-[33vw] max-w-[80vw]!"
+                  : "w-40 min-w-[min(100vw-30rem,10rem)] max-w-[33vw]!",
           )}
           showCloseButton={false}
         >
@@ -518,6 +526,28 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                     workspaceFileTree.isLoading && "animate-spin",
                   )}
                 />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setMaximized((value) => !value)}
+                aria-pressed={maximized}
+                aria-label={
+                  maximized
+                    ? "Restore workspace panel"
+                    : "Maximize workspace panel"
+                }
+                title={
+                  maximized
+                    ? "Restore workspace panel"
+                    : "Maximize workspace panel"
+                }
+              >
+                {maximized ? (
+                  <Minimize2 className="size-4" />
+                ) : (
+                  <Maximize2 className="size-4" />
+                )}
               </Button>
               <Button
                 variant={pinned ? "secondary" : "ghost"}
