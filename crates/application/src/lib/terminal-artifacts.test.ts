@@ -135,6 +135,48 @@ describe("terminal artifacts", () => {
     });
   });
 
+  it("marks only the running tool call when a message is interrupted", () => {
+    const command = (
+      id: string,
+      status: string,
+      exitCode?: number,
+    ): Record<string, unknown> => ({
+      toolCallId: id,
+      title: id,
+      kind: "execute",
+      status,
+      rawInput: { command: id },
+      content: [{ type: "terminal", terminalId: id }],
+      ...(exitCode === undefined
+        ? {}
+        : {
+            _meta: {
+              terminal_exit: { terminal_id: id, exit_code: exitCode },
+            },
+          }),
+    });
+    const statuses = Object.fromEntries(
+      terminalArtifacts(
+        [
+          message(
+            [
+              command("done", "completed", 0),
+              command("broken", "failed", 1),
+              command("current", "in_progress"),
+            ],
+            "interrupted",
+          ),
+        ],
+        false,
+      ).map((terminal) => [terminal.toolCallId, terminal.status]),
+    );
+    expect(statuses).toEqual({
+      done: "completed",
+      broken: "failed",
+      current: "cancelled",
+    });
+  });
+
   it("does not turn every execute tool into a terminal and marks interrupted commands", () => {
     expect(
       terminalArtifacts(

@@ -115,17 +115,26 @@ export function terminalArtifacts(
           terminal.truncated = true;
         }
         terminal.deferred ||= update._deferred === true;
-        terminal.status =
-          tool.status === "cancelled" || item.message.status === "interrupted"
+        const finished =
+          tool.status === "completed" ||
+          tool.status === "failed" ||
+          tool.status === "cancelled" ||
+          terminal.exitCode !== undefined ||
+          Boolean(terminal.signal);
+        terminal.status = finished
+          ? tool.status === "cancelled"
             ? "cancelled"
             : tool.status === "failed" ||
-                item.message.status === "failed" ||
                 terminal.signal ||
                 (terminal.exitCode !== undefined && terminal.exitCode !== 0)
               ? "failed"
-              : terminal.exitCode === 0 ||
-                  tool.status === "completed" ||
-                  !streaming
+              : "completed"
+          : tool.status === "cancelled" ||
+              item.message.status === "interrupted"
+            ? "cancelled"
+            : tool.status === "failed" || item.message.status === "failed"
+              ? "failed"
+              : !streaming
                 ? "completed"
                 : "running";
         terminals.set(key, terminal);
