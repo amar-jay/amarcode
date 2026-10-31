@@ -40,11 +40,20 @@ pub async fn handle(stream: TcpStream, app: Arc<App>) -> Result<()> {
 }
 
 /// Shared JSON-line engine, also used by the WebSocket frame adapter.
-pub(super) async fn handle_io<R, W>(
+pub(super) async fn handle_io<R, W>(reader: R, writer: W, app: Arc<App>, peer: &str) -> Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    handle_io_context(reader, writer, app, peer, None).await
+}
+
+pub(super) async fn handle_io_context<R, W>(
     reader: R,
     mut writer: W,
     app: Arc<App>,
     peer: &str,
+    authenticated_address: Option<&str>,
 ) -> Result<()>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -75,7 +84,13 @@ where
         debug!(%peer, method = %request.method, "rpc request");
 
         match handler::dispatch(&app, &request.method, request.params).await {
-            Ok(DispatchOutcome::Result(value)) => {
+            Ok(DispatchOutcome::Result(mut value)) => {
+                if request.method == crate::protocol::rpc::methods::HEALTH {
+                    value["remote_auth_required"] = authenticated_address.is_some().into();
+                    if let Some(address) = authenticated_address {
+                        value["addr"] = address.into();
+                    }
+                }
                 write_response(&mut writer, &RpcResponse::ok(value)).await?;
             }
             Ok(DispatchOutcome::Subscribe(filter)) => {

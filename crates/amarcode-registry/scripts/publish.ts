@@ -156,7 +156,7 @@ async function execute(plan: ReleasePlan) {
         ...(product.includeProtocolVersion
           ? {
               protocolVersion: protocolVersion(),
-              capabilities: ["authenticated-websocket", "remote-cli"],
+              capabilities: ["authenticated-websocket", "remote-cli", "unified-instance"],
             }
           : {}),
         publishedAt: new Date().toISOString(),

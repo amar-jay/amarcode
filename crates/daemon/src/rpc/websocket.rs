@@ -38,6 +38,7 @@ pub(super) struct State {
     tls: Option<TlsAcceptor>,
     origins: Vec<String>,
     bearer_token: String,
+    address: String,
 }
 
 impl Listener {
@@ -87,6 +88,7 @@ impl State {
         Ok(Self {
             tls,
             bearer_token,
+            address: config.daemon_addr.clone(),
             origins: config.ws_allowed_origins.clone(),
         })
     }
@@ -127,7 +129,13 @@ impl State {
         // Both futures are polled together, including during large uploads and long prompts.
         let (bridge, rpc) = tokio::io::duplex(64 * 1024);
         let (rpc_read, rpc_write) = tokio::io::split(rpc);
-        let handler = super::connection::handle_io(rpc_read, rpc_write, app, peer);
+        let handler = super::connection::handle_io_context(
+            rpc_read,
+            rpc_write,
+            app,
+            peer,
+            Some(&self.address),
+        );
         let transport = bridge_frames(socket, bridge);
         tokio::select! {
             result = handler => result,

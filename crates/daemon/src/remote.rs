@@ -10,17 +10,93 @@ use tokio::{
 #[derive(Default, Deserialize)]
 pub struct Setup {
     #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub listen_addr: Option<String>,
+    #[serde(default)]
     pub cloudflared: Option<PathBuf>,
     #[serde(default)]
     pub tool_bin_dirs: Vec<PathBuf>,
 }
 
-/// Called before Tokio starts: the installed remote defaults never affect local runs.
+pub fn instance_root() -> Result<PathBuf> {
+    crate::config::resolve()?
+        .parent()
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::msg("Cannot locate the daemon instance directory"))
+}
+
+/// Load optional access settings for the standard instance before Tokio starts.
+/// Legacy explicit roots remain available for deliberately isolated instances.
+pub fn configured() -> Result<Option<Setup>> {
+    let root = instance_root()?;
+    match fs::read(root.join("remote.json")) {
+        Ok(bytes) => {
+            let setup: Setup = serde_json::from_slice(&bytes)?;
+            apply_environment(&root, &setup, false)?;
+            if setup.enabled {
+                Ok(Some(setup))
+            } else {
+                Ok(None)
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Persist access settings without starting a second daemon or a tunnel.
+pub fn configure_access(enabled: bool) -> Result<()> {
+    let root = instance_root()?;
+    fs::create_dir_all(&root)?;
+    let path = root.join("remote.json");
+    let mut settings: serde_json::Value = match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(e) => return Err(e.into()),
+    };
+    let object = settings
+        .as_object_mut()
+        .ok_or_else(|| Error::msg("remote.json must be an object"))?;
+    object.insert("enabled".into(), enabled.into());
+    if enabled {
+        let token = root.join("access-token");
+        if !token.exists() {
+            use std::io::Write;
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&token)?;
+            writeln!(
+                file,
+                "{}{}",
+                uuid::Uuid::new_v4().simple(),
+                uuid::Uuid::new_v4().simple()
+            )?;
+            file.sync_all()?;
+        }
+        crate::rpc::websocket::load_token(&token)?;
+    }
+    crate::update::releases::atomic_write(&path, &serde_json::to_vec_pretty(&settings)?)
+        .map_err(Error::msg)?;
+    println!(
+        "Remote access {}. Restart the existing daemon to apply.\nAccess token file: {}",
+        if enabled { "enabled" } else { "disabled" },
+        root.join("access-token").display()
+    );
+    Ok(())
+}
+
+/// Called before Tokio starts. Remote access shares the standard database.
 pub fn prepare(require_tunnel: bool) -> Result<Setup> {
     let root = env::var_os("AMARCODE_REMOTE_ROOT")
         .map(PathBuf::from)
-        .or_else(|| dirs::data_local_dir().map(|path| path.join("amarcode-remote")))
-        .ok_or_else(|| Error::msg("Cannot locate the remote installation directory"))?;
+        .map(Ok)
+        .unwrap_or_else(instance_root)?;
     let setup: Setup = match fs::read(root.join("remote.json")) {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
         Err(error) if !require_tunnel && error.kind() == std::io::ErrorKind::NotFound => Setup::default(),
@@ -36,6 +112,11 @@ pub fn prepare(require_tunnel: bool) -> Result<Setup> {
             "Installed cloudflared is missing; rerun the Amarcode installer",
         ));
     }
+    apply_environment(&root, &setup, env::var_os("AMARCODE_REMOTE_ROOT").is_some())?;
+    Ok(setup)
+}
+
+fn apply_environment(root: &std::path::Path, setup: &Setup, isolated: bool) -> Result<()> {
     if !setup.tool_bin_dirs.is_empty() {
         let path = env::var_os("PATH").unwrap_or_default();
         let mut directories = Vec::new();
@@ -60,18 +141,113 @@ pub fn prepare(require_tunnel: bool) -> Result<Setup> {
                 .map_err(|error| Error::msg(format!("Invalid installed runtime PATH: {error}")))?,
         );
     }
-    for (key, value) in [
-        ("AMARCODE_APPDIR", root.join("data").into_os_string()),
-        (
-            "AMARCODE_WS_TOKEN_FILE",
-            root.join("access-token").into_os_string(),
-        ),
-    ] {
+    if isolated && env::var_os("AMARCODE_APPDIR").is_none() {
+        env::set_var("AMARCODE_APPDIR", root.join("data"));
+    }
+    for (key, value) in [(
+        "AMARCODE_WS_TOKEN_FILE",
+        root.join("access-token").into_os_string(),
+    )] {
         if env::var_os(key).is_none() {
             env::set_var(key, value);
         }
     }
-    Ok(setup)
+    Ok(())
+}
+
+/// Access configuration cloned from the single application's configuration.
+pub fn access_config(local: &Config, setup: &Setup) -> Result<Config> {
+    let mut remote = local.clone();
+    remote.transport = crate::config::DaemonTransport::WebSocket;
+    remote.daemon_addr = env::var("AMARCODE_WS_ADDR")
+        .ok()
+        .or_else(|| setup.listen_addr.clone())
+        .unwrap_or_else(|| crate::config::DEFAULT_WS_DAEMON_ADDR.into());
+    remote.ws_token_file = env::var_os("AMARCODE_WS_TOKEN_FILE")
+        .map(PathBuf::from)
+        .or(Some(instance_root()?.join("access-token")));
+    remote.ws_tls_cert = env::var_os("AMARCODE_WS_TLS_CERT").map(PathBuf::from);
+    remote.ws_tls_key = env::var_os("AMARCODE_WS_TLS_KEY").map(PathBuf::from);
+    remote.ws_allowed_origins = env::var("AMARCODE_WS_ALLOW_ORIGIN")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect();
+    remote.validate()?;
+    Ok(remote)
+}
+
+pub async fn run_shared(local: Config, setup: Setup, no_tunnel: bool) -> Result<()> {
+    let remote = access_config(&local, &setup)?;
+    validate(&remote, no_tunnel)?;
+    let listener = crate::rpc::websocket::Listener::bind(&remote).await?;
+    let app = App::new(local).await?;
+    let (ready, listening) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(app.run_with_access(listener, ready));
+    if listening.await.is_err() {
+        return server.await.map_err(|e| Error::msg(e.to_string()))?;
+    }
+    finish(remote, setup, no_tunnel, server).await
+}
+
+/// Attach Cloudflare to a live authenticated listener; never opens a database.
+pub async fn tunnel(local: Config, setup: Setup) -> Result<()> {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+    let remote = access_config(&local, &setup)?;
+    validate(&remote, false)?;
+    let token = crate::rpc::websocket::load_token(
+        remote
+            .ws_token_file
+            .as_deref()
+            .ok_or_else(|| Error::msg("Remote token file missing"))?,
+    )?;
+    let mut request = format!("ws://{}/rpc", remote.daemon_addr)
+        .into_client_request()
+        .map_err(|e| Error::msg(e.to_string()))?;
+    request.headers_mut().insert(
+        "authorization",
+        format!("Bearer {token}")
+            .parse()
+            .map_err(|_| Error::msg("Invalid remote token"))?,
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let (mut socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .map_err(|e| {
+                Error::msg(format!(
+                    "Start or restart the existing daemon before opening a tunnel: {e}"
+                ))
+            })?;
+        socket
+            .send(Message::Text(
+                serde_json::json!({"method":"health"}).to_string().into(),
+            ))
+            .await
+            .map_err(|e| Error::msg(e.to_string()))?;
+        let response = socket
+            .next()
+            .await
+            .ok_or_else(|| Error::msg("Daemon closed the health connection"))?
+            .map_err(|e| Error::msg(e.to_string()))?;
+        let reply: serde_json::Value =
+            serde_json::from_str(response.to_text().map_err(|e| Error::msg(e.to_string()))?)?;
+        if reply["result"]["remote_auth_required"] != true || reply["result"]["status"] != "ok" {
+            return Err(Error::msg(
+                "Tunnel origin is not an authenticated Amarcode daemon",
+            ));
+        }
+        socket
+            .close(None)
+            .await
+            .map_err(|e| Error::msg(e.to_string()))?;
+        Ok(())
+    })
+    .await
+    .map_err(|_| Error::msg("Daemon health check timed out"))??;
+    finish(remote, setup, false, tokio::spawn(std::future::pending())).await
 }
 
 pub fn validate(config: &Config, no_tunnel: bool) -> Result<()> {
@@ -110,6 +286,27 @@ fn tunnel_url(line: &str) -> Option<String> {
 
 pub async fn run(config: Config, setup: Setup, no_tunnel: bool) -> Result<()> {
     validate(&config, no_tunnel)?;
+    crate::rpc::websocket::load_token(
+        config
+            .ws_token_file
+            .as_deref()
+            .ok_or_else(|| Error::msg("Remote access token file is not configured"))?,
+    )?;
+    let app = App::new(config.clone()).await?;
+    let (ready, listening) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(app.run_with_ready(ready));
+    if listening.await.is_err() {
+        return server.await.map_err(|e| Error::msg(e.to_string()))?;
+    }
+    finish(config, setup, no_tunnel, server).await
+}
+
+async fn finish(
+    config: Config,
+    setup: Setup,
+    no_tunnel: bool,
+    mut server: tokio::task::JoinHandle<Result<()>>,
+) -> Result<()> {
     let cloudflared = if no_tunnel {
         None
     } else {
@@ -123,17 +320,9 @@ pub async fn run(config: Config, setup: Setup, no_tunnel: bool) -> Result<()> {
     let token_path = config
         .ws_token_file
         .as_deref()
-        .ok_or_else(|| Error::msg("Remote access token file is not configured"))?
-        .to_owned();
-    // Validate before opening the database, including in SSH-only mode.
-    let token = crate::rpc::websocket::load_token(&token_path)?;
+        .ok_or_else(|| Error::msg("Remote access token file is not configured"))?;
+    let token = crate::rpc::websocket::load_token(token_path)?;
     let address = config.daemon_addr.clone();
-    let app = App::new(config).await?;
-    let (ready, listening) = tokio::sync::oneshot::channel();
-    let mut server = tokio::spawn(app.run_with_ready(ready));
-    if listening.await.is_err() {
-        return server.await.map_err(|e| Error::msg(e.to_string()))?;
-    }
     let Some(cloudflared) = cloudflared else {
         println!(
             "SSH-only daemon listening on {address}\nAccess token file: {}",

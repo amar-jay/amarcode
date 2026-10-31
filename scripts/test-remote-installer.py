@@ -27,8 +27,8 @@ class RemoteInstallerTests(unittest.TestCase):
         subprocess.run(['openssl', 'genpkey', '-algorithm', 'ED25519', '-out', str(self.key)], check=True, capture_output=True)
         public = subprocess.run(['openssl', 'pkey', '-in', str(self.key), '-pubout', '-outform', 'DER'], check=True, capture_output=True).stdout
         self.module.PUBLIC_KEY = public[-32:].hex()
-        self.binary = b'#!/bin/sh\necho "Amarcode run --transport --remote"\n'
-        self.manifest = {'version': '1.2.3', 'protocolVersion': 12, 'capabilities': ['authenticated-websocket', 'remote-cli'], 'artifacts': {
+        self.binary = b'#!/bin/sh\necho "Amarcode run --transport --remote access enable tunnel"\n'
+        self.manifest = {'version': '1.2.3', 'protocolVersion': 12, 'capabilities': ['authenticated-websocket', 'remote-cli', 'unified-instance'], 'artifacts': {
             'x86_64-unknown-linux-gnu': {'target': 'x86_64-unknown-linux-gnu', 'size': len(self.binary),
                                       'sha256': hashlib.sha256(self.binary).hexdigest(),
                                       'url': '/v1/daemon/1.2.3/x86_64-unknown-linux-gnu'}}}
@@ -123,7 +123,7 @@ class RemoteInstallerTests(unittest.TestCase):
 
     def test_legacy_release_is_rejected_before_any_binary_runs(self):
         self.manifest.pop('capabilities')
-        with self.assertRaisesRegex(ValueError, 'predates authenticated remote CLI support'):
+        with self.assertRaisesRegex(ValueError, 'predates authenticated unified-instance CLI support'):
             self.module.select_artifact(self.manifest, 'x86_64-unknown-linux-gnu', self.module.REGISTRY + '/v1/daemon/latest.json')
 
     def test_cloudflared_asset_selection_checks_architecture_origin_version_and_digest(self):
@@ -215,6 +215,38 @@ class RemoteInstallerTests(unittest.TestCase):
         self.assertIn(b'--cloudflared-version', output.stdout)
         self.assertIn(b'--tunnel', output.stdout)
 
+    def test_offline_migration_preserves_data_token_and_aliases_old_paths(self):
+        legacy, root = self.root / 'amarcode-remote', self.root / 'com.amarcode.desktop'
+        (legacy / 'data/attachments').mkdir(parents=True)
+        root.mkdir()
+        (legacy / 'data/workspace.sqlite3').write_bytes(b'fixture database')
+        (legacy / 'data/attachments/file').write_text('attachment')
+        (legacy / 'access-token').write_text('a' * 64)
+        self.module.migrate_legacy(legacy, root)
+        self.module.migrate_legacy(legacy, root)
+        self.assertEqual((root / 'data/workspace.sqlite3').read_bytes(), b'fixture database')
+        self.assertEqual((root / 'data/attachments/file').read_text(), 'attachment')
+        self.assertEqual((root / 'access-token').read_text(), 'a' * 64)
+        self.assertEqual((legacy / 'data').resolve(), (root / 'data').resolve())
+
+    def test_migration_refuses_active_and_conflicting_databases(self):
+        import fcntl
+        legacy, root = self.root / 'legacy', self.root / 'shared'
+        (legacy / 'data').mkdir(parents=True)
+        root.mkdir()
+        source = legacy / 'data/workspace.sqlite3'
+        source.write_bytes(b'legacy')
+        with (legacy / 'data/workspace.sqlite3.amarcode.lock').open('a+b') as owner:
+            fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(ValueError, 'Stop the legacy remote daemon'):
+                self.module.migrate_legacy(legacy, root)
+        (root / 'data').mkdir()
+        (root / 'data/workspace.sqlite3').write_bytes(b'desktop')
+        with self.assertRaisesRegex(ValueError, 'Both desktop and legacy remote data exist'):
+            self.module.migrate_legacy(legacy, root)
+        self.assertEqual(source.read_bytes(), b'legacy')
+        self.assertEqual((root / 'data/workspace.sqlite3').read_bytes(), b'desktop')
+
     def test_install_and_reinstall_preserve_token_and_write_private_launchers(self):
         manifest, signature = self.signed()
         def download(url, destination, limit):
@@ -229,14 +261,14 @@ class RemoteInstallerTests(unittest.TestCase):
             Path(destination).write_bytes(payload)
         captured = io.StringIO()
         data = self.root / "data with ' spaces"
-        with patch.dict(os.environ, {'HOME': str(self.root / 'home'), 'XDG_DATA_HOME': str(data), 'XDG_CONFIG_HOME': str(self.root / 'config'), 'ZDOTDIR': str(self.root / 'zsh')}), patch.object(sys, 'argv', ['installer', '--bin-dir', str(self.root / 'bin')]), patch.object(self.module, 'download', download), patch.object(self.module.platform, 'system', return_value='Linux'), patch.object(self.module.platform, 'machine', return_value='x86_64'), contextlib.redirect_stdout(captured):
+        with patch.dict(os.environ, {'HOME': str(self.root / 'home'), 'XDG_DATA_HOME': str(data), 'XDG_CONFIG_HOME': str(self.root / 'config'), 'ZDOTDIR': str(self.root / 'zsh')}), patch.object(sys, 'argv', ['installer', '--bin-dir', str(self.root / 'bin'), '--with-cloudflare']), patch.object(self.module, 'download', download), patch.object(self.module.platform, 'system', return_value='Linux'), patch.object(self.module.platform, 'machine', return_value='x86_64'), contextlib.redirect_stdout(captured):
             self.module.main()
-            installed = data / 'amarcode-remote'
+            installed = data / 'com.amarcode.desktop'
             token = (installed / 'access-token').read_text()
             self.module.main()
             self.assertEqual(token, (installed / 'access-token').read_text())
         self.assertEqual(captured.getvalue().count('Access token (save privately):'), 1)
-        self.assertIn('amarcode-daemon --remote', captured.getvalue())
+        self.assertIn('amarcode-daemon run', captured.getvalue())
         self.assertIn('No service or tunnel has been started', captured.getvalue())
         for name in ['access-token', 'remote.json', 'run.sh', 'tunnel.sh']:
             self.assertEqual((installed / name).stat().st_mode & 0o077, 0)
@@ -245,20 +277,24 @@ class RemoteInstallerTests(unittest.TestCase):
         output = subprocess.run([str(launcher)], check=True, capture_output=True)
         self.assertIn(b'Amarcode run', output.stdout)
         self.assertIn('AMARCODE_WS_TOKEN_FILE', launcher.read_text())
-        self.assertIn('--transport websocket', launcher.read_text())
+        self.assertIn(' run', launcher.read_text())
+        self.assertNotIn('AMARCODE_REMOTE_ROOT', launcher.read_text())
         tunnel = installed / 'tunnel.sh'
         output = subprocess.run([str(tunnel)], check=True, capture_output=True)
         self.assertIn(b'Amarcode run --transport --remote', output.stdout)
         import shlex
         executable = Path(shlex.split(next(line for line in tunnel.read_text().splitlines() if line.startswith('exec ')))[1])
-        self.assertEqual(executable, self.root / 'bin/amarcode-daemon')
+        self.assertEqual(executable, installed / 'daemon/bin/amarcode-daemon')
+        self.assertEqual((self.root / 'bin/amarcode-daemon').readlink(), executable)
+        record = json.loads((installed / 'daemon/current-release.json').read_text())
+        self.assertEqual(json.loads(record['manifest'])['version'], '1.2.3')
         self.assertTrue(executable.is_symlink())
-        self.assertIn('--remote', tunnel.read_text())
+        self.assertIn(' tunnel', tunnel.read_text())
         setup = json.loads((installed / 'remote.json').read_text())
         self.assertTrue(Path(setup['cloudflared']).is_relative_to(installed / 'cloudflared'))
         self.assertEqual(len(setup['tool_bin_dirs']), 2)
         for tool in ['bun', 'bunx', 'uv', 'uvx']:
-            runtime = self.root / 'bin' / tool
+            runtime = installed / 'daemon/bin' / tool
             self.assertTrue(runtime.is_symlink())
             self.assertTrue(runtime.resolve().is_relative_to(installed / 'runtimes'))
             subprocess.run([str(runtime), '--version'], check=True, capture_output=True)

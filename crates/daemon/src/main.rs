@@ -54,6 +54,13 @@ enum LifecycleCommand {
         #[command(subcommand)]
         command: amarcode_daemon::update::bootstrap::Command,
     },
+    /// Open Cloudflare access to an already-running authenticated instance.
+    Tunnel,
+    /// Enable/disable authenticated access to this instance; restart to apply.
+    Access {
+        #[arg(value_enum)]
+        mode: AccessMode,
+    },
     /// Register the current executable as a per-user login service.
     Install,
     /// Stop and unregister the per-user service without deleting user data.
@@ -78,6 +85,12 @@ enum LifecycleCommand {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
+enum AccessMode {
+    Enable,
+    Disable,
+}
+
 fn main() {
     #[cfg(windows)]
     amarcode_daemon::windows::attach_parent_console();
@@ -94,15 +107,19 @@ fn main() {
             std::process::exit(1);
         }
     }
-    let transport = cli.transport.unwrap_or(if cli.remote {
+    let isolated = std::env::var_os("AMARCODE_REMOTE_ROOT").is_some();
+    let transport = cli.transport.unwrap_or(if cli.remote && isolated {
         DaemonTransport::WebSocket
     } else {
         DaemonTransport::Tcp
     });
     let remote = if cli.remote {
-        if command != LifecycleCommand::Run || transport != DaemonTransport::WebSocket {
+        if command != LifecycleCommand::Run
+            || (!isolated && transport != DaemonTransport::Tcp)
+            || (isolated && transport != DaemonTransport::WebSocket)
+        {
             eprintln!(
-                "amarcode-daemon: --remote is supported only for run with --transport websocket"
+                "amarcode-daemon: --remote requires run; standard instances use TCP with an additional authenticated WebSocket listener"
             );
             std::process::exit(2);
         }
@@ -113,10 +130,27 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    } else if command == LifecycleCommand::Tunnel {
+        match amarcode_daemon::remote::prepare(true) {
+            Ok(setup) => Some(setup),
+            Err(error) => {
+                eprintln!("amarcode-daemon: {error}");
+                std::process::exit(1);
+            }
+        }
+    } else if command == LifecycleCommand::Run && transport == DaemonTransport::Tcp {
+        match amarcode_daemon::remote::configured() {
+            Ok(setup) => setup,
+            Err(error) => {
+                eprintln!("amarcode-daemon: {error}");
+                std::process::exit(1);
+            }
+        }
     } else {
         None
     };
-    async_main(command, transport, remote, cli.no_tunnel);
+    let no_tunnel = cli.no_tunnel || !cli.remote;
+    async_main(command, transport, remote, no_tunnel);
 }
 
 #[tokio::main]
@@ -136,6 +170,23 @@ async fn async_main(
     if let LifecycleCommand::UpdateSupervisor { ref release_root } = command {
         if let Err(error) = amarcode_daemon::update::supervisor::run(release_root).await {
             eprintln!("amarcode update supervisor: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if command == LifecycleCommand::Tunnel {
+        let outcome = match Config::get(DaemonTransport::Tcp) {
+            Ok(config) => {
+                amarcode_daemon::remote::tunnel(
+                    config.clone(),
+                    remote.expect("prepared tunnel setup"),
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        };
+        if let Err(error) = outcome {
+            eprintln!("amarcode-daemon: {error}");
             std::process::exit(1);
         }
         return;
@@ -181,6 +232,9 @@ async fn async_main(
     );
 
     let outcome = match remote {
+        Some(setup) if config.transport == DaemonTransport::Tcp => {
+            amarcode_daemon::remote::run_shared(config.clone(), setup, no_tunnel).await
+        }
         Some(setup) => amarcode_daemon::remote::run(config.clone(), setup, no_tunnel).await,
         None => run(config.clone()).await,
     };
@@ -199,9 +253,13 @@ fn run_lifecycle_command(command: LifecycleCommand) -> amarcode_daemon::Result<(
     let controller = NativeServiceController;
     match command {
         LifecycleCommand::Run
+        | LifecycleCommand::Tunnel
         | LifecycleCommand::UpdateSupervisor { .. }
         | LifecycleCommand::Bootstrap { .. } => {
             unreachable!("run is handled by the async entrypoint")
+        }
+        LifecycleCommand::Access { mode } => {
+            amarcode_daemon::remote::configure_access(mode == AccessMode::Enable)?;
         }
         LifecycleCommand::Install => {
             let executable = std::env::current_exe()?;

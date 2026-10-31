@@ -59,8 +59,8 @@ def verify_manifest(manifest, signature, directory):
 
 
 def select_artifact(manifest, target, manifest_url):
-    if not {'authenticated-websocket', 'remote-cli'}.issubset(manifest.get('capabilities', [])):
-        raise ValueError('This daemon release predates authenticated remote CLI support; publish a new daemon release first')
+    if not {'authenticated-websocket', 'remote-cli', 'unified-instance'}.issubset(manifest.get('capabilities', [])):
+        raise ValueError('This daemon release predates authenticated unified-instance CLI support; publish a new daemon release first')
     version = manifest['version']
     if not isinstance(version, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]{0,127}', version):
         raise ValueError('Invalid release version')
@@ -286,11 +286,15 @@ def persist_command_path(home, bin_dir):
             path.write_text(updated)
 
 
-def install_command(bin_dir, executable, root):
+def install_command(bin_dir, executable, root, legacy=None):
     bin_dir.mkdir(parents=True, exist_ok=True)
     command = bin_dir / 'amarcode-daemon'
     if os.path.lexists(command):
-        if not command.is_symlink() or not command.resolve().is_relative_to((root / 'releases').resolve()):
+        resolved = command.resolve()
+        owned = resolved.is_relative_to((root / 'daemon').resolve())
+        if legacy is not None:
+            owned = owned or resolved.is_relative_to((legacy / 'releases').resolve())
+        if not command.is_symlink() or not owned:
             raise ValueError(str(command) + ' already exists outside this installation; choose another --bin-dir')
     temporary = bin_dir / ('.amarcode-daemon-' + secrets.token_hex(8))
     try:
@@ -302,14 +306,95 @@ def install_command(bin_dir, executable, root):
     return command
 
 
+def migrate_legacy(legacy, root):
+    """Move an offline legacy instance once; old launchers then alias the same DB."""
+    import fcntl
+    source, target = legacy / 'data', root / 'data'
+    pending = root / 'remote-migration-pending.json'
+    if pending.exists():
+        saved = json.loads(pending.read_text())
+        if saved != {'source': str(source), 'target': str(target)}:
+            raise ValueError('Unexpected pending remote migration')
+        if not source.exists() and target.is_dir():
+            source.symlink_to(target, target_is_directory=True)
+        if source.is_symlink() and source.resolve() == target.resolve():
+            pending.unlink()
+    if not source.exists() or (source.is_symlink() and source.resolve() == target.resolve()):
+        return
+    if source.is_symlink() or not source.is_dir():
+        raise ValueError('Legacy data directory is redirected; migrate it manually')
+    if not any(source.iterdir()):
+        return
+    if target.exists() and any(target.iterdir()):
+        raise ValueError('Both desktop and legacy remote data exist. Stop both daemons and choose which instance to keep; automatic database merging is not supported. Both directories were preserved.')
+    old_token, new_token = legacy / 'access-token', root / 'access-token'
+    if old_token.exists() and new_token.exists() and old_token.read_bytes() != new_token.read_bytes():
+        raise ValueError('Desktop and legacy remote access tokens conflict; both were preserved')
+    lock = source / 'workspace.sqlite3.amarcode.lock'
+    with lock.open('a+b') as ownership:
+        try:
+            fcntl.flock(ownership, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError('Stop the legacy remote daemon before migrating its database')
+        if old_token.exists() and not new_token.exists():
+            private_write(new_token, old_token.read_text())
+        private_write(pending, json.dumps({'source': str(source), 'target': str(target)}))
+        if target.exists():
+            target.rmdir()
+        source.rename(target)
+        source.symlink_to(target, target_is_directory=True)
+        pending.unlink()
+    print('Migrated legacy remote data; old data paths now alias the same instance.')
+
+
+def installed_release(root, temporary, target):
+    """Verify and reuse the same current release consumed by desktop bootstrap."""
+    record = root / 'daemon/current-release.json'
+    if not record.exists():
+        return None
+    saved = json.loads(record.read_text())
+    if 'bundled' in saved:
+        release = saved['bundled']
+        if release['target'] != target:
+            raise ValueError('Installed daemon target is incompatible')
+        parts = [release['version'], release['sha256']]
+        if release.get('instance'):
+            parts.append(release['instance'])
+        if any(not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]{0,127}', part) for part in parts):
+            raise ValueError('Invalid installed bundle path')
+        executable = root / 'daemon/bundled'
+        for part in parts:
+            executable /= part
+        executable /= 'amarcode-daemon'
+        artifact = release
+    else:
+        manifest_path, signature_path = temporary / 'current.json', temporary / 'current.sig'
+        manifest_path.write_text(saved['manifest'])
+        signature_path.write_text(saved['signature'])
+        manifest = verify_manifest(manifest_path, signature_path, temporary)
+        source = urllib.parse.urlsplit(saved['source_url'])
+        if source.scheme != 'https' or source.netloc != urllib.parse.urlsplit(REGISTRY).netloc:
+            raise ValueError('Installed daemon registry origin is invalid')
+        version, artifact, _ = select_artifact(manifest, target, saved['source_url'])
+        executable = root / 'daemon' / version / target / 'amarcode-daemon'
+        release = {'version': version, 'protocol_version': manifest.get('protocolVersion')}
+    if not executable.is_file() or executable.stat().st_size != artifact['size'] or hashlib.sha256(executable.read_bytes()).hexdigest().lower() != artifact['sha256'].lower():
+        raise ValueError('Installed daemon verification failed; repair it before configuring remote access')
+    probe = subprocess.run([str(executable), 'access', '--help'], check=True, capture_output=True, timeout=10)
+    if b'enable' not in probe.stdout:
+        raise ValueError('Upgrade the installed daemon before configuring unified remote access')
+    return executable, release['version'], release.get('protocol_version')
+
+
 def main():
     parser = argparse.ArgumentParser(description='Install Amarcode, cloudflared, Bun, and uv (Linux)')
     parser.add_argument('--version', help='Install a specific signed release; default: latest')
+    parser.add_argument('--with-cloudflare', action='store_true', help='Install the optional Cloudflare connector')
     parser.add_argument('--cloudflared-version', help='Install a specific official cloudflared release; default: latest')
     parser.add_argument('--bun-version', help='Official Bun release tag; default: latest')
     parser.add_argument('--uv-version', help='Official uv release tag; default: latest')
-    parser.add_argument('--bin-dir', type=Path, default=Path.home() / '.local/bin', help='Command installation directory; default: ~/.local/bin')
-    parser.add_argument('--start', '--tunnel', dest='start', action='store_true', help='Start amarcode-daemon --remote after installation')
+    parser.add_argument('--bin-dir', type=Path, help='Optional additional command alias directory; the managed command always lives in the instance daemon/bin directory')
+    parser.add_argument('--start', '--tunnel', dest='start', action='store_true', help='Run the shared daemon in the foreground after installation (SSH-only)')
     parser.add_argument('--no-service', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if platform.system() != 'Linux':
@@ -328,36 +413,75 @@ def main():
         if value and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]{0,127}', value):
             parser.error('Invalid ' + label + ' version')
     manifest_url = REGISTRY + ('/v1/daemon/' + args.version + '/manifest.json' if args.version else '/v1/daemon/latest.json')
-    root = Path(os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local/share'))) / 'amarcode-remote'
+    data_home = Path(os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local/share')))
+    legacy = data_home / 'amarcode-remote'
+    root = data_home / 'com.amarcode.desktop'
     if not root.is_absolute() or any(c in str(root) for c in '\n\r\0'):
         parser.error('XDG_DATA_HOME must be an absolute path without control characters')
-    bin_dir = args.bin_dir.expanduser().absolute()
+    bin_dir = root / 'daemon/bin'
+    alias_dir = args.bin_dir.expanduser().absolute() if args.bin_dir else None
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(root, 0o700)
-    with tempfile.TemporaryDirectory(dir=root) as temporary:
+    # Serialize with desktop bootstrap and update supervision. Do not switch a
+    # running service behind its back: reuse its verified current release.
+    import fcntl
+    release_root = root / 'daemon'
+    release_root.mkdir(exist_ok=True, mode=0o700)
+    with (release_root / 'request.lock').open('a+b') as request_lock, (release_root / 'supervisor.lock').open('a+b') as supervisor_lock, tempfile.TemporaryDirectory(dir=root) as temporary:
+        for lock in [request_lock, supervisor_lock]:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ValueError('A daemon install or update is active; retry when it finishes')
+        if (release_root / 'bootstrap-activation-pending-v1').exists():
+            raise ValueError('Finish or repair the interrupted desktop installation first')
+        job = release_root / 'update-job.json'
+        # Native request/supervisor locks protect the current release throughout.
         directory = Path(temporary)
-        manifest_path, signature_path = directory / 'manifest.json', directory / 'manifest.sig'
-        download(manifest_url, manifest_path, 1024 * 1024)
-        download(manifest_url + '.sig', signature_path, 4096)
-        manifest = verify_manifest(manifest_path, signature_path, directory)
-        version, artifact, url = select_artifact(manifest, target, manifest_url)
-        if args.version and version != args.version:
-            raise ValueError('Signed manifest does not match requested version')
-        binary = directory / 'amarcode-daemon'
-        download(url, binary, artifact['size'])
-        if binary.stat().st_size != artifact['size'] or hashlib.sha256(binary.read_bytes()).hexdigest().lower() != artifact['sha256'].lower():
-            raise ValueError('Downloaded daemon size/checksum verification failed')
-        os.chmod(binary, 0o700)
-        probe = subprocess.run([str(binary), '--help'], check=True, capture_output=True, timeout=10)
-        if b'--transport' not in probe.stdout or b'--remote' not in probe.stdout:
-            raise ValueError('Downloaded binary does not support the daemon CLI')
-        release = root / 'releases' / version / artifact['sha256']
-        release.mkdir(parents=True, exist_ok=True, mode=0o700)
-        executable = release / 'amarcode-daemon'
-        os.replace(binary, executable)
-        shutil.copyfile(manifest_path, release / 'manifest.json')
-        shutil.copyfile(signature_path, release / 'manifest.json.sig')
-    cloudflared = install_cloudflared(root, architecture, args.cloudflared_version)
+        current = installed_release(root, directory, target)
+        if current:
+            executable, version, protocol = current
+            if args.version and args.version != version:
+                raise ValueError('Use the managed daemon update flow to change an existing release')
+            print('Reusing managed daemon ' + version)
+        else:
+            manifest_path, signature_path = directory / 'manifest.json', directory / 'manifest.sig'
+            download(manifest_url, manifest_path, 1024 * 1024)
+            download(manifest_url + '.sig', signature_path, 4096)
+            manifest = verify_manifest(manifest_path, signature_path, directory)
+            version, artifact, url = select_artifact(manifest, target, manifest_url)
+            if args.version and version != args.version:
+                raise ValueError('Signed manifest does not match requested version')
+            binary = directory / 'amarcode-daemon'
+            download(url, binary, artifact['size'])
+            if binary.stat().st_size != artifact['size'] or hashlib.sha256(binary.read_bytes()).hexdigest().lower() != artifact['sha256'].lower():
+                raise ValueError('Downloaded daemon size/checksum verification failed')
+            os.chmod(binary, 0o700)
+            probe = subprocess.run([str(binary), 'access', '--help'], check=True, capture_output=True, timeout=10)
+            if b'enable' not in probe.stdout:
+                raise ValueError('Downloaded binary does not support unified instance access')
+            release = release_root / version / target
+            release.mkdir(parents=True, exist_ok=True, mode=0o700)
+            executable = release / 'amarcode-daemon'
+            if executable.exists():
+                if executable.stat().st_size != artifact['size'] or hashlib.sha256(executable.read_bytes()).hexdigest().lower() != artifact['sha256'].lower():
+                    raise ValueError('Immutable release is damaged; repair it before installing')
+            else:
+                os.replace(binary, executable)
+            private_write(release_root / 'current-manifest.json', manifest_path.read_text())
+            private_write(release_root / 'current-manifest.json.sig', signature_path.read_text())
+            private_write(release_root / 'current-release.json', json.dumps({
+                'manifest': manifest_path.read_text(), 'signature': signature_path.read_text(),
+                'source_url': manifest_url,
+            }))
+        migrate_legacy(legacy, root)
+        command = install_command(bin_dir, executable, root)
+        if alias_dir and alias_dir != bin_dir:
+            install_command(alias_dir, command, root, legacy)
+        old_alias = Path.home() / '.local/bin/amarcode-daemon'
+        if old_alias.is_symlink() and old_alias.resolve().is_relative_to((legacy / 'releases').resolve()):
+            install_command(old_alias.parent, command, root, legacy)
+    cloudflared = install_cloudflared(root, architecture, args.cloudflared_version) if args.with_cloudflare or args.cloudflared_version else None
     bun_bin = install_runtime(root, 'bun', architecture, args.bun_version)
     uv_bin = install_runtime(root, 'uv', architecture, args.uv_version)
     tool_bin_dirs = [str(bun_bin), str(uv_bin)]
@@ -369,19 +493,22 @@ def main():
     token = token_path.read_text().strip()
     if not re.fullmatch(r'[A-Za-z0-9._~-]{32,512}', token):
         raise ValueError('Existing access-token is invalid; fix it before restarting')
-    private_write(root / 'remote.json', json.dumps({'cloudflared': str(cloudflared), 'tool_bin_dirs': tool_bin_dirs}) + '\n')
-    command = install_command(bin_dir, executable, root)
+    settings_path = root / 'remote.json'
+    settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    settings.update({'enabled': True, 'tool_bin_dirs': tool_bin_dirs})
+    if cloudflared is not None:
+        settings['cloudflared'] = str(cloudflared)
+    private_write(settings_path, json.dumps(settings) + '\n')
     persist_command_path(Path.home(), bin_dir)
     for name, directory in [('bun', bun_bin), ('bunx', bun_bin), ('uv', uv_bin), ('uvx', uv_bin)]:
         link_runtime(bin_dir, name, directory / name, root)
     import shlex
     quote = lambda value: shlex.quote(str(value))
     # Existing helper paths continue to use the same native command and lifecycle.
-    for name, arguments in [('run.sh', '--transport websocket'), ('tunnel.sh', '--transport websocket --remote')]:
+    for name, arguments in [('run.sh', 'run'), ('tunnel.sh', 'tunnel')]:
         launcher = root / name
         private_write(launcher, '#!/bin/sh\nset -eu\n' +
                       'export PATH=' + quote(os.pathsep.join(tool_bin_dirs)) + ':"$PATH"\n' +
-                      'export AMARCODE_REMOTE_ROOT=' + quote(root) + '\n' +
                       'export AMARCODE_APPDIR=' + quote(root / 'data') + '\n' +
                       'export AMARCODE_WS_TOKEN_FILE=' + quote(token_path) + '\n' +
                       'exec ' + quote(command) + ' ' + arguments + '\n')
@@ -389,7 +516,7 @@ def main():
     print('\nAmarcode remote setup complete. No service or tunnel has been started.')
     print('Daemon version: ' + version)
     print('Command: ' + str(command))
-    print('Cloudflared: ' + str(cloudflared))
+    print('Cloudflared: ' + (str(cloudflared) if cloudflared else 'optional; not installed'))
     print('Bun / bunx: ' + str(bun_bin))
     print('uv / uvx: ' + str(uv_bin))
     print('Data directory: ' + str(root / 'data'))
@@ -402,14 +529,14 @@ def main():
         print('PATH saved for new Bash, Zsh, and Fish sessions. For this shell, run:')
         print('  export PATH=' + quote(bin_dir) + ':"$PATH"')
     print('\nStart whenever needed:')
-    print('  amarcode-daemon --remote')
-    print('The command prints a wss://<tunnel-host>/rpc URL. Enter it with the access token in Amarcode → Settings → Connection.')
-    print('Project paths refer to this host. Ctrl+C stops both processes; quick tunnel URLs change each time.')
+    print('  amarcode-daemon run')
+    print('One instance serves local TCP on 127.0.0.1:43821 and authenticated SSH-forwarded WebSocket on 127.0.0.1:43721.')
+    print('If already running, restart the existing service to apply access settings: amarcode-daemon restart')
+    print('For a managed service: amarcode-daemon bootstrap install. Cloudflare is optional: install --with-cloudflare, then amarcode-daemon tunnel.')
     if args.start:
-        os.environ['AMARCODE_REMOTE_ROOT'] = str(root)
         os.environ['PATH'] = os.pathsep.join(tool_bin_dirs + [os.environ.get('PATH', '')])
         sys.stdout.flush()
-        os.execv(str(command), [str(command), '--transport', 'websocket', '--remote'])
+        os.execv(str(command), [str(command), 'run'])
 
 
 if __name__ == '__main__':

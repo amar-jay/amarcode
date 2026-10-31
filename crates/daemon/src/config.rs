@@ -135,6 +135,19 @@ impl Config {
 
     fn load_from_env(transport: DaemonTransport) -> Result<Self> {
         let app_dir = resolve()?;
+        if app_dir
+            .parent()
+            .is_some_and(|root| root.join("remote-migration-pending.json").exists())
+        {
+            return Err(Error::msg("Remote data migration is incomplete; rerun the installer before starting the daemon"));
+        }
+        if env_path("AMARCODE_APPDIR").is_none() && !app_dir.join(DEFAULT_DB_NAME).exists() {
+            if let Some(base) = dirs::data_local_dir() {
+                if base.join("amarcode-remote/data").is_dir() {
+                    return Err(Error::msg("Legacy remote data found. Stop the old daemon and rerun the installer to migrate it into the shared instance, or explicitly select its data directory with AMARCODE_APPDIR"));
+                }
+            }
+        }
         let db_path =
             env_path("AMARCODE_STORE_PATH").unwrap_or_else(|| app_dir.join(DEFAULT_DB_NAME));
         let acp_registry_source = env_text("AMARCODE_ACP_REGISTRY_SOURCE")?
