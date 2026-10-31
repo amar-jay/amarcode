@@ -4,6 +4,12 @@ Background service for Amarcode. Owns durable workspace state, talks to ACP
 coding agents as subprocesses, and exposes a local TCP JSON-line API for the
 editor / CLI.
 
+TCP clients send one RPC JSON object per line. A malformed request receives an
+error and closes the connection; later lines are never dispatched. HTTP requests
+are unsupported, including HTTP bodies containing otherwise valid RPC JSON.
+Valid RPC requests that fail during dispatch return an error without closing the
+connection.
+
 ## ACP registry checkout
 
 The upstream ACP registry is pinned for local development as the

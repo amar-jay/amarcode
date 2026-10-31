@@ -378,6 +378,157 @@ mod processes {
         stopped(pid).await;
     }
 
+    async fn lifecycle_status(
+        receiver: &mut watch::Receiver<crate::daemon::connection_lifecycle::Snapshot>,
+        predicate: impl Fn(&crate::daemon::connection_lifecycle::ConnectionStatus) -> bool,
+    ) -> crate::daemon::connection_lifecycle::ConnectionStatus {
+        tokio::time::timeout(Duration::from_secs(4), async {
+            loop {
+                let status = receiver.borrow_and_update().status.clone();
+                if predicate(&status) {
+                    return status;
+                }
+                receiver.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("supervisor status transition")
+    }
+
+    struct Supervisor(JoinHandle<()>);
+    impl Drop for Supervisor {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+
+    fn supervisor(
+        manager: Arc<SshTunnelManager>,
+        selected: Arc<Mutex<crate::daemon::remote::ConnectionSettings>>,
+        changes: watch::Receiver<u64>,
+    ) -> (
+        Supervisor,
+        watch::Receiver<crate::daemon::connection_lifecycle::Snapshot>,
+        watch::Receiver<u64>,
+    ) {
+        let (state, receiver) = watch::channel(Default::default());
+        let (generations, generation_receiver) = watch::channel(0);
+        let task = tokio::spawn(async move {
+            crate::daemon::connection_lifecycle::supervise(
+                &manager,
+                || Ok(selected.lock().unwrap().clone()),
+                changes,
+                &state,
+                &generations,
+                Duration::from_millis(30),
+                Duration::from_millis(30),
+            )
+            .await;
+        });
+        (Supervisor(task), receiver, generation_receiver)
+    }
+
+    #[tokio::test]
+    async fn supervisor_recovers_an_exited_tunnel_and_invalidates_subscribers() {
+        use crate::daemon::connection_lifecycle::ConnectionPhase;
+        let server = server(true, amarcode_protocol::PROTOCOL_VERSION).await;
+        let (_directory, manager) = manager(Duration::from_secs(2));
+        let manager = Arc::new(manager);
+        let mut config = config();
+        config.daemon_port = server.port;
+        let selected = Arc::new(Mutex::new(settings(config, TOKEN)));
+        let (_changes, changes) = watch::channel(0);
+        let (task, mut status, generations) = supervisor(Arc::clone(&manager), selected, changes);
+        let ready = lifecycle_status(&mut status, |s| s.status == ConnectionPhase::Connected).await;
+        let old_pid = {
+            let mut current = manager.current.lock().await;
+            let child = &mut current.as_mut().unwrap().child;
+            let pid = child.id().unwrap();
+            child.kill().await.unwrap();
+            pid
+        };
+        let recovered = lifecycle_status(&mut status, |s| {
+            s.status == ConnectionPhase::Connected && s.generation > ready.generation
+        })
+        .await;
+        assert_eq!(recovered.generation, ready.generation + 2);
+        assert!(*generations.borrow() > ready.generation);
+        assert_ne!(
+            manager.current.lock().await.as_ref().unwrap().child.id(),
+            Some(old_pid)
+        );
+        drop(task);
+        manager.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn supervisor_backs_off_and_recovers_after_a_failed_start_without_bootstrap() {
+        use crate::daemon::connection_lifecycle::ConnectionPhase;
+        let server = server(true, amarcode_protocol::PROTOCOL_VERSION).await;
+        let (_directory, manager) = manager(Duration::from_secs(2));
+        let manager = Arc::new(manager);
+        let mut config = config();
+        config.daemon_port = server.port;
+        config.host = "reject".into();
+        let selected = Arc::new(Mutex::new(settings(config, TOKEN)));
+        let (changes, changed) = watch::channel(0);
+        let (task, mut status, _) =
+            supervisor(Arc::clone(&manager), Arc::clone(&selected), changed);
+        let first = lifecycle_status(&mut status, |s| {
+            s.reconnect_attempt == 1 && s.retry_in_ms.is_some()
+        })
+        .await;
+        let second = lifecycle_status(&mut status, |s| {
+            s.reconnect_attempt == 2 && s.retry_in_ms.is_some()
+        })
+        .await;
+        assert_eq!(first.retry_in_ms, Some(30));
+        assert_eq!(second.retry_in_ms, Some(60));
+        assert!(second
+            .error
+            .unwrap()
+            .contains("Host key verification failed"));
+        selected.lock().unwrap().ssh.as_mut().unwrap().host = "dev-box".into();
+        changes.send_modify(|generation| *generation += 1);
+        let ready = lifecycle_status(&mut status, |s| s.status == ConnectionPhase::Connected).await;
+        assert_eq!(ready.reconnect_attempt, 0);
+        assert!(ready.error.is_none());
+        drop(task);
+        manager.disconnect().await;
+    }
+
+    #[tokio::test]
+    async fn profile_change_cancels_supervisor_startup_without_reconnecting_the_old_host() {
+        use crate::daemon::{connection_lifecycle::ConnectionPhase, remote::ConnectionSettings};
+        let (directory, manager) = manager(Duration::from_secs(20));
+        let manager = Arc::new(manager);
+        let mut config = config();
+        config.host = "stall".into();
+        let selected = Arc::new(Mutex::new(settings(config, TOKEN)));
+        let (changes, changed) = watch::channel(0);
+        let (task, mut status, _) =
+            supervisor(Arc::clone(&manager), Arc::clone(&selected), changed);
+        let pid_file = directory.path().join("pid");
+        let pid = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if let Ok(text) = std::fs::read_to_string(&pid_file) {
+                    if let Ok(pid) = text.parse::<u32>() {
+                        break pid;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        *selected.lock().unwrap() = ConnectionSettings::default();
+        changes.send_modify(|generation| *generation += 1);
+        lifecycle_status(&mut status, |s| s.status == ConnectionPhase::Idle).await;
+        stopped(pid).await;
+        assert!(manager.current.lock().await.is_none());
+        drop(task);
+    }
+
     fn settings(config: SshTunnelConfig, token: &str) -> crate::daemon::remote::ConnectionSettings {
         crate::daemon::remote::ConnectionSettings {
             url: String::new(),
@@ -563,6 +714,32 @@ mod processes {
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert!(stored.ssh.is_none() && stored.url.is_empty() && stored.token.is_empty());
         assert_eq!(*receiver.borrow(), 3);
+    }
+
+    #[tokio::test]
+    async fn shutdown_reaps_the_tunnel_and_refuses_late_startup() {
+        let server = server(true, amarcode_protocol::PROTOCOL_VERSION).await;
+        let (_directory, manager) = manager(Duration::from_secs(2));
+        let mut config = config();
+        config.daemon_port = server.port;
+        manager.connect(&config, TOKEN).await.unwrap();
+        let pid = manager
+            .current
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .child
+            .id()
+            .unwrap();
+        manager.shutdown().await;
+        stopped(pid).await;
+        assert!(manager
+            .connect(&config, TOKEN)
+            .await
+            .unwrap_err()
+            .contains("shutting down"));
+        assert!(manager.current.lock().await.is_none());
     }
 
     #[tokio::test]

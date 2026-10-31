@@ -85,6 +85,11 @@ pub fn get_daemon_connection() -> Result<daemon::remote::ConnectionInfo, String>
 }
 
 #[tauri::command]
+pub fn get_daemon_connection_status() -> daemon::connection_lifecycle::ConnectionStatus {
+    daemon::connection_lifecycle::status()
+}
+
+#[tauri::command]
 pub async fn set_daemon_connection(
     url: String,
     token: String,

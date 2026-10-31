@@ -1,11 +1,23 @@
 ---
 title: Conversation continuity
-description: What Amarcode restores when you restart an agent or switch agents, and what stays agent-specific.
+description: What Amarcode recovers after a connection drops, an agent restarts, or you switch agents.
 ---
 
 Amarcode stores visible conversation history independently of an agent's native session. This gives a chat a durable identity even when the agent process changes.
 
 ![One conversation’s activity timeline, with successive runs by codex-acp, grok-build, and amarcode-acp.](/images/workspace/agent-handoff.webp)
+
+## Recover after a desktop disconnect
+
+When the desktop reconnects to a running daemon, it reloads the current session
+state, including the active turn and queued approval or input requests. A turn
+completed or a request answered by another client while you were offline is
+reflected in the recovered view. Reconnecting does not resend your prompt.
+
+[SSH connections](/docs/remote/ssh/) automatically recreate a lost desktop tunnel.
+The remote daemon and its agents can continue working while the desktop is
+disconnected. Restarting the daemon is different: it interrupts agent processes
+and clears in-memory pending requests, while retaining saved conversation history.
 
 ## Native resumption comes first
 
@@ -21,14 +33,14 @@ The transcript identifies the original speakers and separates historical data fr
 
 ## What carries over
 
-| Information | Restoration behavior |
-| --- | --- |
-| User and assistant text | Included in fallback context, subject to its limit |
-| Assistant thinking and tools | May contribute a short activity digest |
-| Structured tool calls and results | Saved for the UI; not restored as native tool history by the fallback |
-| Earlier attachments | Retained for the UI; not replayed by fallback hydration |
-| Hidden reasoning, caches, provider state | Cannot be reconstructed by Amarcode |
-| Session permissions and configuration | Agent-specific; do not assume they transfer |
+| Information                              | Restoration behavior                                                  |
+| ---------------------------------------- | --------------------------------------------------------------------- |
+| User and assistant text                  | Included in fallback context, subject to its limit                    |
+| Assistant thinking and tools             | May contribute a short activity digest                                |
+| Structured tool calls and results        | Saved for the UI; not restored as native tool history by the fallback |
+| Earlier attachments                      | Retained for the UI; not replayed by fallback hydration               |
+| Hidden reasoning, caches, provider state | Cannot be reconstructed by Amarcode                                   |
+| Session permissions and configuration    | Agent-specific; do not assume they transfer                           |
 
 ## Context has limits
 

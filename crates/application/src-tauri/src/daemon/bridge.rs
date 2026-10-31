@@ -68,12 +68,8 @@ impl Connection {
     }
     async fn connect() -> Result<Self, String> {
         let settings = super::remote::load()?;
-        if let Some(config) = &settings.ssh {
-            let (endpoint, ()) = super::ssh::shared()
-                .connect_transaction(config, &settings.token, false, || {
-                    super::remote::ensure_selected(&settings)
-                })
-                .await?;
+        if settings.ssh.is_some() {
+            let endpoint = super::connection_lifecycle::endpoint(&settings).await?;
             return Self::remote(&endpoint.url, &settings.token).await;
         }
         if !settings.url.is_empty() {

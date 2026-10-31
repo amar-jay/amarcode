@@ -104,7 +104,17 @@ export type DaemonConnectionInfo = {
   scope: string;
 };
 
+export type DaemonConnectionStatus = {
+  status: "idle" | "connecting" | "connected" | "reconnecting";
+  error: string | null;
+  reconnectAttempt: number;
+  retryInMs: number | null;
+  generation: number;
+};
+
 export const daemonApi = {
+  getConnectionStatus: (): Promise<DaemonConnectionStatus> =>
+    invoke("get_daemon_connection_status"),
   getConnection: (): Promise<DaemonConnectionInfo> =>
     invoke("get_daemon_connection"),
   setConnection: (url: string, token: string): Promise<DaemonConnectionInfo> =>

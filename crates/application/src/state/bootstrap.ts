@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDaemonConnectionStatus } from "@/hooks/use-daemon-connection-status";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { notify, notifyToast } from "@/lib/notify";
 import {
@@ -37,6 +38,8 @@ export function useAppBootstrap() {
       status: "checking",
     });
   const [daemonAttempt, setDaemonAttempt] = useState(0);
+  const sshStatus = useDaemonConnectionStatus();
+  const recoveredGeneration = useRef<number | null>(null);
   const [daemonUpdateVersion, setDaemonUpdateVersion] = useState<string | null>(
     null,
   );
@@ -63,6 +66,16 @@ export function useAppBootstrap() {
     () => setDaemonAttempt((attempt) => attempt + 1),
     [],
   );
+  useEffect(() => {
+    if (
+      sshStatus?.status === "connected" &&
+      daemonConnection.status === "failed" &&
+      recoveredGeneration.current !== sshStatus.generation
+    ) {
+      recoveredGeneration.current = sshStatus.generation;
+      retryDaemon();
+    }
+  }, [sshStatus, daemonConnection.status, retryDaemon]);
   const initializeDaemonClient = useCallback(async () => {
     ensureDaemonEventStream(store);
     await Promise.all([loadAgents(), refreshChats()]);

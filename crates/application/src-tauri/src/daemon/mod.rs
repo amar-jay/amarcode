@@ -1,5 +1,6 @@
 mod bridge;
 mod client;
+pub(crate) mod connection_lifecycle;
 mod manager;
 pub mod ssh;
 

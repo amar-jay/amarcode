@@ -24,7 +24,14 @@ pub async fn subscribe_events(
     on_status: Channel<DaemonEventStreamStatus>,
 ) -> Result<(), String> {
     let mut changes = crate::daemon::remote::changes();
+    let mut tunnel_changes = crate::daemon::connection_lifecycle::generations().subscribe();
     let mut subscription = client.subscribe_events(filter).await?;
+    if changes.has_changed().unwrap_or(true) {
+        return Err("Daemon connection settings changed".into());
+    }
+    if tunnel_changes.has_changed().unwrap_or(true) {
+        return Err("SSH tunnel changed during subscription setup".into());
+    }
     on_status
         .send(DaemonEventStreamStatus::Connected)
         .map_err(|error| error.to_string())?;
@@ -33,6 +40,7 @@ pub async fn subscribe_events(
         let next = tokio::select! {
             next = subscription.next::<EditorEvent>() => next,
             _ = changes.changed() => return Err("Daemon connection settings changed".into()),
+            _ = tunnel_changes.changed() => return Err("SSH tunnel changed; reconnect and recover session state".into()),
         };
         match next {
             Ok(event) => on_event.send(event).map_err(|error| error.to_string())?,

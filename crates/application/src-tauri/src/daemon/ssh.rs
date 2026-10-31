@@ -5,7 +5,10 @@ use std::{
     collections::VecDeque,
     path::PathBuf,
     process::Stdio,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     time::Duration,
 };
 use tokio::{
@@ -160,6 +163,7 @@ pub struct SshTunnelManager {
     cancellation: watch::Sender<u64>,
     executable: PathBuf,
     startup_timeout: Duration,
+    shutting_down: AtomicBool,
     #[cfg(test)]
     test_script: Option<PathBuf>,
 }
@@ -171,6 +175,7 @@ impl Default for SshTunnelManager {
             cancellation: watch::channel(0).0,
             executable: "ssh".into(),
             startup_timeout: STARTUP_TIMEOUT,
+            shutting_down: AtomicBool::new(false),
             #[cfg(test)]
             test_script: None,
         }
@@ -180,6 +185,15 @@ impl Default for SshTunnelManager {
 impl SshTunnelManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub(super) async fn is_running(&self, config: &SshTunnelConfig, token: &str) -> bool {
+        let mut current = self.current.lock().await;
+        current.as_mut().is_some_and(|tunnel| {
+            tunnel.config == *config
+                && tunnel.token == token
+                && matches!(tunnel.child.try_wait(), Ok(None))
+        })
     }
 
     /// Reuse a live tunnel, or verify a replacement without disturbing the old one.
@@ -203,6 +217,9 @@ impl SshTunnelManager {
         verify_reused: bool,
         commit: impl FnOnce() -> Result<T, String>,
     ) -> Result<(SshTunnelEndpoint, T), String> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err("SSH manager is shutting down".into());
+        }
         config.validate()?;
         super::remote::validate("ws://127.0.0.1/rpc", token)?;
         let mut cancellation = self.cancellation.subscribe();
@@ -212,6 +229,9 @@ impl SshTunnelManager {
         };
         if cancellation.has_changed().unwrap_or(true) {
             return Err("SSH connection cancelled".into());
+        }
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err("SSH manager is shutting down".into());
         }
         if let Some(tunnel) = current.as_mut() {
             if tunnel.config == *config
@@ -259,6 +279,11 @@ impl SshTunnelManager {
     /// Cancels startup and terminates/reaps the owned tunnel, if present.
     pub async fn disconnect(&self) {
         let _ = self.disconnect_transaction(|| Ok(())).await;
+    }
+
+    pub(crate) async fn shutdown(&self) {
+        self.shutting_down.store(true, Ordering::Release);
+        self.disconnect().await;
     }
 
     pub(crate) async fn disconnect_transaction<T>(

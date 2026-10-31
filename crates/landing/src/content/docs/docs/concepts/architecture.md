@@ -21,7 +21,10 @@ The Rust daemon is the system of record. It owns:
 - Provider credentials and agent installations on its host.
 - Local service lifecycle and managed daemon update jobs.
 
-Local clients communicate over a TCP JSON-line API. Remote desktop connections use authenticated WebSockets. Both transports share the same RPC methods.
+Local clients communicate over a TCP JSON-line API. Remote desktop connections
+use authenticated WebSockets, either through a public tunnel or through an
+[SSH tunnel owned by the desktop](/docs/remote/ssh/). The daemon can stay bound to
+remote loopback when using SSH. Both transports share the same RPC methods.
 
 ## Coding agents
 
@@ -40,6 +43,10 @@ SQLite uses WAL mode and foreign keys. A database instance lock prevents a secon
 Closing the desktop does not stop the managed daemon. Active agent work can continue. In foreground remote mode, the host command must remain running; stopping it ends the daemon and its agent processes.
 
 ## Where your data lives
+
+The desktop stores its remote connection token and SSH profile locally. SSH
+private keys remain on the desktop and are handled by the SSH client or agent;
+the daemon does not receive the key file.
 
 The active daemon host owns its conversations, files, attachments, and provider keys. A remote connection does not move the local daemon's history to that host.
 

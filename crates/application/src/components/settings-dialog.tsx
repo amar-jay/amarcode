@@ -259,7 +259,13 @@ export function SettingsDialog({
                 </BreadcrumbList>
               </Breadcrumb>
             </header>
-            <div className="flex flex-1 flex-col overflow-y-hidden p-6">
+            <div
+              className={
+                page === "connection"
+                  ? "flex min-h-0 flex-1 flex-col overflow-y-auto p-6"
+                  : "flex flex-1 flex-col overflow-y-hidden p-6"
+              }
+            >
               {page === "appearance" ? (
                 <AppearancePanel
                   theme={theme}

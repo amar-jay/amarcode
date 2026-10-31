@@ -5,6 +5,11 @@ description: Install the Amarcode daemon on Linux and expose it through an authe
 
 Remote mode keeps project files, chats, agents, and provider credentials on a Linux machine. Your desktop connects to it through an authenticated WebSocket connection.
 
+This page describes the installer and Cloudflare quick-tunnel workflow. If you
+already run an authenticated WebSocket daemon and have SSH access to its host,
+follow [Connect over SSH](/docs/remote/ssh/) instead. SSH connections do not require
+a public daemon URL; the desktop does not provision or start the remote daemon.
+
 ## Before you start
 
 The host needs Linux, Bash, Python 3, OpenSSL with Ed25519 support, and outbound internet access. You do not need root, a systemd user session, or preinstalled Rust, Bun, or uv.
@@ -59,12 +64,12 @@ The quick-tunnel hostname changes between runs. The access token and chat histor
 
 Files live under `${XDG_DATA_HOME:-$HOME/.local/share}/amarcode-remote/`:
 
-| Path | Purpose |
-| --- | --- |
-| `access-token` | Private bearer credential |
-| `remote.json` | Connector and runtime locations |
-| `data/` | Chats, attachments, agent installations, credentials, and logs |
-| `releases/` | Verified daemon releases |
-| `runtimes/` | Managed Bun and uv tools |
+| Path           | Purpose                                                        |
+| -------------- | -------------------------------------------------------------- |
+| `access-token` | Private bearer credential                                      |
+| `remote.json`  | Connector and runtime locations                                |
+| `data/`        | Chats, attachments, agent installations, credentials, and logs |
+| `releases/`    | Verified daemon releases                                       |
+| `runtimes/`    | Managed Bun and uv tools                                       |
 
 Project directories stay wherever you created them on the host.

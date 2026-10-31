@@ -19,6 +19,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             daemon::remote::initialize(app)?;
+            tauri::async_runtime::spawn(async {
+                daemon::connection_lifecycle::start();
+            });
             #[cfg(target_os = "linux")]
             microphone::configure(app)?;
             window::fit_main_window(app)?;
@@ -34,6 +37,7 @@ pub fn run() {
             commands::clipboard::read_pasted_files,
             commands::daemon::daemon_bootstrap,
             commands::daemon::get_daemon_connection,
+            commands::daemon::get_daemon_connection_status,
             commands::daemon::set_daemon_connection,
             commands::daemon::set_ssh_daemon_connection,
             commands::daemon::daemon_install,
@@ -83,7 +87,7 @@ pub fn run() {
     // The remote daemon belongs to its host; only the local SSH tunnel is ours.
     app.run(|_, event| {
         if matches!(event, tauri::RunEvent::Exit) {
-            tauri::async_runtime::block_on(daemon::ssh::shared().disconnect());
+            tauri::async_runtime::block_on(daemon::connection_lifecycle::shutdown());
         }
     });
 }

@@ -126,10 +126,22 @@ tunnel. A stale RPC cannot reactivate a profile that was deselected while it
 waited for the tunnel lock. Switching to local or direct WebSocket stops the SSH
 tunnel only after the replacement settings commit succeeds.
 
-The current settings screen still selects local TCP or remote WebSocket
-connections; SSH fields, automatic retry/status reporting, and remote daemon
-setup are later integration steps. The manager never installs or starts a remote
-daemon.
+The native SSH supervisor starts with the app and owns reconnection timing. It
+checks process liveness and authenticated daemon health, retries from 250 ms up
+to 5 seconds, and resets retry state when the selected profile changes. RPCs wait
+for its verified endpoint rather than spawning competing tunnels; sent RPCs are
+never replayed automatically. Endpoint loss/replacement invalidates event
+subscriptions so the existing reconnect/snapshot flow restores active turns and
+pending approvals. Settings changes also cancel subscription setup that is
+still in flight. Application exit aborts supervision before disconnecting SSH.
+
+`get_daemon_connection_status` exposes non-secret lifecycle state, error, retry
+timing, and connection generation. The startup UI retries bootstrap once per
+recovered SSH generation, including when the host was unavailable at launch.
+Settings → Connection offers Local daemon, Remote WebSocket, and SSH, including a
+native identity-file picker and target-specific token reuse. SSH setup still
+requires an already running remote daemon; the manager never installs or starts
+one. Dedicated SSH-only remote setup remains a separate step.
 
 On Unix, subprocess tests use a Python 3 forwarding fixture and an authenticated
 local WebSocket server. They require loopback socket access but no SSH server,
