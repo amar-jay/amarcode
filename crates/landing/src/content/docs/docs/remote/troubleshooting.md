@@ -6,8 +6,9 @@ description: Update a remote daemon and resolve connection, authentication, and 
 ## Update a remote host
 
 Managed daemons use the same signed update lifecycle whether the desktop
-connects locally or over WebSocket. Use the desktop's daemon update
-action while connected to that host. The host's supervisor performs activation
+connects locally or over WebSocket. Use **Check for updates** in the desktop
+while connected to that host. The single update dialog includes the application
+and the connected daemon, and identifies the remote host before you confirm. The host's supervisor performs activation
 and rollback; the desktop retries status over the remote connection while the
 listener restarts. It never reads the laptop's local journal for a remote update.
 
@@ -23,7 +24,9 @@ of the daemon, although a new connector run gets a new public hostname.
 
 ## Update a local installation
 
-The desktop checks for app and daemon updates separately. Use the update action it offers for each. Daemon updates verify the signed artifact, activate the candidate, and check its exact version and protocol before committing. Failed activation attempts restore the verified previous release.
+Use **Check for updates** in the desktop. One dialog lists the available application and background service releases. The connected daemon updates first, then the application installs and restarts. If only one component has an update, only that component changes. Updating the daemon interrupts active agent turns; saved chats remain available.
+
+Daemon updates verify the signed artifact, activate the candidate, and check its exact version and protocol before committing. Failed activation attempts restore the verified previous release and stop the combined update before the app installer starts. If application installation fails after the daemon succeeds, retrying continues with the application. Check failures and services that cannot update are reported separately; they are never presented as an up-to-date result.
 
 Managed daemon self-updates currently target supported Linux and Windows services with standard configuration. Custom transports, addresses, data paths, and development binaries can report updates as unavailable.
 

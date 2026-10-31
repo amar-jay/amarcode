@@ -48,6 +48,7 @@ type ChatSidebarProps = {
   onUpdateChat: (chatId: string, changes: { title: string }) => Promise<void>;
   onOpenSettings: () => void;
   updateAvailable: boolean;
+  updateBusy: boolean;
   onCheckForUpdates: () => void;
 };
 
@@ -61,6 +62,7 @@ export function AppSidebar({
   onUpdateChat,
   onOpenSettings,
   updateAvailable,
+  updateBusy,
   onCheckForUpdates,
 }: ChatSidebarProps) {
   const [pinnedChatIds, setPinnedChatIds] = useAtom(pinnedChatIdsAtom);
@@ -173,13 +175,18 @@ export function AppSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 onClick={onCheckForUpdates}
+                disabled={updateBusy}
                 tooltip={
                   updateAvailable ? "Update available" : "Check for updates"
                 }
               >
                 <Download />
                 <span>
-                  {updateAvailable ? "Update available" : "Check for updates"}
+                  {updateBusy
+                    ? "Please wait…"
+                    : updateAvailable
+                      ? "Update available"
+                      : "Check for updates"}
                 </span>
               </SidebarMenuButton>
             </SidebarMenuItem>

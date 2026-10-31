@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDaemonConnectionStatus } from "@/hooks/use-daemon-connection-status";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
-import { notify, notifyToast } from "@/lib/notify";
-import {
-  appUpdateApi,
-  type AppUpdateStatus,
-  daemonApi,
-  type DaemonBootstrapStatus,
-  type DaemonUpdateStatus,
-} from "@/api";
+import { notify } from "@/lib/notify";
+import { useUpdates } from "@/hooks/use-updates";
+import { daemonApi, type DaemonBootstrapStatus } from "@/api";
 import {
   loadAgentsAtom,
   selectedAgentAtom,
@@ -40,15 +35,6 @@ export function useAppBootstrap() {
   const [daemonAttempt, setDaemonAttempt] = useState(0);
   const sshStatus = useDaemonConnectionStatus();
   const recoveredGeneration = useRef<number | null>(null);
-  const [daemonUpdateVersion, setDaemonUpdateVersion] = useState<string | null>(
-    null,
-  );
-  const [daemonUpdateStatus, setDaemonUpdateStatus] =
-    useState<DaemonUpdateStatus | null>(null);
-  const [appUpdateVersion, setAppUpdateVersion] = useState<string | null>(null);
-  const [appUpdateNotes, setAppUpdateNotes] = useState<string | null>(null);
-  const [appUpdateStatus, setAppUpdateStatus] =
-    useState<AppUpdateStatus | null>(null);
   const store = useStore();
   const theme = useAtomValue(themeAtom);
   const palette = useAtomValue(paletteAtom);
@@ -86,27 +72,7 @@ export function useAppBootstrap() {
     if (live) await loadLiveChat({ chatId: live.chatId, silent: true });
   }, [initializeDaemonClient, loadLiveChat, store]);
 
-  const checkDaemonUpdate = useCallback(async () => {
-    try {
-      const update = await daemonApi.checkUpdate();
-      if (update.status !== "available") return;
-      notifyToast(`Daemon ${update.version} is available`, {
-        id: `daemon-update-${update.version}`,
-        description: `Installed version: ${update.currentVersion}`,
-        duration: 15_000,
-        action: {
-          label: "Update",
-          onClick: () => {
-            setDaemonUpdateStatus(null);
-            setDaemonUpdateVersion(update.version);
-          },
-        },
-      });
-    } catch (error) {
-      // Updates are best-effort; startup and offline use remain unaffected.
-      console.info("Daemon update check failed:", error);
-    }
-  }, []);
+  const updates = useUpdates(daemonConnection.status, reconcileDaemonClient);
 
   const installDaemon = useCallback(async () => {
     try {
@@ -125,44 +91,6 @@ export function useAppBootstrap() {
     }
   }, [initializeDaemonClient]);
 
-  const checkAppUpdate = useCallback(async (announceUpToDate = false) => {
-    try {
-      const update = await appUpdateApi.check();
-      if (update.status === "upToDate") {
-        if (announceUpToDate) notify("Amarcode is up to date.", "success");
-        return;
-      }
-      setAppUpdateVersion(update.version);
-      setAppUpdateNotes(update.notes);
-      notifyToast(`Amarcode update available`, {
-        id: `app-update-${update.version}`,
-        description: `Update now.`,
-        duration: 15_000,
-        action: {
-          label: "Update",
-          onClick: () => setAppUpdateStatus(null),
-        },
-      });
-    } catch (error) {
-      // A browser-only development session has no Tauri bridge. Packaged app
-      // update checks are best-effort so offline startup is never blocked.
-      console.info("Application update check failed:", error);
-      if (announceUpToDate) {
-        notify(error instanceof Error ? error.message : String(error), "error");
-      }
-    }
-  }, []);
-
-  const installAppUpdate = useCallback(async () => {
-    try {
-      await appUpdateApi.install(setAppUpdateStatus);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("Application update failed:", error);
-      setAppUpdateStatus({ status: "failed", error: message });
-    }
-  }, []);
-
   // Theme → <html class="dark">
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -175,11 +103,6 @@ export function useAppBootstrap() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => void checkAppUpdate(), 0);
-    return () => window.clearTimeout(timer);
-  }, [checkAppUpdate]);
 
   // Palette → data-style
   useEffect(() => {
@@ -199,7 +122,6 @@ export function useAppBootstrap() {
         });
         if (cancelled || health === null) return;
         await initializeDaemonClient();
-        if (!cancelled) void checkDaemonUpdate();
       } catch (error) {
         if (cancelled) return;
         console.error("Daemon bootstrap failed:", error);
@@ -216,35 +138,7 @@ export function useAppBootstrap() {
     return () => {
       cancelled = true;
     };
-  }, [initializeDaemonClient, checkDaemonUpdate, daemonAttempt]);
-
-  const updateDaemon = useCallback(async () => {
-    try {
-      if (!daemonUpdateVersion) return;
-      const health = await daemonApi.update(
-        daemonUpdateVersion,
-        setDaemonUpdateStatus,
-      );
-      await reconcileDaemonClient();
-      notify(`Daemon ${health.version} updated successfully.`, "success");
-      setDaemonUpdateVersion(null);
-      setDaemonUpdateStatus(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("Daemon update failed:", error);
-      setDaemonUpdateStatus({ status: "failed", error: message });
-      // The backend attempts rollback; reconnect/reconcile with whatever
-      // healthy version is available after that attempt.
-      try {
-        await reconcileDaemonClient();
-      } catch (reconnectError) {
-        console.error(
-          "Daemon reconnection after update failure failed:",
-          reconnectError,
-        );
-      }
-    }
-  }, [reconcileDaemonClient, daemonUpdateVersion]);
+  }, [initializeDaemonClient, daemonAttempt]);
 
   // Keep sidebar list fresh when any chat metadata changes (every event).
   useEffect(() => {
@@ -276,29 +170,6 @@ export function useAppBootstrap() {
     daemonConnection,
     retryDaemon,
     installDaemon,
-    daemonUpdateVersion,
-    daemonUpdateStatus,
-    updateDaemon,
-    appUpdateVersion,
-    appUpdateNotes,
-    appUpdateStatus,
-    checkAppUpdate,
-    installAppUpdate,
-    closeAppUpdate: () => {
-      if (appUpdateStatus === null || appUpdateStatus.status === "failed") {
-        setAppUpdateVersion(null);
-        setAppUpdateNotes(null);
-        setAppUpdateStatus(null);
-      }
-    },
-    closeDaemonUpdate: () => {
-      if (
-        daemonUpdateStatus === null ||
-        daemonUpdateStatus.status === "failed"
-      ) {
-        setDaemonUpdateVersion(null);
-        setDaemonUpdateStatus(null);
-      }
-    },
+    ...updates,
   };
 }

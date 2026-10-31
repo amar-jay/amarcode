@@ -7,8 +7,7 @@ import { LiveChatScreen } from "@/components/live-chat-screen";
 import { TopBar } from "@/components/top-bar";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { DaemonConnectionDialog } from "@/components/daemon-connection-dialog";
-import { DaemonUpdateDialog } from "@/components/daemon-update-dialog";
-import { AppUpdateDialog } from "@/components/app-update-dialog";
+import { UpdateDialog } from "@/components/update-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { daemonApi } from "@/api";
 import { useState } from "react";
@@ -55,16 +54,16 @@ export default function App() {
     daemonConnection,
     retryDaemon,
     installDaemon,
-    daemonUpdateVersion,
-    daemonUpdateStatus,
-    updateDaemon,
-    closeDaemonUpdate,
-    appUpdateVersion,
-    appUpdateNotes,
-    appUpdateStatus,
-    checkAppUpdate,
-    installAppUpdate,
-    closeAppUpdate,
+    updatePlan,
+    updateProgress,
+    updateError,
+    updateOpen,
+    updateChecking,
+    updating,
+    updateAvailable,
+    checkUpdates,
+    installUpdates,
+    closeUpdate,
   } = useAppBootstrap();
 
   const [theme, setTheme] = useAtom(themeAtom);
@@ -160,8 +159,9 @@ export default function App() {
             await refreshChats();
           }}
           onOpenSettings={() => setSettingsOpen(true)}
-          updateAvailable={appUpdateVersion !== null}
-          onCheckForUpdates={() => void checkAppUpdate(true)}
+          updateAvailable={updateAvailable}
+          updateBusy={updateChecking || updating}
+          onCheckForUpdates={() => void checkUpdates(true)}
         />
         <div className="flex min-h-0 min-w-0 flex-1">
           <div
@@ -237,18 +237,14 @@ export default function App() {
           onCloseApplication={() => void getCurrentWindow().close()}
         />
       )}
-      <DaemonUpdateDialog
-        version={daemonUpdateVersion}
-        status={daemonUpdateStatus}
-        onConfirm={() => void updateDaemon()}
-        onClose={closeDaemonUpdate}
-      />
-      <AppUpdateDialog
-        version={appUpdateVersion}
-        notes={appUpdateNotes}
-        status={appUpdateStatus}
-        onConfirm={() => void installAppUpdate()}
-        onClose={closeAppUpdate}
+      <UpdateDialog
+        open={updateOpen}
+        plan={updatePlan}
+        progress={updateProgress}
+        error={updateError}
+        updating={updating}
+        onConfirm={() => void installUpdates()}
+        onClose={closeUpdate}
       />
     </div>
   );
