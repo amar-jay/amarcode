@@ -1,20 +1,19 @@
 {
-  "name": "cloudflare-workers-openapi",
+  "name": "openrouter-worker-proxy",
   "version": "0.0.1",
   "private": true,
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "start": "wrangler dev",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "build": "wrangler deploy --dry-run"
   },
-  "dependencies": {
-    "chanfana": "^3.3.0",
-    "hono": "^4.12.12",
-    "zod": "^4.3.6"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "wrangler": "^4.153.0"
+    "wrangler": "^4.153.0",
+    "typescript": "^5.9.3"
   }
 }

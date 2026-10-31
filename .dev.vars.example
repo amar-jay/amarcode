@@ -1,0 +1,4 @@
+OPENROUTER_MODEL=your-provider/your-model
+OPENROUTER_TRANSCRIPTION_MODEL=openai/whisper-large-v3-turbo
+OPENROUTER_API_KEY=your-openrouter-api-key
+PROXY_API_KEY=your-separate-proxy-key
