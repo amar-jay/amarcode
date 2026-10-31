@@ -86,6 +86,9 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     "staged" | "unstaged"
   >();
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
+  const [searchBarHost, setSearchBarHost] = useState<HTMLDivElement | null>(
+    null,
+  );
   const [selectedLine, setSelectedLine] = useState<number>();
   useEffect(() => {
     if (!workspacePath) {
@@ -406,6 +409,13 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
           showCloseButton={false}
         >
           <SheetHeader className="relative flex-row items-center gap-2 px-3 py-1 select-none [&_button]:h-6 [&_button]:min-w-6 [&_button_svg]:size-3.5">
+            {navigatorView === "search" ? (
+              <div
+                ref={setSearchBarHost}
+                className="flex min-h-6 min-w-0 flex-1 items-center"
+              />
+            ) : (
+              <>
             <PanelTitle
               className={cn(
                 "flex min-w-0 flex-1 flex-row items-center gap-1 overflow-hidden text-xs font-bold",
@@ -495,6 +505,8 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                   </Button>
                 )}
               </div>
+            )}
+              </>
             )}
             <div className="ml-auto flex shrink-0 items-center gap-0">
               <Button
@@ -676,6 +688,8 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                     }
                     mode={searchMode}
                     onModeChange={setSearchMode}
+                    barHost={searchBarHost}
+                    onClose={() => setNavigatorView("files")}
                     onSelect={(path, line) => {
                       workspaceFileTree.setSelectedPath(path);
                       setSelectedComparison(undefined);

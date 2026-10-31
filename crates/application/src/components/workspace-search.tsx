@@ -1,4 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  CaseSensitive,
+  File,
+  Regex,
+  Replace,
+  TextSearch,
+} from "lucide-react";
 import { daemonApi } from "@/api";
 import type { WorkspaceSearchResult } from "@/types";
 import { Button } from "./ui/button";
@@ -11,6 +19,8 @@ export function WorkspaceSearch({
   onModeChange,
   refreshRevision,
   onFindInFile,
+  barHost,
+  onClose,
 }: {
   workspacePath: string;
   active: boolean;
@@ -19,11 +29,13 @@ export function WorkspaceSearch({
   onSelect: (path: string, line?: number) => void;
   mode: "files" | "contents";
   onModeChange: (mode: "files" | "contents") => void;
+  barHost: HTMLElement | null;
+  onClose: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (active) inputRef.current?.focus();
-  }, [active, mode]);
+  }, [active, mode, barHost]);
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [regex, setRegex] = useState(false);
@@ -89,94 +101,105 @@ export function WorkspaceSearch({
     groups.set(match.path, matches);
   }
 
+  const searchBar = (
+    <div className="flex min-h-6 min-w-0 flex-1 items-center">
+      <input
+        ref={inputRef}
+        data-workspace-search
+        type="search"
+        aria-label={
+          mode === "files"
+            ? "Search workspace file names"
+            : "Search text across workspace"
+        }
+        placeholder={mode === "files" ? "Find files…" : "Search in files…"}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+            return;
+          }
+          if (event.key === "Enter") setRefresh((value) => value + 1);
+        }}
+        className="h-6 min-w-0 flex-1 border-0 bg-transparent px-0 text-xs outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
+      />
+      <div
+        className="flex shrink-0 items-center"
+        role="group"
+        aria-label="Workspace search mode"
+      >
+        <Button
+          size="icon-sm"
+          variant={mode === "files" ? "secondary" : "ghost"}
+          className={mode === "files" ? undefined : "text-muted-foreground"}
+          aria-pressed={mode === "files"}
+          onClick={() => onModeChange("files")}
+          title="Search file names"
+          aria-label="Search file names"
+        >
+          <File className="size-3.5" />
+        </Button>
+        <Button
+          size="icon-sm"
+          variant={mode === "contents" ? "secondary" : "ghost"}
+          className={mode === "contents" ? undefined : "text-muted-foreground"}
+          aria-pressed={mode === "contents"}
+          onClick={() => onModeChange("contents")}
+          title="Search file contents"
+          aria-label="Search file contents"
+        >
+          <TextSearch className="size-3.5" />
+        </Button>
+        {mode === "contents" && (
+          <>
+            <Button
+              size="icon-sm"
+              variant={caseSensitive ? "secondary" : "ghost"}
+              className={caseSensitive ? undefined : "text-muted-foreground"}
+              aria-pressed={caseSensitive}
+              onClick={() => setCaseSensitive((value) => !value)}
+              title="Match case"
+              aria-label="Match case"
+            >
+              <CaseSensitive className="size-3.5" />
+            </Button>
+            <Button
+              size="icon-sm"
+              variant={regex ? "secondary" : "ghost"}
+              className={regex ? undefined : "text-muted-foreground"}
+              aria-pressed={regex}
+              onClick={() => setRegex((value) => !value)}
+              title="Use regular expression"
+              aria-label="Use regular expression"
+            >
+              <Regex className="size-3.5" />
+            </Button>
+          </>
+        )}
+        {onFindInFile && (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            onClick={onFindInFile}
+            title="Find and replace in open file (Ctrl/Cmd+F)"
+            aria-label="Find and replace in open file"
+          >
+            <Replace className="size-3.5" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <section
       aria-label="Search workspace"
       className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="space-y-1 border-b p-1.5">
-        <div className="flex items-center gap-0.5">
-          <div
-            className="flex min-w-0 items-center"
-            role="group"
-            aria-label="Workspace search mode"
-          >
-            <Button
-              size="xs"
-              className="px-1.5"
-              variant={mode === "files" ? "secondary" : "ghost"}
-              aria-pressed={mode === "files"}
-              onClick={() => onModeChange("files")}
-            >
-              File names
-            </Button>
-            <Button
-              size="xs"
-              className="px-1.5"
-              variant={mode === "contents" ? "secondary" : "ghost"}
-              aria-pressed={mode === "contents"}
-              onClick={() => onModeChange("contents")}
-            >
-              Contents
-            </Button>
-            {onFindInFile && (
-              <Button
-                size="xs"
-                className="px-1.5"
-                variant="ghost"
-                onClick={onFindInFile}
-                title="Find and replace in open file (Ctrl/Cmd+F)"
-                aria-label="Find and replace in open file"
-              >
-                In file
-              </Button>
-            )}
-          </div>
-          <div className="ml-auto flex shrink-0 items-center gap-0.5">
-            {mode === "contents" && (
-              <>
-                <Button
-                  size="icon-xs"
-                  variant={caseSensitive ? "secondary" : "ghost"}
-                  aria-pressed={caseSensitive}
-                  onClick={() => setCaseSensitive((value) => !value)}
-                  title="Match case"
-                  aria-label="Match case"
-                >
-                  Aa
-                </Button>
-                <Button
-                  size="icon-xs"
-                  variant={regex ? "secondary" : "ghost"}
-                  aria-pressed={regex}
-                  onClick={() => setRegex((value) => !value)}
-                  title="Use regular expression"
-                  aria-label="Use regular expression"
-                >
-                  .*
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-        <input
-          ref={inputRef}
-          data-workspace-search
-          type="search"
-          aria-label={
-            mode === "files"
-              ? "Search workspace file names"
-              : "Search text across workspace"
-          }
-          placeholder={mode === "files" ? "Find files…" : "Search in files…"}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") setRefresh((value) => value + 1);
-          }}
-          className="h-6 w-full min-w-0 rounded border bg-background px-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        />
-      </div>
+      {barHost ? createPortal(searchBar, barHost) : searchBar}
       <div
         role="status"
         aria-live="polite"
