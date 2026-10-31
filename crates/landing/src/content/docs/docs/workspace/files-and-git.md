@@ -1,39 +1,28 @@
 ---
 title: Files and Git
-description: Browse project files, edit text, and review staged and unstaged changes.
+description: Open project files, edit text, and review Git changes.
 ---
 
-Workspace operations run on the daemon host. With a remote connection, the file tree, editor, and Git views all refer to that remote project.
+Files and Git run on the computer that hosts the daemon. On a remote connection, you are looking at that remote project.
 
 ## Find a file
 
-Use the workspace file tree or file search to open a project file. Discovery respects workspace `.gitignore` files, excludes common generated directories, and currently searches to a maximum depth of six.
+Use the file tree or file search. Search skips ignored and generated files.
 
-## Edit text
+## Edit
 
-The editor supports UTF-8 text files up to 1 MB. Binary files cannot be opened as editable text.
+The editor opens UTF-8 text files up to 1 MB.
 
-Drafts and undo history stay in memory while you close and reopen the editor panel. They are not durable across app reloads, so save your work before reloading or switching daemon connections.
+Drafts stay while the editor panel is open. Save before you reload the app or switch connections.
 
 ![The project tree and editor, with a TypeScript file open beside the conversation.](/images/workspace/editor.webp)
 
-## Handle a save conflict
+If someone else changed the file, the save is rejected. Reload the file and apply your edit to the current version.
 
-A save includes the content originally read from disk. If an agent or another client has changed the file, the daemon rejects the stale save rather than overwriting those changes.
+## Git
 
-Keep your draft, reload the current file, review the difference, and apply your intended edit against the latest version. The daemon serializes saves from Amarcode clients and prepares replacements in a temporary file.
-
-## Review Git changes
-
-The Git view distinguishes staged and unstaged changes. A file can have both:
-
-- **Unstaged** compares the working tree with the index.
-- **Staged** compares the index with `HEAD`.
-
-Review the diff, stage or unstage individual files, or stage all files. Enter a commit message to commit staged changes. Git must be installed and configured on the daemon host.
+The Git view separates unstaged and staged changes. Stage files, write a message, and commit. Git must be installed on the daemon’s computer.
 
 ![Git review with staged and unstaged files, an inline diff, and the commit field.](/images/workspace/git-review.webp)
 
-:::note
-A non-Git folder can still be a workspace. Git actions require a repository, and text diff display is limited to files up to 1 MB.
-:::
+A folder does not have to be a Git repository to be a workspace. Diffs are shown for text files up to 1 MB.

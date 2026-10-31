@@ -1,40 +1,40 @@
 ---
 title: Connect from the desktop
-description: Connect Amarcode to an authenticated remote daemon and choose a remote project.
+description: Point Amarcode at a remote daemon and open a project there.
 ---
 
-Connect using the remote host's URL and access token. Your projects and agents run on that host.
+Use the remote machine’s URL and access token. Projects and agents run on that machine.
 
-## Connect from the app
+## Connect
 
-First [install and start the daemon](/docs/remote/setup/#start-and-connect) on your Linux host.
+[Start the daemon](/docs/remote/setup/#start-and-connect) on the Linux host and copy what it prints.
 
-1. Open **Settings → Connection**, or **Connection settings** in the startup dialog.
-2. Choose **Remote daemon** under **Connection type**.
-3. Enter the full `wss://host/rpc` URL printed by the host.
-4. Paste its access token into **Daemon access token**.
+1. Open **Settings → Connection**.
+2. Choose **Remote daemon**.
+3. Paste the `wss://` URL, including `/rpc`.
+4. Paste the access token.
 5. Choose **Verify and apply**.
 
-Use the URL and token from the current host session. Keep the token private and separate from the URL.
+Use the URL and token from the current session. Keep the token private.
 
-## Open a remote project
+## Open a project
 
-Choose a workspace using an absolute path on the remote host, for example:
+Enter an absolute path on the remote machine:
 
 ```text
 /home/me/projects/my-app
 ```
 
-Local desktop folders are not available to the remote daemon. Agents and provider settings you manage while connected also belong to that remote host.
+Folders on your desktop are not available there.
 
-## Open a remote terminal
+## Open a shell
 
-Run `amarcoded ssh` in your terminal and enter the same URL and token. See [remote terminal](/docs/remote/ssh/).
+In your own terminal, run `amarcoded ssh` and enter the same URL and token. See [remote terminal](/docs/remote/ssh/).
 
-## Switch back to local
+## Use this computer again
 
-Save editor drafts first. Choose **Local daemon** under **Connection type** and select **Verify and apply**.
+Save editor drafts. Choose **Local daemon** and **Verify and apply**.
 
-The remote daemon keeps running. Each host keeps its own conversations; switching connections does not move history between them.
+The remote daemon keeps running. Each machine keeps its own chats.
 
-If a connection fails, see [troubleshooting](/docs/remote/troubleshooting/).
+If the connection fails, see [troubleshooting](/docs/remote/troubleshooting/).

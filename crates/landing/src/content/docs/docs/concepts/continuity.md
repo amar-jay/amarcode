@@ -1,38 +1,32 @@
 ---
 title: Conversation continuity
-description: What Amarcode recovers after a connection drops, an agent restarts, or you switch agents.
+description: What you still have after you close the app, lose a connection, or switch agents.
 ---
 
-Your conversations stay saved when you close the app, lose a connection, or switch agents.
+Chats stay saved when you close the app, lose a connection, or switch agents.
 
 ![One conversation’s activity timeline, with successive runs by codex-acp, grok-build, and amarcode-acp.](/images/workspace/agent-handoff.webp)
 
-## Reconnect to your work
+## Reconnect
 
-When the app reconnects to a running daemon, it restores the current conversation status, including active work and pending requests. You do not need to resend your prompt.
+When the app reconnects to a running daemon, it shows the current chat, including work that is still running. You do not resend the prompt.
 
-Restarting the daemon interrupts agent work. Saved messages remain available for a follow-up.
+Restarting the daemon stops agent work. The saved messages are still there.
 
-## Resume or switch agents
+## Switch agents
 
-Amarcode tries to resume the agent's earlier session. If it cannot, or you choose another agent, it supplies conversation history with your next prompt.
+Amarcode tries to continue the agent’s session. If it cannot, or you pick another agent, it sends the saved conversation with your next prompt.
 
-A restored conversation gives the agent context, but may not include every detail of its earlier session.
+The new agent gets that context. It may not have every detail of the earlier session.
 
-## What carries over
-
-| Information | What to expect |
+| What | What to expect |
 | --- | --- |
-| Messages | Saved and available as conversation context |
-| Tool activity | Visible in the app; a new agent may receive only a summary |
-| Attachments | Saved in the app; reattach files a new agent needs |
-| Permissions and model settings | Depend on the selected agent and session |
+| Messages | Saved, and available as context |
+| Tool activity | Visible in the app; a new agent may only get a summary |
+| Attachments | Saved; attach again if the new agent needs the file |
+| Permissions and model | Follow the agent you selected |
 | Hidden model state | Does not transfer |
 
-## Continue a long task
+For a long task, say the goal, what you decided, and what is left. If the chat is too large to continue, start a new one with a short handoff.
 
-Include the current goal, key decisions, and remaining work in your next prompt. Reattach relevant files and ask the agent to confirm its understanding.
-
-Agents have context limits. If a conversation is too large to continue, start a new chat with a concise handoff.
-
-[Remote terminal sessions](/docs/remote/ssh/#connection-lifetime) have a separate lifetime; use `tmux` to keep terminal work running across disconnects.
+A [remote terminal](/docs/remote/ssh/#connection-lifetime) is separate. Use `tmux` there if you want the shell to survive a disconnect.

@@ -1,38 +1,32 @@
 ---
 title: Your first conversation
-description: Choose a workspace, select an agent, and start a conversation in Amarcode.
+description: Open a project and send a prompt with the built-in agent.
 ---
 
-## Choose your project
+## Choose a project
 
-Use the folder control in the prompt composer to select a project directory. This becomes the workspace for the conversation and the working directory for its agent.
+Use the folder control in the composer. That folder is the workspace for the chat and the agent.
 
-For remote connections, enter an absolute directory on the **remote host**, such as `/home/me/projects/my-app`. Your desktop's local folders are not available to that daemon.
-
-## Select an agent
-
-Open the agent picker. Choose an installed agent, or install an agent from the catalog. Complete any sign-in or provider configuration it requires.
-
-You can set a default agent and project folder in **Settings → Agent defaults**.
+On a remote connection, enter a path on the remote machine, such as `/home/me/projects/my-app`. Folders on your desktop are not visible to that daemon.
 
 ## Send a prompt
 
-Start with a small, concrete request:
+**Amarcode ACP** is already installed. You do not need an API key.
 
 ```text
 Read this project and explain its entry points. Do not change any files yet.
 ```
 
-The conversation opens when you send your prompt. As the agent works, Amarcode shows its response and structured activity, including file changes and terminal commands when the agent reports them.
+The chat opens when you send the prompt. Amarcode shows the reply, file changes, and commands as the agent works.
 
-## Respond to requests
+To use a different agent, open the agent picker. See [agents](/docs/agents/overview/).
 
-An agent may ask for permission before acting, or ask you a question. Read the request and choose a response. Available permission choices come from the agent.
+## Answer the agent
 
-Use the stop control to cancel an active turn. Completed messages remain in the conversation.
+An agent may ask a question or ask permission before it acts. Read the request and choose a response.
 
-## Return to your work
+Use the stop control to cancel the current turn. Earlier messages stay in the chat.
 
-Choose a conversation from the sidebar to reopen its saved messages. You can select another agent for a follow-up. Amarcode first attempts native session resumption and otherwise supplies saved context to the agent.
+## Come back later
 
-See [conversation continuity](/docs/concepts/continuity/) for what this preserves and what it cannot restore.
+Choose the chat in the sidebar. Your messages stay saved when you close the app. See [conversation continuity](/docs/concepts/continuity/).

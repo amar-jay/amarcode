@@ -1,32 +1,24 @@
 ---
 title: Desktop, daemon, and agents
-description: Understand which part of Amarcode owns your files, conversations, processes, and credentials.
+description: What each part of Amarcode does, and where your work is stored.
 ---
 
-Amarcode has three parts: the desktop app, a background service called the daemon, and coding agents.
+## Desktop
 
-## The desktop
+You chat, edit files, review changes, and change settings here. Save drafts before you reload the app or switch connections.
 
-The desktop is where you chat, edit files, review changes, and manage settings. Save editor drafts before reloading the app or switching connections.
+## Daemon
 
-## The daemon
+The daemon stores chats and runs agents and file operations. One installation serves this user on each computer. The app and the `amarcoded` command use that same installation.
 
-The daemon manages your conversations, project files, agents, and credentials. It runs on your computer for local work or on another machine for remote work.
+Closing the app leaves the daemon running. Stopping the daemon stops active agent work. Saved chats remain.
 
-There is one managed daemon installation per user on each host. The desktop and command-line tools use that same installation.
+Uninstalling the app also leaves the daemon. See [removal](/docs/getting-started/installation/#remove-the-desktop-or-daemon).
 
-## Coding agents
+## Agents
 
-Agents read your project, answer questions, edit files, and run commands. Amarcode connects to agents through the Agent Client Protocol (ACP). Available models and commands depend on the agent.
+Agents read the project, edit files, and run commands. Models and commands depend on the agent you pick.
 
-## Closing the window
+## Where work is stored
 
-Closing the desktop leaves the managed daemon running, so active agent work can continue. Stopping or restarting the daemon interrupts that work.
-
-Uninstalling the desktop also leaves the daemon and its data in place. See [removal options](/docs/getting-started/installation/#remove-the-desktop-or-daemon).
-
-## Where your data lives
-
-Conversations, attachments, agent installations, and provider keys stay on the daemon host. Connecting to a remote host does not copy your local history there.
-
-Prompts are sent to the selected agent's model provider. Dictation sends audio to Amarcode's transcription service. These services have their own data-handling policies.
+Chats, attachments, installed agents, and keys stay on the daemon’s computer. Connecting to a remote host does not copy your local history there.

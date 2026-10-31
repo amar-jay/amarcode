@@ -1,68 +1,53 @@
 ---
 title: Updates and troubleshooting
-description: Update a remote daemon and resolve connection, authentication, and agent installation problems.
+description: Update Amarcode and fix connection or install problems.
 ---
 
-## Update Amarcode
+## Update
 
-Choose **Check for updates** in the desktop. One dialog includes the app and the connected daemon. When connected remotely, check the host shown before starting the update.
+Choose **Check for updates**. One dialog covers the app and the daemon you are connected to. On a remote connection, check the machine name before you continue.
 
-Updating the daemon interrupts active agent work and terminal sessions. Saved chats remain available. If an update fails, follow the error message and retry.
+A daemon update stops active agent work and remote shells. Saved chats remain. If it fails, read the message and retry.
 
-Automatic daemon updates require a managed service. For a foreground or custom installation, stop the daemon and follow your host's installation procedure.
+A foreground daemon does not update itself. Stop it and start it again after you install the new version.
 
 ## The connection fails
 
-Check these in order:
+1. The daemon is still running. In a container, use the [tmux steps](/docs/remote/setup/#codespaces-and-containers-without-systemd).
+2. The URL is the current one and includes `/rpc`.
+3. The token is from that same machine.
+4. The app and daemon are current.
 
-1. The remote daemon and its connection helper are still running.
-2. You are using the current URL, including its `/rpc` path.
-3. The access token belongs to that host and was pasted into the token field.
-4. The desktop and daemon are up to date.
-5. Both machines have internet access.
-
-Restarting the connection helper can change its URL. Copy the new URL into **Settings → Connection**.
+Starting remote access again can print a new URL. Paste that URL into **Settings → Connection**.
 
 ## Authentication is rejected
 
-Copy the token again from the remote host's `access-token` file. Keep it separate from the URL.
+Copy the token again from the remote machine. A token from your laptop is not the remote token.
 
-If you use a token file on Unix, make it private with `chmod 600 /path/to/token`. A token for your local daemon may differ from the remote host's token.
+If you use a token file, run `chmod 600` on it.
 
-## Connection refused in a container
+## Connection refused
 
-Make sure the daemon is running. Installing it or having a service file does not start a working service in containers without systemd.
-
-Follow the [tmux setup for containers](/docs/remote/setup/#codespaces-and-containers-without-systemd). Install `tmux` first if the shell reports `command not found`.
+The daemon is not listening. A service file or a finished install does not mean the process is running. Start it with `amarcoded --remote`, or with `amarcoded tunnel` only when `amarcoded status` shows it is actually running.
 
 ## The port is already in use
 
-A daemon may already be running. Use `amarcoded restart` for an existing managed service instead of starting a second process. Stop any foreground daemon before starting another one.
+A daemon is already running. Use `amarcoded restart` instead of starting a second one.
 
-## Remote terminal will not connect
+## The remote shell fails
 
-Run `amarcoded ssh` from an interactive terminal and use the current remote URL and token.
+Run `amarcoded ssh` from an interactive terminal, with the current URL and token.
 
-- **Unauthorized:** check that you used the remote host's token.
+- **Unauthorized:** use that machine’s token.
 - **Not found:** update the remote daemon.
-- **Timeout or connection refused:** check the daemon, connection helper, and URL.
-- **Token file error:** correct the file path and permissions, or unset `AMARCODE_WS_TOKEN_FILE` to paste a token.
-- **Disconnected:** reconnect and reattach your `tmux` session.
+- **Timeout or connection refused:** the daemon or its remote access is not running.
+- **Token file error:** fix the path, or unset `AMARCODE_WS_TOKEN_FILE` and paste the token.
+- **Disconnected:** connect again and reattach `tmux` if you were using it.
 
-See [remote terminal](/docs/remote/ssh/).
+## The installer says GitHub rate limit
 
-## Installer reports a GitHub rate limit
-
-Wait until the reset time shown in the error, then retry. On shared hosts, an exported `GH_TOKEN` or `GITHUB_TOKEN` can provide an authenticated download allowance.
-
-If a token is rejected, refresh it or unset it before retrying.
+Wait until the time in the error, then run the installer again. If you have `GH_TOKEN` or `GITHUB_TOKEN` set, the installer uses it for the download lookup.
 
 ## An agent will not install
 
-Confirm the host has internet access and the agent supports its operating system. Retry from the agent picker. For more detail, check `data/daemon.log` in the host's Amarcode data directory.
-
-## Report a problem
-
-Include your operating system, app and daemon versions, the error, and relevant logs in a [GitHub issue](https://github.com/amar-jay/amarcode/issues).
-
-Remove access tokens, API keys, private prompts, and sensitive paths before posting.
+Confirm the machine has internet access and retry from the agent picker.

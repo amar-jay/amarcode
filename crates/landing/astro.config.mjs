@@ -114,7 +114,7 @@ export default defineConfig({
               label: "Choose and install an agent",
               slug: "docs/agents/overview",
             },
-            { label: "Configure a provider", slug: "docs/agents/provider" },
+            { label: "Use your own provider", slug: "docs/agents/provider" },
             { label: "Permissions", slug: "docs/agents/permissions" },
           ],
         },

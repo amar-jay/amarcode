@@ -1,30 +1,26 @@
 ---
 title: Choose and install an agent
-description: Use ACP-compatible coding agents with Amarcode.
+description: Use the built-in agent, or install another one.
 ---
 
-Choose a coding agent from the picker in the composer. Each agent has its own models, commands, and sign-in requirements.
+The agent picker is in the composer. **Amarcode ACP** is installed for you and works without signing in or adding an API key.
 
 ![The agent picker, including built-in Amarcode ACP and installed agents.](/images/workspace/agent-picker.webp)
 
-## Use the built-in agent
-
-**Amarcode ACP** installs automatically and works with Amarcode Free. No sign-in or API key is needed. If its download fails, choose **Install** to retry.
-
-To use your own model provider, open **Settings → ACP provider**. See [configure a provider](/docs/agents/provider/).
-
 ## Install another agent
 
-Open the agent picker or **Settings → Agent defaults**, find an agent, and choose **Install**. Complete its sign-in or setup if prompted.
+Open the agent picker or **Settings → Agent defaults**, choose **Install**, and finish any sign-in that agent asks for.
 
-Agents run on the computer hosting your daemon. With a remote connection, they install and run on the remote machine.
+Agents run on the computer that hosts the daemon. With a remote connection, they install on that remote machine.
 
 ## Switch agents
 
-Choose another agent before sending your next prompt. Your conversation stays available, but commands, model choices, and permissions may change.
+Pick another agent before the next prompt. The chat stays. Commands and permissions can change with the agent.
 
-For long tasks, include a short handoff with the goal and remaining work. See [conversation continuity](/docs/concepts/continuity/).
+For a long task, say what is done and what is left. See [conversation continuity](/docs/concepts/continuity/).
+
+To use your own model with Amarcode ACP, see [your own provider](/docs/agents/provider/).
 
 ## If installation fails
 
-Check the error for missing tools, an unsupported platform, or a failed download. Confirm the daemon host has internet access, then retry.
+Check the error, confirm the daemon’s computer has internet access, and choose **Install** again.

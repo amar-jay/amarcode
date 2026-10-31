@@ -1,29 +1,27 @@
 ---
-title: Configure a provider
-description: Connect Amarcode ACP to an OpenAI-compatible model provider.
+title: Use your own provider
+description: Optional settings for connecting Amarcode ACP to your own model.
 ---
 
-The built-in **Amarcode ACP** agent is ready to use with Amarcode Free. You only need these settings if you want to use your own model provider.
+You only need this if you want Amarcode ACP to use your own model. The built-in agent works without it.
 
 ## Add a provider
 
 1. Open **Settings → ACP provider** and choose **Add provider**.
-2. Give it a name.
-3. Enter your provider's **Base URL**, **Model ID**, and **API key**.
+2. Name it.
+3. Enter the **Base URL**, **Model ID**, and **API key** from your provider.
 4. Choose **Save and use**, then start a new chat.
 
-Use the endpoint and model ID from your provider's documentation. For example, a base URL may include an API prefix such as `https://provider.example/v1`.
+## Switch or remove one
 
-## Switch providers
+Choose a saved provider, or **Use default** to go back to the built-in agent. Saved providers stay in the list.
 
-Choose a saved provider from the **Provider** selector. Choose **Use default** to return to Amarcode Free; your saved providers remain available.
+**Delete provider** removes that provider and its key. If you delete the one in use, Amarcode returns to the default. The change applies to new chats.
 
-**Delete provider** removes a saved provider and its key. Deleting the active provider returns to the default. Provider changes apply to new chats.
+## Keys
 
-## Manage keys
+Keys are stored on the computer running the daemon. A remote connection changes that remote computer’s settings.
 
-Keys are saved on the computer running the daemon. When connected remotely, you are changing that remote host's provider settings.
+Leave the key field blank to keep the saved key. If you change the base URL, enter the key again.
 
-Leave the key field blank to keep its saved value. If you change the base URL, enter the key again.
-
-Dictation works without provider setup and is unaffected by these settings. See [attachments and dictation](/docs/workspace/attachments-and-dictation/).
+Dictation does not use these settings. See [attachments and dictation](/docs/workspace/attachments-and-dictation/).

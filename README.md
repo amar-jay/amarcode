@@ -10,43 +10,8 @@
   <img src="./assets/amarcode-light.png#gh-light-mode-only" alt="Amarcode in light theme" width="100%"/>
 </p>
 
-## Advantages
+Amarcode is a desktop workspace for coding agents. A background daemon keeps your chats and project work running after you close the window.
 
-Amarcode uses the open [Agent Client Protocol](https://agentclientprotocol.com/),
-allowing it to work with a growing range of compatible agents, including
-ChatGPT, Claude, Grok, Antigravity, and Cursor.
+The built-in agent is ready after you install. You can also install other agents that use the [Agent Client Protocol](https://agentclientprotocol.com/).
 
-One of Amarcode's main advantages is **semantic continuation**. An ACP session
-belongs to the agent that created it, and agents differ in how they persist,
-resume, compact, or discard their internal state. A native session therefore
-cannot be restored portably once that state is unavailable, especially when a
-conversation moves between different types of agents.
-
-**How Amarcode keeps a conversation portable?**
-Amarcode addresses this by treating its own durable chat history as the source
-of truth. It stores the visible user and assistant messages independently of an
-agent's ACP session ID. When the native session cannot be resumed, Amarcode
-creates a new session and supplies the saved transcript as prior context with
-the next user prompt. The new agent does not receive the original hidden model
-state, but it receives a measurable, inspectable historical record from which
-it can continue the conversation. This is the closest portable approximation
-to continuity that can be applied consistently across heterogeneous ACP
-agents.
-
-In short, Amarcode first uses native ACP resumption when available and uses
-local transcript hydration as the interoperable fallback. This lets one durable
-conversation survive agent restarts and differences in agent session support
-without pretending that opaque native state can be reproduced exactly.
-
-### Guarantees and limitations
-
-- Hydration includes user and assistant text, plus bounded digests of assistant thinking and tool activity. Structured tool calls, tool results, and prior attachments are not replayed as native historical turns.
-
-- The daemon forwards the full eligible transcript without a fixed byte cutoff. Context limits and compaction belong to the destination agent. The built-in adapter uses a configured context window, provider model metadata, or a 128,000-token fallback and can summarize older provider exchanges. Restored history arrives as prompt text, not native historical turns; if it exceeds the adapter's pinned-input budget, the adapter returns an error instead of silently dropping it. Other ACP agents apply their own limits and may reject oversized prompts.
-
-- A live prompt can be cancelled, but individual historical messages cannot be mutated or deleted through ACP.
-
-> [!IMPORTANT]
-> Semantic continuation is not native state restoration. Hidden reasoning,
-> provider-side conversation state, model caches, permissions, and other
-> vendor proprietary data cannot be reconstructed from ACP messages.
+Guides: [amarcode.amarjay.com/docs](https://amarcode.amarjay.com/docs/).

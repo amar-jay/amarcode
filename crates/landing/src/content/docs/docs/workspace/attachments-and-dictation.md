@@ -1,33 +1,29 @@
 ---
 title: Attachments and dictation
-description: Add images, pasted text, and spoken input to your prompts.
+description: Add an image, pasted text, or spoken prompt.
 ---
 
 ## Attach an image or text
 
-Paste an image or text into the composer and review its attachment preview before sending. A prompt supports up to four attachments.
+Paste into the composer and check the preview. A prompt can include up to four attachments.
 
 ![An image attached in a conversation, shown above the agent’s reply.](/images/workspace/attachment.webp)
 
 | Content | Limit |
 | --- | --- |
-| PNG, JPEG, WebP, or GIF image | 10 MB per image |
-| UTF-8 plain text | 1 MB per attachment |
+| PNG, JPEG, WebP, or GIF | 10 MB each |
+| UTF-8 text | 1 MB each |
 
-Images require an agent with image support. Attachments are saved on the computer running your daemon.
+The agent must support images. Attachments are stored with the daemon. Attach a file again if a new agent needs to see it.
 
-When switching agents or reopening an older conversation, reattach files the agent needs to inspect.
+## Dictate
 
-## Dictate a prompt
-
-Choose the microphone control and allow microphone access when prompted. Speak, stop recording, and review the text before sending.
+Use the microphone control, allow access, speak, then stop and read the text before you send.
 
 ![The dictation controls in the composer, showing a recording timer and discard option.](/images/workspace/dictation.webp)
 
-Dictation needs an internet connection, but no API key or provider setup. Your chat provider settings do not affect it. Recordings can be up to two minutes and 25 MB.
-
-Audio is sent to Amarcode's transcription service for processing. The daemon does not save the recording.
+Dictation needs an internet connection. It does not use your model provider or an API key. A recording can be up to two minutes and 25 MB, and it is not kept after transcription.
 
 ## If dictation fails
 
-Check microphone permissions and your internet connection. Retry the recording, or use a shorter clip if it exceeds the upload limit.
+Check the microphone permission and your connection. Try a shorter recording if the clip is too large.

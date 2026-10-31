@@ -1,102 +1,79 @@
 ---
 title: Set up a remote host
-description: Install Amarcode on Linux and connect your desktop using its secure remote URL.
+description: Install Amarcode on Linux and connect from the desktop.
 ---
 
-Install the daemon on a Linux machine to work with its projects from Amarcode. Files, conversations, agents, and credentials stay on that host.
+Install the daemon on a Linux machine when you want its projects in Amarcode. Files, chats, agents, and credentials stay on that machine.
 
 ## Before you start
 
-You need Linux, Bash, Python 3, OpenSSL with Ed25519 support, and internet access. The installer sets up the daemon and the tools needed to install agents.
+You need Linux, Bash, Python 3, and internet access.
 
-## Install or reuse the daemon
+## Install
 
-On the remote host, run:
+On the remote machine:
 
 ```bash
 curl -fsSL https://amarcode.amarjay.com/install.sh | bash
 ```
 
-Remote access is included. The installer creates an access token and prints the next steps; it does not start the daemon.
+This prepares remote access and prints an access token. It does not start the daemon.
 
-Open a new terminal if `amarcoded` is not found, or use the PATH command printed by the installer. `amarcode-daemon` is an alternative name for the same command.
+If `amarcoded` is not found, open a new terminal or use the command path the installer printed. `amarcode-daemon` is the same command.
 
 ## Start and connect
-
-Run:
 
 ```sh
 amarcoded --remote
 ```
 
-Copy the connection URL and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, and select **Verify and apply** after entering both.
+Copy the URL and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, paste both, and select **Verify and apply**.
 
-Keep this command running while you work. Ctrl+C stops the daemon and interrupts active agents. A new connection-helper session may print a different URL; update the app's connection settings if it changes.
+Leave this command running. Ctrl+C stops the daemon. If you start it again and the URL changes, update the connection settings.
 
-See [connect from the desktop](/docs/remote/connect/) for choosing a remote project.
+See [connect from the desktop](/docs/remote/connect/).
 
 :::caution[Keep the token private]
-Anyone with the access token can access your daemon and perform operations on its host.
+Anyone with the token can use the daemon on that machine.
 :::
 
 ## Codespaces and containers without systemd
 
-Run the daemon inside `tmux` to keep it running when you close your terminal.
-
-On Ubuntu or Debian, install `tmux` if needed:
+A container often has no working service manager. `amarcoded status` can look installed while nothing is listening. Run the daemon in `tmux` so it keeps going after you close the terminal.
 
 ```sh
 sudo apt-get update
 sudo apt-get install -y tmux
-```
-
-Start a session and run the daemon inside it:
-
-```sh
 tmux new-session -s amarcode
 amarcoded --remote
 ```
 
-Copy the URL and token, then press **Ctrl+B**, release both keys, and press **D** to detach. Return with:
+Copy the URL and token. Detach with **Ctrl+B**, then **D**. Come back with:
 
 ```sh
 tmux attach-session -t amarcode
 ```
 
-If the daemon exits, start it again and copy its new URL. `tmux` keeps work running across terminal disconnects, but not container stops, suspension, or host reboots.
+`tmux` survives a closed terminal. It does not survive stopping the container or rebooting the machine. If the daemon exits, start it again and copy the new URL.
 
-## Use an existing service
+## Use a service
 
-On a host with a working systemd user manager, install a persistent service and open remote access with:
+On a machine with a working systemd user manager:
 
 ```sh
 amarcoded bootstrap install
 amarcoded tunnel
 ```
 
-If the service was running before remote access was configured, run `amarcoded restart` before starting the tunnel.
-
-Keep the tunnel command running. Stopping it closes remote access while the daemon keeps running. The tunnel command requires an already-running daemon.
+If the daemon was already running, run `amarcoded restart` before `amarcoded tunnel`. The tunnel command needs a running daemon. Stopping the tunnel closes remote access and leaves the daemon running.
 
 ## Loopback-only setup
 
-For access through a private network path or tunnel you manage:
+Use this when you already have your own private network path:
 
 ```bash
 curl -fsSL https://amarcode.amarjay.com/install.sh | bash -s -- --no-tunnel
 amarcoded --remote --no-tunnel
 ```
 
-The authenticated listener uses `127.0.0.1:43721`. Make it reachable through your chosen network path, then connect using its URL and access token.
-
-## Installation layout
-
-The default Linux installation is `${XDG_DATA_HOME:-$HOME/.local/share}/com.amarcode.desktop/`. Its `data/` directory contains conversations, attachments, agent installations, credentials, and logs. Project folders stay where you created them.
-
-The desktop and command-line tools share one installation per user on each host.
-
-## Migrate an existing remote installation
-
-Back up your data and stop the old daemon before rerunning the installer. It can migrate an older remote installation while preserving conversations and the access token.
-
-If the installer reports conflicting data directories or tokens, keep both backups and resolve the conflict before continuing. Separate conversation databases are not merged automatically.
+The listener is `127.0.0.1:43721`. Reach it through your own path, then connect with its URL and token.

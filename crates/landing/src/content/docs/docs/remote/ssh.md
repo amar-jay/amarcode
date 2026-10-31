@@ -1,56 +1,46 @@
 ---
 title: Remote terminal
-description: Open an interactive shell on a remote machine through its authenticated Amarcode daemon.
+description: Open a shell on the machine that runs your daemon.
 ---
 
-Use `amarcoded ssh` from your terminal to open a shell on a remote Amarcode host.
+`amarcoded ssh` opens a shell on a remote Amarcode machine. It does not start a daemon, and it does not need an SSH server.
 
 ## Open a remote shell
 
-First [install and start the daemon](/docs/remote/setup/#start-and-connect) on the remote host and copy its URL and access token.
+[Start the daemon](/docs/remote/setup/#start-and-connect) on the remote machine and copy its URL and token.
 
-On your own machine, run:
+On your own machine:
 
 ```sh
 amarcoded ssh
 ```
 
-Enter the URL and paste the token when prompted. Token input is hidden and is not saved.
+Enter the URL and paste the token. The token is hidden and is not saved.
 
-You can also pass the URL directly:
+You can pass the URL instead:
 
 ```sh
 amarcoded ssh wss://your-host/rpc
 ```
 
-Commands run as the daemon's user on the remote host. Type `exit` or press Ctrl+D to close the shell.
-
-This uses your Amarcode connection; no SSH server or SSH keys are needed.
+Commands run as the daemon’s user. Type `exit` or press Ctrl+D to leave.
 
 ## Use a token file
-
-For repeated connections, keep the remote host's token in a private local file:
 
 ```sh
 amarcoded ssh wss://your-host/rpc --token-file /absolute/path/to/remote-token
 ```
 
-On Unix, restrict the file with `chmod 600 /absolute/path/to/remote-token`.
-
-You can set `AMARCODE_WS_TOKEN_FILE` instead. If neither is supplied, the command prompts for a token.
+On Unix, run `chmod 600` on that file. `AMARCODE_WS_TOKEN_FILE` works the same way. Without either, the command asks you to paste the token.
 
 ## Connection lifetime
 
-Disconnecting closes the shell. To keep work running, install `tmux` on the remote host and run:
+Closing the shell does not stop the daemon. To keep a shell across a disconnect, install `tmux` on the remote machine and run:
 
 ```sh
 tmux new-session -A -s work
 ```
 
-After a disconnect, run `amarcoded ssh` again and enter the same `tmux` command to return to your work. Use the current daemon URL if it has changed.
+Connect again with `amarcoded ssh` and run that same command to return. Use the current URL if it changed.
 
-Closing a remote terminal leaves the daemon and unrelated agent work running. See [keeping the daemon running in a container](/docs/remote/setup/#codespaces-and-containers-without-systemd).
-
-## Loopback-only deployment
-
-For a connection through a network path you manage, see [loopback-only setup](/docs/remote/setup/#loopback-only-setup).
+In a container, also keep the daemon itself in `tmux`. See [containers without systemd](/docs/remote/setup/#codespaces-and-containers-without-systemd).

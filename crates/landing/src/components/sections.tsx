@@ -16,7 +16,7 @@ const features = [
   {
     Icon: Replace,
     title: "Change your perspective.",
-    text: "Switch agents within a conversation. When a native session can’t resume, Amarcode supplies saved text as context for the next prompt.",
+    text: "Switch agents in the same chat. Amarcode keeps the saved messages for the next one.",
   },
   {
     Icon: Unplug,
@@ -38,7 +38,7 @@ const questions = [
   {
     title: "Can I continue a conversation with another agent?",
     answer:
-      "Yes. Amarcode uses native session resumption when available. Otherwise, it provides saved user and assistant text as context with your next prompt. This carries the conversation forward, but does not restore hidden reasoning, provider state, or previous tool results in the new agent’s context.",
+      "Yes. The chat stays in Amarcode. The next agent receives the saved messages with your prompt. Hidden model state does not come along.",
   },
   {
     title: "What is ACP?",
@@ -48,7 +48,7 @@ const questions = [
   {
     title: "Does Amarcode include access to the agents?",
     answer:
-      "Agents have their own installation and authentication requirements. You use the account or API access required by the agent you choose; Amarcode provides the workspace around it.",
+      "The built-in agent is ready after install. Other agents may ask you to sign in.",
   },
 ];
 

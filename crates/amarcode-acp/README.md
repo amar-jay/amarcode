@@ -57,22 +57,9 @@ by splitting the name on `.`, `_`, and `-`, then capitalizing each word; for
 example, `local_qwen-coder.v2` is displayed as `Local Qwen Coder V2`. This lets
 several configured `amarcode-acp` instances advertise distinct identities.
 
-For the built-in free service, use this provider block:
-
-```json
-{
-  "base_url": "https://free.amarcode.amarjay.com",
-  "model": "default"
-}
-```
-
-No API key is required for this endpoint. The adapter posts to
-`/v1/chat/completions` without an Authorization header or model override; the
-service selects the model. Model discovery keeps the service default rather than
-exposing the upstream catalog. Application dictation is handled separately by
-the daemon through the fixed, keyless endpoint
-`https://free.amarcode.amarjay.com/api/v1/audio/transcriptions`, independently of
-this chat configuration.
+Leave `base_url` unset to use the built-in service. The desktop selects that
+default; do not copy a service URL into this file. Dictation does not use this
+provider block.
 
 `provider.baseUrl` and `provider.apiKey` are also accepted for compatibility
 with camelCase configuration producers. Keep this file private because it

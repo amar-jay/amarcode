@@ -67,10 +67,10 @@ git submodule update --init --recursive
 ## Remote access
 
 Local desktop connections use loopback TCP with one JSON RPC object per line.
-For remote connections, use authenticated WebSockets through
-[SSH](../landing/src/content/docs/docs/remote/ssh.md) or the
-[remote installer and Cloudflare setup](../landing/src/content/docs/docs/remote/setup.md).
-Those guides cover installation, tokens, and connection settings.
+For remote connections, use the URL and token from
+[remote setup](../landing/src/content/docs/docs/remote/setup.md).
+[`amarcoded ssh`](../landing/src/content/docs/docs/remote/ssh.md) opens a shell
+on that machine. It is not a desktop connection type.
 
 ## Checks and debugging
 
