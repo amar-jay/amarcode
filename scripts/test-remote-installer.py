@@ -81,6 +81,122 @@ class RemoteInstallerTests(unittest.TestCase):
         signed.write_text(base64.b64encode(signature).decode())
         return path, signed
 
+    def test_current_path_aliases_work_without_sourcing_and_follow_releases(self):
+        home = self.root / 'home'
+        home.mkdir()
+        aliases = home / 'bin'
+        aliases.mkdir()
+        root, legacy = home / 'managed', home / 'legacy'
+        bin_dir = root / 'daemon/bin'
+        executable = root / 'daemon/v1/amarcode-daemon'
+        executable.parent.mkdir(parents=True)
+        executable.write_text('#!/bin/sh\nprintf "%s\n" "$@"\n')
+        executable.chmod(0o700)
+        with patch.dict(os.environ, {'PATH': str(aliases) + ':/usr/bin:/bin'}):
+            directory = self.module.current_shell_alias_dir(home, root, legacy)
+            self.assertEqual(directory, aliases)
+            managed = self.module.install_command(bin_dir, executable, root)
+            short = self.module.install_command(bin_dir, managed, root, name='amarcoded')
+            self.module.install_command(directory, managed, root)
+            self.module.install_command(directory, short, root, name='amarcoded')
+            self.assertEqual(self.module.start_command(short), 'amarcoded --remote')
+            result = subprocess.run(['amarcoded', '--remote'], check=True, capture_output=True)
+            self.assertEqual(result.stdout, b'--remote\n')
+            # Stable aliases follow the managed pointer, not a particular release.
+            next_release = root / 'daemon/v2/amarcode-daemon'
+            next_release.parent.mkdir()
+            next_release.write_text('#!/bin/sh\necho next-version\n')
+            next_release.chmod(0o700)
+            self.module.install_command(bin_dir, next_release, root)
+            result = subprocess.run(['amarcoded', '--version'], check=True, capture_output=True)
+            self.assertEqual(result.stdout, b'next-version\n')
+
+    def test_auto_alias_skips_other_programs_system_and_relative_paths(self):
+        home = self.root / 'home'
+        home.mkdir()
+        taken, usable = home / 'taken', home / 'usable'
+        for directory in [taken, usable]:
+            directory.mkdir()
+        other = taken / 'amarcoded'
+        other.write_text('unrelated application')
+        root, legacy = home / 'managed', home / 'legacy'
+        with patch.dict(os.environ, {'PATH': ':.:/usr/bin:' + str(taken) + ':' + str(usable)}):
+            self.assertEqual(self.module.current_shell_alias_dir(home, root, legacy), usable)
+        self.assertEqual(other.read_text(), 'unrelated application')
+        with patch.dict(os.environ, {'PATH': '/usr/bin:.'}):
+            self.assertIsNone(self.module.current_shell_alias_dir(home, root, legacy))
+        with patch.dict(os.environ, {'PATH': str(usable)}), patch.object(self.module.os, 'access', return_value=False):
+            self.assertIsNone(self.module.current_shell_alias_dir(home, root, legacy))
+
+    def test_start_command_falls_back_to_a_shell_safe_path_and_preserves_foreign_command(self):
+        import shlex
+        home = self.root / "home with ' quote"
+        root, legacy = home / 'managed', home / 'legacy'
+        executable = root / 'daemon/v1/amarcode-daemon'
+        executable.parent.mkdir(parents=True)
+        executable.write_text('#!/bin/sh\nprintf "%s\n" "$@"\n')
+        executable.chmod(0o700)
+        command = self.module.install_command(root / 'daemon/bin', executable, root, name='amarcoded')
+        with patch.dict(os.environ, {'PATH': '/usr/bin:/bin'}):
+            text = self.module.start_command(command, True)
+            self.assertEqual(shlex.split(text), [str(command), '--remote', '--no-tunnel'])
+            result = subprocess.run(['sh', '-c', text], check=True, capture_output=True)
+            self.assertEqual(result.stdout, b'--remote\n--no-tunnel\n')
+        other = home / 'bin'
+        other.mkdir()
+        (other / 'amarcoded').write_text('#!/bin/sh\necho unrelated\n')
+        (other / 'amarcoded').chmod(0o700)
+        with patch.dict(os.environ, {'PATH': str(other) + ':/usr/bin:/bin'}):
+            self.assertEqual(shlex.split(self.module.start_command(command))[0], str(command))
+
+    def test_plain_ui_summary_is_short_and_verbose_is_opt_in(self):
+        # Minimal Python installations do not need pip or Rich to install.
+        for verbose in [False, True]:
+            output = io.StringIO()
+            with patch.dict(sys.modules, {'rich.console': None}), contextlib.redirect_stdout(output):
+                self.module.ui = self.module.InstallerUI(verbose)
+                for label in ['Daemon', 'Remote access', 'Agent tools']:
+                    with self.module.ui.step(label):
+                        self.module.ui.detail('Downloading a verified dependency')
+                self.module.installation_summary('1.2.3', self.root / 'bin/amarcoded',
+                    self.root, self.root / 'bun', self.root / 'uv', False, False)
+            text = output.getvalue()
+            self.assertNotIn('\x1b', text)
+            self.assertIn('[3/3] Agent tools', text)
+            self.assertIn('Start the daemon:', text)
+            self.assertEqual('Data directory:' in text, verbose)
+            self.assertEqual('Downloading a verified dependency' in text, verbose)
+            if not verbose:
+                self.assertLessEqual(len(text.splitlines()), 10)
+
+    def test_rich_spinner_stops_on_success_and_failure(self):
+        console_module = types.ModuleType('rich.console')
+        status = []
+        class Console:
+            is_terminal = True
+            def __init__(self, **options):
+                self.options = options
+            def print(self, message, **options):
+                status.append(message)
+            @contextlib.contextmanager
+            def status(self, message, **options):
+                status.append('start')
+                try:
+                    yield
+                finally:
+                    status.append('stop')
+        console_module.Console = Console
+        with patch.dict(sys.modules, {'rich.console': console_module}):
+            ui = self.module.InstallerUI()
+            self.assertFalse(ui.console.options['markup'])
+            with ui.step('Daemon'):
+                pass
+            with self.assertRaisesRegex(ValueError, 'network failure'):
+                with ui.step('Remote access'):
+                    raise ValueError('network failure')
+        self.assertEqual(status, ['start', 'stop', '[1/3] Daemon done',
+                                  'start', 'stop', '[2/3] Remote access failed'])
+
     def test_persistent_path_is_idempotent_and_shell_safe(self):
         home = self.root / 'home'
         home.mkdir()
@@ -335,9 +451,14 @@ class RemoteInstallerTests(unittest.TestCase):
                                                 [str(installed / 'daemon/bin/amarcode-daemon')] + mode.split())
                 self.assertEqual(token, (installed / 'access-token').read_text())
                 self.assertTrue((installed / 'run.sh').read_text().endswith(' ' + mode + '\n'))
-        self.assertEqual(captured.getvalue().count('Access token (save privately):'), 1)
-        self.assertIn('amarcode-daemon --remote', captured.getvalue())
-        self.assertIn('No service or tunnel has been started', captured.getvalue())
+        self.assertNotIn(token.strip(), captured.getvalue())
+        import shlex
+        commands = [shlex.split(line.strip()) for line in captured.getvalue().splitlines()
+                    if line.startswith('  ')]
+        self.assertIn([str(installed / 'daemon/bin/amarcoded'), '--remote'], commands)
+        self.assertIn('Start the daemon:', captured.getvalue())
+        self.assertNotIn('Bun / bunx:', captured.getvalue())
+        self.assertNotIn('For a managed service:', captured.getvalue())
         for name in ['access-token', 'remote.json', 'run.sh', 'tunnel.sh']:
             self.assertEqual((installed / name).stat().st_mode & 0o077, 0)
         launcher = installed / 'run.sh'

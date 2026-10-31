@@ -17,9 +17,9 @@ On the remote machine:
 curl -fsSL https://amarcode.amarjay.com/install.sh | bash
 ```
 
-This prepares remote access and prints an access token. It does not start the daemon.
+This prepares remote access. It does not start the daemon.
 
-If `amarcoded` is not found, open a new terminal or use the command path the installer printed. `amarcode-daemon` is the same command.
+Use the start command printed by the installer; it works in your current terminal. If `amarcoded` is not found yet, open a new terminal or use that full command path. `amarcode-daemon` is the same command.
 
 ## Start and connect
 
