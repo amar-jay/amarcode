@@ -98,6 +98,14 @@ where
                 // the acknowledgement is being written is then queued for this
                 // subscriber instead of falling into a registration gap.
                 let receiver = acknowledge_subscription(&mut writer, &app.events).await?;
+                // Replay work already in progress. Closing the app drops the
+                // event stream; the daemon keeps the prompts running.
+                for snapshot in app.sessions.retained_session_snapshots()? {
+                    let event = EditorEvent::SessionStateUpdated { snapshot };
+                    if event_matches(&event, &filter, &app.store)? {
+                        write_event(&mut writer, &event).await?;
+                    }
+                }
                 info!(%peer, ?filter, "entering event subscription mode");
                 return stream_events(
                     &mut writer,
@@ -381,6 +389,35 @@ mod tests {
         assert_eq!(replies[0]["result"]["status"], "ok");
         assert!(replies[1]["error"].is_string());
         assert_eq!(replies[2]["result"]["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn subscription_replays_a_prompt_that_is_already_running() {
+        let (_directory, app) = test_app().await;
+        app.sessions.record_running_turn_for_test("chat-1");
+        let (mut client, server) = duplex(16 * 1024);
+        let (reader, writer) = tokio::io::split(server);
+        let app_for_handler = Arc::clone(&app);
+        let handler =
+            tokio::spawn(async move { handle_io(reader, writer, app_for_handler, "test").await });
+        client
+            .write_all(b"{\"method\":\"subscribe_events\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(client).lines();
+        let ack = lines.next_line().await.unwrap().unwrap();
+        let replay = lines.next_line().await.unwrap().unwrap();
+        drop(lines);
+        handler.abort();
+        let ack: serde_json::Value = serde_json::from_str(&ack).unwrap();
+        let replay: serde_json::Value = serde_json::from_str(&replay).unwrap();
+        assert_eq!(ack["result"]["subscribed"], true);
+        assert_eq!(replay["event"]["type"], "sessionStateUpdated");
+        assert_eq!(replay["event"]["payload"]["snapshot"]["chat_id"], "chat-1");
+        assert_eq!(
+            replay["event"]["payload"]["snapshot"]["turn"]["status"],
+            "started"
+        );
     }
 
     #[tokio::test]

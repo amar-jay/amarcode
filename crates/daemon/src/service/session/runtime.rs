@@ -44,6 +44,44 @@ impl DerefMut for SessionState {
 }
 
 impl SessionState {
+    #[cfg(test)]
+    pub fn record_running_turn(&mut self, chat_id: &str) {
+        let snapshot = self
+            .snapshots
+            .entry(chat_id.to_owned())
+            .or_insert_with(|| ChatSessionSnapshot {
+                daemon_instance_id: self.instance_id.clone(),
+                chat_id: chat_id.to_owned(),
+                revision: 0,
+                run_id: None,
+                agent_id: None,
+                run_status: None,
+                turn: None,
+                pending_requests: vec![],
+                error_message: None,
+                error_kind: None,
+                context_restoration: None,
+            });
+        snapshot.revision = 2;
+        snapshot.run_id = Some("run-1".into());
+        snapshot.run_status = Some(RunStatus::Running);
+        snapshot.turn = Some(SessionTurnSnapshot {
+            user_message_id: "user-1".into(),
+            status: TurnStatus::Started,
+            stop_reason: None,
+            error_message: None,
+            error_kind: None,
+        });
+    }
+
+    /// Snapshots retained for this daemon process. A new subscriber needs them
+    /// because the event bus does not replay work that started earlier.
+    pub fn retained_snapshots(&self) -> Vec<ChatSessionSnapshot> {
+        let mut snapshots: Vec<_> = self.snapshots.values().cloned().collect();
+        snapshots.sort_by(|left, right| left.chat_id.cmp(&right.chat_id));
+        snapshots
+    }
+
     pub fn snapshot(&mut self, chat_id: &str) -> ChatSessionSnapshot {
         self.snapshots
             .entry(chat_id.to_owned())
@@ -411,6 +449,9 @@ mod tests {
                 matches!(receiver.try_recv().unwrap(), EditorEvent::SessionStateUpdated { snapshot } if snapshot.revision == revision)
             );
         }
+        let retained = state.retained_snapshots();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].turn.as_ref().unwrap().status, TurnStatus::Started);
     }
     #[test]
     fn only_one_client_claims_a_request_and_every_client_observes_resolution() {

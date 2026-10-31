@@ -434,6 +434,25 @@ impl SessionManager {
             .snapshot(chat_id))
     }
 
+    /// Current session snapshots, including prompts already running before this client connected.
+    #[cfg(test)]
+    pub fn record_running_turn_for_test(&self, chat_id: &str) {
+        self.inner
+            .state
+            .lock()
+            .expect("session lock")
+            .record_running_turn(chat_id);
+    }
+
+    pub fn retained_session_snapshots(&self) -> Result<Vec<crate::protocol::ChatSessionSnapshot>> {
+        Ok(self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| Error::msg("session lock poisoned"))?
+            .retained_snapshots())
+    }
+
     fn emit(&self, event: EditorEvent) {
         super::runtime::emit(&self.inner, event);
     }
