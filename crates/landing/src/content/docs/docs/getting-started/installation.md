@@ -17,6 +17,10 @@ On first launch, the connection dialog asks you to install the background servic
 
 The desktop includes the daemon executable, so this step does not need a separate daemon download. Installing agents and using a hosted model can still require an internet connection.
 
+After service installation on Linux, `amarcode-daemon` is available from a new terminal. Setup adds a stable command directory to Bash, Zsh, and Fish startup configuration. No administrator access is required for PATH setup.
+
+On Linux, the command follows daemon updates and rollbacks. Existing installations gain it when the desktop next connects to the local service. Running `amarcode-daemon uninstall` removes the terminal command and its PATH registration along with the service.
+
 The daemon runs as a service for your user account. Closing the desktop does not stop it. On Linux it uses the systemd user manager; on Windows it uses Task Scheduler.
 
 :::tip[Using a remote machine?]

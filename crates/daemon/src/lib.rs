@@ -6,6 +6,8 @@
 pub mod acp;
 pub mod app;
 pub mod cleanup;
+#[cfg(target_os = "linux")]
+pub mod cli_path;
 pub mod config;
 pub mod error;
 mod instance_lock;

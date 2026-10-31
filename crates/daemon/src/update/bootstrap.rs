@@ -63,6 +63,12 @@ pub async fn run(command: Command) -> Result<(), String> {
                     ensure(&root, &progress)
                 }
             })?;
+            #[cfg(target_os = "linux")]
+            if health.is_some() {
+                let release = releases::load_installed(&root)?;
+                crate::cli_path::install(&release.installed_executable(&root)?)
+                    .map_err(|e| e.to_string())?;
+            }
             output(&DaemonBootstrapEvent::Complete { health })
         }
         Command::CheckUpdate => {

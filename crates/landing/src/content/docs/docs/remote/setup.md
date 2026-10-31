@@ -36,13 +36,13 @@ bash install.sh
 
 The installer downloads and verifies the daemon, Cloudflare connector, and managed Bun and uv runtimes. It creates a private access token and links the daemon into `~/.local/bin`.
 
-If that directory is missing from your PATH, apply the command printed by the installer:
+The installer adds the command directory to your Bash, Zsh, and Fish startup configuration. Open a new terminal, or apply the command printed by the installer in your current shell:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The installer does not edit your shell startup files. It also does not start the daemon or tunnel unless you pass `--start`.
+PATH setup is idempotent and preserves existing configuration. A custom `--bin-dir` is added in the same way. The installer does not start the daemon or tunnel unless you pass `--start`.
 
 ## Start remote mode
 

@@ -250,6 +250,42 @@ def private_write(path, contents):
             os.unlink(name)
 
 
+def persist_command_path(home, bin_dir):
+    """Append one owned block; preserve existing profile contents and PATH entries."""
+    from shlex import quote
+    if any(char in str(bin_dir) for char in '\r\n:'):
+        raise ValueError('Command directory contains a newline or colon')
+    begin = '# >>> Amarcode remote PATH >>>\n'
+    end = '# <<< Amarcode remote PATH <<<\n'
+    quoted = quote(str(bin_dir))
+    block = (begin + 'case ":$PATH:" in\n  *:' + quoted + ':*) ;;\n' +
+             '  *) export PATH="$PATH":' + quoted + ' ;;\nesac\n' + end)
+    login = next((home / name for name in ['.bash_profile', '.bash_login']
+                  if (home / name).exists()), home / '.profile')
+    zdot = Path(os.environ.get('ZDOTDIR', str(home)))
+    profiles = {home / '.profile', login, home / '.bashrc', zdot / '.zshrc'}
+    config = Path(os.environ.get('XDG_CONFIG_HOME', str(home / '.config')))
+    fish = config / 'fish/conf.d/amarcode-remote.fish'
+    profiles.add(fish)
+    for path in sorted(profiles):
+        original = path.read_text() if path.exists() else ''
+        updated = original
+        if begin in updated:
+            start = updated.index(begin)
+            if end not in updated[start:]:
+                raise ValueError('Incomplete Amarcode remote PATH block in ' + str(path))
+            finish = updated.index(end, start) + len(end)
+            updated = updated[:start] + updated[finish:]
+        contents = (begin + 'if not contains -- ' + quoted + ' $PATH\n' +
+                    '    set -gx PATH $PATH ' + quoted + '\nend\n' + end) if path == fish else block
+        if updated and not updated.endswith('\n'):
+            updated += '\n'
+        updated += contents
+        if updated != original:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(updated)
+
+
 def install_command(bin_dir, executable, root):
     bin_dir.mkdir(parents=True, exist_ok=True)
     command = bin_dir / 'amarcode-daemon'
@@ -335,6 +371,7 @@ def main():
         raise ValueError('Existing access-token is invalid; fix it before restarting')
     private_write(root / 'remote.json', json.dumps({'cloudflared': str(cloudflared), 'tool_bin_dirs': tool_bin_dirs}) + '\n')
     command = install_command(bin_dir, executable, root)
+    persist_command_path(Path.home(), bin_dir)
     for name, directory in [('bun', bun_bin), ('bunx', bun_bin), ('uv', uv_bin), ('uvx', uv_bin)]:
         link_runtime(bin_dir, name, directory / name, root)
     import shlex
@@ -362,7 +399,7 @@ def main():
     else:
         print('Your existing access token and chat data have been preserved.')
     if str(bin_dir) not in os.get_exec_path():
-        print('Add the command to this shell before continuing:')
+        print('PATH saved for new Bash, Zsh, and Fish sessions. For this shell, run:')
         print('  export PATH=' + quote(bin_dir) + ':"$PATH"')
     print('\nStart whenever needed:')
     print('  amarcode-daemon --remote')

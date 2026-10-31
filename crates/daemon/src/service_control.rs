@@ -54,11 +54,17 @@ impl ServiceController for NativeServiceController {
                 executable.display()
             ))
         })?;
-        platform::install(&executable, agent_path)
+        platform::install(&executable, agent_path)?;
+        #[cfg(target_os = "linux")]
+        crate::cli_path::install(&executable)?;
+        Ok(())
     }
 
     fn uninstall(&self) -> Result<()> {
-        platform::uninstall()
+        platform::uninstall()?;
+        #[cfg(target_os = "linux")]
+        crate::cli_path::uninstall()?;
+        Ok(())
     }
 
     fn start(&self) -> Result<()> {

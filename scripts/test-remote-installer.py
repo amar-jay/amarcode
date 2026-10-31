@@ -81,6 +81,27 @@ class RemoteInstallerTests(unittest.TestCase):
         signed.write_text(base64.b64encode(signature).decode())
         return path, signed
 
+    def test_persistent_path_is_idempotent_and_shell_safe(self):
+        home = self.root / 'home'
+        home.mkdir()
+        profile = home / '.bash_profile'
+        profile.write_text('# preserve existing configuration\n')
+        bin_dir = self.root / "bin with ' quote [glob]"
+        bin_dir.mkdir()
+        command = bin_dir / 'amarcode-daemon'
+        command.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+        command.chmod(0o700)
+        with patch.dict(os.environ, {'ZDOTDIR': str(home), 'XDG_CONFIG_HOME': str(home / '.config')}):
+            self.module.persist_command_path(home, bin_dir)
+            first = profile.read_text()
+            self.module.persist_command_path(home, bin_dir)
+        self.assertEqual(first, profile.read_text())
+        self.assertTrue(first.startswith('# preserve existing configuration\n'))
+        result = subprocess.run(['sh', '-c', '. "$1"; amarcode-daemon "two words" --version',
+                                 'sh', str(home / '.profile')],
+                                env={'PATH': '/usr/bin:/bin'}, capture_output=True, check=True)
+        self.assertEqual(result.stdout, b'two words\n--version\n')
+
     def test_signature_and_tampering(self):
         manifest, signature = self.signed()
         self.assertEqual(self.module.verify_manifest(manifest, signature, self.root)['version'], '1.2.3')
@@ -208,7 +229,7 @@ class RemoteInstallerTests(unittest.TestCase):
             Path(destination).write_bytes(payload)
         captured = io.StringIO()
         data = self.root / "data with ' spaces"
-        with patch.dict(os.environ, {'XDG_DATA_HOME': str(data)}), patch.object(sys, 'argv', ['installer', '--bin-dir', str(self.root / 'bin')]), patch.object(self.module, 'download', download), patch.object(self.module.platform, 'system', return_value='Linux'), patch.object(self.module.platform, 'machine', return_value='x86_64'), contextlib.redirect_stdout(captured):
+        with patch.dict(os.environ, {'HOME': str(self.root / 'home'), 'XDG_DATA_HOME': str(data), 'XDG_CONFIG_HOME': str(self.root / 'config'), 'ZDOTDIR': str(self.root / 'zsh')}), patch.object(sys, 'argv', ['installer', '--bin-dir', str(self.root / 'bin')]), patch.object(self.module, 'download', download), patch.object(self.module.platform, 'system', return_value='Linux'), patch.object(self.module.platform, 'machine', return_value='x86_64'), contextlib.redirect_stdout(captured):
             self.module.main()
             installed = data / 'amarcode-remote'
             token = (installed / 'access-token').read_text()
