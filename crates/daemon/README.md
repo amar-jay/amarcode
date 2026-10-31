@@ -39,14 +39,14 @@ foreground daemon against the same data directory.
 
 ## Configuration
 
-| Variable | Purpose |
-| --- | --- |
-| `AMARCODE_APPDIR` | Data directory; defaults to the platform's Amarcode local app-data directory's `data` child. |
-| `AMARCODE_DAEMON_ADDR` | Listener address; defaults to `127.0.0.1:43821` for TCP or `127.0.0.1:43721` for WebSockets. |
-| `AMARCODE_STORE_PATH` | SQLite path; defaults to `{app_dir}/workspace.sqlite3`. |
-| `AMARCODE_LOG` | Logging filter; falls back to `RUST_LOG`, then `amarcode_daemon=info`. |
-| `AMARCODE_ACP_REGISTRY_SOURCE` | Agent registry Git URL or local repository; an empty value disables startup synchronization. |
-| `AMARCODE_ACP_RELEASE_URL` | Built-in Amarcode ACP release manifest URL override; releases still require a valid signature. |
+| Variable                       | Purpose                                                                                        |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `AMARCODE_APPDIR`              | Data directory; defaults to the platform's Amarcode local app-data directory's `data` child.   |
+| `AMARCODE_DAEMON_ADDR`         | Listener address; defaults to `127.0.0.1:43821` for TCP or `127.0.0.1:43721` for WebSockets.   |
+| `AMARCODE_STORE_PATH`          | SQLite path; defaults to `{app_dir}/workspace.sqlite3`.                                        |
+| `AMARCODE_LOG`                 | Logging filter; falls back to `RUST_LOG`, then `amarcode_daemon=info`.                         |
+| `AMARCODE_ACP_REGISTRY_SOURCE` | Agent registry Git URL or local repository; an empty value disables startup synchronization.   |
+| `AMARCODE_ACP_RELEASE_URL`     | Built-in Amarcode ACP release manifest URL override; releases still require a valid signature. |
 
 Logs are written to stderr and `{app_dir}/daemon.log`. Environment changes for
 an installed service must be applied to its service environment before restart.

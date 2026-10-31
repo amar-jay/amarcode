@@ -49,12 +49,15 @@ function SheetContent({
   side = "right",
   showCloseButton = true,
   resizable = false,
+  docked = false,
   style,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left";
   showCloseButton?: boolean;
   resizable?: boolean;
+  /** Render in the application layout instead of an overlay portal. */
+  docked?: boolean;
 }) {
   const [width, setWidth] = React.useState<number>();
   const resizeStart = React.useRef<{ x: number; width: number } | undefined>(
@@ -82,6 +85,40 @@ function SheetContent({
     resizeStart.current = undefined;
   };
 
+  const resizeHandle = resizable && (side === "left" || side === "right") && (
+    <div
+      aria-label="Resize panel"
+      aria-orientation="vertical"
+      className={cn(
+        "absolute top-0 bottom-0 z-10 w-2 cursor-col-resize touch-none",
+        "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:bg-border after:opacity-0 after:transition-opacity hover:after:opacity-100",
+        side === "right" ? "left-0" : "right-0",
+      )}
+      onPointerDown={startResize}
+      onPointerMove={resize}
+      onPointerUp={stopResize}
+      onPointerCancel={stopResize}
+      role="separator"
+    />
+  );
+
+  if (docked) {
+    return (
+      <aside
+        aria-label="Workspace panel"
+        data-slot="docked-workspace-panel"
+        style={{ ...style, ...(width ? { width: `${width}px` } : {}) }}
+        className={cn(
+          "relative flex min-h-0 shrink-0 flex-col border-l bg-popover text-xs/relaxed text-popover-foreground",
+          className,
+        )}
+      >
+        {children}
+        {resizeHandle}
+      </aside>
+    );
+  }
+
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -100,22 +137,7 @@ function SheetContent({
         {...props}
       >
         {children}
-        {resizable && (side === "left" || side === "right") && (
-          <div
-            aria-label="Resize panel"
-            aria-orientation="vertical"
-            className={cn(
-              "absolute top-0 bottom-0 z-10 w-2 cursor-col-resize touch-none",
-              "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:bg-border after:opacity-0 after:transition-opacity hover:after:opacity-100",
-              side === "right" ? "left-0" : "right-0",
-            )}
-            onPointerDown={startResize}
-            onPointerMove={resize}
-            onPointerUp={stopResize}
-            onPointerCancel={stopResize}
-            role="separator"
-          />
-        )}
+        {resizeHandle}
         {showCloseButton && (
           <SheetPrimitive.Close data-slot="sheet-close" asChild>
             <Button

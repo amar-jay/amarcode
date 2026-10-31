@@ -6,6 +6,8 @@ import {
   FoldVertical,
   GitBranch,
   ListFilter,
+  Pin,
+  PinOff,
   RefreshCw,
   UnfoldVertical,
   XIcon,
@@ -13,7 +15,11 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { daemonApi, WorkspaceDiff, type WorkspaceChange } from "@/api";
-import { sidePanelOpenAtom, workspaceFileOpenRequestAtom } from "@/state";
+import {
+  sidePanelOpenAtom,
+  sidePanelPinnedAtom,
+  workspaceFileOpenRequestAtom,
+} from "@/state";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "./ui/sheet";
 import {
   useWorkspaceFileTree,
@@ -45,6 +51,8 @@ interface AppSidePanelProps {
 }
 function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [sheetOpen, setSheetOpen] = useAtom(sidePanelOpenAtom);
+  const [pinned, setPinned] = useAtom(sidePanelPinnedAtom);
+  const PanelTitle = pinned ? "h2" : SheetTitle;
   const [fileOpenRequest, setFileOpenRequest] = useAtom(
     workspaceFileOpenRequestAtom,
   );
@@ -308,279 +316,306 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   return (
     <Sheet open={sheetOpen} onOpenChange={setSheetOpen} modal={false}>
       {/* Keep resize drags from being treated as outside clicks by the sheet. */}
-      <SheetContent
-        side="right"
-        resizable
-        onPointerDownOutside={(event) => event.preventDefault()}
-        className={cn(
-          workspaceFileTree.selectedPath
-            ? "w-280 min-w-[33vw] max-w-[80vw]!"
-            : "w-40 min-w-[min(100vw-30rem,10rem)] max-w-[33vw]!",
-        )}
-        showCloseButton={false}
-      >
-        <SheetHeader className="relative flex-row items-center gap-2 px-3 py-1 select-none">
-          <SheetTitle
-            className={cn(
-              "flex min-w-0 shrink-0 flex-row items-center gap-1 overflow-hidden text-xs font-bold",
-              workspaceFileTree.selectedPath && "max-w-[25%]",
-            )}
-          >
-            <span className="truncate">{dirName || ""}</span>
-            {branchName && (
-              <span
-                className="inline-flex min-w-0 max-w-24 shrink items-center gap-1 rounded bg-muted px-1.5 py-[3.5px] font-mono text-[0.65rem] font-normal text-muted-foreground"
-                title={`Git branch: ${branchName}`}
-              >
-                <GitBranch className="size-3 shrink-0" />
-                <span className="truncate">{branchName}</span>
-              </span>
-            )}
-          </SheetTitle>
-          {workspaceFileTree.selectedPath && (
-            <div className="flex min-w-0 flex-1 items-center justify-center gap-1">
-              <FileDiff
-                className={cn(
-                  "size-4 shrink-0 text-muted-foreground",
-                  diff?.status === "M" && diff?.comparison === "Unstaged"
-                    ? "text-orange-500"
-                    : diff?.status === "M" && diff?.comparison === "Staged"
-                      ? "text-green-500"
-                      : "",
-                )}
-              />
-              <span
-                className="min-w-0 truncate font-mono text-xs"
-                title={workspaceFileTree.selectedPath}
-              >
-                {workspaceFileTree.selectedPath || ""}
-              </span>
-              {editor.dirtyDocuments.some(
-                (document) =>
-                  document.workspace === workspacePath &&
-                  document.path === workspaceFileTree.selectedPath,
-              ) && (
-                <span
-                  className="size-1.5 shrink-0 rounded-full bg-orange-500"
-                  title="Unsaved changes"
-                />
+      {(!pinned || sheetOpen) && (
+        <SheetContent
+          docked={pinned}
+          side="right"
+          resizable
+          onPointerDownOutside={(event) => event.preventDefault()}
+          className={cn(
+            pinned
+              ? workspaceFileTree.selectedPath
+                ? "w-[50%] min-w-0 max-w-[60%]!"
+                : "w-72 min-w-0 max-w-[60%]!"
+              : workspaceFileTree.selectedPath
+                ? "w-280 min-w-[33vw] max-w-[80vw]!"
+                : "w-40 min-w-[min(100vw-30rem,10rem)] max-w-[33vw]!",
+          )}
+          showCloseButton={false}
+        >
+          <SheetHeader className="relative flex-row items-center gap-2 px-3 py-1 select-none">
+            <PanelTitle
+              className={cn(
+                "flex min-w-0 shrink-0 flex-row items-center gap-1 overflow-hidden text-xs font-bold",
+                workspaceFileTree.selectedPath && "max-w-[25%]",
               )}
-              <WorkspaceToolbarButton
-                label={
-                  selectedComparison === undefined
-                    ? "Show unstaged diff"
-                    : "Edit working file"
-                }
-                onClick={() =>
-                  setSelectedComparison(
-                    selectedComparison === undefined ? "unstaged" : undefined,
-                  )
-                }
-              >
-                {selectedComparison === undefined ? (
-                  <FileDiff className="size-3.5" />
-                ) : (
-                  <FilePenLine className="size-3.5" />
+            >
+              <span className="truncate">{dirName || ""}</span>
+              {branchName && (
+                <span
+                  className="inline-flex min-w-0 max-w-24 shrink items-center gap-1 rounded bg-muted px-1.5 py-[3.5px] font-mono text-[0.65rem] font-normal text-muted-foreground"
+                  title={`Git branch: ${branchName}`}
+                >
+                  <GitBranch className="size-3 shrink-0" />
+                  <span className="truncate">{branchName}</span>
+                </span>
+              )}
+            </PanelTitle>
+            {workspaceFileTree.selectedPath && (
+              <div className="flex min-w-0 flex-1 items-center justify-center gap-1">
+                <FileDiff
+                  className={cn(
+                    "size-4 shrink-0 text-muted-foreground",
+                    diff?.status === "M" && diff?.comparison === "Unstaged"
+                      ? "text-orange-500"
+                      : diff?.status === "M" && diff?.comparison === "Staged"
+                        ? "text-green-500"
+                        : "",
+                  )}
+                />
+                <span
+                  className="min-w-0 truncate font-mono text-xs"
+                  title={workspaceFileTree.selectedPath}
+                >
+                  {workspaceFileTree.selectedPath || ""}
+                </span>
+                {editor.dirtyDocuments.some(
+                  (document) =>
+                    document.workspace === workspacePath &&
+                    document.path === workspaceFileTree.selectedPath,
+                ) && (
+                  <span
+                    className="size-1.5 shrink-0 rounded-full bg-orange-500"
+                    title="Unsaved changes"
+                  />
                 )}
-              </WorkspaceToolbarButton>
-              {selectedComparison !== undefined && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="size-6 shrink-0"
-                  onClick={() => setDiffExpanded((expanded) => !expanded)}
-                  aria-pressed={diffExpanded}
-                  aria-label={
-                    diffExpanded
-                      ? "Collapse unchanged lines"
-                      : "Show entire file"
+                <WorkspaceToolbarButton
+                  label={
+                    selectedComparison === undefined
+                      ? "Show unstaged diff"
+                      : "Edit working file"
                   }
-                  title={
-                    diffExpanded
-                      ? "Collapse unchanged lines"
-                      : "Show entire file"
+                  onClick={() =>
+                    setSelectedComparison(
+                      selectedComparison === undefined ? "unstaged" : undefined,
+                    )
                   }
                 >
-                  {diffExpanded ? (
-                    <FoldVertical className="size-3.5" />
+                  {selectedComparison === undefined ? (
+                    <FileDiff className="size-3.5" />
                   ) : (
-                    <UnfoldVertical className="size-3.5" />
+                    <FilePenLine className="size-3.5" />
                   )}
-                </Button>
-              )}
-            </div>
-          )}
-          <div className="ml-auto flex shrink-0 items-center">
-            {workspaceDrafts.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+                </WorkspaceToolbarButton>
+                {selectedComparison !== undefined && (
                   <Button
-                    size="sm"
                     variant="ghost"
-                    className="gap-1 px-2"
-                    aria-label={`Open unsaved files (${workspaceDrafts.length})`}
-                    title={`Unsaved files (${workspaceDrafts.length})`}
+                    size="icon-sm"
+                    className="size-6 shrink-0"
+                    onClick={() => setDiffExpanded((expanded) => !expanded)}
+                    aria-pressed={diffExpanded}
+                    aria-label={
+                      diffExpanded
+                        ? "Collapse unchanged lines"
+                        : "Show entire file"
+                    }
+                    title={
+                      diffExpanded
+                        ? "Collapse unchanged lines"
+                        : "Show entire file"
+                    }
                   >
-                    <Files className="size-3.5" />
-                    <span className="font-mono text-[0.65rem] tabular-nums">
-                      {workspaceDrafts.length}
-                    </span>
+                    {diffExpanded ? (
+                      <FoldVertical className="size-3.5" />
+                    ) : (
+                      <UnfoldVertical className="size-3.5" />
+                    )}
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-80 max-w-[80vw]">
-                  <DropdownMenuLabel>Unsaved files</DropdownMenuLabel>
-                  {workspaceDrafts.map((document) => (
-                    <DropdownMenuItem
-                      key={document.path}
-                      onSelect={() => {
-                        workspaceFileTree.setSelectedPath(document.path);
-                        setSelectedComparison(undefined);
-                        setSelectedLine(undefined);
-                      }}
-                    >
-                      <span className="size-1.5 shrink-0 rounded-full bg-orange-500" />
-                      <span
-                        className="truncate font-mono"
-                        title={document.path}
-                      >
-                        {document.path}
-                      </span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            <div ref={setToolbarHost} className="flex items-center" />
-            <Button
-              className="gap-1 px-2"
-              variant={navigatorView === "changes" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() =>
-                setNavigatorView((view) =>
-                  view === "changes" ? "files" : "changes",
-                )
-              }
-              aria-pressed={navigatorView === "changes"}
-              aria-label={
-                navigatorView === "changes"
-                  ? "Show all workspace files"
-                  : "Show changed files"
-              }
-              title={
-                navigatorView === "changes"
-                  ? "Show all files"
-                  : "Show changed files"
-              }
-            >
-              <ListFilter className="size-3.5" />
-              <span className="font-mono text-[0.65rem] tabular-nums">
-                {changes.length}
-              </span>
-            </Button>
-            <WorkspaceFileSearch
-              active={sheetOpen}
-              disabled={!workspaceFileTree.validWorkspace}
-              value={fileSearchQuery}
-              onValueChange={setFileSearchQuery}
-            />
-            <Button
-              disabled={
-                !workspaceFileTree.validWorkspace || workspaceFileTree.isLoading
-              }
-              onClick={() => {
-                void workspaceFileTree.refresh();
-                void refreshChanges();
-              }}
-              size="icon-sm"
-              variant="ghost"
-            >
-              <RefreshCw
-                className={cn(
-                  "size-4",
-                  workspaceFileTree.isLoading && "animate-spin",
                 )}
+              </div>
+            )}
+            <div className="ml-auto flex shrink-0 items-center">
+              {workspaceDrafts.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="gap-1 px-2"
+                      aria-label={`Open unsaved files (${workspaceDrafts.length})`}
+                      title={`Unsaved files (${workspaceDrafts.length})`}
+                    >
+                      <Files className="size-3.5" />
+                      <span className="font-mono text-[0.65rem] tabular-nums">
+                        {workspaceDrafts.length}
+                      </span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className="w-80 max-w-[80vw]"
+                  >
+                    <DropdownMenuLabel>Unsaved files</DropdownMenuLabel>
+                    {workspaceDrafts.map((document) => (
+                      <DropdownMenuItem
+                        key={document.path}
+                        onSelect={() => {
+                          workspaceFileTree.setSelectedPath(document.path);
+                          setSelectedComparison(undefined);
+                          setSelectedLine(undefined);
+                        }}
+                      >
+                        <span className="size-1.5 shrink-0 rounded-full bg-orange-500" />
+                        <span
+                          className="truncate font-mono"
+                          title={document.path}
+                        >
+                          {document.path}
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              <div ref={setToolbarHost} className="flex items-center" />
+              <Button
+                className="gap-1 px-2"
+                variant={navigatorView === "changes" ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() =>
+                  setNavigatorView((view) =>
+                    view === "changes" ? "files" : "changes",
+                  )
+                }
+                aria-pressed={navigatorView === "changes"}
+                aria-label={
+                  navigatorView === "changes"
+                    ? "Show all workspace files"
+                    : "Show changed files"
+                }
+                title={
+                  navigatorView === "changes"
+                    ? "Show all files"
+                    : "Show changed files"
+                }
+              >
+                <ListFilter className="size-3.5" />
+                <span className="font-mono text-[0.65rem] tabular-nums">
+                  {changes.length}
+                </span>
+              </Button>
+              <WorkspaceFileSearch
+                active={sheetOpen}
+                disabled={!workspaceFileTree.validWorkspace}
+                value={fileSearchQuery}
+                onValueChange={setFileSearchQuery}
               />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setSheetOpen(false)}
-            >
-              <XIcon className="size-4" />
-              <span className="sr-only">Close</span>
-            </Button>
-          </div>
-        </SheetHeader>
-
-        <ResizablePanelGroup
-          orientation="horizontal"
-          className="min-h-0 flex-1 border-t"
-        >
-          <ResizablePanel
-            defaultSize="256px"
-            minSize="180px"
-            maxSize="450px"
-            groupResizeBehavior="preserve-pixel-size"
-          >
-            <div className="flex size-full min-h-0 flex-col">
-              {navigatorView === "files" ? (
-                <WorkspaceFileTree
-                  {...workspaceFileTree}
-                  changes={changesByPath}
-                  searchQuery={fileSearchQuery}
-                  setSelectedPath={selectPath}
+              <Button
+                disabled={
+                  !workspaceFileTree.validWorkspace ||
+                  workspaceFileTree.isLoading
+                }
+                onClick={() => {
+                  void workspaceFileTree.refresh();
+                  void refreshChanges();
+                }}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <RefreshCw
+                  className={cn(
+                    "size-4",
+                    workspaceFileTree.isLoading && "animate-spin",
+                  )}
                 />
-              ) : (
-                <WorkspaceChangedFiles
-                  changes={changes}
-                  isLoading={changesLoading}
-                  searchQuery={fileSearchQuery}
-                  selectedPath={workspaceFileTree.selectedPath}
-                  selectedComparison={selectedComparison}
-                  setSelectedPath={selectPath}
-                  onStage={stageFile}
-                  onUnstage={unstageFile}
-                  changingStagePath={changingStagePath}
-                  commitMessage={commitMessage}
-                  onCommitMessageChange={setCommitMessage}
-                  onStageAll={stageAllFiles}
-                  stagingAll={stagingAll}
-                  onCommit={commitChanges}
-                  committing={committing}
-                  validWorkspace={workspaceFileTree.validWorkspace}
-                />
-              )}
+              </Button>
+              <Button
+                variant={pinned ? "secondary" : "ghost"}
+                size="icon-sm"
+                onClick={() => setPinned((value) => !value)}
+                aria-pressed={pinned}
+                aria-label={
+                  pinned ? "Unpin workspace panel" : "Pin workspace panel"
+                }
+                title={pinned ? "Unpin workspace panel" : "Pin workspace panel"}
+              >
+                {pinned ? (
+                  <PinOff className="size-4" />
+                ) : (
+                  <Pin className="size-4" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setSheetOpen(false)}
+              >
+                <XIcon className="size-4" />
+                <span className="sr-only">Close</span>
+              </Button>
             </div>
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          {!!workspaceFileTree.selectedPath && (
-            <ResizablePanel minSize="0px" className="min-h-0 overflow-hidden">
-              {selectedComparison === undefined ? (
-                <WorkspaceEditor
-                  key={`${workspacePath}:${workspaceFileTree.selectedPath}`}
-                  controller={editor}
-                  toolbarHost={toolbarHost}
-                  selectedLine={selectedLine}
-                  onSaved={() => {
-                    void refreshChanges();
-                    void workspaceFileTree.refresh();
-                  }}
-                />
-              ) : (
-                <WorkspaceDiffViewer
-                  selectedPath={workspaceFileTree.selectedPath}
-                  comparison={selectedComparison}
-                  selectedLine={selectedLine}
-                  workspacePath={workspacePath}
-                  setDiff={setDiff}
-                  diff={diff}
-                  expanded={diffExpanded}
-                />
-              )}
+          </SheetHeader>
+
+          <ResizablePanelGroup
+            orientation="horizontal"
+            className="min-h-0 flex-1 border-t"
+          >
+            <ResizablePanel
+              defaultSize="256px"
+              minSize="180px"
+              maxSize="450px"
+              groupResizeBehavior="preserve-pixel-size"
+            >
+              <div className="flex size-full min-h-0 flex-col">
+                {navigatorView === "files" ? (
+                  <WorkspaceFileTree
+                    {...workspaceFileTree}
+                    changes={changesByPath}
+                    searchQuery={fileSearchQuery}
+                    setSelectedPath={selectPath}
+                  />
+                ) : (
+                  <WorkspaceChangedFiles
+                    changes={changes}
+                    isLoading={changesLoading}
+                    searchQuery={fileSearchQuery}
+                    selectedPath={workspaceFileTree.selectedPath}
+                    selectedComparison={selectedComparison}
+                    setSelectedPath={selectPath}
+                    onStage={stageFile}
+                    onUnstage={unstageFile}
+                    changingStagePath={changingStagePath}
+                    commitMessage={commitMessage}
+                    onCommitMessageChange={setCommitMessage}
+                    onStageAll={stageAllFiles}
+                    stagingAll={stagingAll}
+                    onCommit={commitChanges}
+                    committing={committing}
+                    validWorkspace={workspaceFileTree.validWorkspace}
+                  />
+                )}
+              </div>
             </ResizablePanel>
-          )}
-        </ResizablePanelGroup>
-      </SheetContent>
+            <ResizableHandle withHandle />
+            {!!workspaceFileTree.selectedPath && (
+              <ResizablePanel minSize="0px" className="min-h-0 overflow-hidden">
+                {selectedComparison === undefined ? (
+                  <WorkspaceEditor
+                    key={`${workspacePath}:${workspaceFileTree.selectedPath}`}
+                    controller={editor}
+                    toolbarHost={toolbarHost}
+                    selectedLine={selectedLine}
+                    onSaved={() => {
+                      void refreshChanges();
+                      void workspaceFileTree.refresh();
+                    }}
+                  />
+                ) : (
+                  <WorkspaceDiffViewer
+                    selectedPath={workspaceFileTree.selectedPath}
+                    comparison={selectedComparison}
+                    selectedLine={selectedLine}
+                    workspacePath={workspacePath}
+                    setDiff={setDiff}
+                    diff={diff}
+                    expanded={diffExpanded}
+                  />
+                )}
+              </ResizablePanel>
+            )}
+          </ResizablePanelGroup>
+        </SheetContent>
+      )}
     </Sheet>
   );
 }

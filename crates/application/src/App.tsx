@@ -118,34 +118,36 @@ export default function App() {
           updateAvailable={appUpdateVersion !== null}
           onCheckForUpdates={() => void checkAppUpdate(true)}
         />
-        <AppSidePanel workspacePath={workspacePath} />
-        {activeSession ? (
-          <LiveChatScreen />
-        ) : (
-          <main
-            data-home-stage
-            className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden px-8 py-12"
-          >
-            <HomeWatermark />
-            <div data-prompt-shell className="relative z-10 w-full max-w-2xl">
-              <MainPromptInput
-                workspacePath={workspacePath}
-                onWorkspacePathChange={setWorkspacePath}
-                selectedAgentId={selectedAgent?.id ?? ""}
-                onAgentSelected={(agent) => selectAgentById(agent.id)}
-                onChatStarted={(chat, agent) => {
-                  openStartedChat({ chat, agent });
-                  void refreshChats();
-                }}
-                onStartedPromptFailed={(chatId, error) => {
-                  failStartedPrompt({ chatId, error });
-                  startNewChat();
-                  void refreshChats();
-                }}
-              />
-            </div>
-          </main>
-        )}
+        <div className="flex min-h-0 min-w-0 flex-1">
+          {activeSession ? (
+            <LiveChatScreen />
+          ) : (
+            <main
+              data-home-stage
+              className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden px-8 py-12"
+            >
+              <HomeWatermark />
+              <div data-prompt-shell className="relative z-10 w-full max-w-2xl">
+                <MainPromptInput
+                  workspacePath={workspacePath}
+                  onWorkspacePathChange={setWorkspacePath}
+                  selectedAgentId={selectedAgent?.id ?? ""}
+                  onAgentSelected={(agent) => selectAgentById(agent.id)}
+                  onChatStarted={(chat, agent) => {
+                    openStartedChat({ chat, agent });
+                    void refreshChats();
+                  }}
+                  onStartedPromptFailed={(chatId, error) => {
+                    failStartedPrompt({ chatId, error });
+                    startNewChat();
+                    void refreshChats();
+                  }}
+                />
+              </div>
+            </main>
+          )}
+          <AppSidePanel workspacePath={workspacePath} />
+        </div>
       </div>
       <Toaster
         position="bottom-right"
