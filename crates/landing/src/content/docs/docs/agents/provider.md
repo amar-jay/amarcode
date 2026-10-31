@@ -5,6 +5,10 @@ description: Connect Amarcode ACP to an OpenAI-compatible model provider.
 
 The built-in **Amarcode ACP** agent uses an OpenAI-compatible chat-completion API. You supply the provider endpoint, model ID, and API key.
 
+Downloading and installing Amarcode ACP requires no sign-in, API key, or provider
+configuration. Once downloaded, it remains installed and selectable. Configure
+a provider before starting a chat; these settings are separate from installation.
+
 ## Save your provider settings
 
 1. Open **Settings → ACP provider**.

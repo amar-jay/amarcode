@@ -250,6 +250,15 @@ impl AgentManager {
         if !agent_is_available(&self.tools_dir, agent) {
             return Err(Error::msg(unavailable_reason(&self.tools_dir, agent)));
         }
+        if agent.id == super::amarcode_acp::AGENT_ID
+            && !agent
+                .arguments
+                .windows(2)
+                .find(|pair| pair[0] == "--config")
+                .is_some_and(|pair| super::amarcode_acp::config_file_is_ready(Path::new(&pair[1])))
+        {
+            return Err(Error::msg("Amarcode ACP is installed. Configure its provider in Settings → ACP provider before starting a chat."));
+        }
         let command = find_command(&self.tools_dir, agent)
             .ok_or_else(|| Error::msg(unavailable_reason(&self.tools_dir, agent)))?;
         let arguments = resolved_arguments(agent, &command);
@@ -312,14 +321,7 @@ fn valid_registry_id(id: &str) -> bool {
 
 fn agent_is_available(tools_dir: &Path, agent: &AgentDefinition) -> bool {
     if agent.id == super::amarcode_acp::AGENT_ID {
-        return find_command(tools_dir, agent).is_some()
-            && agent
-                .arguments
-                .windows(2)
-                .find(|pair| pair[0] == "--config")
-                .is_some_and(|pair| {
-                    super::amarcode_acp::config_file_is_ready(Path::new(&pair[1]))
-                });
+        return find_command(tools_dir, agent).is_some();
     }
     agent_is_available_with_caches(
         tools_dir,
@@ -583,16 +585,6 @@ fn uv_wheels_dir() -> Option<PathBuf> {
 }
 
 fn unavailable_reason(tools_dir: &Path, agent: &AgentDefinition) -> String {
-    if agent.id == super::amarcode_acp::AGENT_ID
-        && find_command(tools_dir, agent).is_some()
-        && !agent
-            .arguments
-            .windows(2)
-            .find(|pair| pair[0] == "--config")
-            .is_some_and(|pair| super::amarcode_acp::config_file_is_ready(Path::new(&pair[1])))
-    {
-        return "Provider configuration is required in Settings".into();
-    }
     if agent.command.trim().is_empty() {
         return "Agent command is empty".into();
     }

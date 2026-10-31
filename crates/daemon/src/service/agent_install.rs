@@ -89,25 +89,7 @@ impl AgentManager {
     fn install_inner(&self, agent_id: &str) -> Result<InstallAgentResult> {
         if agent_id == super::amarcode_acp::AGENT_ID {
             self.install_amarcode_acp()?;
-            self.refresh_availability()?;
-            let updated = self
-                .get(agent_id)?
-                .ok_or_else(|| Error::msg("built-in agent missing after install"))?;
-            if !self.amarcode_acp_configured() {
-                return Ok(InstallAgentResult {
-                    agent: self.agent_info(&updated)?,
-                    runtime_status: AgentRuntimeStatus::AuthRequired,
-                    runtime_message: Some(
-                        "Add an API key and provider details in Settings → Agent defaults".into(),
-                    ),
-                });
-            }
-            let (runtime_status, runtime_message) = self.probe_runtime(agent_id)?;
-            return Ok(InstallAgentResult {
-                agent: self.agent_info(&updated)?,
-                runtime_status,
-                runtime_message,
-            });
+            return self.builtin_install_result();
         }
         self.materialize_current(agent_id)?;
 
@@ -127,6 +109,25 @@ impl AgentManager {
             agent: self.agent_info(&updated)?,
             runtime_status,
             runtime_message,
+        })
+    }
+
+    // Installing this public native release has no sign-in/provider setup step.
+    // Provider readiness is checked separately when resolving a chat launch.
+    fn builtin_install_result(&self) -> Result<InstallAgentResult> {
+        self.refresh_availability()?;
+        let agent = self
+            .get(super::amarcode_acp::AGENT_ID)?
+            .ok_or_else(|| Error::msg("built-in agent missing after install"))?;
+        if !self.is_available(&agent) {
+            return Err(Error::msg(
+                "Amarcode ACP executable is missing after installation",
+            ));
+        }
+        Ok(InstallAgentResult {
+            agent: self.agent_info(&agent)?,
+            runtime_status: AgentRuntimeStatus::Ready,
+            runtime_message: None,
         })
     }
 
@@ -673,6 +674,80 @@ fn run_timed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_install_needs_no_sign_in_provider_or_runtime_probe() {
+        use std::sync::Arc;
+        let root = tempfile::tempdir().unwrap();
+        let manager = AgentManager::new(
+            Arc::new(crate::store::Store::open(&root.path().join("store.sqlite3")).unwrap()),
+            root.path(),
+        );
+        manager.sync_builtin_preset().unwrap();
+        assert!(
+            !manager
+                .get(super::super::amarcode_acp::AGENT_ID)
+                .unwrap()
+                .unwrap()
+                .available
+        );
+        let executable = root.path().join(if cfg!(windows) {
+            "amarcode-acp.exe"
+        } else {
+            "amarcode-acp"
+        });
+        // A runtime probe would fail; installation must not start the adapter.
+        std::fs::write(&executable, "#!/bin/sh\nexit 99\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        manager.save_builtin_definition(&executable).unwrap();
+        let result = manager.builtin_install_result().unwrap();
+        assert!(matches!(result.runtime_status, AgentRuntimeStatus::Ready));
+        assert!(result.runtime_message.is_none());
+        assert!(result.agent.available);
+        assert!(result.agent.unavailable_reason.is_none());
+        assert!(!manager.amarcode_acp_config_path().exists());
+        // Readiness for download/selection is separate from chat configuration.
+        let error = manager
+            .resolve(super::super::amarcode_acp::AGENT_ID)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Settings → ACP provider"));
+        assert!(!error.contains("sign in"));
+        assert!(!error.contains("authenticate"));
+        manager
+            .set_amarcode_acp_config(
+                "https://example.com/v1".into(),
+                "model".into(),
+                "key".into(),
+                false,
+            )
+            .unwrap();
+        assert!(manager
+            .resolve(super::super::amarcode_acp::AGENT_ID)
+            .is_ok());
+        manager
+            .set_amarcode_acp_config(
+                "https://example.com/v1".into(),
+                "model".into(),
+                String::new(),
+                true,
+            )
+            .unwrap();
+        let installed = manager
+            .list()
+            .unwrap()
+            .into_iter()
+            .find(|agent| agent.id == super::super::amarcode_acp::AGENT_ID)
+            .unwrap();
+        assert!(
+            installed.available,
+            "clearing provider settings must not trigger another download"
+        );
+    }
 
     #[cfg(unix)]
     #[test]

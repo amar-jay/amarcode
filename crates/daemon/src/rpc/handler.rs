@@ -84,11 +84,7 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
             app.ensure_registry_ready().await?;
             Ok(DispatchOutcome::Result(list_agents(app)?))
         }
-        methods::INSTALL_AGENT => {
-            #[cfg(windows)]
-            app.ensure_registry_ready().await?;
-            Ok(DispatchOutcome::Result(install_agent(app, params).await?))
-        }
+        methods::INSTALL_AGENT => Ok(DispatchOutcome::Result(install_agent(app, params).await?)),
         methods::AUTHENTICATE_AGENT => Ok(DispatchOutcome::Result(
             authenticate_agent(app, params).await?,
         )),
@@ -181,6 +177,10 @@ async fn install_agent(app: &App, params: Value) -> Result<Value> {
     let p: InstallAgentParams = parse_params(params)?;
     if p.agent_id.trim().is_empty() {
         return Err(Error::msg("agent_id must not be empty"));
+    }
+    #[cfg(windows)]
+    if p.agent_id != crate::service::amarcode_acp::AGENT_ID {
+        app.ensure_registry_ready().await?;
     }
     let agent_id = p.agent_id;
     let result = tokio::task::block_in_place(|| app.agents.install(&agent_id))?;

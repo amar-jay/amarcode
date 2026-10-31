@@ -158,12 +158,6 @@ impl AgentManager {
         Ok((provider.base_url, provider.api_key))
     }
 
-    pub(crate) fn amarcode_acp_configured(&self) -> bool {
-        self.amarcode_acp_config()
-            .map(|config| config.configured)
-            .unwrap_or(false)
-    }
-
     pub(crate) fn amarcode_acp_config_path(&self) -> PathBuf {
         self.credentials_dir().join(format!("{AGENT_ID}.json"))
     }

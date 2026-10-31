@@ -145,12 +145,15 @@ mod tests {
         }
         let profile = fs::read_to_string(home.join(".bash_profile")).unwrap();
         assert_eq!(profile.matches("# >>> Amarcode").count(), 1);
-        let output = std::process::Command::new("sh")
+        let output = std::process::Command::new("/bin/sh")
             .arg("-c")
             .arg(". \"$1\"; amarcoded 'two words' --version")
             .arg("sh")
             .arg(home.join(".profile"))
-            .env("PATH", "/usr/bin:/bin")
+            // Exercise profile registration without resolving an installed host
+            // daemon that legitimately takes precedence over appended entries.
+            .env("PATH", "")
+            .current_dir(home)
             .output()
             .unwrap();
         assert!(
