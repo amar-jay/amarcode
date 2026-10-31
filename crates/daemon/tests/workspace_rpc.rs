@@ -186,6 +186,37 @@ async fn exercise_workspace(websocket: bool) {
         .call(methods::LIST_WORKSPACE_FILES, workspace.clone())
         .await;
     assert_eq!(files, json!([".gitignore", "file.txt"]));
+    let search = daemon
+        .call(
+            methods::SEARCH_WORKSPACE_CONTENT,
+            json!({ "workspace_path": root, "query": "COMMITTED" }),
+        )
+        .await;
+    assert_eq!(
+        search["matches"],
+        json!([
+            { "path": "file.txt", "line": 1, "preview": "committed" }
+        ])
+    );
+    assert_eq!(search["truncated"], false);
+    assert!(daemon
+        .call(
+            methods::SEARCH_WORKSPACE_CONTENT,
+            json!({ "workspace_path": root, "query": "COMMITTED", "case_sensitive": true }),
+        )
+        .await["matches"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(daemon
+        .call(
+            methods::SEARCH_WORKSPACE_CONTENT,
+            json!({ "workspace_path": root, "query": "^ignored$", "regex": true }),
+        )
+        .await["matches"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     assert_eq!(
         daemon
             .call(

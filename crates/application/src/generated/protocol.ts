@@ -13,6 +13,12 @@ export type WorkspaceDiff = { path: string, status: string, before: string, afte
 
 export type ListWorkspaceFilesParams = { workspace_path: string, query: string | null, };
 
+export type SearchWorkspaceContentParams = { workspace_path: string, query: string, case_sensitive: boolean, regex: boolean, };
+
+export type WorkspaceSearchMatch = { path: string, line: number, preview: string, };
+
+export type WorkspaceSearchResult = { matches: Array<WorkspaceSearchMatch>, truncated: boolean, skipped_files: number, };
+
 export type WorkspaceParams = { workspace_path: string, };
 
 export type WorkspaceFileParams = { workspace_path: string, relative_path: string, };

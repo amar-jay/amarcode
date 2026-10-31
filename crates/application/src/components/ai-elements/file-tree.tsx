@@ -129,11 +129,13 @@ const FileTreeFolderContext = createContext<FileTreeFolderContextType>({
 export type FileTreeFolderProps = HTMLAttributes<HTMLDivElement> & {
   path: string;
   name: string;
+  nameClassName?: string;
 };
 
 export const FileTreeFolder = ({
   path,
   name,
+  nameClassName,
   className,
   children,
   ...props
@@ -180,7 +182,7 @@ export const FileTreeFolder = ({
                 <FolderIcon className="size-4 text-blue-500" />
               )}
             </FileTreeIcon>
-            <FileTreeName>{name}</FileTreeName>
+            <FileTreeName className={nameClassName}>{name}</FileTreeName>
           </button>
           <CollapsibleContent>
             <div className="ml-4 border-l pl-2">{children}</div>

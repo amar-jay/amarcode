@@ -59,7 +59,8 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
                 .map(DispatchOutcome::Result)
         }
         // Filesystem and Git operations share this path across TCP and WS.
-        methods::LIST_WORKSPACE_FILES
+        methods::SEARCH_WORKSPACE_CONTENT
+        | methods::LIST_WORKSPACE_FILES
         | methods::GET_WORKSPACE_INFO
         | methods::LIST_WORKSPACE_CHANGES
         | methods::STAGE_WORKSPACE_FILE

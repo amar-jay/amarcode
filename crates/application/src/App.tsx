@@ -11,6 +11,13 @@ import { DaemonUpdateDialog } from "@/components/daemon-update-dialog";
 import { AppUpdateDialog } from "@/components/app-update-dialog";
 import { Toaster } from "@/components/ui/sonner";
 import { daemonApi } from "@/api";
+import { useState } from "react";
+import { useSidebar } from "@/components/ui/sidebar";
+import {
+  useAppCommands,
+  useAppShortcutRouter,
+} from "@/hooks/use-app-shortcuts";
+import { AppCommandPalette } from "@/components/app-command-palette";
 import {
   activeSessionAtom,
   agentsAtom,
@@ -29,6 +36,9 @@ import {
   setWorkspacePathAtom,
   settingsOpenAtom,
   sidePanelMaximizedAtom,
+  sidePanelOpenAtom,
+  sidePanelPinnedAtom,
+  stopLiveChatAtom,
   startNewChatAtom,
   themeAtom,
   useAppBootstrap,
@@ -62,6 +72,13 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useAtom(settingsOpenAtom);
   const workspacePath = useAtomValue(workspacePathAtom);
   const workspaceMaximized = useAtomValue(sidePanelMaximizedAtom);
+  const setWorkspaceMaximized = useSetAtom(sidePanelMaximizedAtom);
+  const setWorkspaceOpen = useSetAtom(sidePanelOpenAtom);
+  const workspacePinned = useAtomValue(sidePanelPinnedAtom);
+  const stopResponse = useSetAtom(stopLiveChatAtom);
+  const { toggleSidebar } = useSidebar();
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  useAppShortcutRouter();
   const setWorkspacePath = useSetAtom(setWorkspacePathAtom);
   const agents = useAtomValue(agentsAtom);
   const selectedAgent = useAtomValue(selectedAgentAtom);
@@ -96,6 +113,32 @@ export default function App() {
   const openStartedChat = useSetAtom(openStartedChatAtom);
   const selectAgentById = useSetAtom(selectAgentByIdAtom);
   const refreshChats = useSetAtom(refreshChatsAtom);
+
+  const focusPrompt = () => {
+    setWorkspaceMaximized(false);
+    if (!workspacePinned) setWorkspaceOpen(false);
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLTextAreaElement>("[data-chat-composer] textarea")
+        ?.focus();
+    });
+  };
+  useAppCommands({
+    "new-chat": () => {
+      startNewChat();
+      focusPrompt();
+    },
+    "focus-prompt": focusPrompt,
+    "stop-response": {
+      enabled: activeChatIsWorking,
+      run: () => {
+        void stopResponse();
+      },
+    },
+    settings: () => setSettingsOpen(true),
+    sidebar: toggleSidebar,
+    "command-palette": () => setCommandPaletteOpen((open) => !open),
+  });
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
@@ -165,6 +208,10 @@ export default function App() {
         closeButton
         theme={toasterTheme}
         className="pointer-events-auto z-100!"
+      />
+      <AppCommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
       />
       <SettingsDialog
         open={settingsOpen}

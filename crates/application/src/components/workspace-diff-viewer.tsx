@@ -150,6 +150,7 @@ export function WorkspaceDiffViewer({
   diff,
   setDiff,
   expanded = false,
+  refreshRevision = 0,
 }: {
   selectedPath?: string;
   comparison?: "staged" | "unstaged";
@@ -158,6 +159,7 @@ export function WorkspaceDiffViewer({
   diff?: WorkspaceDiff;
   setDiff: (diff?: WorkspaceDiff) => void;
   expanded?: boolean;
+  refreshRevision?: number;
 }) {
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
@@ -192,7 +194,7 @@ export function WorkspaceDiffViewer({
     return () => {
       cancelled = true;
     };
-  }, [selectedPath, workspacePath, comparison]);
+  }, [selectedPath, workspacePath, comparison, refreshRevision]);
 
   return (
     <section

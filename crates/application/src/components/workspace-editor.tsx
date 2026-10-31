@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import { createPortal } from "react-dom";
 import { WorkspaceToolbarButton } from "./workspace-toolbar-button";
 import { Compartment, EditorState } from "@codemirror/state";
@@ -37,7 +43,7 @@ import {
   openSearchPanel,
   searchKeymap,
 } from "@codemirror/search";
-import { LoaderCircle, RotateCcw, Save, Search } from "lucide-react";
+import { LoaderCircle, Save } from "lucide-react";
 import { languageForPath } from "@/lib/editor-language";
 import type {
   EditorDocument,
@@ -54,11 +60,17 @@ export function WorkspaceEditor({
   selectedLine,
   onSaved,
   toolbarHost,
+  reloadRef,
+  findRef,
+  saveRef,
 }: {
   controller: Controller;
   selectedLine?: number;
   onSaved: () => void;
   toolbarHost: HTMLElement | null;
+  reloadRef?: Ref<() => void>;
+  findRef?: Ref<() => void>;
+  saveRef?: Ref<() => void>;
 }) {
   const { document, update, save, load } = controller;
   const host = useRef<HTMLDivElement>(null);
@@ -245,7 +257,33 @@ export function WorkspaceEditor({
     selectedLine,
   ]);
 
+  useImperativeHandle(
+    findRef,
+    () => () => {
+      if (view.current) openSearchPanel(view.current);
+    },
+    [],
+  );
+  useImperativeHandle(
+    saveRef,
+    () => () => {
+      if (!document?.loaded || document.loading || document.saving) return;
+      void save(document).then((saved) => {
+        if (saved) onSaved();
+      });
+    },
+    [document, save, onSaved],
+  );
   const dirty = !!document && document.content !== document.original;
+  useImperativeHandle(
+    reloadRef,
+    () => () => {
+      if (!document || document.loading || document.saving) return;
+      if (dirty) setConfirmReload(true);
+      else void load(document, true);
+    },
+    [document, dirty, load],
+  );
   return (
     <section
       className="flex h-full min-h-0 flex-col border-l"
@@ -254,26 +292,6 @@ export function WorkspaceEditor({
       {toolbarHost &&
         createPortal(
           <>
-            <WorkspaceToolbarButton
-              label="Find and replace"
-              disabled={!document?.loaded || document.loading}
-              onClick={() => {
-                if (view.current) openSearchPanel(view.current);
-              }}
-            >
-              <Search className="size-3.5" />
-            </WorkspaceToolbarButton>
-            <WorkspaceToolbarButton
-              label="Reload file from disk"
-              disabled={!document || document.loading || document.saving}
-              onClick={() => {
-                if (!document) return;
-                if (dirty) setConfirmReload(true);
-                else void load(document, true);
-              }}
-            >
-              <RotateCcw className="size-3.5" />
-            </WorkspaceToolbarButton>
             <WorkspaceToolbarButton
               label={document?.saving ? "Saving…" : "Save file (Ctrl/Cmd+S)"}
               disabled={!dirty || document?.saving || document?.loading}

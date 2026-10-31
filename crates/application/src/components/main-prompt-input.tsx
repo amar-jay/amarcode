@@ -19,6 +19,7 @@ import {
   ContextTrigger,
 } from "@/components/ai-elements/context";
 
+import { shortcutHint } from "@/lib/app-shortcuts";
 import { FolderOpen } from "lucide-react";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
@@ -239,6 +240,7 @@ function AppPromptInput({
       <div
         className="@container/prompt w-full min-w-0"
         ref={composerRef}
+        data-chat-composer
         onSubmitCapture={dictation.cancel}
       >
         <PromptInput
@@ -333,6 +335,11 @@ function AppPromptInput({
             <div className="flex shrink-0 items-center gap-1">
               <DictationControls dictation={dictation} />
               <PromptInputSubmit
+                title={
+                  isWorking
+                    ? `Stop response (${shortcutHint("stop-response")})`
+                    : "Send message (Enter)"
+                }
                 disabled={
                   !selectedAgentId ||
                   !workspacePath ||

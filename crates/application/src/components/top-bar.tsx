@@ -3,6 +3,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { Minus, PanelRightOpen, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { shortcutHint } from "@/lib/app-shortcuts";
 import { daemonApi } from "@/api";
 import { ChatStateIndicators } from "@/components/chat-state-indicators";
 import {
@@ -113,7 +114,7 @@ export function TopBar() {
             disabled={isOpeningSheet}
             onClick={() => void openWorkspacePanel()}
             aria-label="Open workspace panel"
-            title="Workspace"
+            title={`Workspace (${shortcutHint("workspace")})`}
           >
             <PanelRightOpen className="size-4" />
           </button>

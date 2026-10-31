@@ -138,6 +138,7 @@ dependencies = [
  "hex",
  "ignore",
  "nix",
+ "regex",
  "reqwest",
  "rusqlite",
  "rustls-pemfile",

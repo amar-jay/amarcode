@@ -70,6 +70,7 @@ pub fn run() {
             commands::sessions::respond_permission,
             commands::sessions::respond_input,
             commands::workspace::list_workspace_files,
+            commands::workspace::search_workspace_content,
             commands::workspace::get_workspace_info,
             commands::workspace::list_workspace_changes,
             commands::workspace::stage_workspace_file,

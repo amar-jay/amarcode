@@ -2,6 +2,7 @@ import { useAtom } from "jotai";
 import { pinnedChatIdsAtom } from "@/state/preferences";
 import { useState } from "react";
 import { Download, Plus, Settings } from "lucide-react";
+import { shortcutHint } from "@/lib/app-shortcuts";
 import { notify } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -125,7 +126,8 @@ export function AppSidebar({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={false}
-                  tooltip="New chat"
+                  tooltip={`New chat (${shortcutHint("new-chat")})`}
+                  title={`New chat (${shortcutHint("new-chat")})`}
                   onClick={onNewChat}
                 >
                   <Plus />
@@ -133,7 +135,10 @@ export function AppSidebar({
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
-            <SidebarTrigger className="shrink-0 text-card-foreground/80" />
+            <SidebarTrigger
+              className="shrink-0 text-card-foreground/80"
+              title={`Toggle sidebar (${shortcutHint("sidebar")})`}
+            />
           </div>
         </SidebarHeader>
         <SidebarContent className="px-2 py-2">
@@ -179,7 +184,10 @@ export function AppSidebar({
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton onClick={onOpenSettings} tooltip="Settings">
+              <SidebarMenuButton
+                onClick={onOpenSettings}
+                tooltip={`Settings (${shortcutHint("settings")})`}
+              >
                 <Settings />
                 <span>Settings</span>
               </SidebarMenuButton>

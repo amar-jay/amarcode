@@ -17,6 +17,7 @@ import {
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import type { AcpEvent, AgentRun, PromptAttachment } from "@/types";
+import { shortcutOverlayOpen } from "@/lib/app-shortcuts";
 import { daemonApi } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -269,7 +270,19 @@ export function LiveChatScreen() {
   useEffect(() => {
     if (workspaceMaximized) return;
     const handleFindShortcut = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        event.altKey ||
+        shortcutOverlayOpen()
+      )
+        return;
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "f"
+      ) {
         event.preventDefault();
         openSearch();
       }

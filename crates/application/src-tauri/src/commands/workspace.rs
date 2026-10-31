@@ -2,7 +2,8 @@
 use crate::daemon::DaemonClient;
 use amarcode_protocol::rpc::{
     CommitWorkspaceChangesParams, GetWorkspaceFileDiffParams, ListWorkspaceFilesParams,
-    SaveWorkspaceFileParams, WorkspaceFileParams, WorkspaceParams,
+    SaveWorkspaceFileParams, SearchWorkspaceContentParams, WorkspaceFileParams, WorkspaceParams,
+    WorkspaceSearchResult,
 };
 use amarcode_protocol::{WorkspaceChange, WorkspaceDiff, WorkspaceInfo};
 use tauri::State;
@@ -137,6 +138,24 @@ pub async fn save_workspace_file(
             relative_path,
             expected_content,
             content,
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn search_workspace_content(
+    client: State<'_, DaemonClient>,
+    workspace_path: String,
+    query: String,
+    case_sensitive: bool,
+    regex: bool,
+) -> Result<WorkspaceSearchResult, String> {
+    client
+        .search_workspace_content(SearchWorkspaceContentParams {
+            workspace_path,
+            query,
+            case_sensitive,
+            regex,
         })
         .await
 }

@@ -16,6 +16,11 @@ import {
 } from "@/components/ai-elements/file-tree";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  changedDirectoryStatuses,
+  fileGitStatus,
+  gitStatusClass,
+} from "@/lib/workspace-git-status";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
@@ -87,31 +92,52 @@ function collectFolderPaths(nodes: TreeNode[], paths = new Set<string>()) {
 
 function TreeNodes({
   changes,
+  directories,
   nodes,
 }: {
   changes: Map<string, WorkspaceChange>;
+  directories: Map<string, string>;
   nodes: TreeNode[];
 }) {
-  return nodes.map((node) =>
-    node.kind === "folder" ? (
-      <FileTreeFolder key={node.path} name={node.name} path={node.path}>
-        <TreeNodes changes={changes} nodes={node.children} />
-      </FileTreeFolder>
-    ) : (
-      <FileTreeFile key={node.path} name={node.name} path={node.path}>
+  return nodes.map((node) => {
+    if (node.kind === "folder") {
+      const status = directories.get(node.path);
+      return (
+        <FileTreeFolder
+          key={node.path}
+          name={node.name}
+          path={node.path}
+          nameClassName={gitStatusClass(status)}
+          title={
+            status ? `${node.path} — contains uncommitted changes` : node.path
+          }
+        >
+          <TreeNodes
+            changes={changes}
+            directories={directories}
+            nodes={node.children}
+          />
+        </FileTreeFolder>
+      );
+    }
+    const status = fileGitStatus(node.path, changes);
+    return (
+      <FileTreeFile
+        key={node.path}
+        name={node.name}
+        path={node.path}
+        title={status ? `${node.path} — ${status}` : node.path}
+      >
         <span className="size-4 shrink-0" />
         <FileTreeIcon>
           <FileIcon className="size-4 text-muted-foreground" />
         </FileTreeIcon>
-        <FileTreeName>{node.name}</FileTreeName>
-        {changes.get(node.path) && (
-          <span className="ml-auto rounded bg-muted px-1 font-mono text-[0.6rem] font-semibold text-muted-foreground">
-            {changes.get(node.path)?.status}
-          </span>
-        )}
+        <FileTreeName className={gitStatusClass(status)}>
+          {node.name}
+        </FileTreeName>
       </FileTreeFile>
-    ),
-  );
+    );
+  });
 }
 
 export function useWorkspaceFileTree(
@@ -212,6 +238,10 @@ export function WorkspaceFileTree({
     validWorkspace,
     searchQuery,
   } = treeState;
+  const directories = useMemo(
+    () => changedDirectoryStatuses(changes.values()),
+    [changes],
+  );
   const hasSearchQuery = !!searchQuery.trim();
   const visibleExpanded = useMemo(
     () => (hasSearchQuery ? collectFolderPaths(tree) : expanded),
@@ -248,7 +278,11 @@ export function WorkspaceFileTree({
             onSelect={setSelectedPath}
             selectedPath={selectedPath}
           >
-            <TreeNodes changes={changes} nodes={tree} />
+            <TreeNodes
+              changes={changes}
+              directories={directories}
+              nodes={tree}
+            />
           </FileTree>
         )}
       </div>
@@ -417,7 +451,12 @@ export function WorkspaceChangedFiles({
                               {change.status}
                             </span>
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate font-mono text-xs text-foreground">
+                              <span
+                                className={cn(
+                                  "block truncate font-mono text-xs",
+                                  gitStatusClass(change.status),
+                                )}
+                              >
                                 {name}{" "}
                                 <span className="truncate text-muted-foreground text-[0.65rem]">
                                   {directory}

@@ -1,20 +1,22 @@
 import { useAtom } from "jotai";
 import {
   FileDiff,
+  FileCode2,
   FilePenLine,
   Files,
   FoldVertical,
   GitBranch,
-  ListFilter,
+  GitCompareArrows,
+  Search,
   Maximize2,
   Minimize2,
   Pin,
   PinOff,
-  RefreshCw,
+  RotateCcw,
   UnfoldVertical,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { daemonApi, WorkspaceDiff, type WorkspaceChange } from "@/api";
 import {
@@ -47,7 +49,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
 } from "./ui/dropdown-menu";
-import { WorkspaceFileSearch } from "./workspace-file-search";
+import { useAppCommands } from "@/hooks/use-app-shortcuts";
+import { shortcutHint } from "@/lib/app-shortcuts";
+import { WorkspaceSearch } from "./workspace-search";
 
 interface AppSidePanelProps {
   workspacePath: string;
@@ -69,11 +73,15 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   const [stagingAll, setStagingAll] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
   const [committing, setCommitting] = useState(false);
-  const [navigatorView, setNavigatorView] = useState<"files" | "changes">(
-    "files",
-  );
+  const [navigatorView, setNavigatorView] = useState<
+    "files" | "changes" | "search"
+  >("files");
+  const [searchMode, setSearchMode] = useState<"files" | "contents">("files");
+  const [searchRefreshRevision, setSearchRefreshRevision] = useState(0);
+  const reloadEditorRef = useRef<(() => void) | null>(null);
+  const findInEditorRef = useRef<(() => void) | null>(null);
+  const saveEditorRef = useRef<(() => void) | null>(null);
   const [diffExpanded, setDiffExpanded] = useState(false);
-  const [fileSearchQuery, setFileSearchQuery] = useState("");
   const [selectedComparison, setSelectedComparison] = useState<
     "staged" | "unstaged"
   >();
@@ -100,15 +108,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
       });
   }, [workspacePath]);
 
-  useEffect(() => {
-    queueMicrotask(() => setFileSearchQuery(""));
-  }, [workspacePath]);
-
-  const workspaceFileTree = useWorkspaceFileTree(
-    sheetOpen,
-    workspacePath,
-    fileSearchQuery,
-  );
+  const workspaceFileTree = useWorkspaceFileTree(sheetOpen, workspacePath, "");
 
   const editor = useWorkspaceEditor(
     workspacePath,
@@ -135,7 +135,6 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
       setSelectedComparison(undefined);
       setSelectedLine(fileOpenRequest.line);
       setNavigatorView("files");
-      setFileSearchQuery("");
       setFileOpenRequest(null);
     });
   }, [fileOpenRequest, setFileOpenRequest, workspacePath]);
@@ -318,33 +317,98 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     }
   }, [commitMessage, workspaceFileTree, workspacePath, selectedComparison]);
 
+  const openSearch = (mode: "files" | "contents") => {
+    if (!workspacePath) return false;
+    setSheetOpen(true);
+    setNavigatorView("search");
+    setSearchMode(mode);
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLInputElement>("[data-workspace-search]")
+        ?.focus(),
+    );
+  };
+  const refreshWorkspace = () => {
+    if (!sheetOpen || !workspacePath) return false;
+    void workspaceFileTree.refresh();
+    void refreshChanges();
+    setSearchRefreshRevision((value) => value + 1);
+    reloadEditorRef.current?.();
+  };
+  useAppCommands({
+    workspace: {
+      enabled: Boolean(workspacePath),
+      run: () => setSheetOpen(!sheetOpen),
+    },
+    "find-files": {
+      enabled: Boolean(workspacePath),
+      run: () => openSearch("files"),
+    },
+    "search-content": {
+      enabled: Boolean(workspacePath),
+      run: () => openSearch("contents"),
+    },
+    "git-changes": {
+      enabled: Boolean(workspacePath),
+      run: () => {
+        setSheetOpen(true);
+        setNavigatorView("changes");
+      },
+    },
+    "save-file": {
+      enabled:
+        sheetOpen &&
+        selectedComparison === undefined &&
+        Boolean(
+          editor.document?.loaded &&
+          !editor.document.loading &&
+          !editor.document.saving &&
+          editor.document.content !== editor.document.original,
+        ),
+      run: () => saveEditorRef.current?.(),
+    },
+    refresh: {
+      enabled:
+        sheetOpen && Boolean(workspacePath) && !workspaceFileTree.isLoading,
+      run: refreshWorkspace,
+    },
+    "pin-workspace": { enabled: sheetOpen, run: () => setPinned(!pinned) },
+    "maximize-workspace": {
+      enabled: sheetOpen,
+      run: () => setMaximized(!maximized),
+    },
+    "close-workspace": { enabled: sheetOpen, run: () => setSheetOpen(false) },
+  });
+
   return (
     <Sheet open={sheetOpen} onOpenChange={setSheetOpen} modal={false}>
       {/* Keep resize drags from being treated as outside clicks by the sheet. */}
       {(!docked || sheetOpen) && (
         <SheetContent
+          data-workspace-panel
           docked={docked}
           side="right"
           resizable={!maximized}
           style={maximized ? { width: "100%" } : undefined}
           onPointerDownOutside={(event) => event.preventDefault()}
           className={cn(
+            "min-w-[min(24rem,100%)]",
             maximized
-              ? "w-full min-w-0 max-w-none!"
+              ? "w-full max-w-none!"
               : pinned
                 ? workspaceFileTree.selectedPath
-                  ? "w-[50%] min-w-0 max-w-[60%]!"
-                  : "w-72 min-w-0 max-w-[60%]!"
+                  ? "w-[50%] max-w-[60%]!"
+                  : "w-96 max-w-[60%]!"
                 : workspaceFileTree.selectedPath
-                  ? "w-280 min-w-[33vw] max-w-[80vw]!"
-                  : "w-40 min-w-[min(100vw-30rem,10rem)] max-w-[33vw]!",
+                  ? "w-280 max-w-[80vw]!"
+                  : "w-96 max-w-[80vw]!",
           )}
           showCloseButton={false}
         >
-          <SheetHeader className="relative flex-row items-center gap-2 px-3 py-1 select-none">
+          <SheetHeader className="relative flex-row items-center gap-2 px-3 py-1 select-none [&_button]:h-6 [&_button]:min-w-6 [&_button_svg]:size-3.5">
             <PanelTitle
               className={cn(
-                "flex min-w-0 shrink-0 flex-row items-center gap-1 overflow-hidden text-xs font-bold",
+                "flex min-w-0 flex-1 flex-row items-center gap-1 overflow-hidden text-xs font-bold",
                 workspaceFileTree.selectedPath && "max-w-[25%]",
               )}
             >
@@ -361,9 +425,9 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
             </PanelTitle>
             {workspaceFileTree.selectedPath && (
               <div className="flex min-w-0 flex-1 items-center justify-center gap-1">
-                <FileDiff
+                <FileCode2
                   className={cn(
-                    "size-4 shrink-0 text-muted-foreground",
+                    "size-3.5 shrink-0 text-muted-foreground",
                     diff?.status === "M" && diff?.comparison === "Unstaged"
                       ? "text-orange-500"
                       : diff?.status === "M" && diff?.comparison === "Staged"
@@ -432,14 +496,55 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                 )}
               </div>
             )}
-            <div className="ml-auto flex shrink-0 items-center">
+            <div className="ml-auto flex shrink-0 items-center gap-0">
+              <Button
+                variant={navigatorView === "search" ? "secondary" : "ghost"}
+                size="icon-sm"
+                aria-label="Search workspace"
+                title={`Search workspace (${shortcutHint("find-files")} / ${shortcutHint("search-content")})`}
+                aria-pressed={navigatorView === "search"}
+                onClick={() =>
+                  setNavigatorView((view) =>
+                    view === "search" ? "files" : "search",
+                  )
+                }
+              >
+                <Search className="size-3.5" />
+              </Button>
+              <Button
+                className="gap-1 px-1"
+                variant={navigatorView === "changes" ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() =>
+                  setNavigatorView((view) =>
+                    view === "changes" ? "files" : "changes",
+                  )
+                }
+                aria-pressed={navigatorView === "changes"}
+                aria-label={
+                  navigatorView === "changes"
+                    ? "Show all workspace files"
+                    : "Show changed files"
+                }
+                title={
+                  navigatorView === "changes"
+                    ? `Show all files (${shortcutHint("git-changes")})`
+                    : `Show changed files (${shortcutHint("git-changes")})`
+                }
+              >
+                <GitCompareArrows className="size-3.5" />
+                <span className="font-mono text-[0.65rem] tabular-nums">
+                  {changes.length}
+                </span>
+              </Button>
+              <span aria-hidden="true" className="mx-1 h-3 w-px bg-border" />
               {workspaceDrafts.length > 0 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="gap-1 px-2"
+                      className="gap-1 px-1"
                       aria-label={`Open unsaved files (${workspaceDrafts.length})`}
                       title={`Unsaved files (${workspaceDrafts.length})`}
                     >
@@ -475,80 +580,26 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
-              <div ref={setToolbarHost} className="flex items-center" />
-              <Button
-                className="gap-1 px-2"
-                variant={navigatorView === "changes" ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() =>
-                  setNavigatorView((view) =>
-                    view === "changes" ? "files" : "changes",
-                  )
-                }
-                aria-pressed={navigatorView === "changes"}
-                aria-label={
-                  navigatorView === "changes"
-                    ? "Show all workspace files"
-                    : "Show changed files"
-                }
-                title={
-                  navigatorView === "changes"
-                    ? "Show all files"
-                    : "Show changed files"
-                }
-              >
-                <ListFilter className="size-3.5" />
-                <span className="font-mono text-[0.65rem] tabular-nums">
-                  {changes.length}
-                </span>
-              </Button>
-              <WorkspaceFileSearch
-                active={sheetOpen}
-                disabled={!workspaceFileTree.validWorkspace}
-                value={fileSearchQuery}
-                onValueChange={setFileSearchQuery}
-              />
+              <div ref={setToolbarHost} className="flex items-center gap-0" />
               <Button
                 disabled={
                   !workspaceFileTree.validWorkspace ||
                   workspaceFileTree.isLoading
                 }
-                onClick={() => {
-                  void workspaceFileTree.refresh();
-                  void refreshChanges();
-                }}
+                onClick={refreshWorkspace}
                 size="icon-sm"
                 variant="ghost"
+                aria-label="Refresh workspace, search, and current file"
+                title={`Refresh workspace, search, and current file (${shortcutHint("refresh")})`}
               >
-                <RefreshCw
+                <RotateCcw
                   className={cn(
-                    "size-4",
+                    "size-3.5",
                     workspaceFileTree.isLoading && "animate-spin",
                   )}
                 />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setMaximized((value) => !value)}
-                aria-pressed={maximized}
-                aria-label={
-                  maximized
-                    ? "Restore workspace panel"
-                    : "Maximize workspace panel"
-                }
-                title={
-                  maximized
-                    ? "Restore workspace panel"
-                    : "Maximize workspace panel"
-                }
-              >
-                {maximized ? (
-                  <Minimize2 className="size-4" />
-                ) : (
-                  <Maximize2 className="size-4" />
-                )}
-              </Button>
+              <span aria-hidden="true" className="mx-1 h-3 w-px bg-border" />
               <Button
                 variant={pinned ? "secondary" : "ghost"}
                 size="icon-sm"
@@ -557,20 +608,43 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                 aria-label={
                   pinned ? "Unpin workspace panel" : "Pin workspace panel"
                 }
-                title={pinned ? "Unpin workspace panel" : "Pin workspace panel"}
+                title={`${pinned ? "Unpin workspace panel" : "Pin workspace panel"} (${shortcutHint("pin-workspace")})`}
               >
                 {pinned ? (
-                  <PinOff className="size-4" />
+                  <PinOff className="size-3.5" />
                 ) : (
-                  <Pin className="size-4" />
+                  <Pin className="size-3.5" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setMaximized((value) => !value)}
+                aria-pressed={maximized}
+                aria-label={
+                  maximized
+                    ? `Restore workspace panel (${shortcutHint("maximize-workspace")})`
+                    : `Maximize workspace panel (${shortcutHint("maximize-workspace")})`
+                }
+                title={
+                  maximized
+                    ? `Restore workspace panel (${shortcutHint("maximize-workspace")})`
+                    : `Maximize workspace panel (${shortcutHint("maximize-workspace")})`
+                }
+              >
+                {maximized ? (
+                  <Minimize2 className="size-3.5" />
+                ) : (
+                  <Maximize2 className="size-3.5" />
                 )}
               </Button>
               <Button
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => setSheetOpen(false)}
+                title={`Close workspace panel (${shortcutHint("close-workspace")})`}
               >
-                <XIcon className="size-4" />
+                <XIcon className="size-3.5" />
                 <span className="sr-only">Close</span>
               </Button>
             </div>
@@ -587,18 +661,39 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
               groupResizeBehavior="preserve-pixel-size"
             >
               <div className="flex size-full min-h-0 flex-col">
-                {navigatorView === "files" ? (
+                {navigatorView === "search" ? (
+                  <WorkspaceSearch
+                    key={workspacePath}
+                    workspacePath={workspacePath}
+                    active={sheetOpen}
+                    refreshRevision={searchRefreshRevision}
+                    onFindInFile={
+                      selectedComparison === undefined &&
+                      editor.document?.loaded &&
+                      !editor.document.loading
+                        ? () => findInEditorRef.current?.()
+                        : undefined
+                    }
+                    mode={searchMode}
+                    onModeChange={setSearchMode}
+                    onSelect={(path, line) => {
+                      workspaceFileTree.setSelectedPath(path);
+                      setSelectedComparison(undefined);
+                      setSelectedLine(line);
+                    }}
+                  />
+                ) : navigatorView === "files" ? (
                   <WorkspaceFileTree
                     {...workspaceFileTree}
                     changes={changesByPath}
-                    searchQuery={fileSearchQuery}
+                    searchQuery=""
                     setSelectedPath={selectPath}
                   />
                 ) : (
                   <WorkspaceChangedFiles
                     changes={changes}
                     isLoading={changesLoading}
-                    searchQuery={fileSearchQuery}
+                    searchQuery=""
                     selectedPath={workspaceFileTree.selectedPath}
                     selectedComparison={selectedComparison}
                     setSelectedPath={selectPath}
@@ -622,6 +717,9 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                 {selectedComparison === undefined ? (
                   <WorkspaceEditor
                     key={`${workspacePath}:${workspaceFileTree.selectedPath}`}
+                    reloadRef={reloadEditorRef}
+                    saveRef={saveEditorRef}
+                    findRef={findInEditorRef}
                     controller={editor}
                     toolbarHost={toolbarHost}
                     selectedLine={selectedLine}
@@ -638,6 +736,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                     workspacePath={workspacePath}
                     setDiff={setDiff}
                     diff={diff}
+                    refreshRevision={searchRefreshRevision}
                     expanded={diffExpanded}
                   />
                 )}

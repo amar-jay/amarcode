@@ -4,6 +4,7 @@ import { chatsAtom } from "./chats";
 import { selectedAgentAtom, selectAgentAtom } from "./agents";
 import { defaultWorkspacePathAtom } from "./preferences";
 import { workspacePathAtom } from "./workspace";
+import { sidePanelOpenAtom, workspaceFileOpenRequestAtom } from "./ui";
 
 /**
  * Which surface the main pane shows.
@@ -35,6 +36,8 @@ export const selectChatAtom = atom(null, (get, set, chatId: string) => {
 
 /** Return to the home composer. */
 export const startNewChatAtom = atom(null, (get, set) => {
+  set(sidePanelOpenAtom, false);
+  set(workspaceFileOpenRequestAtom, null);
   set(activeSessionAtom, null);
   set(workspacePathAtom, get(defaultWorkspacePathAtom));
 });

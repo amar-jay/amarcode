@@ -11,6 +11,9 @@ use std::{
     process::Command,
 };
 
+mod search;
+pub use search::search_workspace_content;
+
 mod editor;
 pub use editor::{read_workspace_file, save_workspace_file};
 

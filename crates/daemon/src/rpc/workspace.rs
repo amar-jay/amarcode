@@ -10,6 +10,10 @@ fn result<T: Serialize>(value: std::result::Result<T, String>) -> Result<Value> 
 
 pub(super) async fn dispatch(method: String, params: Value) -> Result<Value> {
     tokio::task::spawn_blocking(move || match method.as_str() {
+        methods::SEARCH_WORKSPACE_CONTENT => {
+            let p: SearchWorkspaceContentParams = serde_json::from_value(params)?;
+            result(workspace::search_workspace_content(p))
+        }
         methods::LIST_WORKSPACE_FILES => {
             let p: ListWorkspaceFilesParams = serde_json::from_value(params)?;
             result(workspace::list_workspace_files(p.workspace_path, p.query))

@@ -5,6 +5,7 @@ import type {
   DaemonUpdateCheck,
   DaemonUpdateStatus,
   WorkspaceInfo,
+  WorkspaceSearchResult,
   WorkspaceChange,
   WorkspaceDiff,
   AcpEvent,
@@ -161,6 +162,18 @@ export const daemonApi = {
   exitApplication: (): Promise<void> => invoke("exit_application"),
   health: (): Promise<Health> => invoke("daemon_health"),
   version: (): Promise<DaemonVersion> => invoke("daemon_version"),
+  searchWorkspaceContent: (
+    workspacePath: string,
+    query: string,
+    caseSensitive = false,
+    regex = false,
+  ): Promise<WorkspaceSearchResult> =>
+    invoke("search_workspace_content", {
+      workspacePath,
+      query,
+      caseSensitive,
+      regex,
+    }),
   listWorkspaceFiles: (
     workspacePath: string,
     query?: string,

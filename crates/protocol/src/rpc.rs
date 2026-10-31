@@ -8,6 +8,7 @@ use crate::{
 };
 
 pub mod methods {
+    pub const SEARCH_WORKSPACE_CONTENT: &str = "search_workspace_content";
     pub const LIST_WORKSPACE_FILES: &str = "list_workspace_files";
     pub const GET_WORKSPACE_INFO: &str = "get_workspace_info";
     pub const LIST_WORKSPACE_CHANGES: &str = "list_workspace_changes";
@@ -506,4 +507,29 @@ pub struct SaveWorkspaceFileParams {
     pub relative_path: String,
     pub expected_content: String,
     pub content: String,
+}
+
+/// Additive workspace content search; line numbers are one-based.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SearchWorkspaceContentParams {
+    pub workspace_path: String,
+    pub query: String,
+    #[serde(default)]
+    pub case_sensitive: bool,
+    #[serde(default)]
+    pub regex: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkspaceSearchMatch {
+    pub path: String,
+    pub line: u32,
+    pub preview: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+pub struct WorkspaceSearchResult {
+    pub matches: Vec<WorkspaceSearchMatch>,
+    pub truncated: bool,
+    pub skipped_files: u32,
 }

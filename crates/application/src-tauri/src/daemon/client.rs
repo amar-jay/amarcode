@@ -12,10 +12,11 @@ use amarcode_protocol::rpc::{
     HealthResult, InstallAgentParams, InstallAgentResult, ListAcpEventsForChatParams,
     ListAcpEventsResult, ListAgentRunsForChatParams, ListAgentRunsResult, ListAgentsResult,
     ListChatsParams, ListChatsResult, ListWorkspaceFilesParams, PromptParams, PromptResultDto,
-    RespondAgentParams, RespondAgentResult, SaveWorkspaceFileParams, SetAmarcodeAcpConfigParams,
-    SetDaemonConfigParams, SetSessionConfigOptionParams, SetSessionConfigOptionResult,
-    SubscribeEventsParams, TranscribeAudioParams, TranscribeAudioResult, UpdateChatParams,
-    VacuumDatabaseResult, VersionResult, WorkspaceFileParams, WorkspaceParams,
+    RespondAgentParams, RespondAgentResult, SaveWorkspaceFileParams, SearchWorkspaceContentParams,
+    SetAmarcodeAcpConfigParams, SetDaemonConfigParams, SetSessionConfigOptionParams,
+    SetSessionConfigOptionResult, SubscribeEventsParams, TranscribeAudioParams,
+    TranscribeAudioResult, UpdateChatParams, VacuumDatabaseResult, VersionResult,
+    WorkspaceFileParams, WorkspaceParams, WorkspaceSearchResult,
 };
 use amarcode_protocol::rpc::{
     DaemonUpdateCheck, DaemonUpdateJob, GetDaemonUpdateParams, StartDaemonUpdateParams,
@@ -212,6 +213,13 @@ impl DaemonClient {
         params: RespondAgentParams,
     ) -> Result<RespondAgentResult, String> {
         self.call(methods::RESPOND_INPUT, params).await
+    }
+
+    pub async fn search_workspace_content(
+        &self,
+        params: SearchWorkspaceContentParams,
+    ) -> Result<WorkspaceSearchResult, String> {
+        self.call(methods::SEARCH_WORKSPACE_CONTENT, params).await
     }
 
     pub async fn list_workspace_files(
