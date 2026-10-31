@@ -1122,14 +1122,16 @@ function GeneralPanel({
             <AlertDialogMedia className="bg-destructive/10 text-destructive">
               <TriangleAlert />
             </AlertDialogMedia>
-            <AlertDialogTitle>Remove this computer’s shared daemon?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Remove this computer’s shared daemon?
+            </AlertDialogTitle>
             <AlertDialogDescription>
               This stops the daemon on this computer and interrupts work for
               every connected client, including remote clients. It permanently
-              deletes its conversations, credentials, access token, and downloaded
-              daemon versions. Your desktop preferences, saved remote connections,
-              and workspace project files are preserved. A daemon on another host
-              is not removed, even when you are connected to it.
+              deletes its conversations, credentials, access token, and
+              downloaded daemon versions. Your desktop preferences, saved remote
+              connections, and workspace project files are preserved. A daemon
+              on another host is not removed, even when you are connected to it.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -1151,8 +1153,8 @@ function GeneralPanel({
                 htmlFor="cleanup-confirmation"
                 className="text-xs font-medium"
               >
-                Type <span className="font-mono">DELETE LOCAL DAEMON DATA</span> to
-                continue
+                Type <span className="font-mono">DELETE LOCAL DAEMON DATA</span>{" "}
+                to continue
               </label>
               <Input
                 id="cleanup-confirmation"

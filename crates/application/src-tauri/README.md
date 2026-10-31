@@ -6,19 +6,19 @@ to the daemon.
 
 ## Module boundaries
 
-| Module | Responsibility |
-| --- | --- |
-| `src/lib.rs` | Assemble plugins, startup hooks, managed dependencies, and the command registry. |
-| `src/commands/` | All `#[tauri::command]` adapters, grouped by domain. Preserve frontend arguments, construct shared request types, and delegate. |
-| `src/daemon/client.rs` | Typed daemon API, response-envelope unwrapping, and protocol compatibility checks. Accept shared `amarcode-protocol::rpc` parameter types. |
-| `src/daemon/bridge.rs` | TCP connections, JSON-line encoding/decoding, and the event-subscription socket. This is the only request-serialization boundary. |
-| `src/daemon/manager.rs` | Invokes the bundled daemon CLI for bootstrap/repair/cleanup and observes daemon update jobs. |
-| `src/daemon/ssh.rs` | Owns a shared local OpenSSH forwarding process and verifies the remote daemon before returning its endpoint. |
-| `crates/daemon/src/update/bootstrap.rs` | Daemon-owned installation, startup, repair, and older-daemon update compatibility. |
-| `src/app_update.rs` | Native desktop updates. |
-| `src/commands/clipboard_files.rs` | Clipboard command, private native read/encoding helpers, and clipboard tests. |
-| `src/window.rs`, `src/microphone.rs` | Desktop startup integration. |
-| `src/config.rs` | Runtime configuration. |
+| Module                                  | Responsibility                                                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/lib.rs`                            | Assemble plugins, startup hooks, managed dependencies, and the command registry.                                                           |
+| `src/commands/`                         | All `#[tauri::command]` adapters, grouped by domain. Preserve frontend arguments, construct shared request types, and delegate.            |
+| `src/daemon/client.rs`                  | Typed daemon API, response-envelope unwrapping, and protocol compatibility checks. Accept shared `amarcode-protocol::rpc` parameter types. |
+| `src/daemon/bridge.rs`                  | TCP connections, JSON-line encoding/decoding, and the event-subscription socket. This is the only request-serialization boundary.          |
+| `src/daemon/manager.rs`                 | Invokes the bundled daemon CLI for bootstrap/repair/cleanup and observes daemon update jobs.                                               |
+| `src/daemon/ssh.rs`                     | Owns a shared local OpenSSH forwarding process and verifies the remote daemon before returning its endpoint.                               |
+| `crates/daemon/src/update/bootstrap.rs` | Daemon-owned installation, startup, repair, and older-daemon update compatibility.                                                         |
+| `src/app_update.rs`                     | Native desktop updates.                                                                                                                    |
+| `src/commands/clipboard_files.rs`       | Clipboard command, private native read/encoding helpers, and clipboard tests.                                                              |
+| `src/window.rs`, `src/microphone.rs`    | Desktop startup integration.                                                                                                               |
+| `src/config.rs`                         | Runtime configuration.                                                                                                                     |
 
 `commands/` contains `application`, `daemon`, `agents`, `chats`, `sessions`,
 `workspace`, `clipboard_files`, and `events`. New commands belong in the corresponding domain,

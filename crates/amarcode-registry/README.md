@@ -116,15 +116,15 @@ For local development, register the debug binary once and let the operating
 system own it:
 
 ```sh
-bun run daemon:install-dev
-bun run daemon:restart
+bun run daemon:cli install
+bun run daemon:cli restart
 bun run tauri:dev
 ```
 
 Debug desktop builds automatically find `target/debug/amarcode-daemon` for
 lifecycle commands. Set `AMARCODE_DAEMON_SERVICE_EXECUTABLE` when using a
-binary elsewhere. Use `bun run daemon:status`, `daemon:stop`, or
-`daemon:uninstall` to manage the development service explicitly.
+binary elsewhere. Use `bun run daemon:cli status --json`, `daemon:cli stop`, or
+`daemon:cli uninstall` to manage the development service explicitly.
 
 For CI publishing, store the private PEM as an encrypted secret, write it to a
 temporary file with restricted permissions, set `AMARCODE_DAEMON_SIGNING_KEY`

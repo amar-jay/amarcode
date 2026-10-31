@@ -122,14 +122,14 @@ commands when work should outlive the connector.
 On Linux the shared instance root is
 `${XDG_DATA_HOME:-$HOME/.local/share}/com.amarcode.desktop/`:
 
-| Path | Purpose |
-| --- | --- |
-| `data/` | Chats, attachments, agent installations, credentials, and logs |
-| `daemon/` | Verified releases, current release record, update journal, and stable command |
-| `access-token` | Private remote bearer credential |
-| `remote.json` | Optional access settings and runtime/connector locations |
-| `runtimes/` | Managed Bun and uv tools |
-| `cloudflared/` | Optional connector |
+| Path           | Purpose                                                                       |
+| -------------- | ----------------------------------------------------------------------------- |
+| `data/`        | Chats, attachments, agent installations, credentials, and logs                |
+| `daemon/`      | Verified releases, current release record, update journal, and stable command |
+| `access-token` | Private remote bearer credential                                              |
+| `remote.json`  | Optional access settings and runtime/connector locations                      |
+| `runtimes/`    | Managed Bun and uv tools                                                      |
+| `cloudflared/` | Optional connector                                                            |
 
 Project directories stay wherever you created them on the host. The application
 on your laptop can have its own local daemon and database; it is a different host.

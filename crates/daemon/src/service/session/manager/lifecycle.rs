@@ -191,16 +191,13 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Clear the open turn on the live chat (if it matches) and notify clients.
+    /// Complete the open turn on the live chat (if it matches) and notify clients.
     pub(super) fn finish_turn(
         &self,
         chat_id: &str,
         run_id: &str,
         user_message_id: &str,
-        status: TurnStatus,
         stop_reason: Option<String>,
-        error_message: Option<&str>,
-        error_kind: Option<crate::protocol::AgentFailureKind>,
     ) {
         if let Ok(mut guard) = self.inner.state.lock() {
             if let Some(live) = guard.get_mut(chat_id) {
@@ -215,10 +212,10 @@ impl SessionManager {
             chat_id: chat_id.to_owned(),
             run_id: run_id.to_owned(),
             user_message_id: user_message_id.to_owned(),
-            status,
+            status: TurnStatus::Completed,
             stop_reason,
-            error_message: error_message.map(str::to_owned),
-            error_kind,
+            error_message: None,
+            error_kind: None,
         });
     }
 

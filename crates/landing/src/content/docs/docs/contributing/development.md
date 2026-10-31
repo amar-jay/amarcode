@@ -24,12 +24,12 @@ git submodule update --init --recursive
 For development with a registered debug daemon:
 
 ```bash
-bun run daemon:install-dev
-bun run daemon:restart
+bun run daemon:cli install
+bun run daemon:cli restart
 bun run app:dev
 ```
 
-These commands register and start a real user service. Closing the app leaves it running. Stop it with `bun run daemon:stop` and remove its registration with `bun run daemon:uninstall` when appropriate.
+These commands register and start a real user service. Closing the app leaves it running. Stop it with `bun run daemon:cli stop` and remove its registration with `bun run daemon:cli uninstall` when appropriate.
 
 The desktop development hook prepares the bundled debug daemon before launching the renderer. `bun run dev` starts the renderer alone; native features require the Tauri shell.
 
@@ -48,8 +48,7 @@ bun run landing:dev
 ```
 
 The same Astro server serves the landing at `http://localhost:4321/` and the
-handbook at `http://localhost:4321/docs/`. The `docs:dev` command is an alias for
-this server; you only need one process.
+handbook at `http://localhost:4321/docs/`; you only need one process.
 
 Build the complete public site with:
 
@@ -63,13 +62,13 @@ The existing Vercel project uses this output directly.
 
 ## Repository map
 
-| Directory | Responsibility |
-| --- | --- |
-| `crates/application` | React desktop interface and Tauri shell |
-| `crates/daemon` | RPC, sessions, workspace operations, SQLite, updates |
-| `crates/protocol` | Shared Rust wire contract and TypeScript generation |
-| `crates/amarcode-acp` | Built-in provider adapter and tools |
-| `crates/amarcode-registry` | Release Worker, installer, publishing tools |
-| `crates/landing` | Astro landing page, React islands, and Starlight handbook |
+| Directory                  | Responsibility                                            |
+| -------------------------- | --------------------------------------------------------- |
+| `crates/application`       | React desktop interface and Tauri shell                   |
+| `crates/daemon`            | RPC, sessions, workspace operations, SQLite, updates      |
+| `crates/protocol`          | Shared Rust wire contract and TypeScript generation       |
+| `crates/amarcode-acp`      | Built-in provider adapter and tools                       |
+| `crates/amarcode-registry` | Release Worker, installer, publishing tools               |
+| `crates/landing`           | Astro landing page, React islands, and Starlight handbook |
 
 Continue with [protocol and testing](/docs/contributing/protocol/).

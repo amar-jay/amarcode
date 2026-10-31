@@ -231,12 +231,9 @@ fn looks_like_unavailable(lower: &str) -> bool {
 }
 
 fn humanize_auth(message: &str) -> String {
-    if message.to_ascii_lowercase().contains("sign in")
-        || message.to_ascii_lowercase().contains("auth")
-    {
-        if message.chars().count() < 180 {
-            return message.to_owned();
-        }
+    let lower = message.to_ascii_lowercase();
+    if (lower.contains("sign in") || lower.contains("auth")) && message.chars().count() < 180 {
+        return message.to_owned();
     }
     "Sign in required before this agent can run".into()
 }

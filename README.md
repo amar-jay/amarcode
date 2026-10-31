@@ -40,12 +40,11 @@ without pretending that opaque native state can be reproduced exactly.
 
 ### Guarantees and limitations
 
-- Hydration currently includes non-empty user and assistant text. Structured tool calls, tool results, thinking, and prior attachments are retained for Amarcode's UI where applicable but are not replayed into the new agent session as historical turns.
+- Hydration includes user and assistant text, plus bounded digests of assistant thinking and tool activity. Structured tool calls, tool results, and prior attachments are not replayed as native historical turns.
 
-- Injected history is limited to the context window of the model. Amarcode compresses the oldest turns until the transcript fits.
+- The daemon forwards the full eligible transcript without a fixed byte cutoff. Context limits and compaction belong to the destination agent. The built-in adapter uses a configured context window, provider model metadata, or a 128,000-token fallback and can summarize older provider exchanges. Restored history arrives as prompt text, not native historical turns; if it exceeds the adapter's pinned-input budget, the adapter returns an error instead of silently dropping it. Other ACP agents apply their own limits and may reject oversized prompts.
 
 - A live prompt can be cancelled, but individual historical messages cannot be mutated or deleted through ACP.
-
 
 > [!IMPORTANT]
 > Semantic continuation is not native state restoration. Hidden reasoning,

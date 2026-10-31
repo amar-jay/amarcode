@@ -46,12 +46,12 @@ running or use `amarcode-daemon bootstrap install` for a persistent user service
 On Linux, the instance root is
 `${XDG_DATA_HOME:-$HOME/.local/share}/com.amarcode.desktop/`:
 
-| Location | Purpose |
-| --- | --- |
-| `data/` | Conversations, attachments, agents, credentials, and logs |
-| `daemon/` | One managed binary/release store for local and remote use |
-| `access-token` | Private bearer token; reused when enabling access again |
-| `remote.json` | Persistent access settings and managed runtime locations |
+| Location       | Purpose                                                   |
+| -------------- | --------------------------------------------------------- |
+| `data/`        | Conversations, attachments, agents, credentials, and logs |
+| `daemon/`      | One managed binary/release store for local and remote use |
+| `access-token` | Private bearer token; reused when enabling access again   |
+| `remote.json`  | Persistent access settings and managed runtime locations  |
 
 Read the token privately from `access-token` and enter it in the desktop's
 **Daemon access token** field. `access enable` prints the token-file path, not

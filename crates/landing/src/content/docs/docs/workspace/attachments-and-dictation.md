@@ -9,10 +9,10 @@ Paste supported content into the composer and review its attachment preview befo
 
 ![An image attached in a conversation, shown above the agent’s reply.](/images/workspace/attachment.webp)
 
-| Content | Limit |
-| --- | --- |
-| PNG, JPEG, WebP, or GIF image | 10 MB per image |
-| UTF-8 plain text | 1 MB per attachment |
+| Content                       | Limit               |
+| ----------------------------- | ------------------- |
+| PNG, JPEG, WebP, or GIF image | 10 MB per image     |
+| UTF-8 plain text              | 1 MB per attachment |
 
 The daemon checks an image's content against its declared media type. Image prompts also require the agent to advertise image support. An agent without that capability rejects the image prompt.
 

@@ -93,7 +93,7 @@ h1 {
 }
 
 .sl-markdown-content {
-	font-size: 0.875rem;
+  font-size: 0.875rem;
 }
 .amarcode-brand,
 .amarcode-wordmark {
@@ -224,8 +224,8 @@ h1 {
   color: var(--sl-color-gray-3);
 }
 .content-panel {
-	/* padding:0; */
-	width: 100%;
+  /* padding:0; */
+  width: 100%;
 }
 
 .docs-overview-banner {
@@ -258,7 +258,7 @@ h1 {
 }
 
 [data-theme="dark"] .docs-overview-banner::before {
-	background: rgb(24 24 24.6 / 80%);
+  background: rgb(24 24 24.6 / 80%);
 }
 
 .docs-overview-banner h1 {

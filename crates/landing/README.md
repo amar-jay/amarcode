@@ -17,9 +17,9 @@ bun run landing:build
 bun run landing:preview
 ```
 
-Open `http://localhost:4321/` or `http://localhost:4321/docs/`. The existing
-`docs:dev`, `docs:check`, `docs:build`, and `docs:preview` commands are aliases for
-the same website workspace. No second server or proxy is needed.
+Open `http://localhost:4321/` or `http://localhost:4321/docs/`. The `landing:*`
+commands serve and build both the landing page and documentation in the same
+website workspace. No second server or proxy is needed.
 
 `landing:build` checks the site and produces `crates/landing/dist/` directly.
 Keep the Vercel project rooted at `crates/landing`, with `bun run build` and
@@ -34,20 +34,20 @@ SITE_URL=https://your-domain.example bun run landing:build
 
 ## Source map
 
-| Path | Purpose |
-| --- | --- |
-| `src/pages/index.astro` | Landing composition and React hydration boundaries |
-| `src/layouts/Landing.astro` | Landing HTML, metadata, and page-scoped CSS imports |
-| `src/components/` | Landing sections and interactive React components |
-| `src/content/docs/docs/` | Handbook Markdown and MDX, routed under `/docs/` |
-| `src/content/docs/404.md` | Site-wide Starlight error page |
-| `src/content.config.ts` | Starlight content collection schema |
-| `src/components/docs/` | Documentation brand and metadata overrides |
-| `src/index.css` | Landing Tailwind styles and tokens |
-| `src/styles/docs.css` | Custom Starlight theme |
-| `astro.config.mjs` | Astro, React, Tailwind, Starlight, and explicit sidebar |
-| `site.config.mjs` | Shared site origin and social image metadata |
-| `public/` | Shared fonts, icons, screenshots, and social preview |
+| Path                        | Purpose                                                 |
+| --------------------------- | ------------------------------------------------------- |
+| `src/pages/index.astro`     | Landing composition and React hydration boundaries      |
+| `src/layouts/Landing.astro` | Landing HTML, metadata, and page-scoped CSS imports     |
+| `src/components/`           | Landing sections and interactive React components       |
+| `src/content/docs/docs/`    | Handbook Markdown and MDX, routed under `/docs/`        |
+| `src/content/docs/404.md`   | Site-wide Starlight error page                          |
+| `src/content.config.ts`     | Starlight content collection schema                     |
+| `src/components/docs/`      | Documentation brand and metadata overrides              |
+| `src/index.css`             | Landing Tailwind styles and tokens                      |
+| `src/styles/docs.css`       | Custom Starlight theme                                  |
+| `astro.config.mjs`          | Astro, React, Tailwind, Starlight, and explicit sidebar |
+| `site.config.mjs`           | Shared site origin and social image metadata            |
+| `public/`                   | Shared fonts, icons, screenshots, and social preview    |
 
 The landing's Tailwind stylesheet is imported only by its layout. Starlight
 loads its own stylesheet and theme so the two page layouts do not reset each

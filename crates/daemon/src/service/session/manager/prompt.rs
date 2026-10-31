@@ -393,15 +393,7 @@ impl SessionManager {
         }
 
         let stop_reason = extract_stop_reason(&prompt_result);
-        self.finish_turn(
-            chat_id,
-            &run_id,
-            &user_message.id,
-            TurnStatus::Completed,
-            stop_reason,
-            None,
-            None,
-        );
+        self.finish_turn(chat_id, &run_id, &user_message.id, stop_reason);
 
         Ok(PromptResult {
             run_id,
@@ -538,8 +530,6 @@ impl SessionManager {
         prompt: &str,
         hydration: &HistoryHydration,
     ) -> Result<String> {
-        const MAX_HISTORY_CHARS: usize = 60_000;
-
         let messages = self
             .inner
             .store
@@ -590,14 +580,12 @@ impl SessionManager {
             turns.push(record);
         }
 
-        let mut history = turns.join("\n\n");
-        if history.len() > MAX_HISTORY_CHARS {
-            while history.len() > MAX_HISTORY_CHARS && !turns.is_empty() {
-                turns.remove(0);
-                history = turns.join("\n\n");
-            }
-            history = format!("[Earlier conversation omitted for context length.]\n\n{history}");
-        }
+        // The destination agent owns its model's token budget and compaction.
+        // A fixed byte cap here can discard context that fits that model, or
+        // erase the entire history when its newest record exceeds the cap.
+        // Preserve the transcript and let the agent compact or reject it
+        // explicitly; never silently continue with missing historical turns.
+        let history = turns.join("\n\n");
 
         if history.is_empty() {
             return Ok(prompt.to_owned());

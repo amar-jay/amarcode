@@ -1,786 +1,98 @@
 # amarcode-daemon
 
-Background service for Amarcode. Owns durable workspace state, talks to ACP
-coding agents as subprocesses, and exposes a local TCP JSON-line API for the
-editor / CLI.
+Background service for Amarcode. It stores workspace and chat state in SQLite,
+runs ACP coding agents, and exposes RPC and live events to the desktop and CLI.
+The daemon runs independently of desktop windows.
 
-TCP clients send one RPC JSON object per line. A malformed request receives an
-error and closes the connection; later lines are never dispatched. HTTP requests
-are unsupported, including HTTP bodies containing otherwise valid RPC JSON.
-Valid RPC requests that fail during dispatch return an error without closing the
-connection.
+## Local development
 
-## ACP registry checkout
+Run these commands from the repository root:
 
-The upstream ACP registry is pinned for local development as the
-`vendor/acp-registry` Git submodule. Initialize it after cloning Amarcode with:
+```bash
+bun run daemon:cli install
+bun run daemon:cli restart
+bun run daemon:cli status --json
+bun run app:dev
+```
 
-```sh
+Installation registers the debug executable as a per-user service. Closing the
+app leaves that service running. Manage it with:
+
+```bash
+bun run daemon:cli start
+bun run daemon:cli stop
+bun run daemon:cli uninstall
+```
+
+Uninstall preserves user data. `bun run daemon:cli purge --confirm-data-loss`
+also deletes the platform-default daemon data directory, including chats and
+logs. It refuses custom `AMARCODE_APPDIR` paths.
+
+For daemon-only debugging, run in the foreground:
+
+```bash
+bun run daemon
+```
+
+The desktop expects a registered service. Stop the service before running a
+foreground daemon against the same data directory.
+
+## Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `AMARCODE_APPDIR` | Data directory; defaults to the platform's Amarcode local app-data directory's `data` child. |
+| `AMARCODE_DAEMON_ADDR` | Listener address; defaults to `127.0.0.1:43821` for TCP or `127.0.0.1:43721` for WebSockets. |
+| `AMARCODE_STORE_PATH` | SQLite path; defaults to `{app_dir}/workspace.sqlite3`. |
+| `AMARCODE_LOG` | Logging filter; falls back to `RUST_LOG`, then `amarcode_daemon=info`. |
+| `AMARCODE_ACP_REGISTRY_SOURCE` | Agent registry Git URL or local repository; an empty value disables startup synchronization. |
+| `AMARCODE_ACP_RELEASE_URL` | Built-in Amarcode ACP release manifest URL override; releases still require a valid signature. |
+
+Logs are written to stderr and `{app_dir}/daemon.log`. Environment changes for
+an installed service must be applied to its service environment before restart.
+
+## Agents
+
+The daemon refreshes its agent catalog from the ACP registry at startup and
+keeps a cached checkout under `{app_dir}/acp-registry` for offline use.
+The built-in `amarcode-acp` preset is installed separately from signed releases;
+configure its provider and credentials in the desktop's Agent defaults settings.
+
+To initialize the pinned registry checkout for repository development:
+
+```bash
 git submodule update --init --recursive
 ```
 
-At daemon startup, Amarcode also maintains a shallow runtime checkout at
-`{app_dir}/acp-registry`. The first startup clones
-`https://github.com/amar-jay/acp-registry.git`; later startups fast-forward the
-checkout to `origin/main`. Synchronization is best-effort: if the source is
-temporarily unavailable, startup continues and keeps the last successful
-checkout.
-
-After synchronization, the daemon rebuilds its agent catalog from the
-registry's `agent.json` manifests. Package distributions are translated to
-`bunx <package>` or `uvx <package>` launch commands. Platform binary
-entries retain their registry-declared command path. Host availability is
-resolved against managed tools and PATH, then persisted on each agent row.
-
-Set `AMARCODE_ACP_REGISTRY_SOURCE` to another Git URL or a local repository for
-development. Set it to an empty value to disable startup synchronization.
-
-## Built-in Amarcode ACP preset
-
-`amarcode-acp` is a daemon-owned preset and does not come from the external ACP
-registry checkout. It is always present in the catalog. Installing it fetches
-the signed manifest from
-`https://updates.amarcode.amarjay.com/v1/acp/latest.json`, verifies its Ed25519
-signature, then verifies the selected binary's byte size and SHA-256 before
-placing it under `{app_dir}/agents/amarcode-acp/<version>/`.
-
-The desktop's Agent defaults settings save the OpenAI-compatible base URL,
-model, and API key through daemon RPC. The daemon writes the complete provider
-configuration to `{app_dir}/credentials/amarcode-acp.json` and returns only
-`has_api_key` to clients; the secret is never stored in the agent row or
-returned by `list_agents`. Set
-`AMARCODE_ACP_RELEASE_URL` to use another manifest endpoint in development. The
-manifest must still be signed by the release key compiled into the daemon.
-
-> [!NOTE]
-> **Scope note for contributors:** the client wire contract lives in the
-> workspace's `amarcode-protocol` crate and is shared with the desktop shell.
-> Do not re-declare those wire types in either consumer.
-
----
-
-## What this process is for
-
-<div align="center">
-<img src="./assets/daemon-diagram.png" width="75%" />
-</div>
-<!-- ```
-┌──────────────┐   TCP JSON lines    ┌─────────────────────────────┐
-│ Editor / CLI │ ◄─────────────────► │       amarcode-daemon       │
-└──────────────┘   (subscribe for    │                             │
-                    live events)     │  rpc  →  service  →  store  │
-                                     │                 ↘           │
-                                     │                   acp (stdio│
-                                     │                   JSON-RPC) │
-                                     └───────────┬─────────────────┘
-                                                 │ spawn / pipes
-                                                 ▼
-                                        ┌─────────────────┐
-                                        │  ACP agent bin  │
-                                        │ (claude, copilot│
-                                        │  codex, grok, …)│
-                                        └─────────────────┘
-``` -->
-
-The daemon is the **system of record** for chats, messages, runs, and agents.
-The UI is a client: it does not own the agent process or the SQLite file.
-
-## Daemon-owned updates
-
-Update RPC is available in protocol 13:
-
-- `check_daemon_update` returns a signed-release check result.
-- `start_daemon_update { "version": "..." }` starts the exact approved release
-  and returns a durable job ID. Duplicate requests reuse a pending job.
-- `get_daemon_update { "job_id": "..." }` returns its status. Omitting `job_id`
-  returns the latest job, including after a client reconnects.
-
-`update/` owns staging, activation, health checks, rollback and recovery.
-The desktop bundles this executable as `amarcode-bootstrap` and invokes its
-short-lived CLI for first installation and repair:
-
-```sh
-amarcode-bootstrap bootstrap ensure
-amarcode-bootstrap bootstrap install
-amarcode-bootstrap bootstrap check-update
-amarcode-bootstrap bootstrap start-update --version <approved-version>
-amarcode-bootstrap bootstrap update-status --job-id <id>
-```
-
-`ensure` never performs first installation. `install` copies the packaged binary
-to immutable storage below the user's daemon release directory and registers that
-copy as the service. It needs no network or separately published daemon release.
-Repair preserves a valid installed release newer than the bundle; otherwise
-it installs the bundle. Activation uses exact version/protocol health checks and
-a durable bootstrap transaction, retaining a verified previous executable for
-rollback. The desktop consumes JSON-line progress/result events and never links
-the daemon library or imports `update::releases`.
-
-Bundled installations have a distinct `bundled` current-release record containing
-version, protocol, target, size and SHA-256. Trust originates in the desktop
-package; the daemon does not fabricate a release signature. Downloaded releases
-always require the pinned Ed25519 manifest signature. Update rollback supports
-both signed downloaded releases and the verified original bundled executable.
-The single atomic `current-release.json` is the commit point for either origin.
-Older signed manifests remain readable. The compatibility CLI starts durable
-supervisor jobs even when an older running daemon lacks update RPC.
-
-The updater runs as `amarcode-daemon update-supervisor --release-root ...` in
-an **independent** native service/task, not as a child owned by the RPC daemon:
-
-- Linux: `amarcode-daemon-update.service` in the systemd user manager.
-- Windows: `Amarcode Daemon Update` in Task Scheduler.
-
-It is registered for login recovery and restarts on failure. Closing the
-desktop or stopping the daemon's own service does not stop this supervisor.
-The supervisor never constructs `App`, opens SQLite, or acquires the daemon's
-database instance lock. Uninstall/purge removes the updater service/task too.
-
-Jobs and public status snapshots live under the existing release cache's
-`updates/<job-id>/` directory, with separate request and supervisor OS locks.
-Activation starts only after both the candidate and rollback binaries are
-verified. The service must report the exact new daemon version and protocol
-before committing the signed `current-release.json` record. That single atomic,
-fsynced record replaces the former manifest/signature pair as the commit point;
-the legacy pair is mirrored for older desktop clients and remains readable for
-migration. An interrupted, uncommitted
-activation rolls back; a committed healthy release is retained. Failed rollback
-is retried across supervisor restarts, with three failed recovery attempts
-ending in an explicit repair-required status.
-
-The bundled CLI reads the supervisor's status snapshot during the RPC restart
-gap for the desktop. It never writes that journal or drives normal-job recovery. Bootstrap
-waits for pending updates before starting/re-registering a service, and repair
-shares the request lock so it cannot race a new daemon update.
-
-Self-updating currently supports the standard managed desktop TCP service on
-the published Linux/Windows targets. Custom address, transport, data/store, or
-registry-source overrides, development binaries and unpublished targets return `unavailable`;
-this avoids silently discarding custom service configuration during activation.
-Progress currently reports staging milestones rather than individual download
-chunks. No service update is performed without an explicit start request.
-
-Workspace operations also belong to the daemon. `service/workspace.rs` owns
-file discovery, workspace/Git metadata, status, staging, commits, and diffs;
-`service/workspace/editor.rs` owns text reads and conflict-checked saves.
-The desktop's workspace commands only forward RPC through `DaemonClient`.
-The native folder picker remains a desktop concern.
-
-The following methods are available over both TCP and WebSocket, without a
-desktop process. Every path is interpreted on the **daemon host**. Request
-types live in `amarcode-protocol::rpc`, and workspace result types are generated
-into the frontend contract alongside the other shared types.
-
-| Methods | Parameters |
-| --- | --- |
-| `list_workspace_files` | `workspace_path`, optional `query` |
-| `get_workspace_info`, `list_workspace_changes`, `stage_all_workspace_files` | `workspace_path` |
-| `read_workspace_file`, `stage_workspace_file`, `unstage_workspace_file` | `workspace_path`, `relative_path` |
-| `get_workspace_file_diff` | `workspace_path`, `relative_path`, optional `staged` |
-| `save_workspace_file` | `workspace_path`, `relative_path`, `expected_content`, `content` |
-| `commit_workspace_changes` | `workspace_path`, `message` |
-
-Workspace RPC runs filesystem and Git work on Tokio's blocking pool. File
-operations enforce workspace containment, including symlinks. Text editing
-retains the 1 MB/UTF-8 limit and rejects stale `expected_content`; saves from
-all clients share the daemon's save lock. Staging accepts deleted paths and
-treats individual filenames as literal Git pathspecs. `staged: true` compares
-HEAD to the index; `false` compares the index to the working tree. Omitting it
-prefers the unstaged comparison when a file has both kinds of changes.
-
-These methods require protocol version 13. The desktop and daemon must be
-upgraded together; the desktop rejects older protocol versions at bootstrap.
-
----
-
-## Session recovery (protocol 13)
-
-`get_chat` with `include_messages: true` includes `session_state`: the daemon
-instance ID, per-chat revision, current run, latest turn, and unresolved approval
-and input requests in creation order. Public request IDs are preserved across
-client reconnects; ACP transport IDs are never exposed. `sessionStateUpdated`
-events carry the same snapshot after each runtime transition, including when
-another client answers a request. Only one client can claim a request.
-
-Clients subscribe and await acknowledgement before loading a snapshot. Within
-one daemon instance, newer revisions supersede older snapshots and legacy
-turn/approval events. Clients discard responses from previous connections or
-navigation states. A lagging event subscription closes so clients reconnect and
-resynchronize rather than silently losing approvals or terminal transitions.
-
-Runtime snapshots are not persisted. Restarting the daemon changes the instance
-ID, clears active turns and pending requests, and retains durable messages and
-normal run crash recovery. Reconnecting or opening a chat never starts an agent
-or sends a prompt. Desktop and daemon must both use protocol 13.
-
-## Architecture (layers)
-
-Strict layering. Dependencies point **down** only.
-
-| Layer               | Path                    | Responsibility                                                                               |
-| ------------------- | ----------------------- | -------------------------------------------------------------------------------------------- |
-| **Entrypoint**      | `main.rs`               | Parse lifecycle commands; `run` loads config, logging, and `App`                             |
-| **Service control** | `service_control.rs`    | Install/start/stop/status through the native per-user service manager                        |
-| **App**             | `app.rs`                | Owns `Config`, `Store`, event bus; binds TCP and serves                                      |
-| **Client RPC**      | `rpc/`                  | TCP accept, one JSON object per line, method dispatch, event subscriptions                   |
-| **Protocol**        | `../protocol/`          | Versioned client wire types and shared domain enums; generates the React TypeScript contract |
-| **ACP protocol**    | `protocol/acp_types.rs` | Daemon-private vocabulary for the agent subprocess protocol                                  |
-| **Service**         | `service/`              | Agent installation, chat lifecycle, ACP sessions, prompts, permissions, terminals, workspace operations, transcription, and persisted event fan-out |
-| **Store**           | `store/`                | SQLite persistence (WAL, FKs, migrations)                                                    |
-| **ACP**             | `acp/`                  | Spawn agent, stdio JSON-RPC, correlate requests, inbound notifications                       |
-
-### Intended call path
-
-```
-TCP line
-  → rpc::connection        parse RpcRequest
-  → rpc::handler           match method
-  → service::*Manager      orchestrate (only join point)
-       ├─► acp             talk to agent (no SQL)
-       ├─► store           durable write (no ACP, no TCP)
-       └─► events bus      live push (after store succeeds)
-  → rpc::connection        write result / error / event lines
-```
-
-**Rules of thumb**
-
-- `rpc` does not open SQL or spawn agents.
-- `store` does not know about TCP or ACP method names as control flow.
-- `acp` does not know about chats or UI events.
-- `service` is the only place that may join store + ACP + event bus.
-- `amarcode-protocol` is the shared client vocabulary; keep it boring and
-  increment `PROTOCOL_VERSION` for incompatible wire changes.
-
-### Store-first write path (critical)
-
-`store` and `acp` are **segmented on purpose** — neither imports the other.
-That does **not** mean writes are unordered. Orchestration lives in
-`service` (especially `session`), and the durability rule is:
-
-> **After ACP produces a meaningful result (or inbound notification),
-> persist to the store first, then notify the client.**
-
-Never emit an `EditorEvent` or return an RPC `result` that claims durable
-state the SQLite file does not yet contain. Reload / reconnect must match
-what the UI already saw.
-
-#### 1. Client-initiated turn (e.g. prompt)
-
-```
-RPC prompt(chat_id, text, agent_id)
-  │
-  ▼ service::session
-  │
-  ├─ 1. STORE first (intent)
-  │     create/update run → starting|running
-  │     insert user message
-  │     (optional) EditorEvent after those rows commit
-  │
-  ├─ 2. ACP
-  │     spawn/reuse AcpClient, agent.prompt / createSession, …
-  │
-  ├─ 3. STORE again (outcome of this RPC step)
-  │     acp_session_id, run status, raw acp_events row for the request
-  │
-  └─ 4. RPC result  { run_id, … }
-        only after step 3 succeeds for what the result claims
-```
-
-Streaming work continues **after** the RPC returns: the prompt call is not
-the whole turn. Further agent output is handled on the inbound loop below.
-
-#### 2. Agent-initiated stream (ACP inbound → UI)
-
-Reader thread / event loop receives `AcpInbound` → `session`:
-
-```
-AcpInbound::Notification | Request
-  │
-  ├─ 1. STORE
-  │     append acp_events (raw envelope)
-  │     upsert messages / message_parts / run status as needed
-  │
-  ├─ 2. EVENTS  (only if store write succeeded)
-  │     EditorEvent::MessageUpdated | RunUpdated | ApprovalRequired | …
-  │
-  └─ 3. if AcpInbound::Request (permission/input)
-        wait for client RPC answer → STORE decision → ACP respond
-```
-
-Order for each unit of progress:
-
-```
-ACP signal  →  store commit  →  EditorEvent fan-out  →  (RPC reply if any)
-```
-
-If the store write fails: **do not** publish the event; log and surface an
-error. Prefer a slightly delayed UI over a UI that shows content SQLite never
-had.
-
-#### 3. Why this shape
-
-| Concern           | Choice                                                   |
-| ----------------- | -------------------------------------------------------- |
-| Isolation         | `store` ↔ `acp` stay decoupled modules                   |
-| Join point        | only `service`                                           |
-| System of record  | SQLite wins over in-memory / UI                          |
-| Subscribe sockets | events are a _projection_ of stored state                |
-| Crash mid-turn    | restart can rebuild from store + `stop_interrupted_runs` |
-
-#### 4. What is _not_ store-first
-
-- Pure reads (`list_chats`, `health`) — store or memory only, no ACP.
-- Transport ack for `subscribe_events` — not durable product state.
-- In-memory correlation ids inside `AcpClient` — not product state.
-
----
-
-## Runtime lifecycle
-
-1. **Config** (`config` + `app_dir`)
-   - `AMARCODE_APPDIR` / platform default (Tauri local app-data directory's `data` child)
-   - `AMARCODE_DAEMON_ADDR` (default `127.0.0.1:43821`)
-   - `AMARCODE_STORE_PATH` (default `{app_dir}/workspace.sqlite3`)
-   - Logging filter: `AMARCODE_LOG` → `RUST_LOG` → `amarcode_daemon=info`
-
-2. **Logging** — stderr + `{app_dir}/daemon.log`
-
-3. **`App::new`**
-   - Open SQLite, apply migrations
-   - Sync registry agents and refresh persisted availability
-   - Mark any leftover `starting`/`running` runs as `stopped`
-   - Create `EditorEvent` broadcast bus
-
-4. **`App::run`** — bind TCP, accept clients until Ctrl-C / SIGTERM
-
----
-
-## Client protocol (TCP JSON-line)
-
-One JSON object per line. No HTTP, no length prefixes.
-
-| Direction                    | Shape                                                        |
-| ---------------------------- | ------------------------------------------------------------ |
-| Request                      | `{ "method": "...", "params": { ... } }` (`params` optional) |
-| Success                      | `{ "result": ... }`                                          |
-| Failure                      | `{ "error": "..." }`                                         |
-| Live event (after subscribe) | `{ "event": { "type": "...", "payload": { ... } } }`         |
-
-### Methods
-
-| Method               | Manager  | Behavior                                                                                 |
-| -------------------- | -------- | ---------------------------------------------------------------------------------------- |
-| `health`             | —        | status, daemon version, protocol version, bind addr                                      |
-| `version`            | —        | daemon version and protocol version                                                      |
-| `subscribe_events`   | —        | ack, then stream `EditorEvent` lines (`chat_id` / `run_id` / `session_id` filters)       |
-| `list_agents`        | agents   | registry agent definitions + host availability                                           |
-| `install_agent`      | agents   | install from registry distribution (`npx`/`uvx`/`binary`), probe runtime, mark available |
-| `authenticate_agent` | sessions | ACP `authenticate` for auth-required agents (live session or short-lived probe)          |
-| `create_chat`        | chats    | `{ workspace_path, title? }` → chat row + `ChatUpdated`                                  |
-| `list_chats`         | chats    | optional `workspace_path` filter                                                         |
-| `get_chat`           | chats    | `{ chat_id, include_messages? }` (messages+parts by default)                             |
-| `discover_commands`  | sessions | `{ chat_id, agent_id }` → start/reuse a session without prompting; return its current command catalog |
-| `prompt`             | sessions | `{ chat_id, agent_id, text }` → store user msg, ACP turn, return run ids                 |
-| `cancel`             | sessions | `{ chat_id }` stop live run                                                              |
-| `respond_permission` | sessions | answer `ApprovalRequired` (`request_id` + `result` or `error`)                           |
-| `respond_input`      | sessions | answer `QuestionRequired` (same params shape)                                            |
-
-### Live events (`EditorEvent`)
-
-Stable **editor-facing** events (camelCase `type` + `payload`), produced by
-`session` once wired:
-
-- `chatUpdated`, `runUpdated`, `turnUpdated`, `messageUpdated`, `messagePartAdded`
-- `approvalRequired`, `questionRequired`
-- `workspaceFilesChanged`, `agentConnectionChanged`
-- `sessionCommandsUpdated` — full replacement catalog for a live chat/run, including empty lists
-
-Slash commands follow [ACP command advertisements](https://agentclientprotocol.com/protocol/v1/slash-commands).
-Every `available_commands_update` replaces the session's catalog, descriptions, and input hints.
-Catalogs stay in memory and are included as `session_commands` in chat detail responses;
-stopped sessions return `null`. Clients should subscribe before discovery, keep processing
-updates throughout the session, and refresh chat detail after reconnecting. Catalog revisions
-are scoped to a run. Execute commands using the existing `prompt` method with text such as
-`/plan implement search`; no separate ACP command-execution method is used.
-
-`turnUpdated` is the client signal for “is this prompt still running?”
-(`started` → `completed` | `cancelled` | `failed`). Prefer it over `runUpdated`
-for composer busy state — a run/session can span many turns.
-
-These are **not** raw ACP notifications. ACP traffic is translated in service.
-
----
-
-## Persistence (`store`)
-
-SQLite file, embedded migrations under `migrations/`.
-
-| Table           | Purpose                                           |
-| --------------- | ------------------------------------------------- |
-| `agents`        | Agent definitions (command, args, env, available) |
-| `chats`         | Conversations scoped by `workspace_path`          |
-| `agent_runs`    | One execution of an agent inside a chat           |
-| `messages`      | Chat messages                                     |
-| `message_parts` | Structured parts (text, tool call, thinking, …)   |
-| `acp_events`    | Selectively retained raw ACP milestones per run   |
-
-`Store` is a `Mutex<Connection>` with table-focused methods in
-`agents` / `chats` / `runs` / `messages` / `events`.
-
----
-
-## ACP layer (`acp`)
-
-Talks to an external agent binary over **stdio**, one JSON-RPC message per line.
-
-```
-service::session
-        │
-        ▼
-   AcpClient::spawn(command, args, env, cwd)
-        │  stdin  ──► agent
-        │  stdout ◄── agent (reader thread)
-        │
-        ├── request(method, params, timeout)  → correlated result
-        ├── notify / respond / respond_error
-        └── Receiver<AcpInbound>
-              Notification | Request | InvalidMessage | Disconnected
-```
-
-Daemon-private ACP method names live in `protocol::acp_types`:
-
-- `AgentRpcMethod` — daemon → agent (`initialize`, `session/new`, `session/prompt`, …)
-- `AgentEventMethod` — agent → daemon (`session/update`, `session/request_permission`, …)
-- `RpcEnvelope` — in-memory direction + method + JSON payload  
-  (persist with `Store::save_acp_envelope` / `AcpEvent::from_envelope`)
-
-Implementation is `acp::client` only (`AcpClient`).
-
----
-
-## Service layer
-
-| Manager         | Role                                                                                    |
-| --------------- | --------------------------------------------------------------------------------------- |
-| `agent_manager` | List/save/create agents, resolve executable (`tools_dir` / PATH)                        |
-| `chat_manager`  | Create/list/archive/title chats, load history + parts; emits `ChatUpdated` after store  |
-| `session`       | Start run, own live `AcpClient`, prompt/cancel, store-first ACP inbound → `EditorEvent` |
-
-Wired on `App` as `agents`, `chats`, `sessions`. Client RPC methods dispatch into these managers (reads → agents/chats; agent turns → sessions).
-
----
-
-The protocol crate's drift test compares the generator output byte-for-byte
-with the checked-in TypeScript file. Run `bun run protocol:generate` after a
-contract change and `bun run protocol:check` in verification/CI.
-
----
-
-## Related concepts (not duplicates)
-
-These names look similar on purpose; each has one job. Do not merge them.
-
-| Concept                                     | Role                                                              |
-| ------------------------------------------- | ----------------------------------------------------------------- |
-| **Client RPC** (`protocol::rpc` + `rpc::*`) | TCP JSON lines to editor/CLI                                      |
-| **ACP JSON-RPC** (`AcpClient`)              | stdio to agent binary                                             |
-| **`EditorEvent`**                           | Live UI projection after store commit                             |
-| **`AgentEventMethod` / `AcpInbound`**       | Raw agent notification/request                                    |
-| **`RpcEnvelope` → `AcpEvent`**              | In-memory frame → SQLite row (`save_acp_envelope`)                |
-| **Domain enums** (`RunStatus`, …)           | Single vocabulary; store binds `as_str()` / `parse()` at SQL edge |
-| **`Error` vs `AcpError`**                   | Library boundary vs ACP transport errors                          |
-
-**Service** adds orchestration (store-first + ACP + events). It must not
-re-declare parallel enums or re-implement SQL that already lives in `store`.
-
----
-
-## Implementation status (snapshot)
-
-| Area                                                     | Status |
-| -------------------------------------------------------- | ------ |
-| Config, logging, app lifecycle                           | Done   |
-| TCP server, connection loop, subscribe                   | Done   |
-| RPC methods (agents/chats/prompt/cancel/respond)         | Done   |
-| Protocol types + `EditorEvent`                           | Done   |
-| Store + migrations + presets                             | Done   |
-| `AcpClient` basic handler                                | Done   |
-| Service managers                                         | Done   |
-| Vertical slice e2e (`vertical_slice` + `mock-acp-agent`) | Done   |
-| Test CLI (`daemon-test-cli`)                             | Done   |
-
----
-
-## Local run
-
-The desktop application only connects to a native per-user service; it never
-owns a daemon child process. For desktop development, register the debug daemon
-once and let the operating system manage it:
+## Remote access
+
+Local desktop connections use loopback TCP with one JSON RPC object per line.
+For remote connections, use authenticated WebSockets through
+[SSH](../landing/src/content/docs/docs/remote/ssh.md) or the
+[remote installer and Cloudflare setup](../landing/src/content/docs/docs/remote/setup.md).
+Those guides cover installation, tokens, and connection settings.
+
+## Checks and debugging
 
 ```bash
-# from workspace root
-bun run daemon:install-dev
-bun run daemon:restart
-bun run daemon:status
-bun run tauri:dev
-```
-
-Closing the desktop leaves the daemon running. Use `bun run daemon:stop` or
-`bun run daemon:uninstall` when you explicitly want to stop or unregister it.
-
-Foreground mode remains available for daemon-only debugging and integration
-work, but the desktop will not treat an unregistered foreground process as its
-managed service:
-
-```bash
-# from workspace root
-cargo run -p amarcode-daemon -- run
-
-# optional
-export AMARCODE_DAEMON_ADDR=127.0.0.1:43821
-export AMARCODE_APPDIR=/custom/path/amarcode-data
-export AMARCODE_LOG=amarcode_daemon=debug
-```
-
-The daemon also owns its per-user service lifecycle:
-
-```bash
-amarcode-daemon install   # register; does not start immediately
-amarcode-daemon start
-amarcode-daemon status --json
-amarcode-daemon restart
-amarcode-daemon stop
-amarcode-daemon uninstall # preserves SQLite and other user data
-amarcode-daemon purge --confirm-data-loss # unregisters service and deletes daemon data
-```
-
-On Windows, Task Scheduler owns the daemon independently of desktop windows.
-The daemon does not allocate a console when the task starts; command-line use
-attaches to an existing console, and `status --json` retains redirected output.
-Agent commands capture output without opening separate terminal windows.
-
-The Windows task persists the installing application's tool PATH beside the
-data directory as `service-path.json`. The daemon also checks common Git, Bun
-(including WinGet packages), Cargo, and uv installation directories. Git is
-required to download the agent catalog. Windows health checks are available before that download finishes;
-the first agent-list request waits for the catalog and reports download errors
-when no cached catalog exists.
-
-Desktop builds include the daemon built from the same source. Fresh installation
-and explicit repair can therefore use new Windows fixes before a standalone
-daemon release is published. Existing services keep their installed version
-until an update or repair is requested. To validate on Windows, run `cargo test -p amarcode-daemon` and
-`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-windows-task-status.ps1`
-from the repository root. Then verify that reopening the desktop leaves the
-running scheduled task and daemon PID intact, and agent output appears in the
-app without a console window.
-
-`purge` is intentionally narrower than `uninstall`. It validates the
-platform-default daemon data directory, refuses relative, redirected, or
-symlinked targets, unregisters and verifies the service first, and only then
-deletes local chats, logs, tool state, and SQLite data. It refuses to delete an
-`AMARCODE_APPDIR` override; remove custom development data manually after
-checking the path. The operation is idempotent, so it can be retried safely.
-
-Running without a subcommand currently aliases `run` for compatibility with
-older development scripts and service definitions.
-
-Smoke:
-
-```bash
-echo '{"method":"health"}' | nc -q 1 127.0.0.1 43821
-echo '{"method":"subscribe_events","params":{}}' | nc 127.0.0.1 43821
-```
-
-### Vertical slice (e2e)
-
-Integration test proves the store-first path with a mock agent:
-
-```text
-create_chat → prompt → mock-acp-agent (stdio ACP)
-  → SQLite (messages, runs, acp_events)
-  → EditorEvent → subscribe_events client
-```
-
-```bash
+cargo check -p amarcode-daemon
+cargo test -p amarcode-daemon
 cargo test -p amarcode-daemon --test vertical_slice
+bun run daemon:test-cli --help
 ```
 
-- `src/bin/mock-acp-agent.rs` — tiny JSON-RPC agent (initialize / createSession / prompt stream)
-- `tests/vertical_slice.rs` — boots daemon, registers mock agent, subscribes, prompts, asserts store + events
-- `src/bin/test-client-cli.rs` (`daemon-test-cli`) — manual TCP client (see below)
+The manual test client supports health checks, agent and chat operations,
+event subscriptions, and a REPL. Run `bun run daemon:test-cli health` against a
+running local daemon.
 
-### Manual client (`daemon-test-cli`)
-
-Clap-based subcommands (`--help` on any command).
+Client wire types live in the shared [protocol crate](../protocol), rather than
+being declared separately by the daemon and desktop. After changing the contract:
 
 ```bash
-# terminal A
-cargo run -p amarcode-daemon -- run
-
-# terminal B — full slice with mock agent
-cargo build -p amarcode-daemon --bin mock-acp-agent --bin daemon-test-cli
-cargo run -p amarcode-daemon --bin daemon-test-cli -- slice \
-  --mock-agent ./target/debug/mock-acp-agent \
-  --workspace /tmp/amarcode-ws \
-  --text "hello mock"
-
-# or individual commands
-daemon-test-cli --help
-daemon-test-cli health
-daemon-test-cli list-agents
-daemon-test-cli create-chat -w /tmp/ws -t Demo
-daemon-test-cli prompt -c <chat_id> -a mock-acp -t hi
-daemon-test-cli subscribe
-daemon-test-cli repl
+bun run protocol:generate
+bun run protocol:check
 ```
 
----
-
-## Design principles (keep)
-
-1. **Daemon owns state and agents**; clients are disposable.
-2. **Thin RPC, fat service, dumb store, isolated ACP.**
-3. **One JSON object per line** on both TCP and agent stdio.
-4. **Editor events are stable**; ACP is allowed to be messier and is logged raw.
-5. **Migrations are append-only**; do not rewrite applied SQL in place for prod DBs.
-6. **No SQL or agent spawn in `rpc`.**
-7. When something looks duplicated, check [Related concepts](#related-concepts-not-duplicates) before adding another type.
-
-## RPC transport selection
-
-Use the single Clap flag `--transport tcp|websocket` to select the listener.
-The single `daemon_addr` setting comes from `AMARCODE_DAEMON_ADDR`. When unset,
-it defaults to `127.0.0.1:43821` for TCP and `127.0.0.1:43721` for WebSockets.
-TCP binds must be loopback addresses (`127.0.0.1` or `::1`); public and wildcard
-TCP binds are rejected. Use authenticated WebSockets for remote access.
-In WebSocket mode, only the WS/WSS listener runs, serving the same RPC methods and event
-subscriptions at `/rpc`. The desktop application currently uses TCP, so keep
-TCP mode for its local daemon. WebSocket addresses, TLS, and origins are
-configured only through environment variables; there are no flags for those
-settings. TCP mode ignores WebSocket-specific environment variables.
-
-Every WebSocket listener requires `AMARCODE_WS_TOKEN_FILE`, including loopback
-listeners used behind tunnels. Startup fails if the file is missing, unreadable,
-invalid, or (on Unix) accessible by group/other users. Clients must send
-`Authorization: Bearer <token>` in the WebSocket handshake before any RPC,
-including health checks or event subscriptions. Browser Origin checks apply in
-addition to token authentication.
-
-The remote installer already generates a private token. For a manual Unix setup,
-create one with cryptographic randomness (this command refuses to overwrite an
-existing file):
-
-```sh
-python3 - <<'PYTOKEN'
-import os, secrets
-with os.fdopen(os.open("access-token", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as file:
-    file.write(secrets.token_hex(32) + "\n")
-PYTOKEN
-```
-
-Set `AMARCODE_WS_TOKEN_FILE` to its absolute path and enter the token in the
-desktop's remote connection settings. Tokens must contain 32–512 URL-safe ASCII
-characters (`A–Z`, `a–z`, digits, `-._~`). On Windows, create the token with a
-cryptographically secure generator and restrict the file ACL to the service
-account and administrators. Each token grants full access to this user's daemon.
-To rotate, replace the file with a newly generated private token, restart the
-daemon to disconnect existing clients, and update the token on each client.
-Previously unauthenticated WebSocket deployments must configure a token before
-upgrading; there is no unauthenticated mode.
-
-For a remote listener, supply a PEM certificate chain (leaf certificate first)
-and its matching unencrypted PEM private key. Use a certificate valid for the
-hostname clients will connect to, issued by a CA they trust. Existing ACME or
-organization-managed certificates work; certificate issuance and renewal are
-managed outside the daemon.
-
-```sh
-chmod 600 /path/to/privkey.pem
-AMARCODE_DAEMON_ADDR=0.0.0.0:43822 \
-AMARCODE_WS_TOKEN_FILE=/absolute/path/to/access-token \
-AMARCODE_WS_TLS_CERT=/path/to/fullchain.pem \
-AMARCODE_WS_TLS_KEY=/path/to/privkey.pem \
-AMARCODE_WS_ALLOW_ORIGIN=https://app.example.com \
-amarcode-daemon run --transport websocket
-```
-
-Connect to `wss://your-daemon-host:43822/rpc`. Permit that port through the host's
-firewall for the intended clients. TLS uses Rustls's safe protocol defaults
-(TLS 1.2/1.3); clients must verify the certificate and hostname. Certificate/key
-changes take effect on daemon restart. On Unix, private key
-files must not be readable or writable by group/other users. On Windows,
-restrict the key's filesystem ACLs to the service account and administrators.
-
-For local development only, a loopback listener may omit TLS:
-
-```sh
-AMARCODE_WS_TOKEN_FILE=/absolute/path/to/access-token \
-amarcode-daemon run --transport websocket
-```
-
-Override the default address with `AMARCODE_DAEMON_ADDR`. Non-loopback
-WebSocket binds require both TLS certificate and key paths. There is no automatic
-certificate generation, plaintext remote fallback, or certificate-verification
-bypass. IPv6 bind syntax is supported, e.g. `[::1]:43822` for local development.
-
-WebSocket fields live directly on `Config`. `Config::get(transport)` loads and
-validates the selected transport once per process through `OnceLock`; changes
-require a restart.
-WebSocket configuration is loaded only from environment variables:
-
-| Environment variable       | Purpose                                                                  |
-| -------------------------- | ------------------------------------------------------------------------ |
-| `AMARCODE_DAEMON_ADDR`     | Optional shared listener address override; defaults depend on transport. |
-| `AMARCODE_WS_TOKEN_FILE` | Required private bearer token file, including loopback listeners.       |
-| `AMARCODE_WS_TLS_CERT`     | PEM certificate chain path.                                              |
-| `AMARCODE_WS_TLS_KEY`      | Matching PEM private key path.                                           |
-| `AMARCODE_WS_ALLOW_ORIGIN` | Comma-separated list of allowed browser origins.                         |
-
-Origins are exact `http(s)://host[:port]` values, with no path, trailing slash,
-wildcard, or `null`. Whitespace around comma-separated entries is ignored.
-Browser connections are rejected unless their Origin is explicitly allowed.
-Non-browser clients may omit Origin but must still supply the bearer token. For an installed service, set these
-variables in its systemd user unit / launchd job / Windows service environment
-and restart it. Set its startup command to `run --transport websocket` to select
-WebSocket mode. The flag defaults to TCP when omitted.
-
-## Remote startup over SSH or Cloudflare
-
-For an already installed daemon, start authenticated SSH-only loopback mode on
-the remote host:
-
-```sh
-amarcode-daemon --remote --no-tunnel
-```
-
-This implies WebSocket transport and requires `127.0.0.1` with a fixed port
-(default `43721`), a private access token file, and no origin TLS. It never starts
-or requires Cloudflare. The desktop's SSH connection supplies encryption and
-forwards to this loopback listener. Startup prints the address and token-file
-path after binding, without printing the token.
-
-Remote defaults use `${XDG_DATA_HOME:-$HOME/.local/share}/amarcode-remote/` on
-Linux, or `AMARCODE_REMOTE_ROOT` when set. Data remains under `data/` and the token
-under `access-token`. Existing `remote.json` runtime paths are honored; that file
-and its Cloudflare binary are optional for SSH-only startup. Without metadata,
-installed agent runtimes must be available on the launch environment's `PATH`.
-Explicit `AMARCODE_APPDIR`, `AMARCODE_STORE_PATH`, `AMARCODE_WS_TOKEN_FILE`, and
-`AMARCODE_DAEMON_ADDR` values retain precedence.
-
-For a custom existing deployment, the direct alternative is:
-
-```sh
-AMARCODE_APPDIR=/absolute/path/to/existing-data \
-AMARCODE_WS_TOKEN_FILE=/absolute/path/to/access-token \
-AMARCODE_DAEMON_ADDR=127.0.0.1:43721 \
-amarcode-daemon run --transport websocket
-```
-
-Both commands run in the foreground. They do not remotely install software or
-register a service. Do not start a second daemon against a database already in
-use. `--remote` without `--no-tunnel` retains its existing authenticated
-Cloudflare quick-tunnel workflow and requires the installed connector.
-
-See the landing docs for [SSH setup and connection](../landing/src/content/docs/docs/remote/ssh.md)
-and [the remote installer and Cloudflare mode](../landing/src/content/docs/docs/remote/setup.md).
+See the [development guide](../landing/src/content/docs/docs/contributing/development.md)
+and [protocol guide](../landing/src/content/docs/docs/contributing/protocol.md)
+for contributor documentation.

@@ -48,8 +48,8 @@ cargo test -p amarcode-acp
 python3 scripts/test-remote-installer.py
 
 # Documentation types, content, and production build
-bun run docs:check
-bun run docs:build
+bun run landing:check
+bun run landing:build
 ```
 
 Daemon transport tests bind local sockets, and some package tests need network or writable runtime caches. Use an environment that permits those operations. The live release-download test is ignored by default.

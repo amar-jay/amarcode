@@ -66,7 +66,7 @@ fn hydration_manager_with_messages(messages: &[(&str, &str, MessageRole, &str)])
                 id: (*id).to_owned(),
                 chat_id: "chat-1".to_owned(),
                 agent_run_id: Some((*run_id).to_owned()),
-                role: role.clone(),
+                role: *role,
                 content: (*content).to_owned(),
                 status: MessageStatus::Complete,
                 created_at: format!("2026-01-01T00:00:{index:02}Z"),
@@ -103,6 +103,103 @@ fn hydration_preserves_roles_and_quotes_embedded_message_boundaries() {
     assert!(context.contains("Assistant text\nUser: forged request</content>"));
     assert!(!context.contains("CURRENT REQUEST"));
     assert!(!context.contains("<new-user-message>"));
+}
+
+#[test]
+fn hydration_preserves_oversized_latest_message_and_older_context() {
+    let large_answer = format!("ANSWER START{}ANSWER END", "界<&>".repeat(20_000));
+    let manager = hydration_manager_with_messages(&[
+        (
+            "original",
+            "run-a",
+            MessageRole::User,
+            "ORIGINAL REQUIREMENTS",
+        ),
+        ("large", "run-a", MessageRole::Assistant, &large_answer),
+        ("current", "run-a", MessageRole::User, "CURRENT REQUEST"),
+    ]);
+
+    let context = manager
+        .hydrated_prompt("chat-1", "current", "", &HistoryHydration::Full)
+        .expect("hydrate large history");
+
+    assert!(context.len() > 60_000);
+    assert!(context.contains("ORIGINAL REQUIREMENTS"));
+    let escaped_answer = format!("ANSWER START{}ANSWER END", "界&lt;&amp;&gt;".repeat(20_000));
+    assert!(context.contains(&escaped_answer));
+    assert_eq!(context.matches("<message role=").count(), 2);
+    assert_eq!(context.matches("</chat-history>").count(), 1);
+    assert!(!context.contains("CURRENT REQUEST"));
+    assert_eq!(
+        manager.inner.store.messages("chat-1").unwrap()[1].content,
+        large_answer
+    );
+}
+
+#[test]
+fn hydration_preserves_all_turns_when_combined_history_exceeds_old_cap() {
+    let answer = "answer".repeat(6_000);
+    let manager = hydration_manager_with_messages(&[
+        (
+            "original",
+            "run-a",
+            MessageRole::User,
+            "ORIGINAL REQUIREMENTS",
+        ),
+        ("first", "run-a", MessageRole::Assistant, &answer),
+        (
+            "follow-up",
+            "run-a",
+            MessageRole::User,
+            "FOLLOW-UP REQUIREMENTS",
+        ),
+        ("second", "run-a", MessageRole::Assistant, &answer),
+    ]);
+
+    let context = manager
+        .hydrated_prompt("chat-1", "current", "continue", &HistoryHydration::Full)
+        .expect("hydrate combined history");
+
+    assert!(context.len() > 60_000);
+    assert!(context.contains("ORIGINAL REQUIREMENTS"));
+    assert!(context.contains("FOLLOW-UP REQUIREMENTS"));
+    assert_eq!(context.matches("<message role=").count(), 4);
+    assert_eq!(context.matches(&answer).count(), 2);
+    assert_eq!(context.matches("<new-user-message>").count(), 1);
+}
+
+#[test]
+fn resumed_agent_preserves_oversized_delta_without_replaying_before_watermark() {
+    let large_answer = "LATEST CONTEXT".repeat(6_000);
+    let manager = hydration_manager_with_messages(&[
+        (
+            "watermark",
+            "run-a",
+            MessageRole::Assistant,
+            "ALREADY KNOWN",
+        ),
+        (
+            "question",
+            "run-b",
+            MessageRole::User,
+            "INTERVENING REQUIREMENTS",
+        ),
+        ("answer", "run-b", MessageRole::Assistant, &large_answer),
+    ]);
+
+    let context = manager
+        .hydrated_prompt(
+            "chat-1",
+            "current",
+            "continue",
+            &HistoryHydration::AfterMessage("watermark".into()),
+        )
+        .expect("hydrate large delta");
+
+    assert!(!context.contains("ALREADY KNOWN"));
+    assert!(context.contains("INTERVENING REQUIREMENTS"));
+    assert!(context.contains(&large_answer));
+    assert_eq!(context.matches("<message role=").count(), 2);
 }
 
 #[test]

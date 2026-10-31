@@ -33,20 +33,20 @@ The transcript identifies the original speakers and separates historical data fr
 
 ## What carries over
 
-| Information                              | Restoration behavior                                                  |
-| ---------------------------------------- | --------------------------------------------------------------------- |
-| User and assistant text                  | Included in fallback context, subject to its limit                    |
-| Assistant thinking and tools             | May contribute a short activity digest                                |
-| Structured tool calls and results        | Saved for the UI; not restored as native tool history by the fallback |
-| Earlier attachments                      | Retained for the UI; not replayed by fallback hydration               |
-| Hidden reasoning, caches, provider state | Cannot be reconstructed by Amarcode                                   |
-| Session permissions and configuration    | Agent-specific; do not assume they transfer                           |
+| Information                              | Restoration behavior                                                    |
+| ---------------------------------------- | ----------------------------------------------------------------------- |
+| User and assistant text                  | Forwarded in fallback context; destination agent applies context limits |
+| Assistant thinking and tools             | May contribute a short activity digest                                  |
+| Structured tool calls and results        | Saved for the UI; not restored as native tool history by the fallback   |
+| Earlier attachments                      | Retained for the UI; not replayed by fallback hydration                 |
+| Hidden reasoning, caches, provider state | Cannot be reconstructed by Amarcode                                     |
+| Session permissions and configuration    | Agent-specific; do not assume they transfer                             |
 
 ## Context has limits
 
-The daemon's fallback transcript currently has a **60,000-byte limit** before its wrapper and the live prompt. It removes the oldest records until the history fits. This is a fixed size bound, not a model-specific token budget or a summary of every omitted turn.
+The daemon forwards the full eligible transcript without a fixed byte cutoff. It does not discard older messages to make room for a large recent message. For a resumed session, only messages after that session's watermark are eligible. The destination agent owns its model's context budget and decides whether to compact or reject an oversized prompt.
 
-The built-in Amarcode ACP adapter has a separate compaction mechanism for its own provider history. It estimates tokens, prunes large tool output, and can summarize older exchanges while retaining the original and current user requests. Other agents manage their own context differently.
+The built-in Amarcode ACP adapter has a separate compaction mechanism for its own provider history. It uses a configured context window, provider model metadata, or a 128,000-token fallback. It estimates tokens, prunes large tool output, and can summarize older exchanges while retaining the original and current user requests. Restored transcripts arrive as prompt text rather than native historical turns. If that pinned input exceeds the available budget, the adapter returns an explicit error instead of silently discarding it. Other agents manage their own context differently and may also reject oversized prompts.
 
 :::tip[Help a new agent pick up the task]
 For long tasks, include the current objective, key decisions, and remaining work in your next prompt. Reattach any files or images the agent needs to inspect.

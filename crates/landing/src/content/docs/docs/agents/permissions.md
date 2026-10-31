@@ -15,11 +15,11 @@ Depending on the agent, choices can include allowing or rejecting once, or remem
 
 Amarcode's fallback permission modes are:
 
-| Mode | Behavior |
-| --- | --- |
-| Confirm | Show requests for your decision. |
+| Mode     | Behavior                                                                                     |
+| -------- | -------------------------------------------------------------------------------------------- |
+| Confirm  | Show requests for your decision.                                                             |
 | Autoedit | Automatically approve requests recognized as file edits; command requests still need review. |
-| Agentic | Automatically approve agent permission requests. |
+| Agentic  | Automatically approve agent permission requests.                                             |
 
 When an agent advertises its own ACP session mode, Amarcode defers to that mode instead of applying its fallback automatic approvals. Available controls therefore depend on your agent.
 
