@@ -9,12 +9,12 @@ function readTheme(): Theme {
   const stored = localStorage.getItem("amarcode-theme");
   return stored === "light" || stored === "dark" || stored === "system"
     ? stored
-    : "system";
+    : "light";
 }
 
 export function readPalette(): Palette {
   const stored = localStorage.getItem("amarcode-palette");
-  return stored === "ember" || stored === "monochrome" ? stored : "monochrome";
+  return stored === "ember" || stored === "monochrome" ? stored : "ember";
 }
 
 /** User-facing chrome preference. Synced to `document.documentElement` by `useAppBootstrap`. */
