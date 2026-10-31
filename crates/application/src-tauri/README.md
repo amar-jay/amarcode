@@ -44,7 +44,7 @@ The client is stateless. Each request uses its own connection so a long-running
 prompt does not block cancellation, reads, or permission responses. Event
 subscriptions use a separate connection and recheck compatibility on reconnect.
 
-The desktop bundles `amarcode-daemon` as the `amarcode-bootstrap` sidecar.
+The desktop bundles the daemon executable as `amarcoded` beside the application.
 `bootstrap ensure` checks/starts an existing service; `bootstrap install` performs
 first installation or explicit repair, entirely offline. The helper copies the
 bundled binary into immutable user-data storage before service registration, so

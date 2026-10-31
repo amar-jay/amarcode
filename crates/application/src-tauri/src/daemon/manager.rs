@@ -253,7 +253,7 @@ fn bundled_executable() -> Result<PathBuf, String> {
         .parent()
         .ok_or("desktop executable has no parent directory")?
         .join(format!(
-            "amarcode-bootstrap{}",
+            "amarcoded{}",
             std::env::consts::EXE_SUFFIX
         ));
     if !path.is_file() {

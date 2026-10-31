@@ -59,7 +59,7 @@ const targetDir = process.env.CARGO_TARGET_DIR
 const destination = join(
   root,
   "crates/application/src-tauri/binaries",
-  `amarcode-bootstrap-${target}${extension}`,
+  `amarcoded-${target}${extension}`,
 );
 mkdirSync(dirname(destination), { recursive: true });
 copyFileSync(

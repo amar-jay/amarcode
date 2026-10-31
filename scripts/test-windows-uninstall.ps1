@@ -39,7 +39,7 @@ try {
         }
         foreach ($path in $owned.Keys) { [IO.File]::WriteAllText($path, $owned[$path]) }
         [IO.File]::WriteAllText((Join-Path $desktop 'amarcode.exe'), 'desktop application')
-        [IO.File]::WriteAllText((Join-Path $desktop 'amarcode-bootstrap.exe'), 'bundled bootstrap')
+        [IO.File]::WriteAllText((Join-Path $desktop 'amarcoded.exe'), 'bundled daemon')
         $process = Start-Process $installer -ArgumentList "/S /D=$desktop" -Wait -PassThru
         if ($process.ExitCode -ne 0) { throw "Fixture installation failed: $($case.Name)" }
         $update = if ($case.Update) { '/UPDATE' } else { '' }
@@ -50,7 +50,7 @@ try {
                 throw "Shared state changed in case '$($case.Name)': $path"
             }
         }
-        if ((Test-Path (Join-Path $desktop 'amarcode.exe')) -or (Test-Path (Join-Path $desktop 'amarcode-bootstrap.exe'))) {
+        if ((Test-Path (Join-Path $desktop 'amarcode.exe')) -or (Test-Path (Join-Path $desktop 'amarcoded.exe'))) {
             throw "Desktop files were not removed: $($case.Name)"
         }
         if ([IO.File]::ReadAllText((Join-Path $desktop 'hook-result.txt')) -ne '0') {

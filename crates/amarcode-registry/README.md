@@ -58,7 +58,7 @@ key is embedded in the desktop application; never commit the private key.
 
 ## Desktop application integration
 
-The desktop bundles a daemon executable as `amarcode-bootstrap`. At startup it
+The desktop bundles the daemon executable as `amarcoded` beside the application. At startup it
 invokes `bootstrap ensure`, which verifies the existing native service and its
 managed executable before accepting health or starting the service. It never
 performs first installation without the user's install action.

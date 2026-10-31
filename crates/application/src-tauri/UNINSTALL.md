@@ -1,13 +1,13 @@
 # Desktop uninstall and shared daemon ownership
 
 Removing the desktop application removes its installed executable, bundled
-bootstrap, shortcuts, and application registration. It preserves the independent
+`amarcoded` sidecar, shortcuts, and application registration. It preserves the independent
 per-user daemon, service registration, current release, update journal, database,
 access token, and access configuration. Active work and other local or remote
 clients keep using that daemon. Application updates preserve it too.
 
 The managed service runs an immutable executable under the user's daemon release
-store, rather than the bootstrap inside the desktop's installation directory.
+store, rather than the copy inside the desktop's installation directory.
 The desktop is a client of that instance; uninstalling a client does not own its
 server's lifecycle.
 

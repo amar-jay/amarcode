@@ -38,7 +38,7 @@ FunctionEnd
 Section Uninstall
   !insertmacro NSIS_HOOK_PREUNINSTALL
   Delete "$INSTDIR\amarcode.exe"
-  Delete "$INSTDIR\amarcode-bootstrap.exe"
+  Delete "$INSTDIR\amarcoded.exe"
 
   ; Tauri checks this state after NSIS_HOOK_PREUNINSTALL, then removes both
   ; bundle-ID data roots. These fixture folders represent those directories.
