@@ -12,6 +12,8 @@ You only need this if you want Amarcode ACP to use your own model. The built-in 
 3. Enter the **Base URL**, **Model ID**, and **API key** from your provider.
 4. Choose **Save and use**, then start a new chat.
 
+![ACP provider settings, with base URL, model ID, and a saved API key.](/images/workspace/acp-provider.png)
+
 ## Switch or remove one
 
 Choose a saved provider, or **Use default** to go back to the built-in agent. Saved providers stay in the list.

@@ -15,6 +15,8 @@ Use the remote machine’s URL and access token. Projects and agents run on that
 4. Paste the access token.
 5. Choose **Verify and apply**.
 
+![Connection settings with Remote daemon selected, and the WebSocket URL and access token filled in.](/images/workspace/desktop-connection.png)
+
 Use the URL and token from the current session. Keep the token private.
 
 ## Open a project
