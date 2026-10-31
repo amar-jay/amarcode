@@ -96,8 +96,12 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         )?)),
 
         // chats (read / CRUD)
-        methods::CREATE_CHAT => Ok(DispatchOutcome::Result(create_chat(app, params)?)),
-        methods::LIST_CHATS => Ok(DispatchOutcome::Result(list_chats(app, params)?)),
+        methods::CREATE_CHAT => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
+            || create_chat(app, params),
+        )?)),
+        methods::LIST_CHATS => Ok(DispatchOutcome::Result(tokio::task::block_in_place(|| {
+            list_chats(app, params)
+        })?)),
         methods::DISCOVER_COMMANDS => {
             let p: amarcode_protocol::rpc::DiscoverCommandsParams = parse_params(params)?;
             to_value(tokio::task::block_in_place(|| {
@@ -105,16 +109,20 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
             })?)
             .map(DispatchOutcome::Result)
         }
-        methods::GET_CHAT => Ok(DispatchOutcome::Result(get_chat(app, params)?)),
-        methods::GET_MESSAGE_PARTS => Ok(DispatchOutcome::Result(get_message_parts(app, params)?)),
-        methods::LIST_ACP_EVENTS_FOR_CHAT => Ok(DispatchOutcome::Result(list_acp_events_for_chat(
-            app, params,
+        methods::GET_CHAT => Ok(DispatchOutcome::Result(tokio::task::block_in_place(|| {
+            get_chat(app, params)
+        })?)),
+        methods::GET_MESSAGE_PARTS => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
+            || get_message_parts(app, params),
         )?)),
-        methods::LIST_AGENT_RUNS_FOR_CHAT => Ok(DispatchOutcome::Result(list_agent_runs_for_chat(
-            app, params,
+        methods::LIST_ACP_EVENTS_FOR_CHAT => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
+            || list_acp_events_for_chat(app, params),
         )?)),
-        methods::GET_DAEMON_CONFIG => Ok(DispatchOutcome::Result(to_value(
-            app.store.daemon_config(),
+        methods::LIST_AGENT_RUNS_FOR_CHAT => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
+            || list_agent_runs_for_chat(app, params),
+        )?)),
+        methods::GET_DAEMON_CONFIG => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
+            || to_value(app.store.daemon_config()),
         )?)),
         methods::SET_DAEMON_CONFIG => Ok(DispatchOutcome::Result(set_daemon_config(app, params)?)),
         methods::VACUUM_DATABASE => Ok(DispatchOutcome::Result(to_value(

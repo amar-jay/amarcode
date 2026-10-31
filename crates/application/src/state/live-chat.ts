@@ -7,6 +7,8 @@ import type {
   Chat,
   ChatDetail,
   ContextUsage,
+  MessagePart,
+  MessageStatus,
   JsonValue,
   PromptAttachment,
   RunStatus,
@@ -507,17 +509,139 @@ const retryLiveChatLoadAtom = atom(
   ) => set(loadLiveChatAtom, input),
 );
 
-/** Coalesce rapid message stream events into one detail reload. */
+/**
+ * Coalesce stream events into one parts update. A running refresh is not
+ * postponed: continuous output used to reset the timer and leave the screen
+ * unchanged until the burst stopped.
+ */
+const STREAM_REFRESH_MS = 120;
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-export const scheduleLiveChatRefreshAtom = atom(null, (get, set) => {
-  const live = get(liveChatAtom);
-  if (!live) return;
-  if (refreshTimer) clearTimeout(refreshTimer);
-  const chatId = live.chatId;
-  refreshTimer = setTimeout(() => {
-    void set(loadLiveChatAtom, { chatId, silent: true });
-  }, 80);
-});
+let refreshRunning = false;
+let refreshFull = false;
+const refreshMessages = new Map<string, MessageStatus | undefined>();
+
+function messageText(parts: MessagePart[]): string {
+  return parts
+    .filter((part) => part.kind === "text")
+    .map((part) => {
+      try {
+        const value = JSON.parse(part.content_json) as { text?: unknown };
+        return typeof value.text === "string" ? value.text : "";
+      } catch {
+        return "";
+      }
+    })
+    .join("");
+}
+
+export const patchLiveChatMessagesAtom = atom(
+  null,
+  async (
+    get,
+    set,
+    input: {
+      chatId: string;
+      messages: Map<string, MessageStatus | undefined>;
+    },
+  ) => {
+    const current = get(liveChatAtom);
+    if (!current || current.chatId !== input.chatId || !current.detail) {
+      if (current?.chatId === input.chatId)
+        await set(loadLiveChatAtom, { chatId: input.chatId, silent: true });
+      return;
+    }
+    const ids = [...input.messages.keys()];
+    const known = new Set(
+      current.detail.messages.map((message) => message.message.id),
+    );
+    if (ids.some((id) => !known.has(id))) {
+      await set(loadLiveChatAtom, { chatId: input.chatId, silent: true });
+      return;
+    }
+    const parts = await daemonApi.getMessageParts(ids);
+    const latest = get(liveChatAtom);
+    if (!latest || latest.chatId !== input.chatId || !latest.detail) return;
+    const byMessage = new Map<string, MessagePart[]>();
+    for (const part of parts) {
+      const list = byMessage.get(part.message_id) ?? [];
+      list.push(part);
+      byMessage.set(part.message_id, list);
+    }
+    set(liveChatAtom, {
+      ...latest,
+      detail: {
+        ...latest.detail,
+        messages: latest.detail.messages.map((message) => {
+          const nextParts = byMessage.get(message.message.id);
+          if (!nextParts) return message;
+          const status =
+            input.messages.get(message.message.id) ?? message.message.status;
+          return {
+            ...message,
+            message: {
+              ...message.message,
+              status,
+              content: messageText(nextParts) || message.message.content,
+            },
+            parts: nextParts,
+          };
+        }),
+      },
+    });
+  },
+);
+
+let kickLiveChatRefresh: (() => void) | undefined;
+
+export const scheduleLiveChatRefreshAtom = atom(
+  null,
+  (
+    get,
+    set,
+    request?: { full?: boolean; messageId?: string; status?: MessageStatus },
+  ) => {
+    const live = get(liveChatAtom);
+    if (!live) return;
+    if (request?.messageId) {
+      refreshMessages.set(
+        request.messageId,
+        request.status ?? refreshMessages.get(request.messageId),
+      );
+    } else refreshFull = true;
+
+    kickLiveChatRefresh = () => {
+      if (refreshTimer || refreshRunning) return;
+      if (!refreshFull && refreshMessages.size === 0) return;
+      const chatId = get(liveChatAtom)?.chatId;
+      if (!chatId) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = undefined;
+        refreshRunning = true;
+        const full = refreshFull;
+        const messages = new Map(refreshMessages);
+        refreshFull = false;
+        refreshMessages.clear();
+        void (async () => {
+          try {
+            if (get(liveChatAtom)?.chatId !== chatId) return;
+            if (full || messages.size === 0)
+              await set(loadLiveChatAtom, { chatId, silent: true });
+            else await set(patchLiveChatMessagesAtom, { chatId, messages });
+          } finally {
+            refreshRunning = false;
+            if (get(liveChatAtom)?.chatId !== chatId) {
+              refreshFull = false;
+              refreshMessages.clear();
+              return;
+            }
+            kickLiveChatRefresh?.();
+          }
+        })();
+      }, STREAM_REFRESH_MS);
+    };
+    kickLiveChatRefresh();
+  },
+);
 
 /** Apply one daemon event to the open live chat (caller filters relevance). */
 export const applyLiveChatEventAtom = atom(
@@ -527,13 +651,11 @@ export const applyLiveChatEventAtom = atom(
     if (!live) return;
     if (event.type === "sessionStateUpdated") {
       set(applySessionSnapshotAtom, event.payload.snapshot);
-      if (event.payload.snapshot.chat_id === live.chatId)
-        void set(scheduleLiveChatRefreshAtom);
       return;
     }
 
     if (event.type === "chatUpdated" && event.payload.chat_id === live.chatId) {
-      void set(scheduleLiveChatRefreshAtom);
+      void set(scheduleLiveChatRefreshAtom, { full: true });
       return;
     }
 
@@ -608,9 +730,13 @@ export const applyLiveChatEventAtom = atom(
       return;
     }
 
-    // Message events carry no content, they only make streaming feel immediate.
+    // The event names the message. Load that message's parts instead of the whole chat.
     if (event.type === "messageUpdated" || event.type === "messagePartAdded") {
-      void set(scheduleLiveChatRefreshAtom);
+      void set(scheduleLiveChatRefreshAtom, {
+        messageId: event.payload.message_id,
+        status:
+          event.type === "messageUpdated" ? event.payload.status : undefined,
+      });
     }
   },
 );

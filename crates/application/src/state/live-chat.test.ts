@@ -38,6 +38,7 @@ vi.mock("@/api", () => ({
     setSessionConfigOption: vi.fn(),
     prompt: vi.fn(),
     respondPermission: vi.fn(),
+    getMessageParts: vi.fn(async () => []),
   },
 }));
 

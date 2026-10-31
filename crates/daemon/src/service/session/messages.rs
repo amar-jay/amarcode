@@ -309,6 +309,9 @@ pub(super) fn append_text_delta(inner: &SessionInner, message_id: &str, delta: &
             },
         );
     }
+    // Later deltas reuse the same part. Tell the client the text changed
+    // without waiting for the blocking prompt RPC to finish.
+    notify_streaming_message(inner, message_id);
     Ok(())
 }
 
@@ -329,6 +332,7 @@ pub(super) fn append_thinking_delta(
             .unwrap_or_default();
         thinking_part.content_json = json!({ "text": format!("{existing}{delta}") }).to_string();
         inner.store.replace_message_parts(message_id, &parts)?;
+        notify_streaming_message(inner, message_id);
     } else {
         let ordinal = parts.iter().map(|part| part.ordinal).max().unwrap_or(-1) + 1;
         parts.push(MessagePart {
@@ -346,8 +350,40 @@ pub(super) fn append_thinking_delta(
                 kind: MessagePartKind::Thinking,
             },
         );
+        notify_streaming_message(inner, message_id);
     }
     Ok(())
+}
+
+/// Streaming deltas arrive faster than the UI can redraw a whole chat.
+/// Publish at most one content notice per message per interval.
+const STREAM_NOTICE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(120);
+
+fn notify_streaming_message(inner: &SessionInner, message_id: &str) {
+    if !stream_notice_due(message_id, std::time::Instant::now()) {
+        return;
+    }
+    emit(
+        inner,
+        EditorEvent::MessageUpdated {
+            message_id: message_id.to_owned(),
+            status: MessageStatus::Streaming,
+        },
+    );
+}
+
+fn stream_notice_due(message_id: &str, now: std::time::Instant) -> bool {
+    use std::sync::Mutex;
+    static LAST: std::sync::LazyLock<Mutex<std::collections::HashMap<String, std::time::Instant>>> =
+        std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+    let mut last = LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let due = last
+        .get(message_id)
+        .is_none_or(|previous| now.saturating_duration_since(*previous) >= STREAM_NOTICE_INTERVAL);
+    if due {
+        last.insert(message_id.to_owned(), now);
+    }
+    due
 }
 
 pub(super) fn finalize_message(
@@ -513,6 +549,21 @@ mod append_tests {
             terminals: Default::default(),
         };
         (inner, "msg-1".to_owned())
+    }
+
+    #[test]
+    fn stream_notices_are_rate_limited() {
+        let start = std::time::Instant::now();
+        let id = "rate-limit-message";
+        assert!(stream_notice_due(id, start));
+        assert!(!stream_notice_due(
+            id,
+            start + std::time::Duration::from_millis(10)
+        ));
+        assert!(stream_notice_due(
+            id,
+            start + STREAM_NOTICE_INTERVAL
+        ));
     }
 
     #[test]
