@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PromptInput,
   PromptInputProvider,
@@ -20,7 +20,8 @@ import {
 } from "@/components/ai-elements/context";
 
 import { shortcutHint } from "@/lib/app-shortcuts";
-import { FolderOpen } from "lucide-react";
+import { Cloud, FolderOpen } from "lucide-react";
+import { connectionIdentity } from "@/lib/daemon-connection-form";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
@@ -112,6 +113,13 @@ function AppPromptInput({
     agentId: string;
     options: SessionConfigOption[];
   }>({ agentId: selectedAgentId, options: [] });
+  const [remoteIdentity, setRemoteIdentity] = useState<string | null>(null);
+  useEffect(() => {
+    void daemonApi
+      .getConnection()
+      .then((info) => setRemoteIdentity(connectionIdentity(info)))
+      .catch(() => {});
+  }, []);
   const isChatComposer = Boolean(onSendPrompt);
   const lastKnown = loadLastSessionConfig(selectedAgentId);
   const pendingOptions =
@@ -266,6 +274,15 @@ function AppPromptInput({
           </PromptInputBody>
           <PromptInputFooter>
             <PromptInputTools className="flex-1">
+              {remoteIdentity && (
+                <PromptInputButton
+                  tooltip={remoteIdentity}
+                  className="text-primary hover:text-primary"
+                  aria-label={`Remote session ${remoteIdentity}`}
+                >
+                  <Cloud size={16} />
+                </PromptInputButton>
+              )}
               {isChatComposer && (
                 <>
                   <SessionConfigControls

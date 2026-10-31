@@ -9,6 +9,7 @@ import {
   canReuseToken,
   connectionError,
   connectionForm,
+  connectionIdentity,
   emptyConnectionForm,
   sshConfig,
 } from "./daemon-connection-form";
@@ -29,6 +30,41 @@ const saved: DaemonConnectionInfo = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("connection identity", () => {
+  it("omits local daemons", () => {
+    expect(
+      connectionIdentity({
+        ...saved,
+        remote: false,
+        mode: "local",
+        ssh: null,
+        url: "",
+      }),
+    ).toBeNull();
+  });
+
+  it("formats an SSH profile", () => {
+    expect(connectionIdentity(saved)).toBe("dev-box");
+    expect(
+      connectionIdentity({
+        ...saved,
+        ssh: { ...saved.ssh!, user: "manan", port: 2222 },
+      }),
+    ).toBe("manan@dev-box:2222");
+  });
+
+  it("formats a websocket host", () => {
+    expect(
+      connectionIdentity({
+        ...saved,
+        mode: "websocket",
+        ssh: null,
+        url: "wss://lab.example:43821/rpc",
+      }),
+    ).toBe("lab.example:43821");
+  });
 });
 
 describe("SSH connection settings", () => {

@@ -26,6 +26,21 @@ export const emptyConnectionForm: ConnectionForm = {
   token: "",
 };
 
+/** Human-readable host identity for a remote daemon session. */
+export function connectionIdentity(info: DaemonConnectionInfo): string | null {
+  if (!info.remote) return null;
+  if (info.mode === "ssh" && info.ssh) {
+    const user = info.ssh.user ? `${info.ssh.user}@` : "";
+    const port = info.ssh.port ? `:${info.ssh.port}` : "";
+    return `${user}${info.ssh.host}${port}`;
+  }
+  try {
+    return new URL(info.url).host || info.url;
+  } catch {
+    return info.url.split("/")[2] ?? info.url;
+  }
+}
+
 export function connectionForm(info: DaemonConnectionInfo): ConnectionForm {
   return {
     ...emptyConnectionForm,
