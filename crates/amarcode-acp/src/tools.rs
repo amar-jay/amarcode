@@ -200,7 +200,11 @@ fn apply_file_command(workspace: &Path, args: &Value) -> Result<FileChange, Stri
             if !canonical_parent.starts_with(&canonical_root) {
                 return Err("path escapes workspace".into());
             }
-            if let canonical_target = path
+            if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                if metadata.file_type().is_symlink() {
+                    return Err("destination must not be a symlink".into());
+                }
+                let canonical_target = path
                     .canonicalize()
                     .map_err(|e| format!("invalid destination: {e}"))?;
                 if !canonical_target.starts_with(&canonical_root) {
@@ -664,9 +668,7 @@ mod tests {
             arguments: String::new(),
         };
         assert!(permission_key(&command, &json!({ "command": "cargo" })).is_some());
-        assert!(
-            permission_key(&model_call("file_command"), &json!({ "path": "a.txt" })).is_some()
-        );
+        assert!(permission_key(&model_call("file_command"), &json!({ "path": "a.txt" })).is_some());
         assert!(permission_key(&model_call("read_file"), &json!({})).is_none());
     }
 

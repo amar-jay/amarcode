@@ -1201,7 +1201,10 @@ mod tests {
             .into_iter()
             .filter_map(|tool| tool.pointer("/function/name")?.as_str().map(str::to_owned))
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["run_command".to_owned(), "file_command".to_owned()]);
+        assert_eq!(
+            names,
+            vec!["run_command".to_owned(), "file_command".to_owned()]
+        );
     }
 
     #[test]
