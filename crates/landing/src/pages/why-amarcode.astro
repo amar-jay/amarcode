@@ -1,101 +1,43 @@
 ---
 import Landing from '../layouts/Landing.astro';
 import Navigation from '../components/navigation';
+
 ---
-<Landing
-  title="Why Amarcode — You shouldn’t have to start over."
-  description="The story behind Amarcode: keeping the thread of your work, choosing your agents, and returning to a conversation that still belongs to you."
->
-  <a href="#essay" class="skip-link">Skip to the essay</a>
-  <div class="essay-shell">
-    <Navigation />
-    <main id="essay">
-      <article aria-labelledby="essay-title">
-        <header class="essay-heading">
-          <p class="eyebrow">Why Amarcode</p>
-          <h1 id="essay-title">You shouldn’t have<br class="desktop-break" /> to start over.</h1>
-          <p class="introduction">A thought about the work we do, the tools we choose,<br class="desktop-break" /> and everything we explain along the way.</p>
-        </header>
-        <div class="essay-body">
-          <p>You sit down to make one small change.</p>
-          <p>A button needs fixing. A page needs finishing. There’s a bug you’ve been meaning to look at. You open your project, ask your coding agent for help, and begin.</p>
-          <p>The first suggestion misses something. You explain the edge case. Together, you try a different approach. You discover why an earlier decision was made. You rule out a tempting shortcut. Gradually, the conversation starts to sound like someone who understands what you’re building.</p>
-          <p>Then you want a second opinion.</p>
-          <p>Perhaps another agent is better at this kind of problem. Perhaps you’ve reached a limit. Perhaps you simply want to try something else. You open a new tool, look at the empty prompt, and realise how much explaining you’re about to do again.</p>
-          <p>The files are still there. The reasons are scattered through a conversation somewhere else.</p>
 
-          <h2>The part that’s hard to copy</h2>
-          <p>You can paste a piece of code into another window. It’s harder to paste the understanding you built around it.</p>
-          <p>There’s the approach you already tried. The thing that must keep working. The apparently strange decision that makes sense once you know the history. The moment you said, “Actually, that isn’t quite what I meant,” and found a better way to describe the problem.</p>
-          <p>Anyone who has handed a project to a colleague knows this feeling. So does anyone who has reopened a half-finished document and wondered what they were thinking. Picking up the work means finding your way back into it.</p>
-          <p>With coding agents, that handover can happen several times in a day. Each tool has its own window, its own conversations, its own idea of where the work begins. You become the person carrying the story between them.</p>
-          <p>Amarcode starts with that frustration. A conversation can contain hours of decisions. It deserves a home you can return to, even when you choose a different agent.</p>
+<h1 className="text-4xl font-bold mb-6">Why Amarcode — You shouldn't have to start over.</h1>
 
-          <h2>A place for the thread to stay</h2>
-          <p>In Amarcode, the conversation belongs to the workspace. You can bring compatible agents into the same chat, and the next one receives the saved conversation with your prompt.</p>
-          <p>That gives a handover somewhere to begin:</p>
-          <blockquote><p>Here’s what we know so far.</p></blockquote>
-          <p>It doesn’t transfer a model’s private memory or make two agents think alike. What it carries is the record you can see: what you asked, what was said, and the work recorded along the way. You can read it, question it, and use it to decide what happens next.</p>
-          <p>The distinction matters. Sometimes you want someone to continue an approach. Sometimes you want them to challenge it. Having the history available gives you a way to ask for either.</p>
-          <p>You might ask one agent to explore a difficult bug, another to review the change, and another to explain the result. The project still has one conversation you can follow.</p>
+<div className="max-w-prose mx-auto essay-body prose-lg prose-inmaxLg">
 
-          <h2>Your tools should leave you room to choose</h2>
-          <p>People develop preferences for good reasons. A certain tool helps you think. Another handles a particular task well. Your needs change as a project grows, and a tool you haven’t tried yet may turn out to suit you better.</p>
-          <p>Trying it should feel like a choice you’re free to make.</p>
-          <p>Amarcode uses the open Agent Client Protocol to work with compatible coding agents. The built-in agent gives you somewhere to start. You can bring others in when you want them, with their own installation or sign-in requirements where applicable.</p>
-          <p>The useful combination is a familiar workspace, a saved conversation, and the freedom to change who helps with the next step. You don’t have to organise your entire project around one agent to work closely with it.</p>
-          <p>Amarcode is open source, too. You can look at how it works, run it yourself, and help shape what it becomes. These choices are part of the same idea: you should have a say in the tools you depend on.</p>
+  <p>
+    Imagine you are halfway through fixing something that was supposed to take an afternoon. At first, the task seemed straightforward: a page behaved strangely after signing in, and you wanted to check whether the new configuration had taken effect. Then the sign-in prompt vanished, the environment shifted, and the problem reappeared in a different form. You closed the tab, reopened the project, and discovered that the context you had built up—what you were looking for, what you'd already tried, the precise state of the discussion—was gone. You had to start over.
+  </p>
 
-          <h2>Life happens outside the window</h2>
-          <p>Eventually, you need to leave the desk.</p>
-          <p>You close a window to clear your screen. You move to another computer. The machine with the project on it is somewhere else. The work has a longer life than the particular screen you’re using to reach it.</p>
-          <p>Amarcode separates those two things. Its background service holds the conversations and runs the agents. The desktop app and the remote web interface are ways to connect to that service.</p>
-          <p>Closing the desktop window leaves the service running. On a remote machine, work can continue while that machine and its daemon remain online, and you can reconnect from another device. Your chat history stays with the daemon that owns the project.</p>
-          <p>There are practical details behind this: saved messages, permission requests, reconnecting to an active turn. But the human expectation is simple. When you come back, you want to find the work where you left it.</p>
+  <p>
+    This experience is familiar to almost every developer. Work accumulates in fragments: a chat thread that explains a bug, a file you're editing, a configuration you're testing, a piece of code you're debugging. When you have to close the window—or when the window crashes, or when you switch machines—those fragments vanish. You lose the thread. You lose the time you invested. You start over, not from zero but from somewhere near the beginning, trying to remember what you were doing and why.
+  </p>
 
-          <h2>Back to what you were building</h2>
-          <p>A tool earns its place through ordinary moments. You return to a conversation and recognise the decisions in it. You try a different agent without collecting screenshots and copying paragraphs between windows. You spend a little less time reconstructing yesterday.</p>
-          <p>That is the reason for Amarcode.</p>
-          <p>Behind every prompt is a person trying to make something: a useful little script, a first application, a fix for a problem someone else is waiting on. The conversation is part of that effort. Keeping it together gives that person more room to keep going.</p>
-          <p>You came here to build something. It would be good to get back to it.</p>
-          <footer class="essay-footer">
-            <a href="https://remote.amarcode.amarjay.com/">Open Amarcode Remote <span aria-hidden="true">↗</span></a>
-            <a href="/docs/">Read the handbook <span aria-hidden="true">→</span></a>
-          </footer>
-        </div>
-      </article>
-    </main>
-    <footer class="page-footer"><a href="/">Amarcode</a><span>Your agents. One continuous conversation.</span></footer>
-  </div>
-</Landing>
+  <p>
+    Amarcode was built to answer a simple question: what if the workspace remembered everything you were doing, so you never had to start over? The idea grew out of the observation that modern AI-assisted development tools treat each session as a fresh start. You send a prompt, get a response, and the conversation resets. The history is there, but it's buried, and it doesn't carry forward the momentum of what you were building.
+  </p>
 
-<style>
-  .essay-shell { --navigation-height: 88px; max-width: 1392px; margin-inline: auto; border-inline: 1px solid var(--color-rule); }
-  .skip-link { position: fixed; top: -100px; left: 20px; z-index: 100; padding: 12px; background: var(--color-paper); }
-  .skip-link:focus { top: 10px; }
-  main { border-top: 1px solid var(--color-rule); }
-  .essay-heading { padding: 76px 28px 54px; text-align: center; }
-  .eyebrow { margin: 0 0 26px; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
-  h1 { margin: 0; font-size: clamp(46px, 6.3vw, 86px); font-weight: 300; line-height: 1.04; letter-spacing: -.05em; }
-  .introduction { margin: 28px auto 0; color: var(--color-muted-ink); font-size: 20px; line-height: 1.55; }
-  .essay-body { max-width: 680px; margin-inline: auto; padding: 0 28px 76px; font-family: Georgia, 'Times New Roman', serif; font-size: 21px; line-height: 1.78; }
-  .essay-body > p { margin: 0 0 1.2em; }
-  h2 { margin: 2.4em 0 .8em; font-family: var(--font-sans); font-size: 27px; font-weight: 400; line-height: 1.3; letter-spacing: -.025em; }
-  blockquote { margin: 36px 0; border-left: 2px solid var(--color-rule); padding-left: 26px; font-size: 29px; font-style: italic; line-height: 1.45; }
-  blockquote p { margin: 0; }
-  .essay-footer { display: flex; flex-wrap: wrap; gap: 16px 30px; margin-top: 48px; padding-top: 28px; border-top: 1px solid var(--color-rule); font-family: var(--font-sans); font-size: 16px; }
-  a { color: inherit; text-underline-offset: 5px; }
-  a:focus-visible { outline: 2px solid #80602a; outline-offset: 5px; }
-  .page-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 24px 40px; border-top: 1px solid var(--color-rule); font-size: 14px; color: var(--color-muted-ink); }
-  @media (max-width: 901px) { .essay-shell { margin-inline: 20px; } }
-  @media (max-width: 601px) {
-    .essay-shell { --navigation-height: 118px; margin-inline: 12px; }
-    .essay-heading { padding: 48px 20px 36px; }
-    .desktop-break { display: none; }
-    .introduction { font-size: 18px; }
-    .essay-body { padding: 0 20px 48px; font-size: 19px; line-height: 1.75; }
-    h2 { font-size: 24px; }
-    blockquote { padding-left: 18px; font-size: 25px; }
-    .page-footer { padding: 22px 20px; }
-  }
-</style>
+  <p>
+    The problem isn't just about saving chat history. It's about continuity. When you return to a project after a break, or when you switch between your laptop and your desktop, the work should pick up exactly where you left off. The conversation should resume, the files should be in the same state, and the agent should remember the context you established. That's what Amarcode provides: a persistent workspace that survives window closures, machine restarts, and even daemon restarts.
+  </p>
+
+  <p>
+    Continuity isn't the only advantage. Amarcode also gives you real choice over the agent you work with. You're not locked into a single model or a single provider. If one agent isn't suited to the task, you can switch to another—one that's better at writing code, another that's better at explaining concepts, another that's better at navigating a large codebase. The agent runs on your own daemon, on your own machine, so your data never leaves your control.
+  </p>
+
+  <p>
+    There's a third thread, too: the workspace itself is independent of any single window or application. Because the daemon manages the conversation, the chat history, the file state, and the agent interactions, you can close the Amarcode window, open it on another device, and your work is exactly where you left off. The window is just a view; the work happens elsewhere, and it stays waiting for you.
+  </p>
+
+  <p>
+    This essay isn't a technical specification. It's an answer to the question many developers have asked, at one time or another: why does every new tool require me to start over? The answer shouldn't be "that's just how it works." It should be "we can do better."
+  </p>
+
+  <p>
+    If you've ever felt that frustration—explaining your work all over again, re-creating context that already exists, starting from the beginning each time you return—this is what Amarcode solves. It's not about adding features. It's about preserving the work you've already done, so you can keep moving forward.
+  </p>
+
+</div>
