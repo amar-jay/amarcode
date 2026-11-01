@@ -1,43 +1,172 @@
 ---
 import Landing from '../layouts/Landing.astro';
 import Navigation from '../components/navigation';
-
 ---
+<Landing
+  title="Why Amarcode — The work should outlive the agent."
+  description="Why Amarcode is building a persistent development environment where agents are interchangeable, execution is independent of the interface, and the work remains continuous."
+>
+  <a href="#essay" class="fixed -top-full left-5 z-[100] bg-background p-3 focus:top-2.5">Skip to the essay</a>
+  <div class="[--navigation-height:5.5rem] mx-auto max-w-7xl border-x border-border sm:max-lg:mx-5 max-sm:mx-3 max-sm:[--navigation-height:7.375rem] [&_a]:text-inherit [&_a]:underline-offset-4 [&_a:focus-visible]:outline-2 [&_a:focus-visible]:outline-ring [&_a:focus-visible]:outline-offset-4">
+    <Navigation />
+    <main id="essay" class="border-t border-border">
+      <article aria-labelledby="essay-title">
+        <header class="px-6 pt-16 pb-12 text-center sm:px-7 sm:pt-20 sm:pb-14 max-sm:pt-12 max-sm:pb-9">
+	          <h1 id="essay-title" class="m-0 text-5xl font-light leading-tight tracking-tight sm:text-7xl lg:text-8xl">
+							Why Amarcode
+						</h1>
 
-<h1 className="text-4xl font-bold mb-6">Why Amarcode — You shouldn't have to start over.</h1>
+          <p class="mt-6 text-lg tracking-wider">
+						Building a persistent development environment <br/> for an evolving ecosystem of AI agents.
+					</p>
+        </header>
+        <div class="mx-auto max-w-5xl px-6 pb-16 font-serif text-xl leading-relaxed sm:px-7 sm:text-[1.3125rem] max-sm:pb-12 [&_>p]:mb-[.8em] [&_>p]:mt-0 [&_a]:font-sans [&_code]:rounded [&_code]:border [&_code]:border-border [&_code]:bg-panel [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[.85em] [&_code]:not-italic [&_blockquote]:my-8 [&_blockquote]:border-l-4 [&_blockquote]:border-amber [&_blockquote]:bg-amber/10 [&_blockquote]:px-6 [&_blockquote]:py-5 [&_blockquote]:text-2xl [&_blockquote]:text-foreground [&_blockquote]:italic [&_blockquote]:leading-relaxed [&_blockquote_p]:m-0 [&_h2]:my-[.6em] [&_h2]:mt-[1.8em] [&_h2]:font-sans [&_h2]:text-3xl [&_h2]:font-normal [&_h2]:leading-snug [&_h2]:tracking-tight [&_blockquote]:max-sm:px-4 [&_blockquote]:max-sm:py-4 [&_blockquote]:max-sm:text-xl [&_h2]:max-sm:text-2xl">
+          <h2>The work should outlive the agent.</h2>
+          <p>Software development is changing.</p>
+          <p>For decades, the relationship between a developer and their tools was relatively straightforward. The developer wrote the code, and the editor provided the environment in which that work happened.</p>
+          <p>Today, that relationship is evolving. AI coding agents can explore repositories, understand complex codebases, modify files, execute commands, diagnose errors, and implement entire features. They are no longer merely assistants that suggest the next line of code. They are increasingly capable participants in the software development process.</p>
+          <p>But this transition has introduced a new problem.</p>
+          <p><strong>Our development environments are becoming dependent on the very agents they are supposed to coordinate.</strong></p>
+          <p>Every agent brings its own interface, conversation history, session management, capabilities, and assumptions about how developers should work. Switching between agents often means switching environments, losing context, or reconstructing the reasoning behind work that has already been done.</p>
+          <p>The code may survive the transition. The understanding behind it often does not.</p>
 
-<div className="max-w-prose mx-auto essay-body prose-lg prose-inmaxLg">
+          <h2>The problem isn't the lack of AI coding tools</h2>
+          <p>There is no shortage of capable AI coding agents.</p>
+          <p>Different agents excel at different tasks. Some are particularly effective at understanding large codebases. Others are better suited to debugging, planning, implementation, or working with particular models and tools.</p>
+          <p>These capabilities are also changing rapidly. An agent that performs exceptionally well today may be surpassed tomorrow. New models emerge, existing tools improve, and the boundaries of what AI can accomplish continue to move.</p>
+          <p>Yet most development workflows remain organized around individual agents.</p>
+          <p>A developer starts a conversation, explains the project, establishes constraints, discusses an implementation, and gradually builds a shared understanding with the agent.</p>
+          <p>Over time, that conversation becomes valuable.</p>
+          <p>It contains architectural decisions, rejected approaches, debugging discoveries, implementation details, and knowledge that may not exist anywhere else in the repository.</p>
+          <p>Then the developer wants to use another agent.</p>
+          <p>Perhaps the new agent is better at the next task. Perhaps the original agent has reached its limits. Perhaps the developer simply wants a second perspective.</p>
+          <p>Suddenly, the accumulated understanding becomes difficult to transfer.</p>
+          <p>The developer must explain the project again, summarize previous decisions, or manually reconstruct the context.</p>
+          <p>This is more than an inconvenience.</p>
+          <p>It reveals a fundamental architectural problem: <strong>the continuity of software development has become coupled to the lifecycle of individual AI agents.</strong></p>
+          <p>We don't think it should be.</p>
 
-  <p>
-    Imagine you are halfway through fixing something that was supposed to take an afternoon. At first, the task seemed straightforward: a page behaved strangely after signing in, and you wanted to check whether the new configuration had taken effect. Then the sign-in prompt vanished, the environment shifted, and the problem reappeared in a different form. You closed the tab, reopened the project, and discovered that the context you had built up—what you were looking for, what you'd already tried, the precise state of the discussion—was gone. You had to start over.
-  </p>
+          <h2>A different starting point</h2>
+          <p>Amarcode began with a simple question:</p>
+          <blockquote><p><em>What if the development environment owned the work, rather than the agent?</em></p></blockquote>
+          <p>What if agents were interchangeable participants in a persistent workspace?</p>
+          <p>What if conversations, decisions, tool activity, and development history remained available regardless of which agent produced them?</p>
+          <p>And what if changing agents did not mean starting over?</p>
+          <p>These questions became the foundation of Amarcode.</p>
+          <p>We are building a development environment in which AI agents can come and go, while the work itself remains continuous.</p>
+          <p>The objective is not to create another AI model, nor to build a proprietary agent that competes with existing ones.</p>
+          <p>It is to create the environment in which those agents can operate.</p>
+          <p>An environment that preserves the history of the work, coordinates access to development resources, and gives developers the freedom to choose whichever agent is most appropriate for the task.</p>
 
-  <p>
-    This experience is familiar to almost every developer. Work accumulates in fragments: a chat thread that explains a bug, a file you're editing, a configuration you're testing, a piece of code you're debugging. When you have to close the window—or when the window crashes, or when you switch machines—those fragments vanish. You lose the thread. You lose the time you invested. You start over, not from zero but from somewhere near the beginning, trying to remember what you were doing and why.
-  </p>
+          <h2>Semantic continuity: preserving what matters</h2>
+          <p>One of Amarcode's defining ideas is <strong>semantic conversation continuity across agents.</strong></p>
+          <p>Traditional session management focuses on restoring a conversation within the same system.</p>
+          <p>But restoring a session and preserving the meaning of a conversation are not necessarily the same problem.</p>
+          <p>Consider a developer working with one agent on a complex feature.</p>
+          <p>Throughout the conversation, the agent explores the repository, proposes several implementations, encounters failures, and eventually settles on a particular design.</p>
+          <p>The developer then switches to another agent.</p>
+          <p>The new agent does not necessarily need the original agent's internal session state. It needs sufficient understanding of what happened, what was decided, what remains unresolved, and what should happen next.</p>
+          <p>That distinction matters.</p>
+          <p>Amarcode maintains its own persistent record of conversations and development activity, independently of the agents involved.</p>
+          <p>When supported, it can resume an agent's native session. When that is not possible, Amarcode can reconstruct the relevant conversation context and establish continuity through a new session.</p>
+          <p>This does not make two different agents internally identical. Their models, context handling, and reasoning processes remain different.</p>
+          <p>But it creates something more useful than dependence on a particular session identifier: a way for the work to continue across agent boundaries.</p>
+          <blockquote><p><strong>The conversation belongs to the workspace, not to the model.</strong></p></blockquote>
+          <p>This principle changes how we think about AI-assisted development.</p>
+          <p>Instead of choosing one agent and building an entire workflow around it, developers can choose different agents as their needs evolve.</p>
+          <p>The history remains. The workspace remains. The developer remains in control.</p>
+          <p>Only the agent changes.</p>
 
-  <p>
-    Amarcode was built to answer a simple question: what if the workspace remembered everything you were doing, so you never had to start over? The idea grew out of the observation that modern AI-assisted development tools treat each session as a fresh start. You send a prompt, get a response, and the conversation resets. The history is there, but it's buried, and it doesn't carry forward the momentum of what you were building.
-  </p>
+          <h2>Why we built a daemon</h2>
+          <p>As Amarcode developed, another architectural question emerged.</p>
+          <p>Why should the lifecycle of an AI agent depend on whether an editor window is open?</p>
+          <p>A coding agent may execute a long-running task, inspect files, run tests, or maintain an active conversation.</p>
+          <p>None of those operations inherently requires a graphical interface.</p>
+          <p>Yet when the interface and the agent are tightly coupled, closing the application or losing a connection can interrupt the workflow.</p>
+          <p>We wanted to separate those concerns.</p>
+          <p>That led to <code>amarcoded</code>, the independent daemon at the center of Amarcode's architecture.</p>
+          <p>The daemon manages agent processes, sessions, persistent conversations, and communication with the development environment.</p>
+          <p>The editor becomes a client of that infrastructure rather than the owner of every operation.</p>
+          <p>This separation makes the system more resilient and creates opportunities that would be difficult to support in a tightly coupled desktop application.</p>
+          <p>A user interface can disconnect and reconnect without requiring the underlying work to be discarded.</p>
+          <p>Conversation history can remain available independently of the active agent process.</p>
+          <p>Different interfaces can interact with the same underlying development infrastructure.</p>
+          <p>Most importantly, the daemon provides a stable foundation on which additional capabilities can be built without repeatedly redesigning the editor.</p>
+          <p>What began as an architectural decision about process management has become one of the most important aspects of the project.</p>
 
-  <p>
-    The problem isn't just about saving chat history. It's about continuity. When you return to a project after a break, or when you switch between your laptop and your desktop, the work should pick up exactly where you left off. The conversation should resume, the files should be in the same state, and the agent should remember the context you established. That's what Amarcode provides: a persistent workspace that survives window closures, machine restarts, and even daemon restarts.
-  </p>
+          <h2>Beyond the local machine</h2>
+          <p>Software development rarely happens entirely within a single graphical application.</p>
+          <p>Developers work across local machines, remote servers, containers, and specialized computing environments.</p>
+          <p>A project may live on a workstation while its computationally expensive tasks run elsewhere. A developer may need access to a remote GPU, a Linux development server, or a machine that has the necessary toolchain installed.</p>
+          <p>We believe the development environment should accommodate these workflows rather than force developers into separate, disconnected tools.</p>
+          <p>This is another reason Amarcode separates its interface from its execution infrastructure.</p>
+          <p>Through the daemon architecture, Amarcode can extend its capabilities beyond the local machine.</p>
+          <p>Remote development over SSH is a natural continuation of this design.</p>
+          <p>The same environment that coordinates local AI agents can provide access to remote development resources.</p>
+          <p>The objective is not to hide the underlying systems or replace the tools developers already rely on.</p>
+          <p>It is to bring them into a coherent workflow.</p>
+          <p>A developer should be able to work with code, agents, terminals, and remote resources without losing the continuity of the development process.</p>
+          <p>The physical location of the computation should not determine the identity of the workspace.</p>
 
-  <p>
-    Continuity isn't the only advantage. Amarcode also gives you real choice over the agent you work with. You're not locked into a single model or a single provider. If one agent isn't suited to the task, you can switch to another—one that's better at writing code, another that's better at explaining concepts, another that's better at navigating a large codebase. The agent runs on your own daemon, on your own machine, so your data never leaves your control.
-  </p>
+          <h2>Open protocols, not closed ecosystems</h2>
+          <p>A fundamental part of Amarcode's philosophy is interoperability.</p>
+          <p>We do not believe a development environment should dictate which AI provider a developer must use.</p>
+          <p>Nor should it require every agent to be rewritten specifically for that environment.</p>
+          <p>This is why the Agent Client Protocol (ACP) is important to Amarcode.</p>
+          <p>ACP provides a common interface through which compatible coding agents can communicate with development tools.</p>
+          <p>By building around a shared protocol, Amarcode can integrate different agents without hard-coding its entire architecture around a single provider.</p>
+          <p>But interoperability alone is not enough.</p>
+          <p>A common protocol can standardize communication without guaranteeing that every agent supports the same capabilities.</p>
+          <p>Session restoration, configuration, tool handling, and conversation persistence can still differ.</p>
+          <p>Amarcode therefore takes responsibility for the parts of the development experience that should remain consistent regardless of those differences.</p>
+          <p>The protocol enables communication.</p>
+          <p>The daemon manages execution and persistence.</p>
+          <p>The environment maintains continuity.</p>
+          <p>Together, these layers allow Amarcode to support an evolving ecosystem of agents while preserving a coherent developer experience.</p>
 
-  <p>
-    There's a third thread, too: the workspace itself is independent of any single window or application. Because the daemon manages the conversation, the chat history, the file state, and the agent interactions, you can close the Amarcode window, open it on another device, and your work is exactly where you left off. The window is just a view; the work happens elsewhere, and it stays waiting for you.
-  </p>
+          <h2>The developer must remain in control</h2>
+          <p>As AI agents become more capable, their actions become more consequential.</p>
+          <p>An agent that can modify files, execute commands, or interact with development infrastructure is no longer simply generating suggestions.</p>
+          <p>It is performing work.</p>
+          <p>That work needs to be observable.</p>
+          <p>Developers should be able to understand what an agent is doing, inspect its changes, review tool activity, and decide which operations are permitted.</p>
+          <p>We want Amarcode to make agent activity visible rather than burying it behind an opaque conversation interface.</p>
+          <p>This includes exposing tool calls and results, reviewing file changes, maintaining accessible development history, and respecting permission boundaries for potentially consequential operations.</p>
+          <p>Autonomy should not come at the expense of accountability.</p>
+          <p>The purpose of Amarcode is not to remove the developer from the process.</p>
+          <p>It is to give the developer better control over increasingly capable tools.</p>
 
-  <p>
-    This essay isn't a technical specification. It's an answer to the question many developers have asked, at one time or another: why does every new tool require me to start over? The answer shouldn't be "that's just how it works." It should be "we can do better."
-  </p>
+          <h2>What we're actually building</h2>
+          <p>It would be easy to describe Amarcode as an AI-powered code editor.</p>
+          <p>Technically, that description is not wrong.</p>
+          <p>But it misses the larger idea.</p>
+          <p>The editor is the visible part of the system. The deeper project is the infrastructure that allows developers to work with multiple AI agents while maintaining ownership of their environment, history, and workflow.</p>
+          <p>We are building a persistent development environment in which agents are interchangeable, execution is independent of the interface, and context can survive transitions between tools.</p>
+          <p>An environment where the developer does not have to commit to one AI provider.</p>
+          <p>Where switching agents does not automatically mean abandoning previous work.</p>
+          <p>Where local and remote development can share a coherent architecture.</p>
+          <p>And where the developer can inspect, direct, and retain control over what the agents do.</p>
+          <p>Not every part of this vision is solved. Semantic continuity remains an engineering challenge, particularly when agents expose different session capabilities or handle context differently.</p>
+          <p>But the direction is clear.</p>
+          <p>We believe the next generation of development tools should be designed around the continuity of the developer's work, not the permanence of any individual AI agent.</p>
 
-  <p>
-    If you've ever felt that frustration—explaining your work all over again, re-creating context that already exists, starting from the beginning each time you return—this is what Amarcode solves. It's not about adding features. It's about preserving the work you've already done, so you can keep moving forward.
-  </p>
-
-</div>
+          <h2>Why Amarcode matters</h2>
+          <p>AI coding agents will continue to improve.</p>
+          <p>Models will become more capable. New protocols will emerge. Some tools will disappear, and others will replace them.</p>
+          <p>We cannot predict which agent will be the best in five years.</p>
+          <p>And we should not have to.</p>
+          <p>The value of a development environment should not depend on the continued dominance of a particular model, provider, or interface.</p>
+          <p>It should come from its ability to preserve and coordinate the work being done.</p>
+          <p>That is the future we are building toward with Amarcode.</p>
+          <p>Not another agent competing for the developer's attention.</p>
+          <p>Not another interface that traps valuable context inside a proprietary session.</p>
+          <p>But an environment that allows different agents to contribute to the same evolving body of work.</p>
+          <blockquote><p><strong>Agents are temporary. The work is persistent.</strong></p></blockquote>
+          <p>And the developer should own that continuity.</p>
+          <p>That is why we're building Amarcode.</p>
+        </div>
+      </article>
+    </main>
+    <footer class="flex flex-wrap justify-between gap-4 border-t border-border px-6 py-6 text-sm sm:px-10 max-sm:py-5"><a href="/">Amarcode</a><span>Your agents. One continuous conversation.</span></footer>
+  </div>
+</Landing>
