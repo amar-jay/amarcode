@@ -262,8 +262,14 @@ export const daemonApi = {
     chatId: string,
     includeMessages = true,
     includeToolContent = false,
+    page?: { messageLimit: number; beforeMessageId?: string },
   ): Promise<GetChatResult> =>
-    invoke("get_chat", { chatId, includeMessages, includeToolContent }),
+    invoke("get_chat", {
+      chatId,
+      includeMessages,
+      includeToolContent,
+      ...page,
+    }),
   getMessageParts: (messageIds: string[]): Promise<MessagePart[]> =>
     invoke("get_message_parts", { messageIds }),
   listAcpEventsForChat: (chatId: string): Promise<AcpEvent[]> =>

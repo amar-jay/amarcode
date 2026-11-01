@@ -40,6 +40,7 @@ import {
   liveChatAtom,
   liveChatIsWorkingAtom,
   loadLiveChatAtom,
+  loadOlderChatMessagesAtom,
   openLiveChatAtom,
   respondLiveRequestAtom,
   submitLivePromptAtom,
@@ -377,5 +378,125 @@ describe("authoritative session recovery", () => {
     expect(store.get(liveChatAtom)?.sessionState?.turn?.user_message_id).toBe(
       "new-user",
     );
+  });
+});
+
+describe("paged chat history", () => {
+  const message = (
+    id: string,
+    content = id,
+  ): import("@/types").MessageDetail => ({
+    message: {
+      id,
+      chat_id: "chat-1",
+      agent_run_id: null,
+      role: "assistant",
+      content,
+      status: "complete",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    },
+    parts: [],
+    agent_id: null,
+  });
+  const page = (ids: string[], older = true): ChatDetail => ({
+    ...detail(snapshot()),
+    messages: ids.map((id) => message(id)),
+    has_older_messages: older,
+  });
+  it("requests only the latest page and keeps default refreshes bounded", async () => {
+    const store = setup();
+    vi.mocked(daemonApi.getChat).mockResolvedValueOnce(page(["m1", "m2"]));
+    await store.set(loadLiveChatAtom, "chat-1");
+    expect(daemonApi.getChat).toHaveBeenLastCalledWith("chat-1", true, false, {
+      messageLimit: 40,
+    });
+    vi.mocked(daemonApi.getChat).mockResolvedValueOnce(page(["m2", "m3"]));
+    await store.set(loadLiveChatAtom, { chatId: "chat-1", silent: true });
+    expect(
+      store.get(liveChatAtom)?.detail?.messages.map((item) => item.message.id),
+    ).toEqual(["m2", "m3"]);
+  });
+  it("prepends older pages without overwriting newer streamed messages or losing them on refresh", async () => {
+    const store = setup();
+    vi.mocked(daemonApi.getChat).mockResolvedValueOnce(page(["m2"]));
+    await store.set(loadLiveChatAtom, "chat-1");
+    const response = deferred<ChatDetail>();
+    vi.mocked(daemonApi.getChat).mockReturnValueOnce(response.promise);
+    const loading = store.set(loadOlderChatMessagesAtom);
+    expect(daemonApi.getChat).toHaveBeenLastCalledWith("chat-1", true, false, {
+      messageLimit: 40,
+      beforeMessageId: "m2",
+    });
+    expect(await store.set(loadOlderChatMessagesAtom)).toBe(false);
+    const current = store.get(liveChatAtom)!;
+    store.set(liveChatAtom, {
+      ...current,
+      detail: {
+        ...current.detail!,
+        messages: [message("m2", "new streamed text"), message("m3")],
+      },
+    });
+    response.resolve(page(["m0", "m1", "m2"], false));
+    expect(await loading).toBe(true);
+    expect(
+      store
+        .get(liveChatAtom)
+        ?.detail?.messages.map((item) => item.message.content),
+    ).toEqual(["m0", "m1", "new streamed text", "m3"]);
+    expect(store.get(liveChatAtom)?.detail?.has_older_messages).toBe(false);
+    vi.mocked(daemonApi.getChat).mockResolvedValueOnce(page(["m3", "m4"]));
+    await store.set(loadLiveChatAtom, { chatId: "chat-1", silent: true });
+    expect(
+      store.get(liveChatAtom)?.detail?.messages.map((item) => item.message.id),
+    ).toEqual(["m0", "m1", "m2", "m3", "m4"]);
+    expect(store.get(liveChatAtom)?.detail?.has_older_messages).toBe(false);
+  });
+  it("ignores an older page arriving after navigation", async () => {
+    const store = setup();
+    vi.mocked(daemonApi.getChat).mockResolvedValueOnce(page(["m2"]));
+    await store.set(loadLiveChatAtom, "chat-1");
+    const response = deferred<ChatDetail>();
+    vi.mocked(daemonApi.getChat).mockReturnValueOnce(response.promise);
+    const loading = store.set(loadOlderChatMessagesAtom);
+    store.set(openLiveChatAtom, "chat-2");
+    response.resolve(page(["m1"], false));
+    expect(await loading).toBe(false);
+    expect(store.get(liveChatAtom)?.chatId).toBe("chat-2");
+    expect(store.get(liveChatAtom)?.detail).toBeNull();
+  });
+  it("retains messages on page failure and lets the reader retry", async () => {
+    const store = setup();
+    vi.mocked(daemonApi.getChat).mockResolvedValueOnce(page(["m2"]));
+    await store.set(loadLiveChatAtom, "chat-1");
+    vi.mocked(daemonApi.getChat).mockRejectedValueOnce(
+      new Error("Disconnected"),
+    );
+    expect(await store.set(loadOlderChatMessagesAtom)).toBe(false);
+    expect(store.get(liveChatAtom)?.olderMessagesError).toBe("Disconnected");
+    expect(store.get(liveChatAtom)?.detail?.messages).toHaveLength(1);
+    vi.mocked(daemonApi.getChat).mockResolvedValueOnce(page(["m1"], false));
+    expect(await store.set(loadOlderChatMessagesAtom)).toBe(true);
+    expect(store.get(liveChatAtom)?.olderMessagesError).toBeNull();
+  });
+  it("allows paging again after the connection changes", async () => {
+    const store = setup();
+    vi.mocked(daemonApi.getChat).mockResolvedValueOnce(page(["m2"]));
+    await store.set(loadLiveChatAtom, "chat-1");
+    const stale = deferred<ChatDetail>();
+    vi.mocked(daemonApi.getChat).mockReturnValueOnce(stale.promise);
+    const first = store.set(loadOlderChatMessagesAtom);
+    store.set(daemonConnectionGenerationAtom, 1);
+    stale.resolve(page(["old"], false));
+    expect(await first).toBe(false);
+    expect(store.get(liveChatAtom)?.olderMessagesLoading).toBe(false);
+    expect(
+      store.get(liveChatAtom)?.detail?.messages.map((item) => item.message.id),
+    ).toEqual(["m2"]);
+    vi.mocked(daemonApi.getChat).mockResolvedValueOnce(page(["m1"], false));
+    expect(await store.set(loadOlderChatMessagesAtom)).toBe(true);
+    expect(
+      store.get(liveChatAtom)?.detail?.messages.map((item) => item.message.id),
+    ).toEqual(["m1", "m2"]);
   });
 });

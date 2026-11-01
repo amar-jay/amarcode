@@ -278,3 +278,85 @@ describe("assistant tool presentation", () => {
     );
   });
 });
+
+describe("completed conversation block caching", () => {
+  it("reuses completed blocks while streaming changes and invalidates them when details change", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => undefined,
+    });
+    const { groupChatBlocks } = await import("./message-parsing");
+    const row = (
+      id: string,
+      run: string,
+      role: "user" | "assistant",
+      content: string,
+    ): MessageDetail => ({
+      message: {
+        id,
+        chat_id: "chat",
+        agent_run_id: run,
+        role,
+        content,
+        status: "complete",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+      parts: [],
+      agent_id: "agent",
+    });
+    const oldUser = row("old-user", "old-run", "user", "First task");
+    const oldAnswer = row(
+      "old-answer",
+      "old-run",
+      "assistant",
+      "Completed work",
+    );
+    const user = row("user", "new-run", "user", "Next task");
+    const answer = row("answer", "new-run", "assistant", "First chunk");
+    const cache: import("./message-parsing").ChatBlockCache = new Map();
+    const initial = groupChatBlocks(
+      [oldUser, oldAnswer, user, answer],
+      true,
+      false,
+      cache,
+    );
+    const next = groupChatBlocks(
+      [
+        oldUser,
+        oldAnswer,
+        user,
+        { ...answer, message: { ...answer.message, content: "Second chunk" } },
+      ],
+      true,
+      false,
+      cache,
+    );
+    expect(next[1]).toBe(initial[1]);
+    expect(next[3]).not.toBe(initial[3]);
+    const changed = groupChatBlocks(
+      [
+        oldUser,
+        {
+          ...oldAnswer,
+          message: { ...oldAnswer.message, content: "Loaded full details" },
+        },
+        user,
+        answer,
+      ],
+      true,
+      false,
+      cache,
+    );
+    expect(changed[1]).not.toBe(initial[1]);
+    const verbose = groupChatBlocks(
+      [oldUser, oldAnswer, user, answer],
+      true,
+      true,
+      cache,
+    );
+    expect(verbose[1]).not.toBe(initial[1]);
+    groupChatBlocks([user, answer], false, true, cache);
+    expect(cache.has("old-answer")).toBe(false);
+  });
+});

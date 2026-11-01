@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import { CHAT_HISTORY_PAGE_SIZE, mergeChatHistory } from "@/lib/chat-history";
 import { daemonApi } from "@/api";
 import type {
   AgentFailureKind,
@@ -74,6 +75,10 @@ export type LiveChatState = {
   sessionCommands: SessionCommands | null;
   sessionConfigAgentId: string | null;
   loading: boolean;
+  historyExpanded?: boolean;
+  olderMessagesLoading?: boolean;
+  olderMessagesGeneration?: number;
+  olderMessagesError?: string | null;
   error: string | null;
   errorKind: AgentFailureKind | null;
   authRequired: {
@@ -433,7 +438,9 @@ export const loadLiveChatAtom = atom(
     }
 
     try {
-      const result = await daemonApi.getChat(id, true);
+      const result = await daemonApi.getChat(id, true, false, {
+        messageLimit: CHAT_HISTORY_PAGE_SIZE,
+      });
       const current = get(liveChatAtom);
       // Ignore stale responses after navigation away.
       if (!current || !stillCurrent()) return;
@@ -448,7 +455,25 @@ export const loadLiveChatAtom = atom(
             : (result.session_commands ?? null);
         set(liveChatAtom, {
           ...current,
-          detail: result,
+          detail: {
+            ...result,
+            messages: current.historyExpanded
+              ? mergeChatHistory(
+                  current.detail?.messages ?? [],
+                  result.messages,
+                )
+              : result.messages,
+            has_older_messages:
+              current.historyExpanded &&
+              current.detail?.messages.some(
+                (item) =>
+                  !result.messages.some(
+                    (next) => next.message.id === item.message.id,
+                  ),
+              )
+                ? current.detail.has_older_messages
+                : result.has_older_messages,
+          },
           sessionCommands,
           runId: sessionCommands?.run_id ?? current.runId,
           sessionConfig: result.session_config ?? current.sessionConfig,
@@ -459,6 +484,9 @@ export const loadLiveChatAtom = atom(
             null,
           contextUsage: result.context_usage ?? current.contextUsage,
           loading: false,
+          olderMessagesLoading:
+            current.olderMessagesGeneration === generation &&
+            current.olderMessagesLoading,
           // Keep failure state across detail reloads. Clearing it here made the
           // banner flash for ~80ms after turnUpdated(failed) scheduled a refresh.
         });
@@ -494,6 +522,88 @@ export const loadLiveChatAtom = atom(
           Math.min(250 * 2 ** Math.min(attempt, 5), 5_000),
         );
       }
+    }
+  },
+);
+
+/** Fetch another page without replacing newer streamed messages or session state. */
+export const loadOlderChatMessagesAtom = atom(
+  null,
+  async (get, set): Promise<boolean> => {
+    const live = get(liveChatAtom);
+    const oldest = live?.detail?.messages[0]?.message.id;
+    if (
+      !live?.detail ||
+      !oldest ||
+      !live.detail.has_older_messages ||
+      live.loading ||
+      (live.olderMessagesLoading &&
+        live.olderMessagesGeneration === get(daemonConnectionGenerationAtom))
+    )
+      return false;
+    const identity = get(liveChatIdentityAtom);
+    const generation = get(daemonConnectionGenerationAtom);
+    const currentChat = () =>
+      identity === get(liveChatIdentityAtom) &&
+      generation === get(daemonConnectionGenerationAtom) &&
+      get(liveChatAtom)?.chatId === live.chatId;
+    const releaseOlderLoad = () => {
+      const current = get(liveChatAtom);
+      if (
+        !current ||
+        current.chatId !== live.chatId ||
+        current.olderMessagesGeneration !== generation
+      )
+        return;
+      set(liveChatAtom, { ...current, olderMessagesLoading: false });
+    };
+    set(liveChatAtom, {
+      ...live,
+      olderMessagesLoading: true,
+      olderMessagesGeneration: generation,
+      olderMessagesError: null,
+    });
+    try {
+      const result = await daemonApi.getChat(live.chatId, true, false, {
+        messageLimit: CHAT_HISTORY_PAGE_SIZE,
+        beforeMessageId: oldest,
+      });
+      const current = get(liveChatAtom);
+      if (!currentChat() || !current?.detail || !isChatDetail(result)) {
+        releaseOlderLoad();
+        return false;
+      }
+      const messages = mergeChatHistory(
+        result.messages,
+        current.detail.messages,
+      );
+      set(liveChatAtom, {
+        ...current,
+        historyExpanded: true,
+        olderMessagesLoading: false,
+        detail: {
+          ...current.detail,
+          messages,
+          has_older_messages: result.has_older_messages,
+        },
+      });
+      return messages[0]?.message.id !== oldest;
+    } catch (cause) {
+      const current = get(liveChatAtom);
+      if (!currentChat()) {
+        releaseOlderLoad();
+        return false;
+      }
+      if (current)
+        set(liveChatAtom, {
+          ...current,
+          olderMessagesLoading: false,
+          olderMessagesError:
+            cause instanceof Error
+              ? cause.message
+              : "Could not load earlier messages.",
+        });
+      return false;
     }
   },
 );
@@ -623,18 +733,19 @@ export const scheduleLiveChatRefreshAtom = atom(
         refreshMessages.clear();
         void (async () => {
           try {
-            if (get(liveChatAtom)?.chatId !== chatId) return;
-            if (full || messages.size === 0)
-              await set(loadLiveChatAtom, { chatId, silent: true });
-            else await set(patchLiveChatMessagesAtom, { chatId, messages });
+            if (get(liveChatAtom)?.chatId === chatId) {
+              if (full || messages.size === 0)
+                await set(loadLiveChatAtom, { chatId, silent: true });
+              else await set(patchLiveChatMessagesAtom, { chatId, messages });
+            }
           } finally {
             refreshRunning = false;
             if (get(liveChatAtom)?.chatId !== chatId) {
               refreshFull = false;
               refreshMessages.clear();
-              return;
+            } else {
+              kickLiveChatRefresh?.();
             }
-            kickLiveChatRefresh?.();
           }
         })();
       }, STREAM_REFRESH_MS);

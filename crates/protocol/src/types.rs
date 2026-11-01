@@ -264,6 +264,9 @@ pub struct ChatDetail {
     pub chat: Chat,
     pub messages: Vec<MessageDetail>,
     #[serde(default)]
+    #[ts(optional)]
+    pub has_older_messages: Option<bool>,
+    #[serde(default)]
     pub session_config: Vec<SessionConfigOption>,
     #[serde(default)]
     pub session_commands: Option<SessionCommands>,

@@ -3,7 +3,7 @@
 use rusqlite::params;
 
 use super::{cell_parse, map_message, now, to_error, Message, MessagePart, Store};
-use crate::{protocol::MessageStatus, Result};
+use crate::{protocol::MessageStatus, Error, Result};
 
 impl Store {
     pub fn create_message(&self, message: &Message) -> Result<()> {
@@ -66,6 +66,51 @@ impl Store {
             .map_err(to_error)?;
         rows.collect::<std::result::Result<_, _>>()
             .map_err(to_error)
+    }
+
+    /// Cursor pagination uses the same stable ordering as full history reads.
+    pub fn message_page(
+        &self,
+        chat_id: &str,
+        limit: u32,
+        before: Option<&str>,
+    ) -> Result<(Vec<Message>, bool)> {
+        if !(1..=200).contains(&limit) {
+            return Err(Error::msg("message_limit must be between 1 and 200"));
+        }
+        let anchor = before
+            .map(|id| {
+                self.get_message(id)?
+                    .filter(|message| message.chat_id == chat_id)
+                    .ok_or_else(|| Error::msg("message cursor does not belong to this chat"))
+            })
+            .transpose()?;
+        let connection = self.connection()?;
+        let query = if anchor.is_some() {
+            "SELECT id,chat_id,agent_run_id,role,content,status,created_at,updated_at
+             FROM messages WHERE chat_id=?1 AND (created_at,id) < (?2,?3)
+             ORDER BY created_at DESC,id DESC LIMIT ?4"
+        } else {
+            "SELECT id,chat_id,agent_run_id,role,content,status,created_at,updated_at
+             FROM messages WHERE chat_id=?1 ORDER BY created_at DESC,id DESC LIMIT ?2"
+        };
+        let mut statement = connection.prepare(query).map_err(to_error)?;
+        let rows = if let Some(anchor) = anchor {
+            statement.query_map(
+                params![chat_id, anchor.created_at, anchor.id, limit + 1],
+                map_message,
+            )
+        } else {
+            statement.query_map(params![chat_id, limit + 1], map_message)
+        }
+        .map_err(to_error)?;
+        let mut messages = rows
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(to_error)?;
+        let has_older = messages.len() > limit as usize;
+        messages.truncate(limit as usize);
+        messages.reverse();
+        Ok((messages, has_older))
     }
 
     pub fn replace_message_parts(&self, message_id: &str, parts: &[MessagePart]) -> Result<()> {

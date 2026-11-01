@@ -409,6 +409,15 @@ function buildTimeline(
   return steps;
 }
 
+export type ChatBlockCache = Map<
+  string,
+  {
+    block: Extract<ChatBlock, { kind: "assistant" }>;
+    verbose: boolean;
+    prompt: string;
+  }
+>;
+
 /**
  * ACP may emit several assistant messages per turn (commentary vs final, or
  * per-messageId streams). Render them as one bubble so the UI doesn't look
@@ -418,6 +427,7 @@ export function groupChatBlocks(
   messages: MessageDetail[],
   turnWorking: boolean,
   verbose: boolean,
+  cache?: ChatBlockCache,
 ): ChatBlock[] {
   const blocks: ChatBlock[] = [];
 
@@ -468,6 +478,30 @@ export function groupChatBlocks(
   // Materialize merged fields.
   for (const [index, block] of blocks.entries()) {
     if (block.kind !== "assistant") continue;
+    const preceding = blocks[index - 1];
+    const prompt =
+      preceding?.kind === "user" &&
+      preceding.item.message.agent_run_id ===
+        block.items[0]?.message.agent_run_id
+        ? preceding.item.message.content
+        : "";
+    const streaming = block.items.some(
+      (item) =>
+        item.message.status === "streaming" ||
+        (turnWorking && item.message.id === messages.at(-1)?.message.id),
+    );
+    const cached = cache?.get(block.key);
+    if (
+      cached &&
+      cached.verbose === verbose &&
+      cached.prompt === prompt &&
+      cached.block.streaming === streaming &&
+      cached.block.items.length === block.items.length &&
+      cached.block.items.every((item, i) => item === block.items[i])
+    ) {
+      blocks[index] = cached.block;
+      continue;
+    }
     block.content = block.items
       .map((item) => item.message.content)
       .filter((text) => text.trim())
@@ -523,7 +557,12 @@ export function groupChatBlocks(
     block.completedAt =
       block.items[block.items.length - 1]?.message.updated_at ??
       block.startedAt;
+    cache?.set(block.key, { block, verbose, prompt });
   }
 
+  if (cache) {
+    const keys = new Set(blocks.map((block) => block.key));
+    for (const key of cache.keys()) if (!keys.has(key)) cache.delete(key);
+  }
   return blocks;
 }

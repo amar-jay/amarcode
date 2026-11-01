@@ -5,7 +5,7 @@ import {
   ChatBlock,
   groupChatBlocks,
 } from "@/lib/message-parsing";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { daemonApi } from "@/api";
 import { notify } from "@/lib/notify";
 import { LoaderCircle, AlertTriangle, CircleX } from "lucide-react";
@@ -124,7 +124,7 @@ function AssistantText({
   );
 }
 
-export function UserMessage({
+export const UserMessage = memo(function UserMessage({
   block,
   verboseReasoning,
   waitingLabel,
@@ -352,4 +352,4 @@ export function UserMessage({
       </MessageContent>
     </Message>
   );
-}
+});

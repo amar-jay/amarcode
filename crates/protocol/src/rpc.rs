@@ -319,6 +319,12 @@ pub struct GetChatParams {
     pub include_messages: bool,
     #[serde(default = "default_true")]
     pub include_tool_content: bool,
+    #[serde(default)]
+    #[ts(optional)]
+    pub message_limit: Option<u32>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub before_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

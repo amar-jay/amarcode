@@ -23,6 +23,7 @@ use crate::{
 pub struct ChatDetail {
     pub chat: Chat,
     pub messages: Vec<MessageDetail>,
+    pub has_older_messages: bool,
     pub session_config: Vec<crate::protocol::SessionConfigOption>,
     pub context_usage: Option<crate::protocol::ContextUsage>,
 }
@@ -87,8 +88,28 @@ impl ChatManager {
 
     /// Load chat row + messages + parts for UI restore.
     pub fn get_with_messages(&self, id: &str) -> Result<ChatDetail> {
-        let chat = self.get_required(id)?;
         let messages = self.store.messages(id)?;
+        self.detail(id, messages, false)
+    }
+
+    pub fn get_with_message_page(
+        &self,
+        id: &str,
+        limit: u32,
+        before: Option<&str>,
+    ) -> Result<ChatDetail> {
+        self.get_required(id)?;
+        let (messages, has_older) = self.store.message_page(id, limit, before)?;
+        self.detail(id, messages, has_older)
+    }
+
+    fn detail(
+        &self,
+        id: &str,
+        messages: Vec<Message>,
+        has_older_messages: bool,
+    ) -> Result<ChatDetail> {
+        let chat = self.get_required(id)?;
         let mut detailed = Vec::with_capacity(messages.len());
         for message in messages {
             let parts = self.store.message_parts(&message.id)?;
@@ -114,6 +135,7 @@ impl ChatManager {
         Ok(ChatDetail {
             chat,
             messages: detailed,
+            has_older_messages,
             session_config,
             context_usage,
         })

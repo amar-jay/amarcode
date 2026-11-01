@@ -245,7 +245,15 @@ fn list_chats(app: &App, params: Value) -> Result<Value> {
 fn get_chat(app: &App, params: Value) -> Result<Value> {
     let p: GetChatParams = parse_params(params)?;
     if p.include_messages {
-        let mut detail = app.chats.get_with_messages(&p.chat_id)?;
+        let mut detail = if let Some(limit) = p.message_limit {
+            app.chats
+                .get_with_message_page(&p.chat_id, limit, p.before_message_id.as_deref())?
+        } else {
+            if p.before_message_id.is_some() {
+                return Err(Error::msg("before_message_id requires message_limit"));
+            }
+            app.chats.get_with_messages(&p.chat_id)?
+        };
         if !p.include_tool_content {
             compact_tool_parts(&mut detail);
         }
@@ -467,6 +475,7 @@ fn chat_detail_json(detail: &ChatDetail) -> Result<Value> {
     Ok(json!({
         "chat": detail.chat,
         "messages": messages,
+        "has_older_messages": detail.has_older_messages,
         "session_config": detail.session_config,
         "context_usage": detail.context_usage,
     }))

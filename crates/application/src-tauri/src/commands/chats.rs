@@ -36,12 +36,16 @@ pub async fn get_chat(
     chat_id: String,
     include_messages: bool,
     include_tool_content: bool,
+    message_limit: Option<u32>,
+    before_message_id: Option<String>,
 ) -> Result<GetChatResult, String> {
     client
         .get_chat(GetChatParams {
             chat_id,
             include_messages,
             include_tool_content,
+            message_limit,
+            before_message_id,
         })
         .await
 }

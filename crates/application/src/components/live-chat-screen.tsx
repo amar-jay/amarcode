@@ -1,3 +1,4 @@
+import { ChatHistoryLoader } from "./chat-history-loader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
@@ -40,6 +41,7 @@ import {
   liveChatAtom,
   liveChatIsWorkingAtom,
   loadLiveChatAtom,
+  loadOlderChatMessagesAtom,
   openLiveChatAtom,
   refreshChatsAtom,
   respondLiveRequestAtom,
@@ -53,7 +55,11 @@ import {
   verboseReasoningAtom,
   sidePanelMaximizedAtom,
 } from "@/state";
-import { groupChatBlocks, type ChatBlock } from "@/lib/message-parsing";
+import {
+  groupChatBlocks,
+  type ChatBlock,
+  type ChatBlockCache,
+} from "@/lib/message-parsing";
 import { UserMessage } from "./user-message";
 
 type ConversationView = "chat" | "activity";
@@ -113,6 +119,7 @@ export function LiveChatScreen() {
 
   const openLiveChat = useSetAtom(openLiveChatAtom);
   const loadLiveChat = useSetAtom(loadLiveChatAtom);
+  const loadOlderMessages = useSetAtom(loadOlderChatMessagesAtom);
   const applyEvent = useSetAtom(applyLiveChatEventAtom);
   const submitPrompt = useSetAtom(submitLivePromptAtom);
   const changeSessionConfig = useSetAtom(setLiveSessionConfigOptionAtom);
@@ -193,9 +200,13 @@ export function LiveChatScreen() {
     () => live?.detail?.messages ?? [],
     [live?.detail?.messages],
   );
+  const blockCache = useMemo(() => {
+    void chatId;
+    return new Map() as ChatBlockCache;
+  }, [chatId]);
   const blocks = useMemo(
-    () => groupChatBlocks(messages, isWorking, verboseReasoning),
-    [messages, isWorking, verboseReasoning],
+    () => groupChatBlocks(messages, isWorking, verboseReasoning, blockCache),
+    [messages, isWorking, verboseReasoning, blockCache],
   );
 
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
@@ -347,7 +358,11 @@ export function LiveChatScreen() {
                   if (event.key === "Enter")
                     moveSearchResult(event.shiftKey ? -1 : 1);
                 }}
-                placeholder="Find in chat"
+                placeholder={
+                  live.detail?.has_older_messages
+                    ? "Find in loaded messages"
+                    : "Find in chat"
+                }
                 aria-label="Find in chat"
                 className="pr-16 pl-7 [&::-webkit-search-cancel-button]:hidden"
               />
@@ -437,8 +452,19 @@ export function LiveChatScreen() {
           </>
         )}
       </header>
-      <Conversation className={conversationView === "activity" ? "hidden" : ""}>
+      <Conversation
+        initial="instant"
+        resize="instant"
+        className={conversationView === "activity" ? "hidden" : ""}
+      >
         <ConversationContent className="mx-auto w-full max-w-3xl gap-2 py-8">
+          <ChatHistoryLoader
+            oldestId={messages[0]?.message.id}
+            hasOlder={Boolean(live.detail?.has_older_messages)}
+            loading={Boolean(live.olderMessagesLoading)}
+            error={live.olderMessagesError}
+            onLoad={loadOlderMessages}
+          />
           {blocks.map((block) => {
             const matches = matchingBlockKeySet.has(block.key);
             const active = block.key === activeMatchKey;
@@ -446,6 +472,14 @@ export function LiveChatScreen() {
               <div
                 key={block.key}
                 data-chat-search-key={block.key}
+                style={
+                  block.kind === "assistant" && !block.streaming
+                    ? {
+                        contentVisibility: "auto",
+                        containIntrinsicSize: "auto 160px",
+                      }
+                    : undefined
+                }
                 className={`rounded-lg transition-[background-color,box-shadow] motion-reduce:scroll-auto ${
                   active
                     ? "bg-primary/8 ring-2 ring-primary/35"
@@ -478,13 +512,15 @@ export function LiveChatScreen() {
           conversationView === "activity" ? "flex min-h-0 flex-1" : "hidden"
         }
       >
-        <ActivityView
-          key={chatId}
-          events={activityEvents}
-          runs={activityRuns}
-          loading={activityLoading}
-          error={activityError}
-        />
+        {conversationView === "activity" && (
+          <ActivityView
+            key={chatId}
+            events={activityEvents}
+            runs={activityRuns}
+            loading={activityLoading}
+            error={activityError}
+          />
+        )}
       </div>
       <div className="px-4 pb-4">
         {live.pendingRequest && (
