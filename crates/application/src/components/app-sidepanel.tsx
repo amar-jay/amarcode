@@ -34,7 +34,7 @@ import {
 import { useWorkspaceEditor } from "@/hooks/use-workspace-editor";
 import { WorkspaceEditor } from "./workspace-editor";
 import { WorkspaceDiffViewer } from "./workspace-diff-viewer";
-import { Button } from "./ui/button";
+import { TooltipButton as Button } from "./ui/tooltip-button";
 import { cn } from "@/lib/utils";
 import {
   ResizableHandle,

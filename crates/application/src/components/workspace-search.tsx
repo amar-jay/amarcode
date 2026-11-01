@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { daemonApi } from "@/api";
 import type { WorkspaceSearchResult } from "@/types";
-import { Button } from "./ui/button";
+import { TooltipButton as Button } from "./ui/tooltip-button";
 
 export function WorkspaceSearch({
   workspacePath,

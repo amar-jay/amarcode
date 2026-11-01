@@ -129,7 +129,6 @@ export function AppSidebar({
                 <SidebarMenuButton
                   isActive={false}
                   tooltip={`New chat (${shortcutHint("new-chat")})`}
-                  title={`New chat (${shortcutHint("new-chat")})`}
                   onClick={onNewChat}
                 >
                   <Plus />

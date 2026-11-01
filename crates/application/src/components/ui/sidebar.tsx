@@ -1,3 +1,4 @@
+import { TooltipButton } from "./tooltip-button";
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Slot } from "radix-ui";
@@ -239,7 +240,7 @@ function SidebarTrigger({
   const { toggleSidebar } = useSidebar();
 
   return (
-    <Button
+    <TooltipButton
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
       variant="ghost"
@@ -253,7 +254,7 @@ function SidebarTrigger({
     >
       <PanelLeftIcon />
       <span className="sr-only">Toggle Sidebar</span>
-    </Button>
+    </TooltipButton>
   );
 }
 

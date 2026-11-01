@@ -7,6 +7,11 @@ import { shortcutHint } from "@/lib/app-shortcuts";
 import { daemonApi } from "@/api";
 import { ChatStateIndicators } from "@/components/chat-state-indicators";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   liveChatAtom,
   liveChatIsWorkingAtom,
   sidePanelOpenAtom,
@@ -91,16 +96,22 @@ export function TopBar() {
                 : "Return to chat"}
             </button>
           )}
-          <button
-            type="button"
-            className="grid h-9 w-10 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            disabled={isOpeningSheet}
-            onClick={() => void openWorkspacePanel()}
-            aria-label="Open workspace panel"
-            title={`Workspace (${shortcutHint("workspace")})`}
-          >
-            <PanelRightOpen className="size-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="grid h-9 w-10 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                disabled={isOpeningSheet}
+                onClick={() => void openWorkspacePanel()}
+                aria-label="Open workspace panel"
+              >
+                <PanelRightOpen className="size-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {`Workspace (${shortcutHint("workspace")})`}
+            </TooltipContent>
+          </Tooltip>
           <button
             type="button"
             className="grid h-9 w-12 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

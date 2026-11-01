@@ -306,7 +306,6 @@ function AppPromptInput({
                 disabled={isChatComposer}
                 onClick={openDirectory}
                 className="max-w-40 min-w-0 @max-[480px]/prompt:max-w-7"
-                title={workspacePath || ""}
               >
                 <FolderOpen size={16} />
                 {workspacePath && (

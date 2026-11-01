@@ -19,9 +19,14 @@ import { Shimmer } from "@/components/ai-elements/shimmer";
 import type { AcpEvent, AgentRun, PromptAttachment } from "@/types";
 import { shortcutOverlayOpen } from "@/lib/app-shortcuts";
 import { daemonApi } from "@/api";
-import { Button } from "@/components/ui/button";
+import { TooltipButton as Button } from "@/components/ui/tooltip-button";
 import { Input } from "@/components/ui/input";
 import { Toggle } from "@/components/ui/toggle";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import AppPromptInput from "./main-prompt-input";
 import { ActivityView } from "./activity/activity-view";
 import { LiveChatFailureBanner } from "./live-chat-failure-banner";
@@ -393,26 +398,30 @@ export function LiveChatScreen() {
               {live.detail?.chat.title ?? session.chat.title ?? "Loading chat"}
             </h1>
             <div className="ml-auto flex">
-              <Toggle
-                size="sm"
-                pressed={conversationView === "activity"}
-                onPressedChange={(pressed) => {
-                  closeSearch();
-                  setConversationView(pressed ? "activity" : "chat");
-                }}
-                aria-label={
-                  conversationView === "activity"
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Toggle
+                    size="sm"
+                    pressed={conversationView === "activity"}
+                    onPressedChange={(pressed) => {
+                      closeSearch();
+                      setConversationView(pressed ? "activity" : "chat");
+                    }}
+                    aria-label={
+                      conversationView === "activity"
+                        ? "Show conversation"
+                        : "Show activity"
+                    }
+                  >
+                    <RotateCwFadingClock className="size-4" />
+                  </Toggle>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {conversationView === "activity"
                     ? "Show conversation"
-                    : "Show activity"
-                }
-                title={
-                  conversationView === "activity"
-                    ? "Show conversation"
-                    : "Show activity"
-                }
-              >
-                <RotateCwFadingClock className="size-4" />
-              </Toggle>
+                    : "Show activity"}
+                </TooltipContent>
+              </Tooltip>
 
               <Button
                 type="button"
