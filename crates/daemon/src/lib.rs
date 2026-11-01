@@ -28,3 +28,5 @@ pub use config::Config;
 pub use error::{Error, Result};
 
 pub mod shell;
+
+pub(crate) mod x11;

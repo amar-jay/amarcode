@@ -16,8 +16,16 @@ use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Control {
-    Open { cols: u16, rows: u16 },
-    Resize { cols: u16, rows: u16 },
+    Open {
+        cols: u16,
+        rows: u16,
+        #[serde(default)]
+        x11: Option<crate::x11::Request>,
+    },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
 }
 fn size(cols: u16, rows: u16) -> Result<PtySize> {
     if cols == 0 || rows == 0 || cols > 1000 || rows > 1000 {
@@ -72,11 +80,30 @@ where
         .map_err(|_| Error::msg("Terminal open timed out"))?
         .ok_or_else(|| Error::msg("Terminal client disconnected"))?
         .map_err(|e| Error::msg(e.to_string()))?;
-    let Control::Open { cols, rows } =
-        serde_json::from_str(first.to_text().map_err(|e| Error::msg(e.to_string()))?)?
-    else {
+    let text = first
+        .to_text()
+        .map_err(|error| Error::msg(error.to_string()))?;
+    if text.len() > 4096 {
+        return Err(Error::msg("Terminal open frame too large"));
+    }
+    let Control::Open { cols, rows, x11 } = serde_json::from_str(text)? else {
         return Err(Error::msg("Expected terminal open"));
     };
+    let x11 = match x11 {
+        Some(request) => Some(crate::x11::RemoteDisplay::new(&request).await?),
+        None => None,
+    };
+    let mut forwarding = crate::x11::Mux::new();
+    if x11.is_some() {
+        socket
+            .send(Message::Text(
+                serde_json::json!({"type":"x11_ready","version":1})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .map_err(|error| Error::msg(error.to_string()))?;
+    }
     let pair = native_pty_system()
         .openpty(size(cols, rows)?)
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -92,8 +119,20 @@ where
     command.env("TERM", "xterm-256color");
     // This PTY is independent of the terminal that launched the daemon.
     // Retaining these markers makes tmux/screen reject legitimate sessions.
-    for variable in ["TMUX", "TMUX_PANE", "STY"] {
+    for variable in [
+        "TMUX",
+        "TMUX_PANE",
+        "STY",
+        "DISPLAY",
+        "XAUTHORITY",
+        "WAYLAND_DISPLAY",
+        "WAYLAND_SOCKET",
+    ] {
         command.env_remove(variable);
+    }
+    if let Some(display) = &x11 {
+        command.env("DISPLAY", &display.display);
+        command.env("XAUTHORITY", display.authority.path());
     }
     if let Some(home) = dirs::home_dir() {
         command.cwd(home);
@@ -110,6 +149,8 @@ where
     };
     let (mut reader, mut writer) = streams(session.master.as_ref())?;
     let (input, mut writes) = tokio::sync::mpsc::channel::<Vec<u8>>(16);
+    let (consumed, mut terminal_acks) = tokio::sync::mpsc::channel(16);
+    let consumed = x11.as_ref().map(|_| consumed);
     let stop = session.stop.clone();
     std::thread::spawn(move || {
         while let Some(bytes) = writes.blocking_recv() {
@@ -127,6 +168,11 @@ where
             }
             if stop.load(Ordering::Relaxed) {
                 break;
+            }
+            if let Some(consumed) = &consumed {
+                if consumed.blocking_send(()).is_err() {
+                    break;
+                }
             }
         }
     });
@@ -157,6 +203,22 @@ where
     let mut child_poll = tokio::time::interval(std::time::Duration::from_millis(100));
     loop {
         tokio::select! {
+            Some(()) = terminal_acks.recv(), if x11.is_some() => {
+                tokio::time::timeout(std::time::Duration::from_secs(15),
+                    socket.send(Message::Text(serde_json::json!({"type":"terminal_ack"}).to_string().into())))
+                    .await.map_err(|_| Error::msg("Terminal write timed out"))?
+                    .map_err(|error| Error::msg(error.to_string()))?;
+            }
+            accepted = async { x11.as_ref().expect("guarded X11 listener").listener.accept().await },
+                if x11.is_some() && forwarding.can_open() => {
+                let (stream, _) = accepted?;
+                let id = forwarding.next_id()?;
+                forwarding.open_remote(id, stream)?;
+                send_x11(socket, crate::x11::Frame::Open { id }).await?;
+            }
+            frame = forwarding.next(), if x11.is_some() => {
+                if let Some(frame) = frame { send_x11(socket, frame).await?; }
+            }
             _ = child_poll.tick() => {
                 if let Some(code) = exited {
                     // Continue draining large output. A detached descendant may keep
@@ -205,9 +267,17 @@ where
                     if bytes.len() > 65536 { return Err(Error::msg("Terminal input too large")); }
                     input.try_send(bytes.to_vec()).map_err(|_| Error::msg("Terminal input is not being consumed"))?;
                 }
-                Some(Ok(Message::Text(text))) => match serde_json::from_str(&text)? {
-                    Control::Resize { cols, rows } => session.master.resize(size(cols, rows)?).map_err(|e| Error::msg(e.to_string()))?,
-                    Control::Open { .. } => return Err(Error::msg("Terminal is already open")),
+                Some(Ok(Message::Text(text))) => {
+                    if text.len() > 65536 { return Err(Error::msg("Terminal control frame too large")); }
+                    if let Ok(frame) = serde_json::from_str::<crate::x11::Frame>(&text) {
+                        if x11.is_none() { return Err(Error::msg("X11 forwarding is not enabled")); }
+                        forwarding.receive(frame)?;
+                    } else {
+                        match serde_json::from_str(&text)? {
+                            Control::Resize { cols, rows } => session.master.resize(size(cols, rows)?).map_err(|e| Error::msg(e.to_string()))?,
+                            Control::Open { .. } => return Err(Error::msg("Terminal is already open")),
+                        }
+                    }
                 },
                 Some(Ok(Message::Ping(bytes))) => {
                     tokio::time::timeout(std::time::Duration::from_secs(15), socket.send(Message::Pong(bytes)))
@@ -222,6 +292,19 @@ where
             }
         }
     }
+}
+
+async fn send_x11<S: AsyncRead + AsyncWrite + Unpin>(
+    socket: &mut WebSocketStream<S>,
+    frame: crate::x11::Frame,
+) -> Result<()> {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        socket.send(Message::Text(serde_json::to_string(&frame)?.into())),
+    )
+    .await
+    .map_err(|_| Error::msg("X11 write timed out"))?
+    .map_err(|error| Error::msg(error.to_string()))
 }
 
 async fn send_exit<S: AsyncRead + AsyncWrite + Unpin>(

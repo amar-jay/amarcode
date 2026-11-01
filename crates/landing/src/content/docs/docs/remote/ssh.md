@@ -25,6 +25,23 @@ amarcoded ssh wss://your-host/rpc
 
 Commands run as the daemon’s user. Type `exit` or press Ctrl+D to leave.
 
+## Open graphical X11 applications
+
+X11 forwarding is enabled automatically when a local X server and `xauth`
+are available on your own machine:
+
+```sh
+amarcoded ssh wss://your-host/rpc
+```
+
+Run an X11 application from that shell to show its window locally. Both client
+and remote daemon need a version supporting X11 forwarding.
+
+This is trusted X11 forwarding: connect only to hosts and applications you
+trust with access to your display. Use `amarcoded ssh --no-x11` to disable it.
+Headless terminals connect without forwarding. Native Wayland applications are not forwarded;
+use their X11 backend. Forwarding ends when the shell disconnects.
+
 ## Use a token file
 
 ```sh

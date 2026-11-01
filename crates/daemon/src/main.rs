@@ -54,6 +54,12 @@ enum LifecycleCommand {
         /// Private token file; otherwise AMARCODE_WS_TOKEN_FILE or a hidden prompt.
         #[arg(long)]
         token_file: Option<PathBuf>,
+        /// Require X11 forwarding (enabled automatically when a local display is available).
+        #[arg(short = 'X', long, conflicts_with = "no_x11")]
+        x11: bool,
+        /// Disable automatic X11 forwarding.
+        #[arg(long)]
+        no_x11: bool,
     },
     /// Resume a durable update job in an independent native service/task.
     UpdateSupervisor {
@@ -183,8 +189,21 @@ async fn async_main(
     no_tunnel: bool,
     workspace: Option<PathBuf>,
 ) {
-    if let LifecycleCommand::Ssh { url, token_file } = command {
-        let result = amarcode_daemon::shell::connect(url, token_file).await;
+    if let LifecycleCommand::Ssh {
+        url,
+        token_file,
+        x11,
+        no_x11,
+    } = command
+    {
+        let x11 = if no_x11 {
+            Some(false)
+        } else if x11 {
+            Some(true)
+        } else {
+            None
+        };
+        let result = amarcode_daemon::shell::connect(url, token_file, x11).await;
         match result {
             Ok(code) => std::process::exit(code),
             Err(error) => {
@@ -396,6 +415,30 @@ mod tests {
     use clap::Parser;
 
     #[test]
+    fn ssh_x11_accepts_explicit_flags_and_opt_out() {
+        for flag in ["--x11", "-X"] {
+            let cli =
+                Cli::try_parse_from(["amarcoded", "ssh", flag, "wss://example.com/rpc"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(LifecycleCommand::Ssh { x11: true, .. })
+            ));
+        }
+        assert!(Cli::try_parse_from(["amarcoded", "--x11"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["amarcoded", "ssh", "--no-x11"])
+                .unwrap()
+                .command,
+            Some(LifecycleCommand::Ssh {
+                no_x11: true,
+                x11: false,
+                ..
+            })
+        ));
+        assert!(Cli::try_parse_from(["amarcoded", "ssh", "--x11", "--no-x11"]).is_err());
+    }
+
+    #[test]
     fn remote_accepts_a_workspace_without_breaking_lifecycle_commands() {
         for arguments in [
             vec!["amarcoded", "--remote", "."],
@@ -459,6 +502,8 @@ mod tests {
                 LifecycleCommand::Ssh {
                     url: None,
                     token_file: None,
+                    x11: false,
+                    no_x11: false,
                 },
             ),
             ("install", LifecycleCommand::Install),
