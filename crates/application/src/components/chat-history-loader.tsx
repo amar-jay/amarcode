@@ -17,7 +17,8 @@ export function ChatHistoryLoader({
   error?: string | null;
   onLoad: () => Promise<boolean>;
 }) {
-  const { scrollRef, stopScroll } = useStickToBottomContext();
+  const { scrollRef, stopScroll, isAtBottom } = useStickToBottomContext();
+  const sentinel = useRef<HTMLDivElement>(null);
   const anchor = useRef<{
     oldestId?: string;
     height: number;
@@ -64,40 +65,59 @@ export function ChatHistoryLoader({
 
   useEffect(() => {
     const scroll = scrollRef.current;
+    const target = sentinel.current;
+    if (!scroll || !target || !hasOlder || loading || error) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Opening a chat starts at the newest message. Only page upward when
+        // the history edge is visible, or the current page cannot fill the view.
+        if (
+          entries.some((entry) => entry.isIntersecting) &&
+          (!isAtBottom || scroll.scrollHeight <= scroll.clientHeight)
+        )
+          void load();
+      },
+      { root: scroll, rootMargin: "160px 0px 0px 0px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [scrollRef, load, hasOlder, loading, error, isAtBottom]);
+
+  useEffect(() => {
+    const scroll = scrollRef.current;
     if (!scroll) return;
-    let previousTop = scroll.scrollTop;
     const onScroll = () => {
-      const top = scroll.scrollTop;
       if (anchor.current) {
-        anchor.current.top = top;
+        anchor.current.top = scroll.scrollTop;
         anchor.current.offset =
           anchor.current.node?.getBoundingClientRect().top;
       }
-      if (top < previousTop && top < 160 && !error) void load();
-      previousTop = top;
     };
     scroll.addEventListener("scroll", onScroll, { passive: true });
     return () => scroll.removeEventListener("scroll", onScroll);
-  }, [scrollRef, load, error]);
+  }, [scrollRef]);
 
   if (!hasOlder) return null;
   return (
-    <div className="flex flex-col items-center gap-1 py-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={loading}
-        onClick={() => void load()}
-      >
-        {loading && (
+    <div
+      ref={sentinel}
+      className="flex min-h-8 flex-col items-center justify-center gap-1 py-2"
+    >
+      {loading && (
+        <span
+          role="status"
+          className="flex items-center gap-2 text-xs text-muted-foreground"
+        >
           <LoaderCircle className="size-3 animate-spin motion-reduce:animate-none" />
-        )}
-        {loading
-          ? "Loading earlier messages…"
-          : error
-            ? "Retry loading earlier messages"
-            : "Load earlier messages"}
-      </Button>
+          Loading earlier messages…
+        </span>
+      )}
+      {error && (
+        <Button variant="ghost" size="sm" onClick={() => void load()}>
+          Retry loading earlier messages
+        </Button>
+      )}
       {error && (
         <p
           role="alert"

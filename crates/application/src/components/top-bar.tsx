@@ -1,6 +1,12 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useAtom, useAtomValue } from "jotai";
-import { Minus, PanelRightOpen, Square, X } from "lucide-react";
+import {
+  Minus,
+  PanelRightClose,
+  PanelRightOpen,
+  Square,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { shortcutHint } from "@/lib/app-shortcuts";
@@ -21,7 +27,7 @@ import {
 } from "@/state";
 
 export function TopBar() {
-  const [, setSheetOpen] = useAtom(sidePanelOpenAtom);
+  const [sheetOpen, setSheetOpen] = useAtom(sidePanelOpenAtom);
   const [workspaceMaximized, setWorkspaceMaximized] = useAtom(
     sidePanelMaximizedAtom,
   );
@@ -31,7 +37,12 @@ export function TopBar() {
   const isWorking = useAtomValue(liveChatIsWorkingAtom);
   const [isOpeningSheet, setIsOpeningSheet] = useState(false);
 
-  const openWorkspacePanel = async () => {
+  const toggleWorkspacePanel = async () => {
+    if (sheetOpen) {
+      setSheetOpen(false);
+      return;
+    }
+
     if (!workspacePath) {
       toast.error("Choose a Git workspace before opening the file panel.");
       return;
@@ -102,14 +113,21 @@ export function TopBar() {
                 type="button"
                 className="grid h-9 w-10 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 disabled={isOpeningSheet}
-                onClick={() => void openWorkspacePanel()}
-                aria-label="Open workspace panel"
+                onClick={() => void toggleWorkspacePanel()}
+                aria-label={
+                  sheetOpen ? "Close workspace panel" : "Open workspace panel"
+                }
+                aria-expanded={sheetOpen}
               >
-                <PanelRightOpen className="size-4" />
+                {sheetOpen ? (
+                  <PanelRightClose className="size-4" />
+                ) : (
+                  <PanelRightOpen className="size-4" />
+                )}
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              {`Workspace (${shortcutHint("workspace")})`}
+              {`${sheetOpen ? "Close" : "Open"} workspace (${shortcutHint("workspace")})`}
             </TooltipContent>
           </Tooltip>
           <button
