@@ -164,12 +164,20 @@ Authentication, audio, embedded context, and MCP capabilities are not advertised
 ## Tools
 
 OpenAI-compatible function calling is executed as an iterative model → tool →
-model loop. The only built-in tool is `run_command`: every read, write, edit,
-search, git, build, and test runs as an OS command. Couple related steps into
-one call with the platform shell instead of many small calls (for example
-`sh -c "cat hello.txt && git status"` on Linux/macOS, or
-`powershell -Command "..."` on Windows). The working directory stays inside the
-session workspace, symlink escapes are rejected, and output is bounded.
+model loop. The built-in tools are:
+
+* `run_command` runs reads, searches, git, builds, tests, and other executable
+  work through the ACP client's terminal service. Couple related steps into one
+  call with the platform shell instead of many small calls (for example
+  `sh -c "cat hello.txt && git status"` on Linux/macOS, or
+  `powershell -Command "..."` on Windows). Its working directory stays inside
+  the session workspace, symlink escapes are rejected, and output is bounded.
+* `file_command` performs direct UTF-8 text-file writes without a shell. With
+  `operation: "create"` it creates or replaces a file using `content`; with
+  `operation: "edit"` it replaces exactly one occurrence of `old_text` with
+  `content`. Edits fail when the old text is absent or ambiguous. Paths must be
+  workspace-relative, parent directories must already exist, and symlink
+  destinations are rejected. Successful writes are reported as ACP diffs.
 
 `run_command` requires approval through ACP `session/request_permission`.
 Permission prompts offer exactly two options: `full-access` and `auto-approve`.

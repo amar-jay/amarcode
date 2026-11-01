@@ -1190,7 +1190,7 @@ mod tests {
         assert!(policy.contains("file_command"));
         assert!(policy.contains("Never ask for confirmation"));
         assert!(policy.contains("permission prompt"));
-        assert!(policy.contains("Couple related steps"));
+        assert!(policy.contains("Couple related command steps"));
         assert!(policy.contains("Answer questions, investigate, plan, and implement changes"));
         assert_eq!(messages[1]["content"], "use gog");
     }

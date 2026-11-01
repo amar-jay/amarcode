@@ -200,15 +200,14 @@ fn apply_file_command(workspace: &Path, args: &Value) -> Result<FileChange, Stri
             if !canonical_parent.starts_with(&canonical_root) {
                 return Err("path escapes workspace".into());
             }
-            if path.exists() {
-                let canonical_target = path
+            if let canonical_target = path
                     .canonicalize()
                     .map_err(|e| format!("invalid destination: {e}"))?;
                 if !canonical_target.starts_with(&canonical_root) {
                     return Err("path escapes workspace".into());
                 }
             }
-            let old_text = if path.exists() {
+            let old_text = if path.is_file() {
                 Some(
                     std::fs::read_to_string(&path)
                         .map_err(|e| format!("failed to read {}: {e}", path.display()))?,
