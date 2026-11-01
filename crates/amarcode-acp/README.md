@@ -31,7 +31,6 @@ Configuration:
   "agent": {
     "max_tool_rounds": 30,
     "max_tool_calls": 120,
-    "max_turn_tokens": 200000,
     "max_turn_seconds": 900,
     "repeated_tool_limit": 3
   },
@@ -111,9 +110,10 @@ inherit the defaults shown above. Invalid zero limits/timeouts are rejected at
 startup. `repeated_tool_limit` must be at least two and `max_retries` at most ten.
 
 Turn limits cover tool rounds, individual calls (including calls in a batch),
-tokens across model and summary requests, and elapsed time. Provider-reported
-token usage replaces estimates when available; each completion's `max_tokens`
-is capped by the remaining budget and model output reserve. Identical rounds
+and elapsed time. Growing context is compacted automatically so the agent can
+continue the same task. Cumulative token usage is reported, without a turn token
+ceiling; the legacy `agent.max_turn_tokens` setting is ignored. Each completion's
+`max_tokens` respects the model output limit and reserved context space. Identical rounds
 and alternating two-round loops stop when the configured repetition threshold
 is reached with the same arguments and results. Budget stops publish the reason,
 return `max_tokens` or `max_turn_requests`, and save completed tool results with

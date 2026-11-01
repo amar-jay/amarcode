@@ -787,23 +787,6 @@ async fn run_agent_turn(
                     .saturating_sub(512),
             );
             for batch in summary_batches {
-                let summary_input = provider::estimate_tokens(
-                    &provider::summary_messages(&summary, &batch).to_string(),
-                ) as u64;
-                if used_tokens
-                    .saturating_add(summary_input)
-                    .saturating_add(plan.summary_budget as u64)
-                    > settings.max_turn_tokens
-                {
-                    finish_active_search_group(&connection, &session_id, search_group.take(), true);
-                    return limited_turn(
-                        history,
-                        StopReason::MaxTokens,
-                        "token budget cannot cover context compaction",
-                        &connection,
-                        &session_id,
-                    );
-                }
                 let completion = match provider::summarize_batch(
                     &runtime.http,
                     &runtime.config,
@@ -871,36 +854,13 @@ async fn run_agent_turn(
             &history,
             runtime.config.context.max_tool_result_bytes,
         );
-        let input_tokens = crate::context::history_tokens(&request_history)
-            .saturating_add(provider::estimate_tokens(&workspace))
-            as u64
-            + (limits
-                .context_length
-                .saturating_sub(limits.history_token_budget() as u64)
-                .saturating_sub(
-                    provider::DEFAULT_OUTPUT_RESERVE
-                        .min(limits.context_length / 4)
-                        .max(1),
-                ));
-        let remaining = settings
-            .max_turn_tokens
-            .saturating_sub(used_tokens)
-            .saturating_sub(input_tokens);
-        if remaining == 0 {
-            finish_active_search_group(&connection, &session_id, search_group.take(), true);
-            return limited_turn(
-                history,
-                StopReason::MaxTokens,
-                "turn token budget reached",
-                &connection,
-                &session_id,
-            );
-        }
+        // Context size is bounded above by compaction. Cumulative provider usage
+        // includes the same input on every tool round; it is telemetry, not a
+        // context limit or a reason to abandon an unfinished task.
         let max_output = provider::DEFAULT_OUTPUT_RESERVE
             .min(limits.context_length / 4)
             .max(1)
-            .min(limits.max_completion_tokens.unwrap_or(u64::MAX))
-            .min(remaining);
+            .min(limits.max_completion_tokens.unwrap_or(u64::MAX));
         let completion = match provider::stream_completion(
             &runtime.http,
             &runtime.config,
@@ -949,8 +909,7 @@ async fn run_agent_turn(
             .await;
         normalize_tool_ids(&mut turn);
         history.push(provider::assistant_message(&turn));
-        let token_stop = turn.finish_reason.as_deref() == Some("length")
-            || (!turn.tool_calls.is_empty() && used_tokens >= settings.max_turn_tokens);
+        let token_stop = turn.finish_reason.as_deref() == Some("length");
         if token_stop {
             for call in &turn.tool_calls {
                 history.push(provider::tool_message(
@@ -962,7 +921,7 @@ async fn run_agent_turn(
             return limited_turn(
                 history,
                 StopReason::MaxTokens,
-                "model or turn token limit reached",
+                "model output token limit reached",
                 &connection,
                 &session_id,
             );

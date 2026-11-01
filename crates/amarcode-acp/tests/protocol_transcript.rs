@@ -1032,15 +1032,96 @@ fn transcript_time_budget_and_idle_timeout_interrupt_a_stalled_stream() {
 }
 
 #[test]
-fn transcript_token_budget_stops_before_a_provider_request() {
+fn transcript_compacts_and_continues_the_same_turn_past_legacy_token_budget() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let workspace = std::env::temp_dir().join(format!("amarcode-continuation-{}", Uuid::new_v4()));
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        workspace.join("large.txt"),
+        "historical evidence ".repeat(2000),
+    )
+    .unwrap();
+    fs::write(workspace.join("verification.txt"), "verification passed").unwrap();
+    let server = thread::spawn(move || {
+        let mut round = 0;
+        let mut summaries = 0;
+        loop {
+            let (mut socket, _) = accept_chat(&listener).unwrap();
+            let request = provider_request(&mut socket);
+            if request["stream"] == false {
+                summaries += 1;
+                assert!(request.get("tools").is_none());
+                write_json_response(
+                    &mut socket,
+                    "200 OK",
+                    "",
+                    json!({
+                        "choices":[{"message":{"content":"Completed read of large.txt; evidence retained. Next verify verification.txt; do not repeat the completed read."}}],
+                        "usage":{"prompt_tokens":300000,"completion_tokens":50}
+                    }),
+                );
+                continue;
+            }
+            assert!(request["max_tokens"].as_u64().unwrap() > 1);
+            let delta = match round {
+                0 => json!({"tool_calls":[read_call("read-large", "large.txt")]}),
+                1 => {
+                    let text = request["messages"].to_string();
+                    assert!(text.contains("original objective"));
+                    assert!(text.contains("Completed read of large.txt"));
+                    assert!(!text.contains("historical evidence"));
+                    json!({"tool_calls":[read_call("verify", "verification.txt")]})
+                }
+                2 => {
+                    let messages = request["messages"].as_array().unwrap();
+                    assert!(messages.iter().any(|message| message["role"] == "tool"
+                        && message["tool_call_id"] == "verify"
+                        && message["content"] == "verification passed"));
+                    json!({"content":"Completed and verified."})
+                }
+                _ => panic!("unexpected continuation request"),
+            };
+            write_sse(
+                &mut socket,
+                &format!(
+                    "data: {}\n\ndata: [DONE]\n\n",
+                    json!({"choices":[{"delta":delta}],"usage":{"prompt_tokens":300000,"completion_tokens":100}})
+                ),
+            );
+            if round == 2 {
+                assert!(summaries > 0, "the growing context was never compacted");
+                break;
+            }
+            round += 1;
+        }
+    });
     let mut agent = AgentProcess::spawn_with_options(
-        "http://127.0.0.1:9/v1",
-        json!({"agent":{"max_turn_tokens":1}}),
+        &format!("http://{address}/v1"),
+        json!({"agent":{"max_turn_tokens":1},"context":{"context_length":8192,"max_tool_result_bytes":65536}}),
     );
     initialize(&mut agent);
-    let session = new_session(&mut agent, 2, "/workspace");
-    prompt(&mut agent, 3, &session, "small budget");
-    assert_eq!(agent.response(3)["result"]["stopReason"], "max_tokens");
+    let session = new_session(&mut agent, 2, workspace.to_str().unwrap());
+    prompt(&mut agent, 3, &session, "original objective");
+    let (response, messages) = agent.response_with_messages(3);
+    assert_eq!(response["result"]["stopReason"], "end_turn", "{response}");
+    assert!(!messages
+        .iter()
+        .any(|message| message.to_string().contains("Stopped:")));
+    let saved: Value =
+        serde_json::from_slice(&fs::read(&agent.session_store_path).unwrap()).unwrap();
+    let history = saved["sessions"][0]["history"].as_array().unwrap();
+    assert!(history.iter().any(|message| message["content"]
+        .as_str()
+        .is_some_and(|text| text.contains("Completed read of large.txt"))));
+    assert_eq!(
+        history.last().unwrap()["content"],
+        "Completed and verified."
+    );
+    server.join().unwrap();
+    fs::remove_dir_all(workspace).unwrap();
 }
 
 #[test]

@@ -63,7 +63,6 @@ impl Config {
     fn validate(&self) -> Result<(), String> {
         if self.agent.max_tool_rounds == 0
             || self.agent.max_tool_calls == 0
-            || self.agent.max_turn_tokens == 0
             || self.agent.max_turn_seconds == 0
             || self.agent.repeated_tool_limit < 2
         {
@@ -119,7 +118,6 @@ impl Config {
 pub struct AgentConfig {
     pub max_tool_rounds: usize,
     pub max_tool_calls: usize,
-    pub max_turn_tokens: u64,
     pub max_turn_seconds: u64,
     pub repeated_tool_limit: usize,
     /// Enforced between requests only when the provider reports USD cost.
@@ -131,7 +129,6 @@ impl Default for AgentConfig {
         Self {
             max_tool_rounds: 30,
             max_tool_calls: 120,
-            max_turn_tokens: 200_000,
             max_turn_seconds: 900,
             repeated_tool_limit: 3,
             max_cost_usd: None,
