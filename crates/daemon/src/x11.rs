@@ -189,6 +189,13 @@ fn display_address(display: &str) -> Result<Address> {
         // XQuartz launchd DISPLAY names are local Unix socket paths.
         return Ok(Address::Unix(PathBuf::from(display)));
     }
+    // Windows X servers listen on loopback TCP for `:N` and `unix:N`.
+    #[cfg(not(unix))]
+    let host = if host.is_empty() || host == "unix" {
+        "localhost"
+    } else {
+        host
+    };
     let ip = match host {
         "localhost" => IpAddr::from([127, 0, 0, 1]),
         "[::1]" | "::1" => IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
