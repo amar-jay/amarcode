@@ -4,7 +4,7 @@ export default function Navigation() {
   return (
     <header className="flex h-(--navigation-height) shrink-0 items-center justify-between gap-6 px-10 max-[901px]:px-[23px] max-[601px]:flex-wrap max-[601px]:gap-2.5 max-[601px]:p-[15px]">
       <a
-        href="#"
+        href="/"
         className="inline-flex items-center gap-2.5 text-[29px] tracking-[-1px] text-ink no-underline max-[601px]:text-[26px]"
         aria-label="Amarcode home"
       >
@@ -20,9 +20,8 @@ export default function Navigation() {
         className="flex gap-[35px] text-[19px] [&>a]:text-ink [&>a]:no-underline [&>a:hover]:underline max-[901px]:gap-5 max-[601px]:order-3 max-[601px]:w-full max-[601px]:justify-between max-[601px]:border-t max-[601px]:border-rule max-[601px]:pt-3 max-[601px]:text-[17px]"
         aria-label="Main navigation"
       >
-        <a href="#app-preview">Workspace</a>
-        <a href="#features">Features</a>
-        <a href="#agents">Agents</a>
+        <a href="/why-amarcode/">Why Amarcode</a>
+        <a href="https://remote.amarcode.amarjay.com/">Remote</a>
         <a href="/docs/">Docs</a>
       </nav>
       <a

@@ -1,8 +1,9 @@
 ---
 import { site, socialImage, socialImageAlt } from '../../site.config.mjs';
 import '../index.css';
-const title = 'Amarcode — Your agents. One continuous conversation.';
-const description = 'Bring your coding agents into one workspace. Keep the conversation, even when you change agents.';
+interface Props { title?: string; description?: string; }
+const { title = 'Amarcode — Your agents. One continuous conversation.', description = 'Bring your coding agents into one workspace. Keep the conversation, even when you change agents.' } = Astro.props;
+const canonical = new URL(Astro.url.pathname, site).href;
 ---
 <!doctype html>
 <html lang="en" class="scroll-smooth scroll-pt-5 font-sans scheme-light motion-reduce:scroll-auto">
@@ -14,13 +15,13 @@ const description = 'Bring your coding agents into one workspace. Keep the conve
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="application-name" content="Amarcode" />
-    <link rel="canonical" href={new URL('/', site).href} />
+    <link rel="canonical" href={canonical} />
     <meta name="theme-color" content="#fafaf6" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Amarcode" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content={new URL('/', site).href} />
+    <meta property="og:url" content={canonical} />
     <meta property="og:image" content={socialImage} />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
