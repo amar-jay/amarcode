@@ -8,9 +8,18 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogClose,
 } from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon } from "@/components/ui/input-group";
-import { SearchIcon, CheckIcon } from "lucide-react";
+import {
+  SearchIcon,
+  CheckIcon,
+  XIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
+  CornerDownLeftIcon,
+} from "lucide-react";
+import "./command-palette.css";
 
 function Command({
   className,
@@ -34,25 +43,46 @@ function CommandDialog({
   children,
   className,
   showCloseButton = false,
+  variant = "default",
+  compact = false,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string;
   description?: string;
   className?: string;
   showCloseButton?: boolean;
+  variant?: "default" | "palette";
+  compact?: boolean;
 }) {
   return (
     <Dialog {...props}>
       <DialogContent
         className={cn(
-          "top-1/3 translate-y-0 overflow-hidden rounded-xl! bg-popover/70! p-0 backdrop-blur-2xl backdrop-saturate-150 [&>[data-slot=command]]:bg-transparent",
+          variant === "palette"
+            ? "command-palette"
+            : "top-1/3 translate-y-0 overflow-hidden rounded-xl! bg-popover/70! p-0 backdrop-blur-2xl backdrop-saturate-150 [&>[data-slot=command]]:bg-transparent",
+          compact && "command-palette-compact",
           className,
         )}
-        showCloseButton={showCloseButton}
+        showCloseButton={variant !== "palette" && showCloseButton}
+        overlayClassName={
+          variant === "palette" ? "bg-black/35 backdrop-blur-xs" : undefined
+        }
       >
-        <DialogHeader className="sr-only">
+        <DialogHeader
+          className={
+            variant === "palette" && !compact
+              ? "command-palette-header"
+              : "sr-only"
+          }
+        >
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
+          {variant === "palette" && !compact && (
+            <DialogClose className="command-palette-close" aria-label="Close">
+              <XIcon className="size-4" />
+            </DialogClose>
+          )}
         </DialogHeader>
         {children}
       </DialogContent>
@@ -156,8 +186,36 @@ function CommandItem({
       {...props}
     >
       {children}
-      <CheckIcon className="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100" />
+      <CheckIcon
+        data-slot="command-check"
+        className="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100"
+      />
     </CommandPrimitive.Item>
+  );
+}
+
+function CommandFooter({ action = "Run command" }: { action?: string }) {
+  return (
+    <div className="command-palette-footer">
+      <span className="flex items-center gap-1.5">
+        <kbd>
+          <ArrowUpIcon />
+        </kbd>
+        <kbd>
+          <ArrowDownIcon />
+        </kbd>
+        <span className="ml-1">Navigate</span>
+      </span>
+      <span className="flex items-center gap-1.5">
+        <kbd>
+          <CornerDownLeftIcon />
+        </kbd>
+        <span>{action}</span>
+      </span>
+      <span className="ml-auto flex items-center gap-1.5">
+        <kbd>esc</kbd> Close
+      </span>
+    </div>
   );
 }
 
@@ -187,4 +245,5 @@ export {
   CommandItem,
   CommandShortcut,
   CommandSeparator,
+  CommandFooter,
 };

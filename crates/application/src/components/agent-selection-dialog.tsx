@@ -5,7 +5,6 @@ import {
   Command,
   CommandDialog,
   CommandEmpty,
-  CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
@@ -13,9 +12,8 @@ import {
 import { useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { PromptInputButton } from "@/components/ai-elements/prompt-input";
-import { Check, Download, LoaderCircle } from "lucide-react";
+import { Download, LoaderCircle } from "lucide-react";
 import { AgentLogo } from "@/components/agent-logo";
-import { Badge } from "@/components/ui/badge";
 import { installAgentAtom, installingAgentIdsAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 
@@ -82,43 +80,39 @@ export function AgentSelectionDialog({
       <CommandItem
         key={agent.id}
         value={stripAcpSuffix(agent.name)}
-        disabled={installingId !== null && !installing}
+        disabled={installingId !== null || installing}
+        data-checked={selectedAgent === agent.id && agent.available}
         title={agent.unavailable_reason ?? undefined}
+        aria-label={`${agent.available ? "Select" : "Install"} ${stripAcpSuffix(agent.name)}`}
         onSelect={() => {
-          if (!agent.available) return;
+          if (installingId || installing) return;
+          if (!agent.available) {
+            void handleInstall(agent);
+            return;
+          }
           setSelectedAgent(agent.id);
           setOpen(false);
         }}
-        className="w-full cursor-pointer data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
       >
         <AgentLogo icon={agent.icon} />
-        <span className="flex min-w-0 flex-1 items-center space-x-5">
+        <span className="flex min-w-0 flex-1 items-center gap-2">
           <span className="truncate">{stripAcpSuffix(agent.name)}</span>
-          {agent.is_builtin && <Badge>Built-in</Badge>}
+          {agent.is_builtin && (
+            <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
+              Built-in
+            </span>
+          )}
         </span>
-
-        {!agent.available ? (
-          <button
-            type="button"
-            className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-primary hover:bg-foreground/10 disabled:opacity-50"
-            aria-label={`Install ${stripAcpSuffix(agent.name)}`}
-            title={`Install ${stripAcpSuffix(agent.name)}`}
-            disabled={installingId !== null || installing}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              void handleInstall(agent);
-            }}
-          >
+        {!agent.available && (
+          <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-primary">
             {installing ? (
               <LoaderCircle className="size-3.5 animate-spin" />
             ) : (
               <Download className="size-3.5" />
             )}
-          </button>
-        ) : selectedAgent === agent.id ? (
-          <Check className="ml-auto size-4" />
-        ) : null}
+            {installing ? "Installing" : "Install"}
+          </span>
+        )}
       </CommandItem>
     );
   };
@@ -137,21 +131,22 @@ export function AgentSelectionDialog({
         <span className="truncate">{stripAcpSuffix(selectedName)}</span>
       </PromptInputButton>
 
-      <CommandDialog open={open} onOpenChange={setOpen}>
-        <Command>
-          <CommandInput placeholder="Search agents..." />
+      <CommandDialog
+        open={open}
+        onOpenChange={setOpen}
+        variant="palette"
+        compact
+        title="Choose an agent"
+        description="Pick who you want to work with."
+      >
+        <Command loop>
+          <CommandInput
+            placeholder="Search agents…"
+            aria-label="Search agents"
+          />
           <CommandList>
-            <CommandEmpty>No agents found.</CommandEmpty>
-            {availableAgents.length > 0 && (
-              <CommandGroup heading="Available">
-                {availableAgents.map(renderAgent)}
-              </CommandGroup>
-            )}
-            {installableAgents.length > 0 && (
-              <CommandGroup heading="Install">
-                {installableAgents.map(renderAgent)}
-              </CommandGroup>
-            )}
+            <CommandEmpty>No matching agents. Try another name.</CommandEmpty>
+            {[...availableAgents, ...installableAgents].map(renderAgent)}
           </CommandList>
         </Command>
       </CommandDialog>

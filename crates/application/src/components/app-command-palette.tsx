@@ -11,12 +11,49 @@ import {
   Command,
   CommandDialog,
   CommandEmpty,
-  CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
   CommandShortcut,
 } from "./ui/command";
+
+import {
+  MessageSquarePlus,
+  TextCursorInput,
+  Square,
+  Settings2,
+  PanelLeft,
+  PanelRight,
+  FileSearch,
+  Search,
+  GitBranch,
+  Save,
+  RefreshCw,
+  Pin,
+  Maximize2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+
+const commandIcons: Record<
+  Exclude<AppCommand, "command-palette">,
+  LucideIcon
+> = {
+  "new-chat": MessageSquarePlus,
+  "focus-prompt": TextCursorInput,
+  "stop-response": Square,
+  settings: Settings2,
+  sidebar: PanelLeft,
+  workspace: PanelRight,
+  "find-files": FileSearch,
+  "search-content": Search,
+  "git-changes": GitBranch,
+  "save-file": Save,
+  refresh: RefreshCw,
+  "pin-workspace": Pin,
+  "maximize-workspace": Maximize2,
+  "close-workspace": X,
+};
 
 export function AppCommandPalette({
   open,
@@ -64,9 +101,10 @@ export function AppCommandPalette({
     <CommandDialog
       open={open}
       onOpenChange={onOpenChange}
+      variant="palette"
+      compact
       title="Command palette"
-      description="Search actions and keyboard shortcuts. Use arrow keys to choose and Enter to run."
-      className="sm:max-w-lg"
+      description="Find an action, or learn its shortcut."
     >
       <Command key={String(open)} data-app-command-palette loop>
         <CommandInput
@@ -74,12 +112,11 @@ export function AppCommandPalette({
           aria-label="Search commands"
         />
         <CommandList>
-          <CommandEmpty>No matching commands.</CommandEmpty>
-          {["Chat", "Workspace", "App"].map((group) => (
-            <CommandGroup key={group} heading={group}>
-              {APP_SHORTCUTS.filter(
-                (item) => item.group === group && item.id !== "command-palette",
-              ).map((item) => (
+          <CommandEmpty>No matching commands. Try another search.</CommandEmpty>
+          {APP_SHORTCUTS.filter((item) => item.id !== "command-palette").map(
+            (item) => {
+              const Icon = commandIcons[item.id];
+              return (
                 <CommandItem
                   key={item.id}
                   value={item.label}
@@ -87,17 +124,20 @@ export function AppCommandPalette({
                   disabled={!available.has(item.id)}
                   onSelect={() => selectCommand(item.id)}
                 >
-                  <span>{item.label}</span>
-                  <CommandShortcut>{shortcutHint(item.id)}</CommandShortcut>
+                  <Icon className="size-4 text-muted-foreground" />
+                  <span className="flex-1">{item.label}</span>
+                  <CommandShortcut>
+                    {shortcutHint(item.id)
+                      .split("+")
+                      .map((key) => (
+                        <kbd key={key}>{key}</kbd>
+                      ))}
+                  </CommandShortcut>
                 </CommandItem>
-              ))}
-            </CommandGroup>
-          ))}
+              );
+            },
+          )}
         </CommandList>
-        <div className="flex items-center justify-between border-t px-3 py-2 text-[10px] text-muted-foreground">
-          <span>↑↓ Navigate · Enter Run · Esc Close</span>
-          <kbd>{shortcutHint("command-palette")}</kbd>
-        </div>
       </Command>
     </CommandDialog>
   );
