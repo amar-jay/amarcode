@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "amarcode-acp"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "agent-client-protocol",
  "bytes",
@@ -125,7 +125,7 @@ dependencies = [
 
 [[package]]
 name = "amarcode-daemon"
-version = "0.8.11"
+version = "0.9.0"
 dependencies = [
  "agent-client-protocol",
  "amarcode-protocol",
