@@ -1,3 +1,4 @@
+import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { isWeb } from "@/lib/platform";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useAtom, useAtomValue } from "jotai";
@@ -28,6 +29,7 @@ import {
 } from "@/state";
 
 export function TopBar() {
+  const { openMobile } = useSidebar();
   const [sheetOpen, setSheetOpen] = useAtom(sidePanelOpenAtom);
   const [workspaceMaximized, setWorkspaceMaximized] = useAtom(
     sidePanelMaximizedAtom,
@@ -70,6 +72,12 @@ export function TopBar() {
   return (
     <>
       <div className="relative z-60 flex h-9 shrink-0 items-center border-b border-border bg-sidebar">
+        <SidebarTrigger
+          className="h-9 w-10 shrink-0 rounded-none md:hidden"
+          title={openMobile ? "Close chat sidebar" : "Open chat sidebar"}
+          aria-label={openMobile ? "Close chat sidebar" : "Open chat sidebar"}
+          aria-expanded={openMobile}
+        />
         <div
           data-tauri-drag-region
           className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 select-none"
