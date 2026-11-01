@@ -198,7 +198,7 @@ export function RecentChats({
   );
 
   return (
-    <SidebarGroup className="p-0">
+    <SidebarGroup className="p-0 group-data-[collapsible=icon]:hidden">
       {pinnedChats.length > 0 && (
         <div className="mb-3">
           <div className="flex h-8 items-center gap-1.5 pl-2 text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
