@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Ellipsis,
   LoaderCircle,
   Pencil,
   Pin,
@@ -23,6 +24,13 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import type { Chat } from "@/types";
 
 const MINUTE = 60 * 1000;
@@ -108,38 +116,62 @@ export function RecentChats({
         <SidebarMenuItem>
           <SidebarMenuButton
             isActive={chat.id === activeChatId}
+            aria-current={chat.id === activeChatId ? "page" : undefined}
             onClick={() => onSelectChat(chat.id)}
             tooltip={chat.title}
-            className="pr-8 hover:bg-sidebar-accent/50"
+            className="relative pr-8 hover:bg-sidebar-accent/50 data-[active=true]:bg-sidebar-accent data-[active=true]:hover:bg-sidebar-accent before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary before:opacity-0 data-[active=true]:before:opacity-100"
           >
             <span className="min-w-0 flex-1 truncate">{chat.title}</span>
+            <span className="flex w-6 shrink-0 items-center justify-center">
+              {runningChatIds.has(chat.id) ? (
+                <span role="status" aria-label="Running">
+                  <LoaderCircle
+                    aria-hidden="true"
+                    className="size-3.5 animate-spin text-sidebar-foreground/55 motion-reduce:animate-none"
+                  />
+                </span>
+              ) : (
+                <time
+                  dateTime={chat.updated_at}
+                  title={formatFullDate(chat.updated_at)}
+                  className="text-center text-[10px] leading-none font-normal tabular-nums text-sidebar-foreground/45"
+                >
+                  {formatRelativeTime(chat.updated_at, now)}
+                </time>
+              )}
+            </span>
           </SidebarMenuButton>
-          {runningChatIds.has(chat.id) ? (
-            <LoaderCircle
-              aria-label="Running"
-              className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 animate-spin text-sidebar-foreground/55 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 group-data-[collapsible=icon]:hidden! motion-reduce:animate-none motion-reduce:transition-none"
-            />
-          ) : (
-            <time
-              dateTime={chat.updated_at}
-              title={formatFullDate(chat.updated_at)}
-              className="pointer-events-none absolute top-1/2 right-1 hidden w-5 -translate-y-1/2 text-center text-[10px] leading-none font-normal tabular-nums text-sidebar-foreground/45 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 group-data-[collapsible=icon]:hidden! md:block motion-reduce:transition-none"
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <SidebarMenuAction
+                showOnHover
+                aria-label={`Actions for ${chat.title}`}
+                title="Chat actions"
+              >
+                <Ellipsis />
+              </SidebarMenuAction>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              side="right"
+              className="min-w-36"
             >
-              {formatRelativeTime(chat.updated_at, now)}
-            </time>
-          )}
-          <SidebarMenuAction
-            showOnHover
-            aria-label={`Delete ${chat.title}`}
-            title="Delete chat"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDeleteChat(chat);
-            }}
-            className="hover:text-destructive"
-          >
-            <Trash2 />
-          </SidebarMenuAction>
+              <DropdownMenuItem onSelect={() => onTogglePin(chat)}>
+                {pinnedChatIds.includes(chat.id) ? <PinOff /> : <Pin />}
+                {pinnedChatIds.includes(chat.id) ? "Unpin chat" : "Pin chat"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onRenameChat(chat)}>
+                <Pencil /> Rename chat
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => onDeleteChat(chat)}
+              >
+                <Trash2 /> Delete chat
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </SidebarMenuItem>
       </ContextMenuTrigger>
       <ContextMenuContent>
