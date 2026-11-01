@@ -59,6 +59,8 @@ pub struct Config {
     pub transport: DaemonTransport,
     pub daemon_addr: String,
     pub db_path: PathBuf,
+    /// Optional launch-time project default; unrelated to the daemon data directory.
+    pub default_workspace_path: Option<PathBuf>,
     /// Required bearer token file for WebSocket RPC (AMARCODE_WS_TOKEN_FILE).
     pub ws_token_file: Option<PathBuf>,
     /// PEM certificate chain for WSS (AMARCODE_WS_TLS_CERT).
@@ -91,6 +93,13 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(path) = &self.default_workspace_path {
+            if !path.is_absolute() || !path.is_dir() || path.to_str().is_none() {
+                return Err(Error::msg(
+                    "default workspace must be an existing absolute directory with a UTF-8 path",
+                ));
+            }
+        }
         if self.daemon_addr.is_empty() {
             return Err(Error::msg("AMARCODE_DAEMON_ADDR must not be empty"));
         }
@@ -163,6 +172,7 @@ impl Config {
                 .filter(|address| !address.is_empty())
                 .unwrap_or_else(|| transport.default_addr().to_owned()),
             db_path,
+            default_workspace_path: None,
             acp_registry_source: (!acp_registry_source.is_empty()).then_some(acp_registry_source),
             ws_token_file: None,
             ws_tls_cert: None,

@@ -2,8 +2,11 @@ import { atom } from "jotai";
 import type { AgentInfo, Chat } from "@/types";
 import { chatsAtom } from "./chats";
 import { selectedAgentAtom, selectAgentAtom } from "./agents";
-import { defaultWorkspacePathAtom } from "./preferences";
-import { workspacePathAtom } from "./workspace";
+import {
+  workspacePathAtom,
+  daemonWorkspacePathAtom,
+  effectiveDefaultWorkspacePathAtom,
+} from "./workspace";
 import { sidePanelOpenAtom, workspaceFileOpenRequestAtom } from "./ui";
 
 /**
@@ -20,6 +23,16 @@ export type ActiveSession = {
 };
 
 export const activeSessionAtom = atom<ActiveSession | null>(null);
+
+/** Apply the server suggestion without changing an open chat or a manually chosen project. */
+export const applyDaemonWorkspaceAtom = atom(null, (get, set, path: string) => {
+  const previous = get(daemonWorkspacePathAtom);
+  const current = get(workspacePathAtom);
+  set(daemonWorkspacePathAtom, path);
+  if (!get(activeSessionAtom) && (!current || current === previous)) {
+    set(workspacePathAtom, get(effectiveDefaultWorkspacePathAtom));
+  }
+});
 
 /** Open an existing chat from the sidebar. */
 export const selectChatAtom = atom(null, (get, set, chatId: string) => {
@@ -39,7 +52,7 @@ export const startNewChatAtom = atom(null, (get, set) => {
   set(sidePanelOpenAtom, false);
   set(workspaceFileOpenRequestAtom, null);
   set(activeSessionAtom, null);
-  set(workspacePathAtom, get(defaultWorkspacePathAtom));
+  set(workspacePathAtom, get(effectiveDefaultWorkspacePathAtom));
 });
 
 /** After home composer creates a chat + fires a prompt. */

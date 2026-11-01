@@ -265,6 +265,7 @@ mod tests {
             std::env::temp_dir().join(format!("amarcode-registry-health-{}", uuid::Uuid::new_v4()));
         let app = App::new(Config {
             db_path: root.join("workspace.sqlite3"),
+            default_workspace_path: None,
             app_dir: root.clone(),
             transport: Default::default(),
             ws_token_file: None,
@@ -302,6 +303,7 @@ mod tests {
         ));
         let config = Config {
             db_path: app_dir.join("workspace.sqlite3"),
+            default_workspace_path: None,
             app_dir: app_dir.clone(),
             transport: Default::default(),
             ws_token_file: None,

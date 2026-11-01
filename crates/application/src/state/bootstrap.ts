@@ -11,17 +11,18 @@ import {
 } from "./agents";
 import { refreshChatsAtom } from "./chats";
 import {
+  daemonConnectionGenerationAtom,
   ensureDaemonEventStream,
   subscribeDaemonEvents,
 } from "./daemon-events";
-import {
-  defaultAgentIdAtom,
-  defaultWorkspacePathAtom,
-  paletteAtom,
-  themeAtom,
-} from "./preferences";
+import { defaultAgentIdAtom, paletteAtom, themeAtom } from "./preferences";
 import { liveChatAtom, loadLiveChatAtom } from "./live-chat";
-import { workspacePathAtom } from "./workspace";
+import {
+  effectiveDefaultWorkspacePathAtom,
+  workspacePathAtom,
+} from "./workspace";
+import { applyDaemonWorkspaceAtom } from "./navigation";
+import type { Health } from "@/types";
 
 /**
  * One-time app shell effects: theme DOM sync, catalogs, event stream, defaults.
@@ -39,7 +40,7 @@ export function useAppBootstrap() {
   const theme = useAtomValue(themeAtom);
   const palette = useAtomValue(paletteAtom);
   const defaultAgentId = useAtomValue(defaultAgentIdAtom);
-  const defaultWorkspacePath = useAtomValue(defaultWorkspacePathAtom);
+  const defaultWorkspacePath = useAtomValue(effectiveDefaultWorkspacePathAtom);
   const selectedAgent = useAtomValue(selectedAgentAtom);
   const selectedAgentId = useAtomValue(selectedAgentIdAtom);
 
@@ -62,10 +63,24 @@ export function useAppBootstrap() {
       retryDaemon();
     }
   }, [sshStatus, daemonConnection.status, retryDaemon]);
-  const initializeDaemonClient = useCallback(async () => {
-    ensureDaemonEventStream(store);
-    await Promise.all([loadAgents(), refreshChats()]);
-  }, [store, loadAgents, refreshChats]);
+  const initializeDaemonClient = useCallback(
+    async (knownHealth?: Health) => {
+      ensureDaemonEventStream(store);
+      const generation = store.get(daemonConnectionGenerationAtom);
+      const [, , health] = await Promise.all([
+        loadAgents(),
+        refreshChats(),
+        knownHealth ? Promise.resolve(knownHealth) : daemonApi.health(),
+      ]);
+      if (store.get(daemonConnectionGenerationAtom) === generation) {
+        store.set(
+          applyDaemonWorkspaceAtom,
+          health.default_workspace_path ?? "",
+        );
+      }
+    },
+    [store, loadAgents, refreshChats],
+  );
   const reconcileDaemonClient = useCallback(async () => {
     await initializeDaemonClient();
     const live = store.get(liveChatAtom);
@@ -76,8 +91,8 @@ export function useAppBootstrap() {
 
   const installDaemon = useCallback(async () => {
     try {
-      await daemonApi.install(setDaemonConnection);
-      await initializeDaemonClient();
+      const health = await daemonApi.install(setDaemonConnection);
+      await initializeDaemonClient(health);
     } catch (error) {
       console.error("Daemon installation failed:", error);
       const message =
@@ -121,7 +136,7 @@ export function useAppBootstrap() {
           if (!cancelled) setDaemonConnection(status);
         });
         if (cancelled || health === null) return;
-        await initializeDaemonClient();
+        await initializeDaemonClient(health);
       } catch (error) {
         if (cancelled) return;
         console.error("Daemon bootstrap failed:", error);

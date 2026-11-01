@@ -125,6 +125,10 @@ job_id: string | null, };
 
 export type HealthResult = {
 /**
+ * Suggested project folder for new chats, if supplied when launching the daemon.
+ */
+default_workspace_path?: string,
+/**
  * True only when WebSocket handshakes require the configured bearer token.
  */
 remote_auth_required: boolean, status: string, version: string, protocol_version: number, addr: string, };

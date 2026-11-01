@@ -158,6 +158,11 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
 
 fn health(app: &App) -> Result<Value> {
     let body = HealthResult {
+        default_workspace_path: app
+            .config
+            .default_workspace_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned()),
         remote_auth_required: app.config.transport == crate::config::DaemonTransport::WebSocket,
         status: "ok".into(),
         version: env!("CARGO_PKG_VERSION").into(),
@@ -218,10 +223,16 @@ fn set_amarcode_acp_config(app: &App, params: Value) -> Result<Value> {
 
 fn create_chat(app: &App, params: Value) -> Result<Value> {
     let p: CreateChatParams = parse_params(params)?;
-    if p.workspace_path.trim().is_empty() {
-        return Err(Error::msg("workspace_path must not be empty"));
-    }
-    let chat = app.chats.create(p.workspace_path, p.title)?;
+    let workspace_path = if p.workspace_path.trim().is_empty() {
+        app.config
+            .default_workspace_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .ok_or_else(|| Error::msg("workspace_path must not be empty"))?
+    } else {
+        p.workspace_path
+    };
+    let chat = app.chats.create(workspace_path, p.title)?;
     to_value(chat)
 }
 

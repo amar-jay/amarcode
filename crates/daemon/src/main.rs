@@ -32,6 +32,9 @@ struct Cli {
     /// Start the shared daemon with public remote access.
     #[arg(long, global = true)]
     remote: bool,
+    /// Default project folder for new chats in remote mode.
+    #[arg(value_name = "WORKSPACE", requires = "remote")]
+    workspace: Option<PathBuf>,
     /// Run remote mode on authenticated loopback without a public tunnel.
     #[arg(long, global = true)]
     no_tunnel: bool,
@@ -107,6 +110,13 @@ fn main() {
         eprintln!("--no-tunnel requires --remote; ssh opens a remote shell");
         std::process::exit(2);
     }
+    let workspace = match cli.workspace.as_deref().map(resolve_workspace).transpose() {
+        Ok(workspace) => workspace,
+        Err(error) => {
+            eprintln!("amarcoded: {error}");
+            std::process::exit(2);
+        }
+    };
     let command = cli.command.unwrap_or(LifecycleCommand::Run);
     // Set the service environment before Tokio creates any worker threads.
     #[cfg(windows)]
@@ -162,7 +172,7 @@ fn main() {
         None
     };
     let no_tunnel = cli.no_tunnel || !cli.remote;
-    async_main(command, transport, remote, no_tunnel);
+    async_main(command, transport, remote, no_tunnel, workspace);
 }
 
 #[tokio::main]
@@ -171,6 +181,7 @@ async fn async_main(
     transport: DaemonTransport,
     remote: Option<amarcode_daemon::remote::Setup>,
     no_tunnel: bool,
+    workspace: Option<PathBuf>,
 ) {
     if let LifecycleCommand::Ssh { url, token_file } = command {
         let result = amarcode_daemon::shell::connect(url, token_file).await;
@@ -224,19 +235,21 @@ async fn async_main(
 
     // Config before logging so we know where to write daemon.log.
     // Failures here go to stderr because the subscriber is not up yet.
-    let config = match Config::get(transport) {
-        Ok(config) => config,
+    let mut config = match Config::get(transport) {
+        Ok(config) => config.clone(),
         Err(err) => {
             eprintln!("amarcode-daemon: failed to load config: {err}");
             std::process::exit(1);
         }
     };
 
+    config.default_workspace_path = workspace;
+
     let quiet_remote = remote.is_some();
     let logging = if quiet_remote {
-        logging::init_remote(config)
+        logging::init_remote(&config)
     } else {
-        logging::init(config)
+        logging::init(&config)
     };
     if let Err(err) = logging {
         eprintln!("amarcode-daemon: failed to initialize logging: {err}");
@@ -337,6 +350,27 @@ fn run_lifecycle_command(command: LifecycleCommand) -> amarcode_daemon::Result<(
     Ok(())
 }
 
+fn resolve_workspace(path: &std::path::Path) -> amarcode_daemon::Result<PathBuf> {
+    let resolved = std::fs::canonicalize(path).map_err(|error| {
+        amarcode_daemon::Error::msg(format!("cannot open workspace {}: {error}", path.display()))
+    })?;
+    if !resolved.is_dir() {
+        return Err(amarcode_daemon::Error::msg(format!(
+            "workspace must be a directory: {}",
+            path.display()
+        )));
+    }
+    if resolved.to_str().is_none() {
+        return Err(amarcode_daemon::Error::msg(
+            "workspace path must be valid UTF-8",
+        ));
+    }
+    std::fs::read_dir(&resolved).map_err(|error| {
+        amarcode_daemon::Error::msg(format!("cannot read workspace {}: {error}", path.display()))
+    })?;
+    Ok(resolved)
+}
+
 fn require_data_loss_confirmation(confirmed: bool) -> amarcode_daemon::Result<()> {
     if confirmed {
         Ok(())
@@ -360,6 +394,61 @@ async fn run(config: Config) -> amarcode_daemon::Result<()> {
 mod tests {
     use super::{require_data_loss_confirmation, Cli, LifecycleCommand};
     use clap::Parser;
+
+    #[test]
+    fn remote_accepts_a_workspace_without_breaking_lifecycle_commands() {
+        for arguments in [
+            vec!["amarcoded", "--remote", "."],
+            vec![
+                "amarcoded",
+                "--remote",
+                "project with spaces",
+                "--no-tunnel",
+            ],
+            vec!["amarcoded", "--no-tunnel", "--remote", "./project"],
+        ] {
+            let cli = Cli::try_parse_from(arguments).unwrap();
+            assert!(cli.remote);
+            assert!(cli.workspace.is_some());
+            assert!(cli.command.is_none());
+        }
+        assert!(Cli::try_parse_from(["amarcoded", "./project"]).is_err());
+        assert!(Cli::try_parse_from(["amarcoded", "--remote", "./one", "./two"]).is_err());
+        let cli = Cli::try_parse_from(["amarcoded", "--remote"]).unwrap();
+        assert!(cli.workspace.is_none());
+    }
+
+    #[test]
+    fn workspace_resolution_accepts_directories_and_rejects_files_or_missing_paths() {
+        use super::resolve_workspace;
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project with spaces");
+        std::fs::create_dir(&project).unwrap();
+        assert_eq!(
+            resolve_workspace(&project).unwrap(),
+            project.canonicalize().unwrap()
+        );
+        assert_eq!(
+            resolve_workspace(std::path::Path::new(".")).unwrap(),
+            std::env::current_dir().unwrap().canonicalize().unwrap()
+        );
+        let file = root.path().join("file");
+        std::fs::write(&file, "not a folder").unwrap();
+        assert!(resolve_workspace(&file)
+            .unwrap_err()
+            .to_string()
+            .contains("directory"));
+        assert!(resolve_workspace(&root.path().join("missing")).is_err());
+        #[cfg(unix)]
+        {
+            let link = root.path().join("alias");
+            std::os::unix::fs::symlink(&project, &link).unwrap();
+            assert_eq!(
+                resolve_workspace(&link).unwrap(),
+                project.canonicalize().unwrap()
+            );
+        }
+    }
 
     #[test]
     fn parses_every_lifecycle_command() {

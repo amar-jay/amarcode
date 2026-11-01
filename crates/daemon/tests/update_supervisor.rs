@@ -46,6 +46,7 @@ async fn update_rpc_reports_unavailable_for_custom_services_without_touching_reg
     let app = App::new(Config {
         app_dir: root.path().to_owned(),
         db_path: root.path().join("workspace.sqlite3"),
+        default_workspace_path: None,
         daemon_addr: "127.0.0.1:0".into(),
         transport: Default::default(),
         ws_token_file: None,

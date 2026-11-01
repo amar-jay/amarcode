@@ -84,6 +84,10 @@ impl RpcResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct HealthResult {
+    /// Suggested project folder for new chats, if supplied when launching the daemon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub default_workspace_path: Option<String>,
     /// True only when WebSocket handshakes require the configured bearer token.
     #[serde(default)]
     pub remote_auth_required: bool,

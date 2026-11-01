@@ -355,6 +355,7 @@ mod tests {
                 return Err("replacement failed health".into());
             }
             Ok(HealthResult {
+                default_workspace_path: None,
                 remote_auth_required: false,
                 status: "ok".into(),
                 version: expected.into(),

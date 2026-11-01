@@ -326,6 +326,7 @@ mod tests {
         let app = App::new(crate::Config {
             app_dir: directory.path().to_owned(),
             db_path: directory.path().join("store.sqlite3"),
+            default_workspace_path: None,
             transport: crate::config::DaemonTransport::Tcp,
             daemon_addr: "127.0.0.1:0".into(),
             acp_registry_source: None,

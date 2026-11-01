@@ -831,3 +831,90 @@ async fn remote_shell_does_not_inherit_the_daemons_tmux_session() {
     assert!(!output.contains("daemon-tmux-session"));
     assert!(!output.contains("daemon-screen-session"));
 }
+
+#[tokio::test]
+async fn remote_workspace_is_shared_by_clients_without_changing_the_data_directory() {
+    let base = tempfile::tempdir().unwrap();
+    let local = port();
+    let remote = port();
+    let root = base.path().join("com.amarcode.desktop");
+    let project = base.path().join("project with spaces");
+    let other = base.path().join("another project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    assert!(command(base.path(), &local, &remote)
+        .args(["access", "enable"])
+        .status()
+        .unwrap()
+        .success());
+    let token = std::fs::read_to_string(root.join("access-token"))
+        .unwrap()
+        .trim()
+        .to_owned();
+    let mut daemon = Process(
+        command(base.path(), &local, &remote)
+            .current_dir(base.path())
+            .args(["--remote", "project with spaces", "--no-tunnel"])
+            .spawn()
+            .unwrap(),
+    );
+    ready(&mut daemon, &local).await;
+    let expected = project
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    for health in [
+        tcp(&local, json!({"method":"health"})).await,
+        ws(&remote, &token, json!({"method":"health"})).await,
+    ] {
+        assert_eq!(health["result"]["default_workspace_path"], expected);
+    }
+    let created = ws(
+        &remote,
+        &token,
+        json!({"method":"create_chat",
+        "params":{"workspace_path":"","title":"Default workspace"}}),
+    )
+    .await;
+    assert_eq!(created["result"]["workspace_path"], expected);
+    let explicit = tcp(
+        &local,
+        json!({"method":"create_chat",
+        "params":{"workspace_path":other,"title":"Explicit workspace"}}),
+    )
+    .await;
+    assert_eq!(
+        explicit["result"]["workspace_path"],
+        other.to_string_lossy().as_ref()
+    );
+    assert!(root.join("data/workspace.sqlite3").exists());
+    assert!(!project.join("workspace.sqlite3").exists());
+    assert!(!project.join("data").exists());
+    drop(daemon);
+    // The launch-time suggestion does not persist into a different startup.
+    let mut daemon = Process(command(base.path(), &local, &remote).spawn().unwrap());
+    ready(&mut daemon, &local).await;
+    assert!(tcp(&local, json!({"method":"health"})).await["result"]
+        .get("default_workspace_path")
+        .is_none());
+}
+
+#[test]
+fn invalid_remote_workspace_fails_before_remote_setup_or_database_creation() {
+    let base = tempfile::tempdir().unwrap();
+    let file = base.path().join("a-file");
+    std::fs::write(&file, "not a folder").unwrap();
+    for path in [file, base.path().join("missing")] {
+        let result = command(base.path(), &port(), &port())
+            .arg("--remote")
+            .arg(path)
+            .arg("--no-tunnel")
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("workspace"));
+        assert!(!base.path().join("com.amarcode.desktop").exists());
+    }
+}

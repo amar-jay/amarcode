@@ -679,6 +679,7 @@ mod tests {
 
     fn health(version: &str) -> HealthResult {
         HealthResult {
+            default_workspace_path: None,
             remote_auth_required: false,
             status: "ok".into(),
             version: version.into(),

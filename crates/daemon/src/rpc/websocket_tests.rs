@@ -23,6 +23,7 @@ fn test_config() -> Config {
         transport: crate::config::DaemonTransport::Tcp,
         app_dir: Default::default(),
         db_path: Default::default(),
+        default_workspace_path: None,
         daemon_addr: "127.0.0.1:0".into(),
         acp_registry_source: None,
         ws_token_file: None,
