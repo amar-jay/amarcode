@@ -85,6 +85,82 @@ describe("assistant tool presentation", () => {
     expect(block.diffs[0].patch).toContain("+const value = 2;");
   });
 
+  it("shows streamed ACP thinking text at its original position as snapshots update", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => undefined,
+    });
+    const { groupChatBlocks } = await import("./message-parsing");
+    const snapshots = [
+      toolPart(0, {
+        toolCallId: "think-1",
+        title: "Thinking",
+        kind: "think",
+        status: "in_progress",
+        content: [
+          {
+            type: "content",
+            content: { type: "text", text: "Inspect the files." },
+          },
+        ],
+      }),
+      toolPart(2, {
+        toolCallId: "think-1",
+        content: [
+          {
+            type: "content",
+            content: {
+              type: "text",
+              text: "Inspect the files. Then verify the fix.",
+            },
+          },
+        ],
+      }),
+      toolPart(3, { toolCallId: "think-1", status: "completed" }),
+    ];
+    for (const verbose of [false, true]) {
+      for (const count of [1, 2, 3]) {
+        const item: MessageDetail = {
+          message: {
+            id: "assistant-1",
+            chat_id: "chat-1",
+            agent_run_id: "run-1",
+            role: "assistant",
+            content: "Answer",
+            status: count === 3 ? "complete" : "streaming",
+            created_at: "2026-01-01T00:00:01Z",
+            updated_at: "2026-01-01T00:00:02Z",
+          },
+          agent_id: "agent-1",
+          parts: [
+            ...snapshots.slice(0, count),
+            {
+              message_id: "assistant-1",
+              ordinal: 1,
+              kind: "text",
+              content_json: JSON.stringify({ text: "Answer" }),
+            } as MessagePart,
+          ].reverse(),
+        };
+        const [block] = groupChatBlocks([item], count !== 3, verbose);
+        if (block.kind !== "assistant") throw new Error("Expected assistant");
+        expect(block.timeline).toHaveLength(1);
+        expect(block.timeline[0]).toMatchObject({
+          kind: "thinking",
+          label:
+            count === 1
+              ? "Inspect the files."
+              : "Inspect the files. Then verify the fix.",
+        });
+        expect(block.entries.map((entry) => entry.kind)).toEqual([
+          "reasoning",
+          "text",
+        ]);
+        expect(block.content).toBe("Answer");
+      }
+    }
+  });
+
   it("keeps separate assistant log messages visually divided", async () => {
     vi.stubGlobal("localStorage", {
       getItem: () => null,

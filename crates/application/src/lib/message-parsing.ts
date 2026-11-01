@@ -240,14 +240,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function toolSummary(part: MessagePart, _verbose: boolean) {
+function toolSummary(
+  part: MessagePart,
+  _verbose: boolean,
+  thinking: ReadonlyMap<string, ToolMessage>,
+) {
   try {
     const value = JSON.parse(part.content_json);
     if (typeof value !== "object" || value === null) return null;
-    const record = value as ToolMessage;
+    const record = thinking.get(value.toolCallId) ?? (value as ToolMessage);
     const label = getToolLabel(record);
     if (!label) return null;
     const id = stringed(record.toolCallId, label);
+    if (record.kind === "think" || record.kind === "thinking") {
+      const text = (record.content ?? [])
+        .flatMap((entry) => {
+          const content = entry.type === "content" ? entry.content : entry;
+          return isRecord(content) &&
+            content.type === "text" &&
+            typeof content.text === "string"
+            ? [content.text]
+            : [];
+        })
+        .join("\n");
+      return {
+        id,
+        label: text.trim() ? text : label,
+        kind: "thinking" as const,
+      };
+    }
     if (!record.kind) {
       record.kind = cleanToolTitle(label).toLocaleLowerCase();
     }
@@ -327,6 +348,30 @@ function buildTimeline(
 ): TimelineStep[] {
   const seenTools = new Set<string>();
   const steps: TimelineStep[] = [];
+  // ACP think tools carry cumulative text snapshots. Keep the latest snapshot
+  // at the initial tool position, including updates without a title or kind.
+  const thinking = new Map<string, ToolMessage>();
+  for (const { parts } of items) {
+    for (const part of [...parts].sort((a, b) => a.ordinal - b.ordinal)) {
+      if (part.kind !== "tool_call") continue;
+      try {
+        const value = JSON.parse(part.content_json);
+        if (!isRecord(value) || typeof value.toolCallId !== "string") continue;
+        if (
+          value.kind !== "think" &&
+          value.kind !== "thinking" &&
+          !thinking.has(value.toolCallId)
+        )
+          continue;
+        thinking.set(value.toolCallId, {
+          ...thinking.get(value.toolCallId),
+          ...value,
+        } as ToolMessage);
+      } catch {
+        // Ignore malformed activity, as with ordinary tool summaries.
+      }
+    }
+  }
 
   for (const { message, parts } of items) {
     const ordered = parts
@@ -347,7 +392,7 @@ function buildTimeline(
         });
         continue;
       }
-      const tool = toolSummary(part, verbose);
+      const tool = toolSummary(part, verbose, thinking);
       if (!tool || seenTools.has(tool.id) || diffToolCallIds.has(tool.id))
         continue;
       seenTools.add(tool.id);
