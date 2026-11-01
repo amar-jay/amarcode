@@ -107,6 +107,18 @@ impl SessionManager {
         attachments: Vec<crate::protocol::rpc::PromptAttachment>,
         config_values: Vec<crate::protocol::SessionConfigAssignment>,
     ) -> Result<PromptResult> {
+        self.prompt_with_cancel_signal(chat_id, agent_id, text, attachments, config_values, None)
+    }
+
+    pub fn prompt_with_cancel_signal(
+        &self,
+        chat_id: &str,
+        agent_id: &str,
+        text: impl AsRef<str>,
+        attachments: Vec<crate::protocol::rpc::PromptAttachment>,
+        config_values: Vec<crate::protocol::SessionConfigAssignment>,
+        stopped: Option<&std::sync::atomic::AtomicBool>,
+    ) -> Result<PromptResult> {
         let text = text.as_ref().trim();
         if text.is_empty() && attachments.is_empty() {
             return Err(Error::msg("prompt must contain text or an attachment"));
@@ -124,6 +136,14 @@ impl SessionManager {
             .lock()
             .map_err(|_| Error::msg("prompt lock poisoned"))?;
 
+        let check_stopped = || -> Result<()> {
+            if stopped.is_some_and(|signal| signal.load(std::sync::atomic::Ordering::SeqCst)) {
+                let _ = self.cancel(chat_id);
+                return Err(Error::msg("Prompt stopped before delivery"));
+            }
+            Ok(())
+        };
+        check_stopped()?;
         let needs_start = {
             let guard = self
                 .inner
@@ -138,6 +158,7 @@ impl SessionManager {
         if needs_start {
             self.start_run_locked(chat_id, agent_id)?;
         }
+        check_stopped()?;
         if !config_values.is_empty() {
             self.apply_config_assignments(chat_id, &config_values, true)?;
         }
@@ -315,6 +336,7 @@ impl SessionManager {
                 }));
             }
         }
+        check_stopped()?;
         let mut params = json!({ "prompt": prompt_blocks });
         if let Some(sid) = &session_id {
             params
@@ -393,9 +415,10 @@ impl SessionManager {
         }
 
         let stop_reason = extract_stop_reason(&prompt_result);
-        self.finish_turn(chat_id, &run_id, &user_message.id, stop_reason);
+        self.finish_turn(chat_id, &run_id, &user_message.id, stop_reason.clone());
 
         Ok(PromptResult {
+            stop_reason,
             run_id,
             chat_id: chat_id.to_owned(),
             agent_id: agent_id.to_owned(),

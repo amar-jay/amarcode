@@ -28,6 +28,21 @@ pub async fn transcribe_audio(
 }
 
 #[tauri::command]
+pub async fn enqueue_prompt(
+    client: State<'_, DaemonClient>,
+    params: amarcode_protocol::rpc::EnqueuePromptParams,
+) -> Result<amarcode_protocol::rpc::PromptQueueState, String> {
+    client.enqueue_prompt(params).await
+}
+#[tauri::command]
+pub async fn update_prompt_queue(
+    client: State<'_, DaemonClient>,
+    params: amarcode_protocol::rpc::UpdatePromptQueueParams,
+) -> Result<amarcode_protocol::rpc::PromptQueueState, String> {
+    client.update_prompt_queue(params).await
+}
+
+#[tauri::command]
 pub async fn prompt(
     client: State<'_, DaemonClient>,
     chat_id: String,

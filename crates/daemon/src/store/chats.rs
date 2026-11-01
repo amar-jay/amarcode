@@ -202,7 +202,8 @@ impl Store {
             .execute(
                 "DELETE FROM chats
                  WHERE id=?1
-                   AND NOT EXISTS (SELECT 1 FROM messages WHERE chat_id=?1)",
+                   AND NOT EXISTS (SELECT 1 FROM messages WHERE chat_id=?1)
+                   AND NOT EXISTS (SELECT 1 FROM prompt_jobs WHERE chat_id=?1 AND status NOT IN ('done','removed'))",
                 params![id],
             )
             .map_err(to_error)?;
@@ -215,7 +216,8 @@ impl Store {
         self.connection()?
             .execute(
                 "DELETE FROM chats
-                 WHERE NOT EXISTS (SELECT 1 FROM messages WHERE chat_id=chats.id)",
+                 WHERE NOT EXISTS (SELECT 1 FROM messages WHERE chat_id=chats.id)
+                 AND NOT EXISTS (SELECT 1 FROM prompt_jobs WHERE chat_id=chats.id AND status NOT IN ('done','removed'))",
                 [],
             )
             .map_err(to_error)

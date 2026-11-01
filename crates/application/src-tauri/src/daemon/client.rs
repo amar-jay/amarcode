@@ -186,6 +186,19 @@ impl DaemonClient {
         self.call(methods::TRANSCRIBE_AUDIO, params).await
     }
 
+    pub async fn enqueue_prompt(
+        &self,
+        params: amarcode_protocol::rpc::EnqueuePromptParams,
+    ) -> Result<amarcode_protocol::rpc::PromptQueueState, String> {
+        self.call(methods::ENQUEUE_PROMPT, params).await
+    }
+    pub async fn update_prompt_queue(
+        &self,
+        params: amarcode_protocol::rpc::UpdatePromptQueueParams,
+    ) -> Result<amarcode_protocol::rpc::PromptQueueState, String> {
+        self.call(methods::UPDATE_PROMPT_QUEUE, params).await
+    }
+
     pub async fn prompt(&self, params: PromptParams) -> Result<PromptResultDto, String> {
         self.call(methods::PROMPT, params).await
     }

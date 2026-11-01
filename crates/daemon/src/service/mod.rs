@@ -22,6 +22,7 @@ pub mod agent_manager;
 pub mod amarcode_acp;
 pub mod attachments;
 pub mod chat_manager;
+pub mod prompt_queue;
 pub mod session;
 pub mod transcription;
 pub mod workspace;

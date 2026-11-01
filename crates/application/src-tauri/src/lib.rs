@@ -64,6 +64,8 @@ pub fn run() {
             commands::sessions::discover_commands,
             commands::sessions::transcribe_audio,
             commands::sessions::prompt,
+            commands::sessions::enqueue_prompt,
+            commands::sessions::update_prompt_queue,
             commands::sessions::set_session_config_option,
             commands::sessions::cancel,
             commands::sessions::respond_permission,

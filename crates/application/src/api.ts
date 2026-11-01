@@ -312,6 +312,35 @@ export const daemonApi = {
   deleteChat: (chatId: string): Promise<DeleteChatResult> =>
     invoke("delete_chat", { chatId }),
 
+  enqueuePrompt: (
+    requestId: string,
+    chatId: string,
+    agentId: string,
+    text: string,
+    attachments: PromptAttachment[],
+    configValues: SessionConfigAssignment[] = [],
+  ): Promise<import("@/types").PromptQueueState> =>
+    invoke("enqueue_prompt", {
+      params: {
+        request_id: requestId,
+        prompt: {
+          chat_id: chatId,
+          agent_id: agentId,
+          text,
+          attachments,
+          config_values: configValues,
+        },
+      },
+    }),
+  updatePromptQueue: (
+    chatId: string,
+    action: "pause" | "resume" | "remove" | "edit",
+    id?: string,
+    text?: string,
+  ): Promise<import("@/types").PromptQueueState> =>
+    invoke("update_prompt_queue", {
+      params: { chat_id: chatId, action, id, text },
+    }),
   prompt: (
     chatId: string,
     agentId: string,

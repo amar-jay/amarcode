@@ -392,6 +392,46 @@ mod tests {
         assert_eq!(replies[2]["result"]["status"], "ok");
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn queue_rpc_roundtrip_preserves_order_and_exposes_pending_work() {
+        let (_directory, app) = test_app().await;
+        let chat = app.chats.create("/test", None).unwrap();
+        app.prompt_queue
+            .pause(&chat.id, "Paused for review")
+            .unwrap();
+        let requests = [
+            serde_json::json!({"method":"enqueue_prompt", "params":{
+                "request_id":"follow-up", "prompt":{
+                    "chat_id":chat.id,"agent_id":"agent", "text":"Later", "attachments":[], "config_values":[]
+                }
+            }}),
+            serde_json::json!({"method":"update_prompt_queue", "params":{
+                "chat_id":chat.id,"action":"edit","id":"follow-up","text":"Edited"
+            }}),
+            serde_json::json!({"method":"get_chat", "params":{"chat_id":chat.id}}),
+            serde_json::json!({"method":"update_prompt_queue", "params":{
+                "chat_id":chat.id,"action":"remove","id":"follow-up"
+            }}),
+        ];
+        let input = requests
+            .iter()
+            .map(|request| format!("{request}\n"))
+            .collect::<String>();
+        let replies = exchange(app, &input).await;
+        assert_eq!(replies.len(), 4);
+        for reply in &replies {
+            assert!(reply.get("error").is_none(), "{reply}");
+        }
+        assert_eq!(replies[0]["result"]["items"][0]["status"], "queued");
+        assert_eq!(replies[1]["result"]["items"][0]["text"], "Edited");
+        assert_eq!(replies[2]["result"]["prompt_queue"]["paused"], true);
+        assert_eq!(
+            replies[2]["result"]["prompt_queue"]["items"][0]["text"],
+            "Edited"
+        );
+        assert_eq!(replies[3]["result"]["items"], serde_json::json!([]));
+    }
+
     #[tokio::test]
     async fn subscription_replays_a_prompt_that_is_already_running() {
         let (_directory, app) = test_app().await;

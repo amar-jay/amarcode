@@ -24,6 +24,8 @@ vi.mock("@/api", () => ({
     respondPermission: vi.fn(),
     respondInput: vi.fn(),
     prompt: vi.fn(),
+    enqueuePrompt: vi.fn(),
+    updatePromptQueue: vi.fn(),
     listChats: vi.fn(async () => []),
   },
 }));
@@ -44,6 +46,7 @@ import {
   openLiveChatAtom,
   respondLiveRequestAtom,
   submitLivePromptAtom,
+  updatePromptQueueAtom,
 } from "./live-chat";
 
 function snapshot(
@@ -498,5 +501,127 @@ describe("paged chat history", () => {
     expect(
       store.get(liveChatAtom)?.detail?.messages.map((item) => item.message.id),
     ).toEqual(["m1", "m2"]);
+  });
+});
+
+describe("follow-up queue delivery", () => {
+  const input = { text: "Follow up", agentId: "agent-1", attachments: [] };
+  async function workingChat() {
+    const store = setup();
+    vi.mocked(daemonApi.getChat).mockResolvedValue(detail(snapshot()));
+    await store.set(loadLiveChatAtom, "chat-1");
+    return store;
+  }
+  it("queues while working without replacing pending approvals or starting another prompt RPC", async () => {
+    const store = await workingChat();
+    const before = store.get(liveChatAtom);
+    vi.mocked(daemonApi.enqueuePrompt).mockResolvedValue({
+      paused: false,
+      reason: null,
+      items: [],
+    });
+    await store.set(submitLivePromptAtom, input);
+    expect(daemonApi.enqueuePrompt).toHaveBeenCalledWith(
+      expect.any(String),
+      "chat-1",
+      "agent-1",
+      "Follow up",
+      [],
+      [],
+    );
+    expect(daemonApi.prompt).not.toHaveBeenCalled();
+    expect(store.get(liveChatAtom)?.turnStatus).toBe(before?.turnStatus);
+    expect(store.get(liveChatAtom)?.pendingRequests).toEqual(
+      before?.pendingRequests,
+    );
+  });
+  it("reuses the request ID after a lost acknowledgment, then uses a new ID after acceptance", async () => {
+    const store = await workingChat();
+    vi.mocked(daemonApi.enqueuePrompt).mockRejectedValueOnce(
+      new Error("Disconnected"),
+    );
+    await expect(store.set(submitLivePromptAtom, input)).rejects.toThrow(
+      "Disconnected",
+    );
+    const first = vi.mocked(daemonApi.enqueuePrompt).mock.calls[0][0];
+    // The queued job may finish before an acknowledgment is retried.
+    store.set(
+      applySessionSnapshotAtom,
+      snapshot({
+        revision: 2,
+        turn: { ...snapshot().turn!, status: "completed" },
+      }),
+    );
+    vi.mocked(daemonApi.getChat).mockResolvedValue(
+      detail(
+        snapshot({
+          revision: 2,
+          turn: { ...snapshot().turn!, status: "completed" },
+        }),
+      ),
+    );
+    vi.mocked(daemonApi.enqueuePrompt).mockResolvedValue({
+      paused: false,
+      reason: null,
+      items: [],
+    });
+    await store.set(submitLivePromptAtom, input);
+    expect(vi.mocked(daemonApi.enqueuePrompt).mock.calls[1][0]).toBe(first);
+    store.set(applySessionSnapshotAtom, snapshot({ revision: 3 }));
+    vi.mocked(daemonApi.getChat).mockResolvedValue(
+      detail(snapshot({ revision: 3 })),
+    );
+    await store.set(submitLivePromptAtom, input);
+    expect(vi.mocked(daemonApi.enqueuePrompt).mock.calls[2][0]).not.toBe(first);
+  });
+  it("does not apply an acknowledgment to a different open chat", async () => {
+    const store = await workingChat();
+    const response =
+      deferred<Awaited<ReturnType<typeof daemonApi.enqueuePrompt>>>();
+    vi.mocked(daemonApi.enqueuePrompt).mockReturnValueOnce(response.promise);
+    const queued = store.set(submitLivePromptAtom, input);
+    store.set(openLiveChatAtom, "chat-2");
+    response.resolve({ paused: true, reason: "Paused", items: [] });
+    await queued;
+    expect(store.get(liveChatAtom)?.chatId).toBe("chat-2");
+    expect(store.get(liveChatAtom)?.detail).toBeNull();
+  });
+  it("shows active work while a queued job starts its agent", async () => {
+    const store = setup();
+    const loaded = detail(snapshot({ turn: null }));
+    loaded.prompt_queue = {
+      paused: false,
+      reason: null,
+      items: [
+        {
+          id: "starting",
+          chat_id: "chat-1",
+          agent_id: "agent-1",
+          text: "Next",
+          attachment_count: 0,
+          status: "running",
+          created_at: "2026-01-01T00:00:00Z",
+          error: null,
+        },
+      ],
+    };
+    vi.mocked(daemonApi.getChat).mockResolvedValueOnce(loaded);
+    await store.set(loadLiveChatAtom, "chat-1");
+    expect(store.get(liveChatIsWorkingAtom)).toBe(true);
+  });
+  it("keeps queue state unchanged when an edit fails", async () => {
+    const store = await workingChat();
+    const before = store.get(liveChatAtom)?.detail?.prompt_queue;
+    vi.mocked(daemonApi.updatePromptQueue).mockRejectedValueOnce(
+      new Error("Already started"),
+    );
+    await expect(
+      store.set(updatePromptQueueAtom, {
+        action: "edit",
+        id: "job",
+        text: "New",
+      }),
+    ).rejects.toThrow("Already started");
+    expect(store.get(liveChatAtom)?.detail?.prompt_queue).toEqual(before);
   });
 });

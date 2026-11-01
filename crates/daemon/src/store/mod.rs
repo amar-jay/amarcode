@@ -30,6 +30,7 @@ pub mod agents;
 pub mod chats;
 pub mod events;
 pub mod messages;
+pub mod prompt_queue;
 pub mod runs;
 
 /// Ordered migrations embedded at compile time (id, SQL).
@@ -69,6 +70,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "0009_message_pagination",
         include_str!("../../migrations/0009_message_pagination.sql"),
+    ),
+    (
+        "0010_prompt_queue",
+        include_str!("../../migrations/0010_prompt_queue.sql"),
     ),
 ];
 

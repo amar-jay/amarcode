@@ -499,6 +499,8 @@ export type PromptInputProps = Omit<
   HTMLAttributes<HTMLFormElement>,
   "onSubmit" | "onError"
 > & {
+  /** Retain the draft until a short delivery acknowledgment succeeds. */
+  clearOnSuccess?: boolean;
   // e.g., "image/*" or leave undefined for any
   accept?: string;
   multiple?: boolean;
@@ -530,12 +532,18 @@ export const PromptInput = ({
   maxFileSize,
   onError,
   onSubmit,
+  clearOnSuccess = false,
   children,
   ...props
 }: PromptInputProps) => {
   // Try to use a provider controller if present
   const controller = useOptionalPromptInputController();
   const usingProvider = !!controller;
+  const latestController = useRef(controller);
+  useEffect(() => {
+    latestController.current = controller;
+  }, [controller]);
+  const queuedSubmissionPending = useRef(false);
 
   // Refs
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -854,6 +862,8 @@ export const PromptInput = ({
     async (event) => {
       event.preventDefault();
 
+      if (queuedSubmissionPending.current) return;
+      if (clearOnSuccess) queuedSubmissionPending.current = true;
       const form = event.currentTarget;
       const text = usingProvider
         ? controller.textInput.value
@@ -864,7 +874,7 @@ export const PromptInput = ({
 
       // Reset form immediately after capturing text to avoid race condition
       // where user input during async blob conversion would be lost
-      if (!usingProvider) {
+      if (!usingProvider && !clearOnSuccess) {
         form.reset();
       }
 
@@ -886,6 +896,16 @@ export const PromptInput = ({
 
         const result = onSubmit({ files: convertedFiles, text }, event);
 
+        if (clearOnSuccess) {
+          await result;
+          for (const file of files) remove(file.id);
+          if (usingProvider) {
+            const current = latestController.current;
+            if (current?.textInput.value === text) current.textInput.clear();
+          } else if (new FormData(form).get("message") === text) form.reset();
+          return;
+        }
+
         // Submission has been accepted. Clear immediately rather than waiting
         // for a long-running agent turn to finish.
         clear();
@@ -903,10 +923,12 @@ export const PromptInput = ({
           }
         }
       } catch {
-        // Synchronous failures happen before acceptance, so preserve the draft.
+        // Queued delivery failures preserve the draft for retry.
+      } finally {
+        if (clearOnSuccess) queuedSubmissionPending.current = false;
       }
     },
-    [usingProvider, controller, files, onSubmit, clear],
+    [usingProvider, controller, files, onSubmit, clear, clearOnSuccess, remove],
   );
 
   // Render with or without local provider

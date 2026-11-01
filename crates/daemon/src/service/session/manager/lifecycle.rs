@@ -5,6 +5,15 @@ use super::*;
 impl SessionManager {
     /// Cancel the live run for a chat.
     pub fn cancel(&self, chat_id: &str) -> Result<()> {
+        self.cancel_inner(chat_id, false)
+    }
+
+    /// A queue cancellation also covers startup before a live run exists.
+    pub fn cancel_if_running(&self, chat_id: &str) -> Result<()> {
+        self.cancel_inner(chat_id, true)
+    }
+
+    fn cancel_inner(&self, chat_id: &str, allow_missing: bool) -> Result<()> {
         let live = {
             let mut guard = self
                 .inner
@@ -15,6 +24,9 @@ impl SessionManager {
         };
 
         let Some(mut live) = live else {
+            if allow_missing {
+                return Ok(());
+            }
             return Err(Error::msg(format!("no live run for chat: {chat_id}")));
         };
 

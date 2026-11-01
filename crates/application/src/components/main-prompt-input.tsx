@@ -20,7 +20,7 @@ import {
 } from "@/components/ai-elements/context";
 
 import { shortcutHint } from "@/lib/app-shortcuts";
-import { Cloud, FolderOpen } from "lucide-react";
+import { Cloud, FolderOpen, Square, ListPlus } from "lucide-react";
 import { connectionIdentity } from "@/lib/daemon-connection-form";
 import { useAgentCatalog } from "@/hooks/use-agent-catalog";
 import { daemonApi } from "@/api";
@@ -81,6 +81,7 @@ interface AppPromptInputProps {
   selectedAgentId: string;
   onAgentSelected?: (agent: AgentInfo) => void;
   isWorking?: boolean;
+  hasQueuedPrompts?: boolean;
   onStop?: () => void;
   sessionConfig?: SessionConfigOption[];
   sessionCommands?: SessionCommands | null;
@@ -102,6 +103,7 @@ function AppPromptInput({
   selectedAgentId,
   onAgentSelected,
   isWorking = false,
+  hasQueuedPrompts = false,
   onStop,
   sessionConfig,
   sessionConfigAgentId,
@@ -259,17 +261,18 @@ function AppPromptInput({
           multiple
           onError={({ message }) => notify(message, "error")}
           onSubmit={handleSubmit}
+          clearOnSuccess={isWorking || hasQueuedPrompts}
         >
           <PromptInputBody>
             <PromptAttachmentPreviews />
             <SlashCommandInput
               commands={commandDiscovery.catalog?.commands ?? []}
               sessionReady={Boolean(commandDiscovery.catalog)}
+              disabled={false}
               onDiscover={commandDiscovery.discover}
               discovering={commandDiscovery.discovering}
               discoveryError={commandDiscovery.error}
               onRetry={commandDiscovery.retry}
-              disabled={isWorking}
             />
           </PromptInputBody>
           <PromptInputFooter>
@@ -350,10 +353,20 @@ function AppPromptInput({
             </PromptInputTools>
             <div className="flex shrink-0 items-center gap-1">
               <DictationControls dictation={dictation} />
+              {isWorking && onStop && (
+                <PromptInputButton
+                  type="button"
+                  onClick={onStop}
+                  tooltip={`Stop response (${shortcutHint("stop-response")})`}
+                  aria-label="Stop response"
+                >
+                  <Square className="size-3.5" />
+                </PromptInputButton>
+              )}
               <PromptInputSubmit
                 title={
-                  isWorking
-                    ? `Stop response (${shortcutHint("stop-response")})`
+                  isWorking || hasQueuedPrompts
+                    ? "Queue follow-up (Enter)"
                     : "Send message (Enter)"
                 }
                 disabled={
@@ -361,9 +374,17 @@ function AppPromptInput({
                   !workspacePath ||
                   commandDiscovery.discovering
                 }
-                status={isWorking ? "streaming" : "ready"}
-                onStop={onStop}
-              />
+                status="ready"
+                aria-label={
+                  isWorking || hasQueuedPrompts
+                    ? "Queue follow-up"
+                    : "Send message"
+                }
+              >
+                {isWorking || hasQueuedPrompts ? (
+                  <ListPlus className="size-4" />
+                ) : undefined}
+              </PromptInputSubmit>
             </div>
           </PromptInputFooter>
         </PromptInput>

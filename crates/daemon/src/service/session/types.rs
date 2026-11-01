@@ -27,6 +27,7 @@ pub(super) const ACP_PROMPT_TOTAL_TIMEOUT: Duration = Duration::from_secs(4 * 60
 /// Result of starting a run / sending a prompt.
 #[derive(Debug, Clone)]
 pub struct PromptResult {
+    pub stop_reason: Option<String>,
     pub run_id: String,
     pub chat_id: String,
     pub agent_id: String,

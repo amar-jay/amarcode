@@ -43,6 +43,8 @@ pub mod methods {
     pub const UPDATE_CHAT: &str = "update_chat";
     pub const DELETE_CHAT: &str = "delete_chat";
     pub const DISCOVER_COMMANDS: &str = "discover_commands";
+    pub const ENQUEUE_PROMPT: &str = "enqueue_prompt";
+    pub const UPDATE_PROMPT_QUEUE: &str = "update_prompt_queue";
     pub const PROMPT: &str = "prompt";
     pub const SET_SESSION_CONFIG_OPTION: &str = "set_session_config_option";
     pub const CANCEL: &str = "cancel";
@@ -429,6 +431,41 @@ pub struct PromptParams {
     pub attachments: Vec<PromptAttachment>,
     #[serde(default)]
     pub config_values: Vec<SessionConfigAssignment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct QueuedPrompt {
+    pub id: String,
+    pub chat_id: String,
+    pub agent_id: String,
+    pub text: String,
+    pub attachment_count: u32,
+    pub status: String,
+    pub created_at: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+pub struct PromptQueueState {
+    pub paused: bool,
+    pub reason: Option<String>,
+    pub items: Vec<QueuedPrompt>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnqueuePromptParams {
+    pub request_id: String,
+    pub prompt: PromptParams,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdatePromptQueueParams {
+    pub chat_id: String,
+    pub action: String,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

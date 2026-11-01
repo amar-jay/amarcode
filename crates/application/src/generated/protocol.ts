@@ -91,7 +91,7 @@ export type SessionPendingRequest = { request_id: string, kind: SessionRequestKi
 
 export type SessionRequestKind = "approval" | "input";
 
-export type ChatDetail = { session_state: ChatSessionSnapshot, chat: Chat, messages: Array<MessageDetail>, has_older_messages?: boolean, session_config: Array<SessionConfigOption>, session_commands: SessionCommands | null, context_usage: ContextUsage | null, };
+export type ChatDetail = { prompt_queue?: PromptQueueState, session_state: ChatSessionSnapshot, chat: Chat, messages: Array<MessageDetail>, has_older_messages?: boolean, session_config: Array<SessionConfigOption>, session_commands: SessionCommands | null, context_usage: ContextUsage | null, };
 
 export type GetChatResult = ChatDetail | Chat;
 
@@ -154,6 +154,10 @@ export type SetAmarcodeAcpConfigParams = { base_url: string, model: string, api_
 export type CreateChatParams = { workspace_path: string, title: string | null, };
 
 export type ListChatsParams = { workspace_path: string | null, };
+
+export type QueuedPrompt = { id: string, chat_id: string, agent_id: string, text: string, attachment_count: number, status: string, created_at: string, error: string | null, };
+
+export type PromptQueueState = { paused: boolean, reason: string | null, items: Array<QueuedPrompt>, };
 
 export type GetChatParams = { chat_id: string, include_messages: boolean, include_tool_content: boolean, message_limit?: number, before_message_id?: string, };
 

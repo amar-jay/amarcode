@@ -34,6 +34,33 @@ import { refreshChatsAtom } from "./chats";
 import { activeSessionAtom } from "./navigation";
 import { hasAcpSessionMode, rememberSessionConfig } from "./session-config";
 
+type QueuedDeliveryInput = {
+  text: string;
+  agentId: string;
+  attachments: PromptAttachment[];
+  configValues?: SessionConfigAssignment[];
+};
+const queuedDeliveryAttemptAtom = atom<{
+  chatId: string;
+  id: string;
+  input: QueuedDeliveryInput;
+} | null>(null);
+function sameQueuedInput(a: QueuedDeliveryInput, b: QueuedDeliveryInput) {
+  return (
+    a.agentId === b.agentId &&
+    a.text.trim() === b.text.trim() &&
+    JSON.stringify(a.configValues ?? []) ===
+      JSON.stringify(b.configValues ?? []) &&
+    a.attachments.length === b.attachments.length &&
+    a.attachments.every(
+      (file, i) =>
+        file.data === b.attachments[i].data &&
+        file.mime_type === b.attachments[i].mime_type &&
+        file.filename === b.attachments[i].filename,
+    )
+  );
+}
+
 const announcedFailures = new Set<string>();
 
 function announceAgentFailure(message: string | null | undefined) {
@@ -113,6 +140,10 @@ const emptyLiveChat = (
 });
 
 export const liveChatAtom = atom<LiveChatState | null>(null);
+export const liveChatHasQueuedDeliveryAtom = atom((get) => {
+  const attempt = get(queuedDeliveryAttemptAtom);
+  return Boolean(attempt && attempt.chatId === get(liveChatAtom)?.chatId);
+});
 const liveChatIdentityAtom = atom(0);
 const chatLoadSequenceAtom = atom(0);
 const localPromptAtom = atom<{
@@ -268,9 +299,17 @@ export const applySessionSnapshotAtom = atom(
 );
 
 /** Busy = open prompt turn (run/session can stay alive across many turns). */
-export const liveChatIsWorkingAtom = atom(
-  (get) => get(liveChatAtom)?.turnStatus === "started",
-);
+export const liveChatIsWorkingAtom = atom((get) => {
+  const live = get(liveChatAtom);
+  return (
+    live?.turnStatus === "started" ||
+    Boolean(
+      live?.detail?.prompt_queue?.items.some(
+        (item) => item.status === "running",
+      ),
+    )
+  );
+});
 
 export type OpenLiveChatInput = {
   chatId: string;
@@ -302,6 +341,7 @@ export const openLiveChatAtom = atom(
     const existing = get(liveChatAtom);
     if (existing?.chatId === chatId && existing.detail) return;
 
+    set(queuedDeliveryAttemptAtom, null);
     set(liveChatIdentityAtom, get(liveChatIdentityAtom) + 1);
     const cached = getLatestTurnForChat(chatId);
     const turnStatus =
@@ -865,12 +905,58 @@ export const submitLivePromptAtom = atom(
     },
   ) => {
     const live = get(liveChatAtom);
+    if (!live || (!input.text.trim() && input.attachments.length === 0)) return;
+
+    const queue = live.detail?.prompt_queue;
     if (
-      !live ||
-      (!input.text.trim() && input.attachments.length === 0) ||
-      live.turnStatus === "started"
-    )
+      get(liveChatIsWorkingAtom) ||
+      queue?.items.length ||
+      get(liveChatHasQueuedDeliveryAtom)
+    ) {
+      const identity = get(liveChatIdentityAtom);
+      const generation = get(daemonConnectionGenerationAtom);
+      const previous = get(queuedDeliveryAttemptAtom);
+      const request =
+        previous?.chatId === live.chatId &&
+        sameQueuedInput(previous.input, input)
+          ? previous
+          : { chatId: live.chatId, id: crypto.randomUUID(), input };
+      set(queuedDeliveryAttemptAtom, request);
+      try {
+        const result = await daemonApi.enqueuePrompt(
+          request.id,
+          live.chatId,
+          input.agentId,
+          input.text.trim(),
+          input.attachments,
+          input.configValues ?? [],
+        );
+        if (get(queuedDeliveryAttemptAtom)?.id === request.id)
+          set(queuedDeliveryAttemptAtom, null);
+        const current = get(liveChatAtom);
+        if (
+          current?.detail &&
+          current.chatId === live.chatId &&
+          identity === get(liveChatIdentityAtom) &&
+          generation === get(daemonConnectionGenerationAtom)
+        ) {
+          set(liveChatAtom, {
+            ...current,
+            detail: { ...current.detail, prompt_queue: result },
+          });
+          void set(loadLiveChatAtom, { chatId: live.chatId, silent: true });
+        }
+      } catch (cause) {
+        notify(
+          cause instanceof Error
+            ? cause.message
+            : "Could not queue this message.",
+          "error",
+        );
+        throw cause;
+      }
       return;
+    }
 
     const identity = get(liveChatIdentityAtom);
     const generation = get(daemonConnectionGenerationAtom);
@@ -927,6 +1013,48 @@ export const submitLivePromptAtom = atom(
         errorKind: "error",
       });
       announceAgentFailure(error);
+      throw cause;
+    }
+  },
+);
+
+export const updatePromptQueueAtom = atom(
+  null,
+  async (
+    get,
+    set,
+    input: {
+      action: "pause" | "resume" | "remove" | "edit";
+      id?: string;
+      text?: string;
+    },
+  ) => {
+    const live = get(liveChatAtom);
+    if (!live) return;
+    const identity = get(liveChatIdentityAtom);
+    const generation = get(daemonConnectionGenerationAtom);
+    try {
+      const result = await daemonApi.updatePromptQueue(
+        live.chatId,
+        input.action,
+        input.id,
+        input.text,
+      );
+      const current = get(liveChatAtom);
+      if (
+        current?.detail &&
+        identity === get(liveChatIdentityAtom) &&
+        generation === get(daemonConnectionGenerationAtom)
+      )
+        set(liveChatAtom, {
+          ...current,
+          detail: { ...current.detail, prompt_queue: result },
+        });
+    } catch (cause) {
+      notify(
+        cause instanceof Error ? cause.message : "Could not update the queue.",
+        "error",
+      );
       throw cause;
     }
   },

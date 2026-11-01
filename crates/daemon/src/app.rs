@@ -33,7 +33,8 @@ pub struct App {
     pub events: broadcast::Sender<EditorEvent>,
     pub agents: AgentManager,
     pub chats: ChatManager,
-    pub sessions: SessionManager,
+    pub sessions: Arc<SessionManager>,
+    pub prompt_queue: Arc<crate::service::prompt_queue::PromptQueue>,
     #[cfg(windows)]
     registry_ready: tokio::sync::OnceCell<()>,
     // Declared after the database-backed fields so they are dropped before
@@ -76,6 +77,7 @@ impl App {
         if stopped > 0 {
             info!(count = stopped, "marked interrupted agent runs as stopped");
         }
+        store.recover_prompt_queues()?;
         let deleted = store.delete_empty_chats()?;
         if deleted > 0 {
             info!(count = deleted, "removed chats with no messages");
@@ -125,11 +127,26 @@ impl App {
             });
         }
         let chats = ChatManager::new(Arc::clone(&store), events.clone());
-        let sessions = SessionManager::new(
+        let sessions = Arc::new(SessionManager::new(
             Arc::clone(&store),
             agents.clone(),
             events.clone(),
             config.app_dir.join("attachments"),
+        ));
+        let queue_sessions = Arc::clone(&sessions);
+        let prompt_queue = crate::service::prompt_queue::PromptQueue::new(
+            Arc::clone(&store),
+            events.clone(),
+            move |p, stopped| {
+                queue_sessions.prompt_with_cancel_signal(
+                    &p.chat_id,
+                    &p.agent_id,
+                    &p.text,
+                    p.attachments,
+                    p.config_values,
+                    Some(stopped),
+                )
+            },
         );
 
         let update_config = config.clone();
@@ -147,6 +164,7 @@ impl App {
             agents,
             chats,
             sessions,
+            prompt_queue,
             #[cfg(windows)]
             registry_ready: tokio::sync::OnceCell::new(),
             _instance_lock: instance_lock,

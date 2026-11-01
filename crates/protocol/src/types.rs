@@ -260,6 +260,9 @@ pub enum SessionRequestKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ChatDetail {
+    #[serde(default)]
+    #[ts(optional)]
+    pub prompt_queue: Option<crate::rpc::PromptQueueState>,
     pub session_state: ChatSessionSnapshot,
     pub chat: Chat,
     pub messages: Vec<MessageDetail>,

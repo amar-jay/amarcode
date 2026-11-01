@@ -99,9 +99,9 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::CREATE_CHAT => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
             || create_chat(app, params),
         )?)),
-        methods::LIST_CHATS => Ok(DispatchOutcome::Result(tokio::task::block_in_place(|| {
-            list_chats(app, params)
-        })?)),
+        methods::LIST_CHATS => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
+            || list_chats(app, params),
+        )?)),
         methods::DISCOVER_COMMANDS => {
             let p: amarcode_protocol::rpc::DiscoverCommandsParams = parse_params(params)?;
             to_value(tokio::task::block_in_place(|| {
@@ -109,18 +109,18 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
             })?)
             .map(DispatchOutcome::Result)
         }
-        methods::GET_CHAT => Ok(DispatchOutcome::Result(tokio::task::block_in_place(|| {
-            get_chat(app, params)
-        })?)),
+        methods::GET_CHAT => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
+            || get_chat(app, params),
+        )?)),
         methods::GET_MESSAGE_PARTS => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
             || get_message_parts(app, params),
         )?)),
-        methods::LIST_ACP_EVENTS_FOR_CHAT => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
-            || list_acp_events_for_chat(app, params),
-        )?)),
-        methods::LIST_AGENT_RUNS_FOR_CHAT => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
-            || list_agent_runs_for_chat(app, params),
-        )?)),
+        methods::LIST_ACP_EVENTS_FOR_CHAT => Ok(DispatchOutcome::Result(
+            tokio::task::block_in_place(|| list_acp_events_for_chat(app, params))?,
+        )),
+        methods::LIST_AGENT_RUNS_FOR_CHAT => Ok(DispatchOutcome::Result(
+            tokio::task::block_in_place(|| list_agent_runs_for_chat(app, params))?,
+        )),
         methods::GET_DAEMON_CONFIG => Ok(DispatchOutcome::Result(tokio::task::block_in_place(
             || to_value(app.store.daemon_config()),
         )?)),
@@ -138,6 +138,18 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
         methods::DELETE_CHAT => Ok(DispatchOutcome::Result(delete_chat(app, params).await?)),
 
         // sessions (ACP may block; run off the async worker)
+        methods::ENQUEUE_PROMPT => {
+            let p: crate::protocol::rpc::EnqueuePromptParams = parse_params(params)?;
+            Ok(DispatchOutcome::Result(to_value(
+                tokio::task::block_in_place(|| app.prompt_queue.enqueue(&p.request_id, p.prompt))?,
+            )?))
+        }
+        methods::UPDATE_PROMPT_QUEUE => {
+            let p: crate::protocol::rpc::UpdatePromptQueueParams = parse_params(params)?;
+            Ok(DispatchOutcome::Result(to_value(
+                tokio::task::block_in_place(|| app.prompt_queue.update(p))?,
+            )?))
+        }
         methods::PROMPT => Ok(DispatchOutcome::Result(prompt(app, params).await?)),
         methods::SET_SESSION_CONFIG_OPTION => Ok(DispatchOutcome::Result(
             set_session_config_option(app, params).await?,
@@ -258,6 +270,7 @@ fn get_chat(app: &App, params: Value) -> Result<Value> {
             compact_tool_parts(&mut detail);
         }
         let mut value = chat_detail_json(&detail)?;
+        value["prompt_queue"] = serde_json::to_value(app.prompt_queue.state(&p.chat_id)?)?;
         value["session_state"] = serde_json::to_value(app.sessions.session_snapshot(&p.chat_id)?)?;
         value["session_commands"] =
             serde_json::to_value(app.sessions.session_commands(&p.chat_id)?)?;
@@ -460,6 +473,8 @@ fn get_attachment(app: &App, params: Value) -> Result<Value> {
 
 async fn delete_chat(app: &App, params: Value) -> Result<Value> {
     let p: DeleteChatParams = parse_params(params)?;
+    app.prompt_queue
+        .pause(&p.chat_id, "Chat is being deleted.")?;
     let chat_id = p.chat_id;
     tokio::task::block_in_place(|| app.sessions.delete_chat(&chat_id))?;
     to_value(DeleteChatResult { deleted: true })
@@ -500,17 +515,8 @@ async fn prompt(app: &App, params: Value) -> Result<Value> {
         return Err(Error::msg("agent_id must not be empty"));
     }
 
-    let chat_id = p.chat_id;
-    let agent_id = p.agent_id;
-    let text = p.text;
-    let attachments = p.attachments;
-    let config_values = p.config_values;
-
-    // ACP spawn/request is blocking; keep the async runtime free.
-    let result = tokio::task::block_in_place(|| {
-        app.sessions
-            .prompt(&chat_id, &agent_id, text, attachments, config_values)
-    });
+    let chat_id = p.chat_id.clone();
+    let result = tokio::task::block_in_place(|| app.prompt_queue.prompt(p));
     let result = match result {
         Ok(result) => result,
         Err(error) => {
@@ -546,7 +552,16 @@ async fn cancel(app: &App, params: Value) -> Result<Value> {
         return Err(Error::msg("chat_id must not be empty"));
     }
     let chat_id = p.chat_id.clone();
-    tokio::task::block_in_place(|| app.sessions.cancel(&chat_id))?;
+    tokio::task::block_in_place(|| {
+        let active = app
+            .prompt_queue
+            .pause(&chat_id, "Stopped by you. Resume to send waiting messages.")?;
+        if active {
+            app.sessions.cancel_if_running(&chat_id)
+        } else {
+            app.sessions.cancel(&chat_id)
+        }
+    })?;
     to_value(CancelResult {
         cancelled: true,
         chat_id: p.chat_id,

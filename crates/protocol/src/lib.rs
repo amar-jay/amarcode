@@ -87,6 +87,8 @@ pub fn typescript_bindings() -> String {
         rpc::SetAmarcodeAcpConfigParams::decl(&config),
         rpc::CreateChatParams::decl(&config),
         rpc::ListChatsParams::decl(&config),
+        rpc::QueuedPrompt::decl(&config),
+        rpc::PromptQueueState::decl(&config),
         rpc::GetChatParams::decl(&config),
         rpc::GetMessagePartsParams::decl(&config),
         rpc::DaemonConfigResult::decl(&config),

@@ -1,3 +1,4 @@
+import { QueuedPrompts } from "./queued-prompts";
 import { ChatHistoryLoader } from "./chat-history-loader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -40,6 +41,7 @@ import {
   clearLiveChatFailureAtom,
   liveChatAtom,
   liveChatIsWorkingAtom,
+  liveChatHasQueuedDeliveryAtom,
   loadLiveChatAtom,
   loadOlderChatMessagesAtom,
   openLiveChatAtom,
@@ -50,6 +52,7 @@ import {
   startNewChatAtom,
   stopLiveChatAtom,
   submitLivePromptAtom,
+  updatePromptQueueAtom,
   subscribeDaemonEvents,
   daemonEventStreamStateAtom,
   verboseReasoningAtom,
@@ -112,6 +115,7 @@ export function LiveChatScreen() {
   const live = useAtomValue(liveChatAtom);
   const eventStream = useAtomValue(daemonEventStreamStateAtom);
   const isWorking = useAtomValue(liveChatIsWorkingAtom);
+  const hasPendingQueueDelivery = useAtomValue(liveChatHasQueuedDeliveryAtom);
   const verboseReasoning = useAtomValue(verboseReasoningAtom);
   const agents = useAtomValue(agentsAtom);
   const agent = useAtomValue(selectedAgentAtom) ?? session?.agent;
@@ -122,6 +126,7 @@ export function LiveChatScreen() {
   const loadOlderMessages = useSetAtom(loadOlderChatMessagesAtom);
   const applyEvent = useSetAtom(applyLiveChatEventAtom);
   const submitPrompt = useSetAtom(submitLivePromptAtom);
+  const updateQueue = useSetAtom(updatePromptQueueAtom);
   const changeSessionConfig = useSetAtom(setLiveSessionConfigOptionAtom);
   const stop = useSetAtom(stopLiveChatAtom);
   const respond = useSetAtom(respondLiveRequestAtom);
@@ -546,6 +551,11 @@ export function LiveChatScreen() {
             }}
           />
         )}
+        <QueuedPrompts
+          key={`queue-${chatId}`}
+          queue={live.detail?.prompt_queue}
+          onUpdate={updateQueue}
+        />
         <AppPromptInput
           chatId={chatId ?? undefined}
           key={chatId}
@@ -561,6 +571,10 @@ export function LiveChatScreen() {
             changeSessionConfig({ configId, value })
           }
           isWorking={isWorking}
+          hasQueuedPrompts={
+            hasPendingQueueDelivery ||
+            Boolean(live.detail?.prompt_queue?.items.length)
+          }
           onStop={() => void stop()}
         />
       </div>
