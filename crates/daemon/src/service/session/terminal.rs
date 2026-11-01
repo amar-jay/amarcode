@@ -136,7 +136,7 @@ fn handle_terminal_request(
     method: &str,
     params: Value,
 ) -> Result<Value> {
-    let expected_session = {
+    let (expected_session, agent_id) = {
         let runs = inner
             .state
             .lock()
@@ -145,9 +145,12 @@ fn handle_terminal_request(
             .get(chat_id)
             .filter(|live| live.run_id == run_id)
             .ok_or_else(|| Error::msg("terminal request belongs to a replaced run"))?;
-        live.acp_session_id
-            .clone()
-            .ok_or_else(|| Error::msg("ACP session is not initialized"))?
+        (
+            live.acp_session_id
+                .clone()
+                .ok_or_else(|| Error::msg("ACP session is not initialized"))?,
+            live.agent_id.clone(),
+        )
     };
     let workspace = inner
         .store
@@ -159,10 +162,13 @@ fn handle_terminal_request(
         "terminal/create" => {
             let request: CreateTerminalRequest = parse(params)?;
             require_session(&request.session_id.to_string(), &expected_session)?;
-            let response =
-                inner
-                    .terminals
-                    .create(run_id, chat_id, Path::new(&workspace), request)?;
+            let response = inner.terminals.create(
+                run_id,
+                chat_id,
+                &agent_id,
+                Path::new(&workspace),
+                request,
+            )?;
             encode(response)
         }
         "terminal/output" => {
@@ -254,6 +260,7 @@ impl TerminalManager {
         &self,
         run_id: &str,
         chat_id: &str,
+        agent_id: &str,
         workspace: &Path,
         request: CreateTerminalRequest,
     ) -> Result<CreateTerminalResponse> {
@@ -274,7 +281,7 @@ impl TerminalManager {
                 "terminal environment overrides are not permitted without explicit authorization",
             ));
         }
-        self.consume_permission(run_id, chat_id, &root, &cwd, &request)?;
+        self.consume_permission(run_id, chat_id, agent_id, &root, &cwd, &request)?;
 
         let mut command = Command::new(&request.command);
         #[cfg(windows)]
@@ -388,32 +395,36 @@ impl TerminalManager {
         });
     }
 
-    /// Whether the agent explicitly declared this terminal command non-sensitive,
-    /// which the host honors as an auto-approval so the command can run without a
-    /// recorded permission. Amarcode signals this through the reserved `_meta`
-    /// extensibility key. The agent (LLM) makes the declaration, so this is
-    /// model-judgment based rather than a command sandbox.
-    fn auto_approved(request: &CreateTerminalRequest) -> bool {
-        request
-            .meta
-            .as_ref()
-            .and_then(|meta| meta.get("amarcode"))
-            .and_then(serde_json::Value::as_object)
-            .and_then(|value| value.get("sensitive"))
-            .and_then(serde_json::Value::as_bool)
-            .map(|sensitive| !sensitive)
-            .unwrap_or(false)
+    /// Whether the built-in amarcode-acp adapter explicitly declared this
+    /// terminal command non-sensitive, which the host honors as an auto-approval
+    /// so the command can run without a recorded permission. Amarcode signals
+    /// this through the reserved `_meta` extensibility key. The agent (LLM)
+    /// makes the declaration, so this is model-judgment based rather than a
+    /// command sandbox; it is only trusted for the built-in adapter, so a
+    /// third-party ACP agent cannot set the flag to bypass permission checks.
+    fn auto_approved(agent_id: &str, request: &CreateTerminalRequest) -> bool {
+        agent_id == crate::service::amarcode_acp::AGENT_ID
+            && request
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.get("amarcode"))
+                .and_then(serde_json::Value::as_object)
+                .and_then(|value| value.get("sensitive"))
+                .and_then(serde_json::Value::as_bool)
+                .map(|sensitive| !sensitive)
+                .unwrap_or(false)
     }
 
     fn consume_permission(
         &self,
         run_id: &str,
         chat_id: &str,
+        agent_id: &str,
         root: &Path,
         cwd: &Path,
         request: &CreateTerminalRequest,
     ) -> Result<()> {
-        if Self::auto_approved(request) {
+        if Self::auto_approved(agent_id, request) {
             return Ok(());
         }
         let mut permissions = self
@@ -782,10 +793,24 @@ mod tests {
             .cwd(workspace.clone());
 
         manager
-            .consume_permission("run", "chat", &workspace, &workspace, &request)
+            .consume_permission(
+                "run",
+                "chat",
+                "generic-agent",
+                &workspace,
+                &workspace,
+                &request,
+            )
             .expect("first use");
         manager
-            .consume_permission("run", "chat", &workspace, &workspace, &request)
+            .consume_permission(
+                "run",
+                "chat",
+                "generic-agent",
+                &workspace,
+                &workspace,
+                &request,
+            )
             .expect("reused permission");
         assert_eq!(manager.permissions.lock().expect("permissions").len(), 1);
         let _ = std::fs::remove_dir_all(workspace);
@@ -805,6 +830,7 @@ mod tests {
             .create(
                 "run",
                 "chat",
+                crate::service::amarcode_acp::AGENT_ID,
                 &workspace,
                 CreateTerminalRequest::new(session.clone(), "/bin/sh")
                     .args(vec!["-c".into(), "printf auto-ok".into()])
@@ -838,6 +864,30 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn third_party_agent_cannot_forge_the_auto_approve_flag() {
+        let workspace = temp_workspace();
+        let manager = TerminalManager::default();
+        let session = SessionId::new("session");
+        let mut meta = serde_json::Map::new();
+        meta.insert("amarcode".into(), json!({ "sensitive": false }));
+        // A non-built-in agent sets the same _meta flag, but the host must not
+        // trust it: no permission was recorded, so the command is rejected.
+        let result = manager.create(
+            "run",
+            "chat",
+            "third-party-agent",
+            &workspace,
+            CreateTerminalRequest::new(session, "/bin/echo")
+                .args(vec!["hello".into()])
+                .cwd(workspace.clone())
+                .meta(meta),
+        );
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn sensitive_true_still_requires_a_recorded_permission() {
         let workspace = temp_workspace();
         let manager = TerminalManager::default();
@@ -848,6 +898,7 @@ mod tests {
         let result = manager.create(
             "run",
             "chat",
+            crate::service::amarcode_acp::AGENT_ID,
             &workspace,
             CreateTerminalRequest::new(session, "/bin/echo")
                 .args(vec!["no".into()])
@@ -869,6 +920,7 @@ mod tests {
             .create(
                 "run",
                 "chat",
+                "generic-agent",
                 &workspace,
                 CreateTerminalRequest::new(session.clone(), "/bin/sh")
                     .args(vec!["-c".into(), "printf terminal-ok".into()])
@@ -921,6 +973,7 @@ mod tests {
             .create(
                 "run",
                 "chat",
+                "generic-agent",
                 &workspace,
                 CreateTerminalRequest::new(session.clone(), "powershell.exe")
                     .args(args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>())
@@ -957,6 +1010,7 @@ mod tests {
         let result = manager.create(
             "run",
             "chat",
+            "generic-agent",
             &workspace,
             CreateTerminalRequest::new("session", "/bin/echo")
                 .args(vec!["different".into()])
@@ -980,6 +1034,7 @@ mod tests {
             .create(
                 "run",
                 "chat",
+                "generic-agent",
                 &workspace,
                 CreateTerminalRequest::new(session.clone(), "/bin/sh")
                     .args(vec!["-c".into(), "sleep 30".into()])

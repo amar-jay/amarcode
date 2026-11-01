@@ -640,6 +640,7 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
 
     let mut methods = Vec::new();
     let mut saw_terminal_content = false;
+    let mut terminal_creates = 0;
     loop {
         let message = agent.output.recv_timeout(TIMEOUT).expect("ACP message");
         if message.get("id").and_then(Value::as_u64) == Some(4) {
@@ -677,6 +678,15 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
             "terminal/create" => {
                 assert_eq!(message["params"]["command"], "/bin/echo");
                 assert_eq!(message["params"]["args"], json!(["hello terminal"]));
+                terminal_creates += 1;
+                // First call: approved through the dialog, so the daemon
+                // recorded an exact permission and _meta.sensitive is true.
+                // Second call: the earlier full-access grant is remembered, so
+                // the adapter signals non-sensitive and the daemon bypasses.
+                assert_eq!(
+                    message["params"]["_meta"]["amarcode"]["sensitive"],
+                    json!(terminal_creates == 1)
+                );
                 json!({ "terminalId": "terminal-1" })
             }
             "terminal/wait_for_exit" => json!({ "exitCode": 0 }),

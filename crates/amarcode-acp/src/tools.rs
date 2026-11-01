@@ -223,7 +223,8 @@ fn read_workspace_file(workspace: &Path, args: &Value) -> Result<String, String>
         let mut directory = std::fs::read_dir(&path)
             .map_err(|error| format!("failed to list {}: {error}", path.display()))?;
         for entry in directory.by_ref() {
-            let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+            let entry =
+                entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
             let file_name = entry.file_name().to_string_lossy().into_owned();
             let kind = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 "dir"
@@ -492,10 +493,7 @@ async fn run_command(
     };
 
     let mut meta = serde_json::Map::new();
-    meta.insert(
-        "amarcode".into(),
-        json!({ "sensitive": !auto_approved }),
-    );
+    meta.insert("amarcode".into(), json!({ "sensitive": !auto_approved }));
     let create = CreateTerminalRequest::new(session_id.clone(), command)
         .args(command_args)
         .cwd(cwd)
@@ -842,10 +840,10 @@ mod tests {
         assert!(directory.contains("sub"));
 
         // Reading never requires a sensitive declaration and is bounded.
-        assert!(read_workspace_file(&root, &json!({"operation":"read","path":"missing"}))
-            .is_err());
-        assert!(read_workspace_file(&root, &json!({"operation":"read","path":"../escape"}))
-            .is_err());
+        assert!(read_workspace_file(&root, &json!({"operation":"read","path":"missing"})).is_err());
+        assert!(
+            read_workspace_file(&root, &json!({"operation":"read","path":"../escape"})).is_err()
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }

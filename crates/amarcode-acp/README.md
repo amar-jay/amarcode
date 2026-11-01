@@ -194,9 +194,10 @@ allow-once choice and a full-access grant; dismissing denies the action.
 The adapter signals a non-sensitive declaration to the host through the
 terminal request's reserved `_meta` key (`amarcode.sensitive`), so the host
 does not additionally require a recorded terminal permission for commands the
-agent already auto-approved. Commands that went through a permission dialog
-keep the host's exact-command enforcement. Reading files never requests
-approval.
+agent already auto-approved. This signal is honored only for the built-in
+amarcode-acp adapter; a third-party ACP agent cannot set the flag to bypass
+host permission checks. Commands that went through a permission dialog keep
+the host's exact-command enforcement. Reading files never requests approval.
 Modes can be changed through the session's Permissions setting and reset on restore.
 File writes run on blocking workers and use synced temporary files plus rename.
 Completed tool results are checkpointed so interruption does not forget changes.
