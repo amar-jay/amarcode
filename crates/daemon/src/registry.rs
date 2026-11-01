@@ -280,6 +280,7 @@ fn git_command() -> Command {
 
     #[cfg(windows)]
     {
+        #[allow(unused_imports)]
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
