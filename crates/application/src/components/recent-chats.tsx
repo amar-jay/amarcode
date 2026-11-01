@@ -119,10 +119,10 @@ export function RecentChats({
             aria-current={chat.id === activeChatId ? "page" : undefined}
             onClick={() => onSelectChat(chat.id)}
             tooltip={chat.title}
-            className="relative pr-8 hover:bg-sidebar-accent/50 data-[active=true]:bg-sidebar-accent data-[active=true]:hover:bg-sidebar-accent before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary before:opacity-0 data-[active=true]:before:opacity-100"
+            className="relative pr-8 md:group-has-data-[sidebar=menu-action]/menu-item:pr-2 hover:bg-sidebar-accent/50 data-[active=true]:bg-sidebar-accent data-[active=true]:hover:bg-sidebar-accent before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary before:opacity-0 data-[active=true]:before:opacity-100"
           >
             <span className="min-w-0 flex-1 truncate">{chat.title}</span>
-            <span className="flex w-6 shrink-0 items-center justify-center">
+            <span className="flex w-6 shrink-0 items-center justify-end md:group-hover/menu-item:opacity-0 md:group-focus-within/menu-item:opacity-0 md:group-has-data-[state=open]/menu-item:opacity-0">
               {runningChatIds.has(chat.id) ? (
                 <span role="status" aria-label="Running">
                   <LoaderCircle
@@ -134,7 +134,7 @@ export function RecentChats({
                 <time
                   dateTime={chat.updated_at}
                   title={formatFullDate(chat.updated_at)}
-                  className="text-center text-[10px] leading-none font-normal tabular-nums text-sidebar-foreground/45"
+                  className="text-right text-[10px] leading-none font-normal tabular-nums text-sidebar-foreground/45"
                 >
                   {formatRelativeTime(chat.updated_at, now)}
                 </time>
