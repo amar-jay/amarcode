@@ -9,10 +9,8 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { useState } from "react";
 import { toast } from "sonner";
 import { shortcutHint } from "@/lib/app-shortcuts";
-import { daemonApi } from "@/api";
 import { ChatStateIndicators } from "@/components/chat-state-indicators";
 import {
   Tooltip,
@@ -38,36 +36,19 @@ export function TopBar() {
   const workspacePath = useAtomValue(workspacePathAtom);
   const live = useAtomValue(liveChatAtom);
   const isWorking = useAtomValue(liveChatIsWorkingAtom);
-  const [isOpeningSheet, setIsOpeningSheet] = useState(false);
 
-  const toggleWorkspacePanel = async () => {
+  const toggleWorkspacePanel = () => {
     if (sheetOpen) {
       setSheetOpen(false);
       return;
     }
 
     if (!workspacePath) {
-      toast.error("Choose a Git workspace before opening the file panel.");
+      toast.error("Choose a workspace before opening the file panel.");
       return;
     }
 
-    setIsOpeningSheet(true);
-    try {
-      const workspace = await daemonApi.getWorkspaceInfo(workspacePath);
-      if (!workspace.isGitRepository) {
-        toast.error("The selected folder is not inside a Git workspace.");
-        return;
-      }
-      setSheetOpen(true);
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not verify the workspace.",
-      );
-    } finally {
-      setIsOpeningSheet(false);
-    }
+    setSheetOpen(true);
   };
   return (
     <>
@@ -130,7 +111,6 @@ export function TopBar() {
               <button
                 type="button"
                 className="grid h-9 w-10 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                disabled={isOpeningSheet}
                 onClick={() => void toggleWorkspacePanel()}
                 aria-label={
                   sheetOpen ? "Close workspace panel" : "Open workspace panel"

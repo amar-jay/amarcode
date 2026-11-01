@@ -67,6 +67,8 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   );
   const [dirName, setDirName] = useState("No workspace selected");
   const [branchName, setBranchName] = useState<string | null>(null);
+  const [gitWorkspacePath, setGitWorkspacePath] = useState<string | null>(null);
+  const isGitRepository = !!workspacePath && gitWorkspacePath === workspacePath;
   const [changes, setChanges] = useState<WorkspaceChange[]>([]);
   const [changesLoading, setChangesLoading] = useState(false);
   const [changingStagePath, setChangingStagePath] = useState<string>();
@@ -91,6 +93,14 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
   );
   const [selectedLine, setSelectedLine] = useState<number>();
   useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      setGitWorkspacePath(null);
+      setBranchName(null);
+      setChanges([]);
+      setSelectedComparison(undefined);
+      setNavigatorView((view) => (view === "changes" ? "files" : view));
+    });
     if (!workspacePath) {
       queueMicrotask(() => {
         setDirName("No workspace selected");
@@ -102,13 +112,19 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     void daemonApi
       .getWorkspaceInfo(workspacePath)
       .then((workspace) => {
+        if (cancelled) return;
+        setGitWorkspacePath(workspace.isGitRepository ? workspacePath : null);
         setDirName(workspace.displayName);
         setBranchName(workspace.branchName);
       })
       .catch(() => {
+        if (cancelled) return;
         setDirName("Workspace");
         setBranchName(null);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [workspacePath]);
 
   const workspaceFileTree = useWorkspaceFileTree(sheetOpen, workspacePath, "");
@@ -170,7 +186,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     ],
   );
   const refreshChanges = useCallback(async () => {
-    if (!workspacePath) {
+    if (!isGitRepository) {
       setChanges([]);
       return;
     }
@@ -182,7 +198,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
     } finally {
       setChangesLoading(false);
     }
-  }, [workspacePath]);
+  }, [workspacePath, isGitRepository]);
 
   useEffect(() => {
     if (sheetOpen) queueMicrotask(() => void refreshChanges());
@@ -352,7 +368,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
       run: () => openSearch("contents"),
     },
     "git-changes": {
-      enabled: Boolean(workspacePath),
+      enabled: isGitRepository,
       run: () => {
         setSheetOpen(true);
         setNavigatorView("changes");
@@ -462,10 +478,13 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                   />
                 )}
                 <WorkspaceToolbarButton
+                  disabled={!isGitRepository}
                   label={
-                    selectedComparison === undefined
-                      ? "Show unstaged diff"
-                      : "Edit working file"
+                    !isGitRepository
+                      ? "Diff requires a Git repository"
+                      : selectedComparison === undefined
+                        ? "Show unstaged diff"
+                        : "Edit working file"
                   }
                   onClick={() =>
                     setSelectedComparison(
@@ -525,6 +544,7 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
               </Button>
               <Button
                 className="gap-1 px-1"
+                disabled={!isGitRepository}
                 variant={navigatorView === "changes" ? "secondary" : "ghost"}
                 size="sm"
                 onClick={() =>
@@ -539,9 +559,11 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                     : "Show changed files"
                 }
                 title={
-                  navigatorView === "changes"
-                    ? `Show all files (${shortcutHint("git-changes")})`
-                    : `Show changed files (${shortcutHint("git-changes")})`
+                  !isGitRepository
+                    ? "Git changes require a Git repository"
+                    : navigatorView === "changes"
+                      ? `Show all files (${shortcutHint("git-changes")})`
+                      : `Show changed files (${shortcutHint("git-changes")})`
                 }
               >
                 <GitCompareArrows className="size-3.5" />
