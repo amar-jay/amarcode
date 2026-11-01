@@ -92,7 +92,6 @@ impl Session {
 struct ActiveTurn {
     id: Uuid,
     cancel: watch::Sender<bool>,
-    history_len: usize,
 }
 
 pub async fn serve(config: Config) -> agent_client_protocol::Result<()> {
@@ -296,21 +295,24 @@ impl Runtime {
     }
 
     fn config_options(&self, model: &str, models: &[String]) -> Vec<SessionConfigOption> {
-        vec![SessionConfigOption::select(
-            "model",
-            "Model",
-            model.to_owned(),
-            models
-                .iter()
-                .map(|id| {
-                    agent_client_protocol::schema::v1::SessionConfigSelectOption::new(
-                        id.clone(),
-                        id.clone(),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )
-        .category(SessionConfigOptionCategory::Model)]
+        vec![
+            SessionConfigOption::select(
+                "model",
+                "Model",
+                model.to_owned(),
+                models
+                    .iter()
+                    .map(|id| {
+                        agent_client_protocol::schema::v1::SessionConfigSelectOption::new(
+                            id.clone(),
+                            id.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .category(SessionConfigOptionCategory::Model),
+            permission_option(false),
+        ]
     }
 
     async fn available_models(&self) -> Vec<String> {
@@ -407,7 +409,13 @@ impl Runtime {
             session.model.clone()
         };
         let models = self.available_models().await;
-        Ok(self.config_options(&model, &models))
+        let mut options = self.config_options(&model, &models);
+        let sessions = self.sessions.lock().await;
+        let session = sessions
+            .get(session_id)
+            .ok_or_else(|| Error::invalid_params().data("unknown session"))?;
+        options[1] = permission_option(session.permissions.has_full_access());
+        Ok(options)
     }
 
     async fn begin_turn(
@@ -429,7 +437,6 @@ impl Runtime {
         if session.active_turn.is_some() {
             return Err(Error::invalid_request().data("session already has an active turn"));
         }
-        let history_len = session.history.len();
         session
             .history
             .push(serde_json::json!({ "role": "user", "content": prompt }));
@@ -439,7 +446,6 @@ impl Runtime {
         session.active_turn = Some(ActiveTurn {
             id: turn_id,
             cancel,
-            history_len,
         });
         Ok((
             turn_id,
@@ -473,7 +479,8 @@ impl Runtime {
             session.history = history;
             self.persist(session_id, session);
         } else {
-            session.history.truncate(active.history_len);
+            // Retain the last balanced checkpoint, including completed tool effects.
+            let _ = active;
             self.persist(session_id, session);
         }
     }
@@ -508,6 +515,23 @@ impl Runtime {
             SessionUpdate::UsageUpdate(update),
         ));
     }
+}
+
+fn permission_option(full_access: bool) -> SessionConfigOption {
+    use agent_client_protocol::schema::v1::SessionConfigSelectOption;
+    SessionConfigOption::select(
+        "permission",
+        "Permissions",
+        if full_access {
+            "full-access"
+        } else {
+            "auto-approve"
+        },
+        vec![
+            SessionConfigSelectOption::new("auto-approve", "Auto approve"),
+            SessionConfigSelectOption::new("full-access", "Full access"),
+        ],
+    )
 }
 
 fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client> {
@@ -547,16 +571,19 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                         .await?;
                     let history = {
                         let sessions = load_session_runtime.sessions.lock().await;
-                        sessions.get(&request.session_id).ok_or_else(|| {
-                            Error::internal_error().data("restored session disappeared")
-                        })?.history.clone()
+                        sessions
+                            .get(&request.session_id)
+                            .ok_or_else(|| {
+                                Error::internal_error().data("restored session disappeared")
+                            })?
+                            .history
+                            .clone()
                     };
                     replay_history(&connection, &request.session_id, &history)?;
                     let options = load_session_runtime
                         .session_config_options(&request.session_id)
                         .await?;
-                    Ok(LoadSessionResponse::new()
-                        .config_options(options))
+                    Ok(LoadSessionResponse::new().config_options(options))
                 }
                 .await;
                 responder.respond_with_result(result)
@@ -566,12 +593,15 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
         .on_receive_request(
             async move |request: ResumeSessionRequest, responder, _connection| {
                 let result = async {
-                    resume_session_runtime.restore(&request.session_id, &request.cwd).await?;
+                    resume_session_runtime
+                        .restore(&request.session_id, &request.cwd)
+                        .await?;
                     let options = resume_session_runtime
                         .session_config_options(&request.session_id)
                         .await?;
                     Ok(ResumeSessionResponse::new().config_options(options))
-                }.await;
+                }
+                .await;
                 responder.respond_with_result(result)
             },
             agent_client_protocol::on_receive_request!(),
@@ -598,12 +628,37 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                     ("model", SessionConfigOptionValue::ValueId { value }) => {
                         let model = value.to_string();
                         async {
-                            set_config_runtime.set_model(&request.session_id, &model).await?;
+                            set_config_runtime
+                                .set_model(&request.session_id, &model)
+                                .await?;
                             let options = set_config_runtime
                                 .session_config_options(&request.session_id)
                                 .await?;
                             Ok(SetSessionConfigOptionResponse::new(options))
-                        }.await
+                        }
+                        .await
+                    }
+                    ("permission", SessionConfigOptionValue::ValueId { value }) => {
+                        async {
+                            let value = value.to_string();
+                            if value != "full-access" && value != "auto-approve" {
+                                return Err(Error::invalid_params().data("unknown permission mode"));
+                            }
+                            {
+                                let sessions = set_config_runtime.sessions.lock().await;
+                                let session =
+                                    sessions.get(&request.session_id).ok_or_else(|| {
+                                        Error::invalid_params().data("unknown session")
+                                    })?;
+                                session.permissions.set_full_access(value == "full-access");
+                            }
+                            Ok(SetSessionConfigOptionResponse::new(
+                                set_config_runtime
+                                    .session_config_options(&request.session_id)
+                                    .await?,
+                            ))
+                        }
+                        .await
                     }
                     _ => Err(Error::invalid_params().data("unknown configuration option")),
                 };
@@ -626,15 +681,24 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                 let message_id =
                     agent_client_protocol::schema::v1::MessageId::new(Uuid::new_v4().to_string());
                 connection.clone().spawn(async move {
+                    let turn = run_agent_turn(
+                        &runtime,
+                        history,
+                        cwd,
+                        model,
+                        permissions,
+                        session_id.clone(),
+                        message_id,
+                        connection,
+                        cancellation,
+                    );
+                    tokio::pin!(turn);
                     let outcome = tokio::select! {
-                        outcome = run_agent_turn(
-                            &runtime, history, cwd, model, permissions, session_id.clone(), message_id,
-                            connection, cancellation,
-                        ) => outcome,
+                        outcome = &mut turn => outcome,
                         _ = request_cancellation.cancelled() => {
                             runtime.cancel(&session_id).await;
-                            runtime.finish_turn(&session_id, turn_id, None).await;
-                            return responder.respond_with_error(Error::request_cancelled());
+                            // Keep polling the executor so terminal kill/release can finish.
+                            turn.await
                         }
                     };
                     match outcome {
@@ -838,6 +902,13 @@ async fn run_agent_turn(
             }
             history = plan.finish(&summary);
         }
+        {
+            let mut sessions = runtime.sessions.lock().await;
+            if let Some(session) = sessions.get_mut(&session_id) {
+                session.history = history.clone();
+                runtime.persist(&session_id, session);
+            }
+        }
         let request_history = crate::context::prune_tool_results(
             &history,
             runtime.config.context.max_tool_result_bytes,
@@ -946,6 +1017,20 @@ async fn run_agent_turn(
             .unwrap_or_else(|_| "Error: turn deadline reached; terminal cleanup timed out".into());
             history.push(provider::tool_message(call, &output));
             round_results.push(tool_fingerprint(call, &output));
+            {
+                let mut checkpoint = history.clone();
+                for pending in turn.tool_calls.iter().skip(round_results.len()) {
+                    checkpoint.push(provider::tool_message(
+                        pending,
+                        "Error: tool not executed before interruption",
+                    ));
+                }
+                let mut sessions = runtime.sessions.lock().await;
+                if let Some(session) = sessions.get_mut(&session_id) {
+                    session.history = checkpoint;
+                    runtime.persist(&session_id, session);
+                }
+            }
         }
         if *execution_cancellation.borrow() {
             return cancelled_or_limited(
@@ -999,7 +1084,10 @@ fn cancelled_or_limited(
     session_id: &SessionId,
 ) -> Result<Completion<TurnOutcome>, String> {
     if *external_cancellation.borrow() {
-        return Ok(Completion::Cancelled);
+        return Ok(Completion::Completed(TurnOutcome {
+            history,
+            stop_reason: StopReason::Cancelled,
+        }));
     }
     if expired.load(std::sync::atomic::Ordering::Relaxed) {
         limited_turn(
@@ -1238,6 +1326,36 @@ mod tests {
             PathBuf::from("test-config.json"),
         ))
         .expect("runtime")
+    }
+
+    #[tokio::test]
+    async fn failure_retains_completed_checkpoint_and_clears_active_turn() {
+        let runtime = runtime();
+        let session = runtime
+            .new_session(NewSessionRequest::new("/workspace"))
+            .await;
+        let (turn, _, _, _, _, _) = runtime
+            .begin_turn(&PromptRequest::new(
+                session.session_id.clone(),
+                vec!["edit".into()],
+            ))
+            .await
+            .unwrap();
+        let checkpoint = vec![
+            serde_json::json!({"role":"user","content":"edit"}),
+            serde_json::json!({"role":"assistant","content":"completed edit"}),
+        ];
+        runtime
+            .sessions
+            .lock()
+            .await
+            .get_mut(&session.session_id)
+            .unwrap()
+            .history = checkpoint.clone();
+        runtime.finish_turn(&session.session_id, turn, None).await;
+        let sessions = runtime.sessions.lock().await;
+        assert_eq!(sessions[&session.session_id].history, checkpoint);
+        assert!(sessions[&session.session_id].active_turn.is_none());
     }
 
     #[tokio::test]

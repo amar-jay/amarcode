@@ -1513,3 +1513,140 @@ fn transcript_discovers_models_from_arbitrary_provider_and_falls_back_on_invalid
         server.join().unwrap();
     }
 }
+
+#[test]
+fn transcript_file_command_creates_and_edits_with_diffs_without_routine_prompts() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        for (index, args) in [
+            json!({"operation":"create","path":"note.txt","content":"hello world","sensitive":false}),
+            json!({"operation":"edit","path":"note.txt","old_text":"world","content":"friend","sensitive":false}),
+        ].into_iter().enumerate() {
+            let (mut socket, _) = accept_chat(&listener).unwrap();
+            read_http_request(&mut socket);
+            write_sse(&mut socket, &tool_sse(vec![json!({"index":0,"id":format!("file-{index}"),"type":"function","function":{"name":"file_command","arguments":args.to_string()}})]));
+        }
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        let body = provider_request(&mut socket);
+        assert!(body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "tool"));
+        write_sse(
+            &mut socket,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Done\"}}]}\n\ndata: [DONE]\n\n",
+        );
+    });
+    let root = std::env::temp_dir().join(format!("acp-file-{}", Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, root.to_str().unwrap());
+    for (id, mode) in [(10, "full-access"), (11, "auto-approve")] {
+        agent.send(json!({"jsonrpc":"2.0","id":id,"method":"session/set_config_option","params":{"sessionId":session,"configId":"permission","value":mode}}));
+        let response = agent.response(id);
+        assert!(response.get("error").is_none(), "{response}");
+        let options = response["result"]["configOptions"].as_array().unwrap();
+        assert!(
+            options
+                .iter()
+                .any(|option| option["id"] == "permission" && option["currentValue"] == mode),
+            "{response}"
+        );
+    }
+    prompt(&mut agent, 3, &session, "Create and edit note.txt");
+    let (response, messages) = agent.response_with_messages(3);
+    assert_eq!(response["result"]["stopReason"], "end_turn");
+    assert!(!messages
+        .iter()
+        .any(|m| m["method"] == "session/request_permission"));
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.pointer("/params/update/content/0/type") == Some(&json!("diff")))
+            .count(),
+        2
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello friend"
+    );
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn transcript_request_cancellation_kills_and_releases_an_active_terminal() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        provider_request(&mut socket);
+        write_sse(
+            &mut socket,
+            &tool_sse(vec![
+                json!({"index":0,"id":"command","function":{"name":"run_command","arguments":json!({"command":"sleep","args":["300"]}).to_string()}}),
+            ]),
+        );
+    });
+    let workspace = std::env::temp_dir().join(format!("amarcode-deadline-{}", Uuid::new_v4()));
+    fs::create_dir_all(&workspace).unwrap();
+    let mut agent = AgentProcess::spawn_with_options(
+        &format!("http://{address}/v1"),
+        json!({"agent":{"max_turn_seconds":60}}),
+    );
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, workspace.to_str().unwrap());
+    prompt(&mut agent, 3, &session, "run a long command");
+    let mut methods = Vec::new();
+    loop {
+        let message = agent.output.recv_timeout(TIMEOUT).unwrap();
+        if message["id"] == 3 {
+            assert_eq!(message["result"]["stopReason"], "cancelled", "{message}");
+            break;
+        }
+        let Some(method) = message["method"].as_str() else {
+            continue;
+        };
+        if method == "session/update" || method == "$/cancel_request" {
+            continue;
+        }
+        methods.push(method.to_owned());
+        if method == "terminal/wait_for_exit" {
+            agent.send(
+                json!({"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":3}}),
+            );
+            continue;
+        }
+        let result = match method {
+            "session/request_permission" => {
+                json!({"outcome":{"outcome":"selected","optionId":"auto-approve"}})
+            }
+            "terminal/create" => json!({"terminalId":"long-running"}),
+            "terminal/output" => {
+                json!({"output":"","truncated":false,"exitStatus":{"exitCode":143}})
+            }
+            "terminal/kill" | "terminal/release" => json!({}),
+            other => panic!("unexpected request: {other}"),
+        };
+        agent.send(json!({"jsonrpc":"2.0","id":message["id"],"result":result}));
+    }
+    assert_eq!(
+        methods,
+        [
+            "session/request_permission",
+            "terminal/create",
+            "terminal/wait_for_exit",
+            "terminal/kill",
+            "terminal/output",
+            "terminal/release"
+        ]
+    );
+    fs::remove_dir_all(workspace).unwrap();
+}

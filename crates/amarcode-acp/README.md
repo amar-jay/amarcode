@@ -173,27 +173,27 @@ model loop. The built-in tools are:
   `powershell -Command "..."` on Windows). Its working directory stays inside
   the session workspace, symlink escapes are rejected, and output is bounded.
 * `file_command` performs direct UTF-8 text-file writes without a shell. With
-  `operation: "create"` it creates or replaces a file using `content`; with
+  `operation: "create"` it creates a file using `content` (replacement requires `overwrite: true`); with
   `operation: "edit"` it replaces exactly one occurrence of `old_text` with
   `content`. Edits fail when the old text is absent or ambiguous. Paths must be
-  workspace-relative, parent directories must already exist, and symlink
-  destinations are rejected. Successful writes are reported as ACP diffs.
+  workspace-relative and parent directories must already exist. Create rejects
+  symlink destinations; edit resolves links and rejects targets outside the workspace. Successful writes are reported as ACP diffs.
 
-`run_command` requires approval through ACP `session/request_permission`.
-Permission prompts offer exactly two options: `full-access` and `auto-approve`.
-Auto-approve allows one command and prompts again for the next sensitive
-action. Full access grants the command and disables every later prompt in that
-ACP session. Dismissing the prompt denies that command once. Remembered
-decisions use the exact executable, full argument vector, and working
-directory. They are discarded when the ACP session closes.
+Sessions expose two permission modes: `auto-approve` (default) and `full-access`.
+In auto-approve, the model sets `sensitive: false` for routine authorized work;
+`sensitive: true` or an omitted declaration requests approval. This relies on
+model judgment, not a command sandbox. Full access bypasses approval prompts.
+Both commands and file writes follow this policy. Permission dialogs offer an
+allow-once choice and a full-access grant; dismissing denies the action.
+Modes can be changed through the session's Permissions setting and reset on restore.
+File writes run on blocking workers and use synced temporary files plus rename.
+Completed tool results are checkpointed so interruption does not forget changes.
 
 Commands use ACP's client-owned terminal lifecycle: `terminal/create`, an
 embedded terminal tool-call update, `terminal/wait_for_exit`, `terminal/output`,
 and `terminal/release`. Cancellation sends `terminal/kill` before release. The
 executable and argument vector are kept separate rather than interpreted by a
-shell. Amarcode requires a permission matching the exact command, arguments,
-and workspace-relative working directory before it starts a process; a
-`full-access` permission disables further prompts for that ACP session.
+shell. Approval follows the selected session mode and the tool sensitivity declaration.
 
 Tool calls are streamed to the client using typed ACP `tool_call` and
 `tool_call_update` events. Calls and results remain structured in provider

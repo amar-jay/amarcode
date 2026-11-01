@@ -64,6 +64,11 @@ impl PermissionState {
         }
     }
 
+    pub fn set_full_access(&self, enabled: bool) {
+        *self.full_access.lock().expect("permission lock") = enabled;
+        self.remembered.lock().expect("permission lock").clear();
+    }
+
     #[allow(dead_code)]
     pub fn has_full_access(&self) -> bool {
         self.full_access.lock().ok().is_some_and(|flag| *flag)
@@ -108,7 +113,12 @@ pub async fn execute(
             Err(format!("unknown tool: {}", call.name)),
         );
     }
-    if let Some(permission_key) = permission_key(call, &arguments) {
+    if let Some(permission_key) = permission_key(call, &arguments).filter(|_| {
+        arguments
+            .get("sensitive")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+    }) {
         let allowed = if let Some(allowed) = permissions.decision(&permission_key) {
             allowed
         } else {
@@ -155,12 +165,12 @@ pub async fn execute(
         return finish(connection, session_id, call, Err("cancelled".into()));
     }
     if call.name == "file_command" {
-        return finish_file_change(
-            connection,
-            session_id,
-            call,
-            apply_file_command(workspace, &arguments),
-        );
+        let workspace = workspace.to_owned();
+        let result =
+            tokio::task::spawn_blocking(move || apply_file_command(&workspace, &arguments))
+                .await
+                .unwrap_or_else(|error| Err(format!("file worker failed: {error}")));
+        return finish_file_change(connection, session_id, call, result);
     }
     return run_command(
         workspace,
@@ -211,6 +221,11 @@ fn apply_file_command(workspace: &Path, args: &Value) -> Result<FileChange, Stri
                     return Err("path escapes workspace".into());
                 }
             }
+            if path.exists() && args.get("overwrite").and_then(Value::as_bool) != Some(true) {
+                return Err(
+                    "file already exists; use edit or explicitly set overwrite=true".into(),
+                );
+            }
             let old_text = if path.is_file() {
                 Some(
                     std::fs::read_to_string(&path)
@@ -219,7 +234,7 @@ fn apply_file_command(workspace: &Path, args: &Value) -> Result<FileChange, Stri
             } else {
                 None
             };
-            std::fs::write(&path, &content)
+            atomic_write(&path, content.as_bytes())
                 .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
             Ok(FileChange {
                 path: path.clone(),
@@ -250,7 +265,7 @@ fn apply_file_command(workspace: &Path, args: &Value) -> Result<FileChange, Stri
                 ));
             }
             let updated = contents.replacen(old_text, new_text, 1);
-            std::fs::write(&path, updated.as_bytes())
+            atomic_write(&path, updated.as_bytes())
                 .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
             Ok(FileChange {
                 path: path.clone(),
@@ -266,6 +281,33 @@ fn apply_file_command(workspace: &Path, args: &Value) -> Result<FileChange, Stri
         }
         _ => Err("operation must be \"create\" or \"edit\"".into()),
     }
+}
+
+// Replace only after the complete contents have been written and synced.
+fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let temporary = path.with_file_name(format!(".amarcode-{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            file.set_permissions(metadata.permissions())?;
+        }
+        file.write_all(content)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn finish_file_change(
@@ -385,10 +427,16 @@ async fn run_command(
         .args(command_args)
         .cwd(cwd)
         .output_byte_limit(MAX_OUTPUT as u64);
+    let creating = connection.send_request(create).block_task();
+    tokio::pin!(creating);
     let created = tokio::select! {
-        result = connection.send_request(create).block_task() => result,
+        result = &mut creating => result,
         _ = cancellation.changed() => {
-            return finish(connection, session_id, call, Err("cancelled".into()));
+            // Obtain the ID if creation is already in flight, then kill below.
+            match tokio::time::timeout(std::time::Duration::from_secs(1), &mut creating).await {
+                Ok(result) => result,
+                Err(_) => return finish(connection, session_id, call, Err("cancelled; terminal creation did not acknowledge cancellation".into())),
+            }
         }
     };
     let terminal_id = match created {
@@ -410,26 +458,35 @@ async fn run_command(
     ));
     let exit = tokio::select! {
         result = wait.block_task() => result.map_err(|error| format!("failed waiting for terminal: {error}")),
-        _ = cancellation.changed() => {
-            let _ = connection
+        _ = async { if !*cancellation.borrow() { let _ = cancellation.changed().await; } } => {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(1), connection
                 .send_request(KillTerminalRequest::new(session_id.clone(), terminal_id.clone()))
-                .block_task()
-                .await;
+                .block_task()).await;
             Err("cancelled".into())
         }
     };
 
-    let output = connection
-        .send_request(TerminalOutputRequest::new(
-            session_id.clone(),
-            terminal_id.clone(),
-        ))
-        .block_task()
-        .await;
-    let _ = connection
-        .send_request(ReleaseTerminalRequest::new(session_id.clone(), terminal_id))
-        .block_task()
-        .await;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        connection
+            .send_request(TerminalOutputRequest::new(
+                session_id.clone(),
+                terminal_id.clone(),
+            ))
+            .block_task(),
+    )
+    .await;
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        connection
+            .send_request(ReleaseTerminalRequest::new(session_id.clone(), terminal_id))
+            .block_task(),
+    )
+    .await;
+    let output = match output {
+        Ok(result) => result.map_err(|error| error.to_string()),
+        Err(_) => Err("terminal output timed out".to_owned()),
+    };
 
     let result = match (exit, output) {
         (Ok(exit), Ok(output)) => {
@@ -658,6 +715,76 @@ mod tests {
         Ok(RequestPermissionResponse::new(
             RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option)),
         ))
+    }
+
+    #[test]
+    fn file_create_edit_and_overwrite_are_explicit() {
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir(&root).unwrap();
+        let create = json!({"operation":"create","path":"note.txt","content":"hello world"});
+        assert!(apply_file_command(&root, &create).is_ok());
+        assert!(apply_file_command(&root, &create).is_err());
+        let edit =
+            json!({"operation":"edit","path":"note.txt","old_text":"world","content":"friend"});
+        let change = apply_file_command(&root, &edit).unwrap();
+        assert_eq!(change.old_text.as_deref(), Some("hello world"));
+        assert_eq!(
+            std::fs::read_to_string(root.join("note.txt")).unwrap(),
+            "hello friend"
+        );
+        assert!(apply_file_command(&root, &edit).is_err());
+        let replace =
+            json!({"operation":"create","path":"note.txt","content":"aa aa","overwrite":true});
+        apply_file_command(&root, &replace).unwrap();
+        assert!(apply_file_command(
+            &root,
+            &json!({"operation":"edit","path":"note.txt","old_text":"aa","content":"b"})
+        )
+        .is_err());
+        assert!(apply_file_command(
+            &root,
+            &json!({"operation":"create","path":"../escape","content":"x"})
+        )
+        .is_err());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_commands_reject_symlink_escapes() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let outside = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        symlink(outside.join("missing"), root.join("dangling")).unwrap();
+        symlink(&outside, root.join("escape")).unwrap();
+        for path in ["dangling", "escape/new"] {
+            assert!(apply_file_command(
+                &root,
+                &json!({"operation":"create","path":path,"content":"x"})
+            )
+            .is_err());
+        }
+        std::fs::write(outside.join("existing"), "original").unwrap();
+        assert!(apply_file_command(&root, &json!({"operation":"edit","path":"escape/existing","old_text":"original","content":"changed"})).is_err());
+        assert_eq!(
+            std::fs::read_to_string(outside.join("existing")).unwrap(),
+            "original"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
+    fn permission_mode_can_be_revoked() {
+        let permissions = PermissionState::default();
+        permissions.set_full_access(true);
+        assert!(permissions.has_full_access());
+        permissions.set_full_access(false);
+        let key = PermissionKey::FileWrite { path: "a".into() };
+        assert_eq!(permissions.decision(&key), None);
     }
 
     #[test]
