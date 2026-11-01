@@ -21,6 +21,26 @@ The built-in agent is ready. Continue with [your first conversation](/docs/getti
 Follow [remote setup](/docs/remote/setup/), then paste that machine’s URL and access token in **Connection settings**.
 :::
 
+## Open a folder from your terminal
+
+```sh
+amarcode .
+amarcode ~/projects/my-app
+amarcode "/home/me/projects/my app"
+```
+
+This opens the desktop app in that local folder, or focuses the running app and selects it. Missing folders and file paths are rejected. The daemon’s default workspace stays unchanged. If the app is connected remotely, switch to **Local daemon** in Connection settings to apply the pending local folder request.
+
+Linux `.deb` and `.rpm` packages install the `amarcode` executable on PATH. For an AppImage, make it executable and create a launcher using its actual location:
+
+```sh
+chmod +x /absolute/path/to/amarcode.AppImage
+mkdir -p ~/.local/bin
+ln -s /absolute/path/to/amarcode.AppImage ~/.local/bin/amarcode
+```
+
+Make sure `~/.local/bin` is on your shell’s PATH. On Windows, run `amarcode.exe` from the installation folder, or add that folder to your user PATH to invoke it elsewhere. On macOS, the executable is inside `amarcode.app/Contents/MacOS/amarcode`.
+
 ## Remove the desktop or daemon
 
 Uninstalling the app leaves the daemon and its data in place.

@@ -88,3 +88,11 @@ export const bindSessionAgentAtom = atom(null, (get, set, agent: AgentInfo) => {
   const session = get(activeSessionAtom);
   if (session) set(activeSessionAtom, { ...session, agent });
 });
+
+/** An explicit desktop launch selects a new local workspace without changing defaults. */
+export const openWorkspaceLaunchAtom = atom(null, (_get, set, path: string) => {
+  set(sidePanelOpenAtom, false);
+  set(workspaceFileOpenRequestAtom, null);
+  set(activeSessionAtom, null);
+  set(workspacePathAtom, path);
+});

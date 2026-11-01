@@ -126,6 +126,10 @@ export type DaemonConnectionStatus = {
 };
 
 export const daemonApi = {
+  getWorkspaceLaunch: (): Promise<{ id: number; path: string } | null> =>
+    invoke("get_workspace_launch"),
+  acknowledgeWorkspaceLaunch: (id: number): Promise<void> =>
+    invoke("acknowledge_workspace_launch", { id }),
   getConnectionStatus: (): Promise<DaemonConnectionStatus> =>
     invoke("get_daemon_connection_status"),
   getConnection: (): Promise<DaemonConnectionInfo> =>

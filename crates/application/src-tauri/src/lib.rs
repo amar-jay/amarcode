@@ -5,6 +5,7 @@ mod app_update;
 mod commands;
 mod config;
 mod daemon;
+mod launcher;
 #[cfg(target_os = "linux")]
 mod microphone;
 mod window;
@@ -12,7 +13,25 @@ mod window;
 pub use daemon::ssh::{SshTunnelConfig, SshTunnelEndpoint, SshTunnelManager};
 
 pub fn run() {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let workspace = match launcher::parse(std::env::args_os().skip(1), &cwd) {
+        Ok(launcher::Command::Open(path)) => path,
+        Ok(launcher::Command::Help) => {
+            println!("Usage: amarcode [WORKSPACE]\n\nOpen the desktop app in a local workspace. Relative paths use the calling directory.\nUse -- before a path beginning with a dash.\n\n  amarcode .\n  amarcode /path/to/project");
+            return;
+        }
+        Ok(launcher::Command::Version) => {
+            println!("amarcode {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        Err(error) => {
+            eprintln!("amarcode: {error}");
+            std::process::exit(2);
+        }
+    };
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(launcher::forward))
+        .manage(launcher::Launcher::new(workspace))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -35,6 +54,8 @@ pub fn run() {
             commands::application::remove_local_daemon,
             commands::application::exit_application,
             commands::clipboard::read_pasted_files,
+            launcher::get_workspace_launch,
+            launcher::acknowledge_workspace_launch,
             commands::daemon::daemon_bootstrap,
             commands::daemon::get_daemon_connection,
             commands::daemon::get_daemon_connection_status,

@@ -1,3 +1,4 @@
+import { useWorkspaceLaunch } from "@/hooks/use-workspace-launch";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDaemonConnectionStatus } from "@/hooks/use-daemon-connection-status";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
@@ -33,6 +34,8 @@ export function useAppBootstrap() {
     useState<DaemonBootstrapStatus>({
       status: "checking",
     });
+  const [clientReady, setClientReady] = useState(false);
+  useWorkspaceLaunch(clientReady && daemonConnection.status === "ready");
   const [daemonAttempt, setDaemonAttempt] = useState(0);
   const sshStatus = useDaemonConnectionStatus();
   const recoveredGeneration = useRef<number | null>(null);
@@ -93,6 +96,7 @@ export function useAppBootstrap() {
     try {
       const health = await daemonApi.install(setDaemonConnection);
       await initializeDaemonClient(health);
+      setClientReady(true);
     } catch (error) {
       console.error("Daemon installation failed:", error);
       const message =
@@ -131,12 +135,14 @@ export function useAppBootstrap() {
       try {
         // Bootstrap may connect or start an already-installed service. It is
         // deliberately read-only when service installation has not occurred.
+        setClientReady(false);
         setDaemonConnection({ status: "checking" });
         const health = await daemonApi.bootstrap((status) => {
           if (!cancelled) setDaemonConnection(status);
         });
         if (cancelled || health === null) return;
         await initializeDaemonClient(health);
+        if (!cancelled) setClientReady(true);
       } catch (error) {
         if (cancelled) return;
         console.error("Daemon bootstrap failed:", error);

@@ -14,6 +14,7 @@ import {
   activeSessionAtom,
   startNewChatAtom,
   applyDaemonWorkspaceAtom,
+  openWorkspaceLaunchAtom,
   selectChatAtom,
 } from "./navigation";
 import {
@@ -101,4 +102,24 @@ test("reconnecting refreshes the daemon suggestion and old daemons clear it", ()
   store.set(applyDaemonWorkspaceAtom, "");
   expect(store.get(daemonWorkspacePathAtom)).toBe("");
   expect(store.get(workspacePathAtom)).toBe("");
+});
+
+test("a workspace launch clears the previous surface without changing saved or daemon defaults", () => {
+  const store = createStore();
+  store.set(defaultWorkspacePathAtom, "/saved");
+  store.set(daemonWorkspacePathAtom, "/daemon");
+  store.set(workspacePathAtom, "/old");
+  store.set(sidePanelOpenAtom, true);
+  store.set(sidePanelMaximizedAtom, true);
+  store.set(workspaceFileOpenRequestAtom, { path: "old.txt" });
+  store.set(openWorkspaceLaunchAtom, "/from-terminal");
+  expect(store.get(workspacePathAtom)).toBe("/from-terminal");
+  expect(store.get(activeSessionAtom)).toBeNull();
+  expect(store.get(sidePanelOpenAtom)).toBe(false);
+  expect(store.get(sidePanelMaximizedAtom)).toBe(false);
+  expect(store.get(workspaceFileOpenRequestAtom)).toBeNull();
+  expect(store.get(defaultWorkspacePathAtom)).toBe("/saved");
+  expect(store.get(daemonWorkspacePathAtom)).toBe("/daemon");
+  store.set(applyDaemonWorkspaceAtom, "/new-daemon-suggestion");
+  expect(store.get(workspacePathAtom)).toBe("/from-terminal");
 });
