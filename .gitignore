@@ -26,3 +26,11 @@ crates/application/src-tauri/binaries/
 
 # Astro generated content and types
 .astro/
+
+# Remote web application build
+crates/application/dist-web/
+
+# Local Vercel project link
+.vercel/
+.vercel
+.env*

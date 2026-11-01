@@ -37,6 +37,7 @@ pub struct Listener {
 pub(super) struct State {
     tls: Option<TlsAcceptor>,
     origins: Vec<String>,
+    browser: super::web_auth::BrowserAuth,
     bearer_token: String,
     address: String,
 }
@@ -90,6 +91,7 @@ impl State {
             bearer_token,
             address: config.daemon_addr.clone(),
             origins: config.ws_allowed_origins.clone(),
+            browser: super::web_auth::BrowserAuth::default(),
         })
     }
 
@@ -109,6 +111,12 @@ impl State {
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
+        let Some(stream) =
+            super::web_auth::route(stream, &self.bearer_token, &self.origins, &self.browser)
+                .await?
+        else {
+            return Ok(());
+        };
         let config = WebSocketConfig::default()
             .max_message_size(Some(MAX_MESSAGE_BYTES))
             .max_frame_size(Some(MAX_MESSAGE_BYTES));
@@ -118,8 +126,11 @@ impl State {
         let handshake = accept_hdr_async_with_config(
             stream,
             |request: &Request, response: Response| {
-                let response =
-                    validate_handshake(request, response, &self.origins, &self.bearer_token)?;
+                let response = if request.headers().contains_key("sec-websocket-protocol") {
+                    self.browser.handshake(request, response, &self.origins)?
+                } else {
+                    validate_handshake(request, response, &self.origins, &self.bearer_token)?
+                };
                 terminal = request.uri().path() == "/terminal";
                 Ok(response)
             },
@@ -182,7 +193,7 @@ pub(crate) fn load_token(path: &Path) -> Result<String> {
     Ok(token)
 }
 
-fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+pub(super) fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
     }

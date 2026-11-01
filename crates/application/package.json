@@ -13,7 +13,11 @@
     "tauri:build": "tauri build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "lint:check": "./node_modules/.bin/eslint . --report-unused-disable-directives"
+    "lint:check": "./node_modules/.bin/eslint . --report-unused-disable-directives",
+    "web:dev": "vite --mode web --open /web.html",
+    "web:build": "tsc -b && vite build --mode web && bun scripts/finalize-web.ts",
+    "web:preview": "vite preview --mode web --outDir dist-web",
+    "web:deploy": "VERCEL_CLI_USE_NATIVE_BINARY=0 bunx vercel deploy --prod --cwd ../.."
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

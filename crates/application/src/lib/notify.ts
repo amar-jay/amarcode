@@ -1,3 +1,4 @@
+import { isWeb } from "@/lib/platform";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   isPermissionGranted,
@@ -21,6 +22,7 @@ async function hasNotificationPermission(): Promise<boolean> {
 }
 
 async function sendWhenAppIsUnfocused(title: string, body: string) {
+  if (isWeb) return;
   try {
     // The Tauri bridge is absent when the Vite app is opened in a browser.
     if (await getCurrentWindow().isFocused()) return;

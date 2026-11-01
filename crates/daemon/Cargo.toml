@@ -21,6 +21,7 @@ clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"
 ed25519-dalek = "2"
 hex = "0.4"
+httparse = "1"
 ignore = "0.4"
 regex = "1"
 futures-util = { version = "0.3", features = ["sink"] }

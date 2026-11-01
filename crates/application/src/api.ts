@@ -1,8 +1,10 @@
+import { isWeb } from "@/lib/platform";
+import { browserInvoke, browserEvents } from "@/lib/browser-daemon";
 import type {
   AmarcodeAcpConfigResult,
   SetAmarcodeAcpConfigParams,
 } from "./generated/protocol";
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, invoke as nativeInvoke } from "@tauri-apps/api/core";
 import type {
   AgentInfo,
   DaemonBootstrapStatus,
@@ -36,6 +38,12 @@ import type {
   SessionConfigOption,
   SessionConfigValue,
 } from "./types";
+
+const invoke = <T>(
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<T> =>
+  isWeb ? browserInvoke<T>(command, args) : nativeInvoke<T>(command, args);
 
 export type DaemonEventStreamStatus =
   { status: "connected" } | { status: "disconnected"; error: string };
@@ -127,6 +135,10 @@ export const daemonApi = {
   bootstrap: async (
     onStatus: (status: DaemonBootstrapStatus) => void,
   ): Promise<Health | null> => {
+    if (isWeb)
+      return browserInvoke<Health>("daemon_bootstrap", {
+        onStatus: { onmessage: onStatus },
+      });
     const statusChannel = new Channel<DaemonBootstrapStatus>();
     statusChannel.onmessage = onStatus;
     return invoke("daemon_bootstrap", { onStatus: statusChannel });
@@ -386,6 +398,7 @@ export const daemonApi = {
     onEvent: (event: EditorEvent) => void,
     onStatus: (status: DaemonEventStreamStatus) => void,
   ): Promise<void> => {
+    if (isWeb) return browserEvents(filter, onEvent, onStatus);
     const eventChannel = new Channel<EditorEvent>();
     eventChannel.onmessage = onEvent;
     const statusChannel = new Channel<DaemonEventStreamStatus>();

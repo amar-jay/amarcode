@@ -40,3 +40,9 @@ Save editor drafts. Choose **Local daemon** and **Verify and apply**.
 The remote daemon keeps running. Each machine keeps its own chats.
 
 If the connection fails, see [troubleshooting](/docs/remote/troubleshooting/).
+
+## Connect in a browser
+
+Open [Amarcode remote](https://remote.amarcode.amarjay.com), paste the daemon’s secure URL and access token, and choose **Connect**. Use an up-to-date daemon with browser access support.
+
+Projects and agents run on the remote machine. Your token stays in the tab’s memory; reload or disconnect to clear it. You can reconnect using the same URL and token while that daemon remains available.

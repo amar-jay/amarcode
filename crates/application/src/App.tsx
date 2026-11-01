@@ -1,3 +1,4 @@
+import { isWeb } from "@/lib/platform";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import MainPromptInput from "@/components/main-prompt-input";
@@ -234,7 +235,9 @@ export default function App() {
           status={daemonConnection}
           onRetry={retryDaemon}
           onInstall={() => void installDaemon()}
-          onCloseApplication={() => void getCurrentWindow().close()}
+          onCloseApplication={() =>
+            isWeb ? window.location.reload() : void getCurrentWindow().close()
+          }
         />
       )}
       <UpdateDialog

@@ -1,3 +1,4 @@
+import { isWeb } from "@/lib/platform";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useAtom, useAtomValue } from "jotai";
 import {
@@ -107,6 +108,15 @@ export function TopBar() {
                 : "Return to chat"}
             </button>
           )}
+          {isWeb && (
+            <button
+              type="button"
+              className="px-3 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => window.location.reload()}
+            >
+              Disconnect
+            </button>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -130,30 +140,34 @@ export function TopBar() {
               {`${sheetOpen ? "Close" : "Open"} workspace (${shortcutHint("workspace")})`}
             </TooltipContent>
           </Tooltip>
-          <button
-            type="button"
-            className="grid h-9 w-12 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            onClick={() => void getCurrentWindow().minimize()}
-            aria-label="Minimize"
-          >
-            <Minus className="size-4" />
-          </button>
-          <button
-            type="button"
-            className="grid h-9 w-12 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            onClick={() => void getCurrentWindow().toggleMaximize()}
-            aria-label="Maximize"
-          >
-            <Square className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            className="grid h-9 w-12 place-items-center text-muted-foreground transition-colors hover:bg-destructive hover:text-background"
-            onClick={() => void getCurrentWindow().close()}
-            aria-label="Close"
-          >
-            <X className="size-4" />
-          </button>
+          {!isWeb && (
+            <>
+              <button
+                type="button"
+                className="grid h-9 w-12 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                onClick={() => void getCurrentWindow().minimize()}
+                aria-label="Minimize"
+              >
+                <Minus className="size-4" />
+              </button>
+              <button
+                type="button"
+                className="grid h-9 w-12 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                onClick={() => void getCurrentWindow().toggleMaximize()}
+                aria-label="Maximize"
+              >
+                <Square className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                className="grid h-9 w-12 place-items-center text-muted-foreground transition-colors hover:bg-destructive hover:text-background"
+                onClick={() => void getCurrentWindow().close()}
+                aria-label="Close"
+              >
+                <X className="size-4" />
+              </button>
+            </>
+          )}
         </div>
       </div>
     </>

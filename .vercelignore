@@ -1,0 +1,10 @@
+.git
+node_modules
+**/node_modules
+target
+**/target
+crates/application/src-tauri
+crates/application/dist
+crates/application/dist-web
+.env*
+**/.env*

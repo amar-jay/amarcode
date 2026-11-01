@@ -1,3 +1,4 @@
+import { isWeb } from "@/lib/platform";
 import { useEffect, useId, useState } from "react";
 import { daemonApi, type DaemonConnectionInfo } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,16 @@ export function DaemonConnectionSettings() {
       setBusy(false);
     }
   };
+  if (isWeb)
+    return (
+      <div className="space-y-3 text-sm">
+        <p>Connected directly to your remote daemon.</p>
+        <p className="break-all text-xs text-muted-foreground">{saved?.url}</p>
+        <Button variant="outline" onClick={() => window.location.reload()}>
+          Disconnect / switch connection
+        </Button>
+      </div>
+    );
   const reuseToken = canReuseToken(form, saved);
   const missingTarget = form.mode === "websocket" && !form.url.trim();
   return (
@@ -132,9 +143,9 @@ export function DaemonConnectionSettings() {
       </fieldset>
       {saved?.mode === "ssh" && (
         <p className="text-xs text-muted-foreground">
-          This installation has a saved SSH tunnel connection. Enter the daemon’s
-          remote URL and token to replace it. For an interactive remote terminal,
-          run <code>amarcoded ssh</code> in your terminal.
+          This installation has a saved SSH tunnel connection. Enter the
+          daemon’s remote URL and token to replace it. For an interactive remote
+          terminal, run <code>amarcoded ssh</code> in your terminal.
         </p>
       )}
       <p className="text-xs text-muted-foreground">

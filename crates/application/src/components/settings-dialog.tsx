@@ -1,3 +1,4 @@
+import { isWeb } from "@/lib/platform";
 import { daemonConnectionGenerationAtom } from "@/state/daemon-events";
 import type {
   AmarcodeAcpConfigResult,
@@ -1162,41 +1163,43 @@ function GeneralPanel({
           Restore defaults
         </Button>
       </div>
-      <section aria-labelledby="danger-zone-title">
-        <div className="rounded-xl border border-destructive/35 bg-destructive/3 p-3">
-          <div className="flex items-center gap-3">
-            {/* <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-destructive/10 text-destructive">
+      {!isWeb && (
+        <section aria-labelledby="danger-zone-title">
+          <div className="rounded-xl border border-destructive/35 bg-destructive/3 p-3">
+            <div className="flex items-center gap-3">
+              {/* <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-destructive/10 text-destructive">
               <Trash2 className="size-4" />
             </span> */}
-            <div className="min-w-0 flex-1">
-              <h3
-                id="danger-zone-title"
-                className="text-xs font-medium text-destructive"
+              <div className="min-w-0 flex-1">
+                <h3
+                  id="danger-zone-title"
+                  className="text-xs font-medium text-destructive"
+                >
+                  Remove local daemon and data
+                </h3>
+                <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                  Remove this computer’s shared daemon and its conversations.
+                  Uninstalling the desktop application preserves the daemon.
+                </p>
+              </div>
+              <Button
+                className="shrink-0"
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  setConfirmation("");
+                  setCleanupError(null);
+                  setCleanupStatus(null);
+                  setCleanupOpen(true);
+                }}
               >
-                Remove local daemon and data
-              </h3>
-              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                Remove this computer’s shared daemon and its conversations.
-                Uninstalling the desktop application preserves the daemon.
-              </p>
+                <Trash2 className="size-4" />
+                Remove daemon
+              </Button>
             </div>
-            <Button
-              className="shrink-0"
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                setConfirmation("");
-                setCleanupError(null);
-                setCleanupStatus(null);
-                setCleanupOpen(true);
-              }}
-            >
-              <Trash2 className="size-4" />
-              Remove daemon
-            </Button>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       <AlertDialog
         open={cleanupOpen}

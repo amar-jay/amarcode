@@ -1,3 +1,4 @@
+import { isWeb } from "@/lib/platform";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { notify, notifyToast } from "@/lib/notify";
@@ -24,7 +25,7 @@ export function useUpdates(
   const busy = useRef(false);
 
   const checkUpdates = useCallback(async (manual = false) => {
-    if (busy.current) return;
+    if (isWeb || busy.current) return;
     busy.current = true;
     setChecking(true);
     toast.dismiss("amarcode-update");
@@ -59,6 +60,7 @@ export function useUpdates(
 
   // Check both components together once startup has either connected or failed.
   useEffect(() => {
+    if (isWeb) return;
     if (!["ready", "failed", "installRequired"].includes(connectionStatus))
       return;
     const timer = window.setTimeout(() => void checkUpdates(), 0);

@@ -31,7 +31,10 @@
     "landing:dev": "bun run --cwd crates/landing dev",
     "landing:build": "bun run --cwd crates/landing build",
     "landing:preview": "bun run --cwd crates/landing preview",
-    "landing:check": "bun run --cwd crates/landing check"
+    "landing:check": "bun run --cwd crates/landing check",
+    "web:dev": "bun run --cwd crates/application web:dev",
+    "web:build": "bun run --cwd crates/application web:build",
+    "web:deploy": "bun run --cwd crates/application web:deploy"
   },
   "devDependencies": {
     "prettier": "^3.9.6"

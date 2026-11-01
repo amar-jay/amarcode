@@ -1,3 +1,4 @@
+import { isWeb } from "@/lib/platform";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { MouseEvent } from "react";
 import type { LinkSafetyConfig, LinkSafetyModalProps } from "streamdown";
@@ -17,7 +18,8 @@ export async function openExternalTarget(target: string) {
   if (!["http:", "https:", "mailto:", "tel:"].includes(url.protocol)) {
     throw new Error(`Unsupported external link protocol: ${url.protocol}`);
   }
-  await openUrl(url.toString());
+  if (isWeb) window.open(url.toString(), "_blank", "noopener,noreferrer");
+  else await openUrl(url.toString());
 }
 
 export function handleExternalLinkClick(event: MouseEvent<HTMLAnchorElement>) {
@@ -37,7 +39,7 @@ export function handleExternalLinkClick(event: MouseEvent<HTMLAnchorElement>) {
     event.currentTarget.getAttribute("href") ?? event.currentTarget.href;
   void openExternalTarget(target).catch((error: unknown) => {
     console.error("Unable to open external link:", error);
-    notify("Unable to open this link with a desktop application.", "error");
+    notify("Unable to open this link in your browser.", "error");
   });
 }
 
@@ -48,7 +50,7 @@ function TauriLinkSafetyModal({ isOpen, onClose, url }: LinkSafetyModalProps) {
       onClose();
     } catch (error) {
       console.error("Unable to open external link:", error);
-      notify("Unable to open this link with a desktop application.", "error");
+      notify("Unable to open this link in your browser.", "error");
     }
   };
 
@@ -58,7 +60,8 @@ function TauriLinkSafetyModal({ isOpen, onClose, url }: LinkSafetyModalProps) {
         <DialogHeader>
           <DialogTitle>Open external link?</DialogTitle>
           <DialogDescription>
-            You&apos;re about to open this link with a desktop application.
+            You&apos;re about to open this link{" "}
+            {isWeb ? "in a new browser tab." : "with a desktop application."}
           </DialogDescription>
         </DialogHeader>
         <p className="max-h-36 overflow-y-auto rounded-md bg-muted p-3 font-mono text-xs break-all">

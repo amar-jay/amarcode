@@ -19,3 +19,5 @@ pub mod websocket;
 mod workspace;
 
 mod terminal;
+
+mod web_auth;

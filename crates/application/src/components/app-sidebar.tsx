@@ -1,3 +1,4 @@
+import { isWeb } from "@/lib/platform";
 import { useAtom } from "jotai";
 import { pinnedChatIdsAtom } from "@/state/preferences";
 import { useState } from "react";
@@ -171,24 +172,26 @@ export function AppSidebar({
             </span>
           </div> */}
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                onClick={onCheckForUpdates}
-                disabled={updateBusy}
-                tooltip={
-                  updateAvailable ? "Update available" : "Check for updates"
-                }
-              >
-                <Download />
-                <span>
-                  {updateBusy
-                    ? "Please wait…"
-                    : updateAvailable
-                      ? "Update available"
-                      : "Check for updates"}
-                </span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {!isWeb && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={onCheckForUpdates}
+                  disabled={updateBusy}
+                  tooltip={
+                    updateAvailable ? "Update available" : "Check for updates"
+                  }
+                >
+                  <Download />
+                  <span>
+                    {updateBusy
+                      ? "Please wait…"
+                      : updateAvailable
+                        ? "Update available"
+                        : "Check for updates"}
+                  </span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
             <SidebarMenuItem>
               <SidebarMenuButton
                 onClick={onOpenSettings}

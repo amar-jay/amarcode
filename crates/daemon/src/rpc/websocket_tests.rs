@@ -406,3 +406,71 @@ async fn websocket_requires_valid_token_before_binding() {
         assert!(Listener::bind(&config).await.is_err());
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn browser_ticket_opens_real_rpc_and_rejects_replay() {
+    let (_desktop, app, desktop_server, directory) = start(false).await;
+    desktop_server.abort();
+    let state = State::prepare(&app.config).unwrap();
+    let state = Arc::new(state);
+    let exchange = async {
+        let (mut client, server) = tokio::io::duplex(32768);
+        let service = state.handle_stream(server, Arc::clone(&app), "browser-ticket");
+        let request = async {
+            client.write_all(format!("POST /web/session HTTP/1.1\r\nHost: localhost\r\nOrigin: https://remote.amarcode.amarjay.com\r\nAuthorization: Bearer {}\r\n\r\n", "a".repeat(64)).as_bytes()).await.unwrap();
+            let mut response = String::new();
+            tokio::io::AsyncReadExt::read_to_string(&mut client, &mut response).await.unwrap();
+            serde_json::from_str::<Value>(response.split("\r\n\r\n").nth(1).unwrap()).unwrap()
+        };
+        let (served, ticket) = tokio::join!(service, request);
+        served.unwrap(); ticket
+    }.await;
+    let ticket = exchange["ticket"].as_str().unwrap();
+    for accepted in [true, false] {
+        let (client, server) = tokio::io::duplex(32768);
+        let mut request = "ws://localhost/rpc".into_client_request().unwrap();
+        request.headers_mut().insert(
+            "origin",
+            "https://remote.amarcode.amarjay.com".parse().unwrap(),
+        );
+        request.headers_mut().insert(
+            "sec-websocket-protocol",
+            format!("amarcode.rpc.v1, amarcode.ticket.{ticket}")
+                .parse()
+                .unwrap(),
+        );
+        let service_state = Arc::clone(&state);
+        let service_app = Arc::clone(&app);
+        let service = tokio::spawn(async move {
+            service_state
+                .handle_stream(server, service_app, "browser")
+                .await
+        });
+        let result = client_async(request, client).await;
+        if accepted {
+            let (mut socket, response) = result.unwrap();
+            assert_eq!(
+                response.headers()["sec-websocket-protocol"],
+                "amarcode.rpc.v1"
+            );
+            socket
+                .send(Message::Text(
+                    "{\"method\":\"health\",\"params\":{}}\n".into(),
+                ))
+                .await
+                .unwrap();
+            let reply = timeout(Duration::from_secs(5), socket.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let health: Value = serde_json::from_str(reply.to_text().unwrap()).unwrap();
+            assert_eq!(health["result"]["remote_auth_required"], true);
+            socket.close(None).await.unwrap();
+        } else {
+            assert!(result.is_err());
+        }
+        service.abort();
+    }
+    drop(directory);
+}
