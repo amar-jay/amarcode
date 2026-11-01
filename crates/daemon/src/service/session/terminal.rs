@@ -388,6 +388,23 @@ impl TerminalManager {
         });
     }
 
+    /// Whether the agent explicitly declared this terminal command non-sensitive,
+    /// which the host honors as an auto-approval so the command can run without a
+    /// recorded permission. Amarcode signals this through the reserved `_meta`
+    /// extensibility key. The agent (LLM) makes the declaration, so this is
+    /// model-judgment based rather than a command sandbox.
+    fn auto_approved(request: &CreateTerminalRequest) -> bool {
+        request
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("amarcode"))
+            .and_then(serde_json::Value::as_object)
+            .and_then(|value| value.get("sensitive"))
+            .and_then(serde_json::Value::as_bool)
+            .map(|sensitive| !sensitive)
+            .unwrap_or(false)
+    }
+
     fn consume_permission(
         &self,
         run_id: &str,
@@ -396,6 +413,9 @@ impl TerminalManager {
         cwd: &Path,
         request: &CreateTerminalRequest,
     ) -> Result<()> {
+        if Self::auto_approved(request) {
+            return Ok(());
+        }
         let mut permissions = self
             .permissions
             .lock()
@@ -768,6 +788,73 @@ mod tests {
             .consume_permission("run", "chat", &workspace, &workspace, &request)
             .expect("reused permission");
         assert_eq!(manager.permissions.lock().expect("permissions").len(), 1);
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn auto_approved_sensitive_false_runs_without_a_recorded_permission() {
+        let workspace = temp_workspace();
+        let manager = TerminalManager::default();
+        let session = SessionId::new("session");
+        let mut meta = serde_json::Map::new();
+        meta.insert("amarcode".into(), json!({ "sensitive": false }));
+        // No permission was recorded, but the agent declared the command
+        // non-sensitive, so the host auto-approves it.
+        let created = manager
+            .create(
+                "run",
+                "chat",
+                &workspace,
+                CreateTerminalRequest::new(session.clone(), "/bin/sh")
+                    .args(vec!["-c".into(), "printf auto-ok".into()])
+                    .cwd(workspace.clone())
+                    .meta(meta),
+            )
+            .expect("auto-approved terminal");
+        let terminal = created.terminal_id;
+        let exit = manager
+            .wait(
+                "run",
+                WaitForTerminalExitRequest::new(session.clone(), terminal.clone()),
+            )
+            .expect("wait terminal");
+        assert_eq!(exit.exit_status.exit_code, Some(0));
+        let output = manager
+            .output(
+                "run",
+                TerminalOutputRequest::new(session.clone(), terminal.clone()),
+            )
+            .expect("terminal output");
+        assert_eq!(output.output, "auto-ok");
+        manager
+            .release(
+                "run",
+                ReleaseTerminalRequest::new(session, terminal.clone()),
+            )
+            .expect("release terminal");
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_true_still_requires_a_recorded_permission() {
+        let workspace = temp_workspace();
+        let manager = TerminalManager::default();
+        let session = SessionId::new("session");
+        let mut meta = serde_json::Map::new();
+        meta.insert("amarcode".into(), json!({ "sensitive": true }));
+        // A command declared sensitive must still match a recorded permission.
+        let result = manager.create(
+            "run",
+            "chat",
+            &workspace,
+            CreateTerminalRequest::new(session, "/bin/echo")
+                .args(vec!["no".into()])
+                .cwd(workspace.clone())
+                .meta(meta),
+        );
+        assert!(result.is_err());
         let _ = std::fs::remove_dir_all(workspace);
     }
 

@@ -46,7 +46,7 @@ pub struct PermissionState {
 
 impl PermissionState {
     fn decision(&self, key: &PermissionKey) -> Option<bool> {
-        if self.full_access.lock().ok()?.clone() {
+        if *self.full_access.lock().ok()? {
             return Some(true);
         }
         self.remembered.lock().ok()?.get(key).copied()
@@ -113,13 +113,25 @@ pub async fn execute(
             Err(format!("unknown tool: {}", call.name)),
         );
     }
-    if let Some(permission_key) = permission_key(call, &arguments).filter(|_| {
+    // Reading is always non-sensitive; it never needs a permission dialog.
+    let sensitive = if call.name == "file_command"
+        && arguments.get("operation").and_then(Value::as_str) == Some("read")
+    {
+        false
+    } else {
         arguments
             .get("sensitive")
             .and_then(Value::as_bool)
             .unwrap_or(true)
-    }) {
+    };
+    // Whether this call was auto-approved without showing the host permission
+    // dialog. When true the daemon must not require a recorded terminal
+    // permission; when false a permission dialog was shown (or is needed), so
+    // the daemon keeps enforcing its exact-command permission.
+    let mut auto_approved = !sensitive;
+    if let Some(permission_key) = permission_key(call, &arguments).filter(|_| sensitive) {
         let allowed = if let Some(allowed) = permissions.decision(&permission_key) {
+            auto_approved = allowed;
             allowed
         } else {
             let permission = connection.send_request(RequestPermissionRequest::new(
@@ -165,6 +177,14 @@ pub async fn execute(
         return finish(connection, session_id, call, Err("cancelled".into()));
     }
     if call.name == "file_command" {
+        if arguments.get("operation").and_then(Value::as_str) == Some("read") {
+            let workspace = workspace.to_owned();
+            let result =
+                tokio::task::spawn_blocking(move || read_workspace_file(&workspace, &arguments))
+                    .await
+                    .unwrap_or_else(|error| Err(format!("file worker failed: {error}")));
+            return finish(connection, session_id, call, result);
+        }
         let workspace = workspace.to_owned();
         let result =
             tokio::task::spawn_blocking(move || apply_file_command(&workspace, &arguments))
@@ -179,6 +199,7 @@ pub async fn execute(
         session_id,
         call,
         cancellation,
+        auto_approved,
     )
     .await;
 }
@@ -189,6 +210,52 @@ struct FileChange {
     old_text: Option<String>,
     new_text: String,
     summary: String,
+}
+
+/// Read a workspace file or list a workspace directory without a shell.
+/// The model can use this to inspect files even when terminal access is
+/// restricted. Returns the file contents or a directory listing, bounded to
+/// [`MAX_OUTPUT`] bytes.
+fn read_workspace_file(workspace: &Path, args: &Value) -> Result<String, String> {
+    let path = existing_path(workspace, required_str(args, "path")?)?;
+    if path.is_dir() {
+        let mut entries = Vec::new();
+        let mut directory = std::fs::read_dir(&path)
+            .map_err(|error| format!("failed to list {}: {error}", path.display()))?;
+        for entry in directory.by_ref() {
+            let entry = entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            let kind = if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                "dir"
+            } else {
+                "file"
+            };
+            entries.push(format!("{kind}\t{file_name}"));
+        }
+        if entries.is_empty() {
+            return Ok(format!("(empty directory: {})", path.display()));
+        }
+        entries.sort();
+        return Ok(truncate(format!(
+            "{}\n{}",
+            path.display(),
+            entries.join("\n")
+        )));
+    }
+    if !path.is_file() {
+        return Err(format!("not a file or directory: {}", path.display()));
+    }
+    let contents = std::fs::read(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    // Prefer UTF-8 text; fall back to a hex summary for binary files.
+    match std::str::from_utf8(&contents) {
+        Ok(text) => Ok(truncate(text.to_owned())),
+        Err(_) => Ok(truncate(format!(
+            "(binary file {}: {} bytes)",
+            path.display(),
+            contents.len()
+        ))),
+    }
 }
 
 /// Create a new file or apply one exact, uniquely matched edit.
@@ -387,6 +454,7 @@ async fn run_command(
     session_id: &SessionId,
     call: &ModelToolCall,
     mut cancellation: watch::Receiver<bool>,
+    auto_approved: bool,
 ) -> String {
     let command = match required_str(args, "command") {
         Ok(command) if !command.is_empty() => command,
@@ -423,10 +491,16 @@ async fn run_command(
         Err(error) => return finish(connection, session_id, call, Err(error)),
     };
 
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "amarcode".into(),
+        json!({ "sensitive": !auto_approved }),
+    );
     let create = CreateTerminalRequest::new(session_id.clone(), command)
         .args(command_args)
         .cwd(cwd)
-        .output_byte_limit(MAX_OUTPUT as u64);
+        .output_byte_limit(MAX_OUTPUT as u64)
+        .meta(meta);
     let creating = connection.send_request(create).block_task();
     tokio::pin!(creating);
     let created = tokio::select! {
@@ -747,6 +821,32 @@ mod tests {
         )
         .is_err());
         assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn file_read_returns_file_and_lists_directory() {
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(root.join("note.txt"), "hello world").unwrap();
+        std::fs::write(root.join("sub").join("nested.md"), "# Hi").unwrap();
+
+        let file = read_workspace_file(&root, &json!({"operation":"read","path":"note.txt"}))
+            .expect("read file");
+        assert_eq!(file, "hello world");
+
+        let directory = read_workspace_file(&root, &json!({"operation":"read","path":"."}))
+            .expect("list directory");
+        assert!(directory.contains("note.txt"));
+        assert!(directory.contains("sub"));
+
+        // Reading never requires a sensitive declaration and is bounded.
+        assert!(read_workspace_file(&root, &json!({"operation":"read","path":"missing"}))
+            .is_err());
+        assert!(read_workspace_file(&root, &json!({"operation":"read","path":"../escape"}))
+            .is_err());
+
         std::fs::remove_dir_all(root).unwrap();
     }
 

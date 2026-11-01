@@ -1580,6 +1580,63 @@ fn transcript_file_command_creates_and_edits_with_diffs_without_routine_prompts(
 }
 
 #[test]
+fn transcript_file_command_read_returns_content_without_a_permission_prompt() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        // The read call omits `sensitive` entirely; reading must still be
+        // treated as non-sensitive and must not request permission.
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        read_http_request(&mut socket);
+        write_sse(
+            &mut socket,
+            &tool_sse(vec![json!({
+                "index": 0,
+                "id": "read-0",
+                "type": "function",
+                "function": { "name": "file_command", "arguments": json!({
+                    "operation": "read", "path": "note.txt"
+                }).to_string() }
+            })]),
+        );
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        let body = provider_request(&mut socket);
+        assert!(body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "tool"));
+        write_sse(
+            &mut socket,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Done\"}}]}\n\ndata: [DONE]\n\n",
+        );
+    });
+    let root = std::env::temp_dir().join(format!("acp-file-read-{}", Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("note.txt"), "hello readable").unwrap();
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, root.to_str().unwrap());
+    prompt(&mut agent, 3, &session, "Read note.txt");
+    let (response, messages) = agent.response_with_messages(3);
+    assert_eq!(response["result"]["stopReason"], "end_turn");
+    assert!(!messages
+        .iter()
+        .any(|m| m["method"] == "session/request_permission"));
+    // The read result is delivered as text, not a diff.
+    assert!(messages.iter().any(|m| {
+        m.pointer("/params/update/content/0/content/type") == Some(&json!("text"))
+            && m.pointer("/params/update/content/0/content/text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("hello readable"))
+    }));
+    server.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn transcript_request_cancellation_kills_and_releases_an_active_terminal() {
     let Some(listener) = provider_listener() else {
         return;

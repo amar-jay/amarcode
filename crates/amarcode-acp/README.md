@@ -172,12 +172,17 @@ model loop. The built-in tools are:
   `sh -c "cat hello.txt && git status"` on Linux/macOS, or
   `powershell -Command "..."` on Windows). Its working directory stays inside
   the session workspace, symlink escapes are rejected, and output is bounded.
-* `file_command` performs direct UTF-8 text-file writes without a shell. With
-  `operation: "create"` it creates a file using `content` (replacement requires `overwrite: true`); with
-  `operation: "edit"` it replaces exactly one occurrence of `old_text` with
-  `content`. Edits fail when the old text is absent or ambiguous. Paths must be
-  workspace-relative and parent directories must already exist. Create rejects
-  symlink destinations; edit resolves links and rejects targets outside the workspace. Successful writes are reported as ACP diffs.
+* `file_command` performs direct UTF-8 text-file work without a shell and needs
+  no terminal. With `operation: "read"` it returns a file's contents or lists a
+  directory (bounded, and always non-sensitive); with
+  `operation: "create"` it creates a file using `content` (replacement requires
+  `overwrite: true`); with `operation: "edit"` it replaces exactly one
+  occurrence of `old_text` with `content`. Edits fail when the old text is
+  absent or ambiguous. Paths must be workspace-relative and parent directories
+  must already exist. Create rejects symlink destinations; edit resolves links
+  and rejects targets outside the workspace. Successful writes are reported as
+  ACP diffs. Models should prefer `operation: "read"` for inspecting files so
+  they can navigate a workspace even when terminal access is restricted.
 
 Sessions expose two permission modes: `auto-approve` (default) and `full-access`.
 In auto-approve, the model sets `sensitive: false` for routine authorized work;
@@ -185,6 +190,13 @@ In auto-approve, the model sets `sensitive: false` for routine authorized work;
 model judgment, not a command sandbox. Full access bypasses approval prompts.
 Both commands and file writes follow this policy. Permission dialogs offer an
 allow-once choice and a full-access grant; dismissing denies the action.
+
+The adapter signals a non-sensitive declaration to the host through the
+terminal request's reserved `_meta` key (`amarcode.sensitive`), so the host
+does not additionally require a recorded terminal permission for commands the
+agent already auto-approved. Commands that went through a permission dialog
+keep the host's exact-command enforcement. Reading files never requests
+approval.
 Modes can be changed through the session's Permissions setting and reset on restore.
 File writes run on blocking workers and use synced temporary files plus rename.
 Completed tool results are checkpointed so interruption does not forget changes.
