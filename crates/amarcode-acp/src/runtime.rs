@@ -735,10 +735,8 @@ async fn run_agent_turn(
     let mut used_cost = 0_f64;
     let mut tool_calls = 0;
     let mut progress = ProgressTracker::default();
-    let mut search_group: Option<SearchPresentationGroup> = None;
     for round in 0..=settings.max_tool_rounds {
         if *execution_cancellation.borrow() {
-            finish_active_search_group(&connection, &session_id, search_group.take(), true);
             return cancelled_or_limited(
                 history,
                 &expired,
@@ -748,7 +746,6 @@ async fn run_agent_turn(
             );
         }
         if round == settings.max_tool_rounds {
-            finish_active_search_group(&connection, &session_id, search_group.take(), true);
             return limited_turn(
                 history,
                 StopReason::MaxTurnRequests,
@@ -761,7 +758,6 @@ async fn run_agent_turn(
             .max_cost_usd
             .is_some_and(|limit| used_cost >= limit)
         {
-            finish_active_search_group(&connection, &session_id, search_group.take(), true);
             return limited_turn(
                 history,
                 StopReason::MaxTurnRequests,
@@ -800,12 +796,6 @@ async fn run_agent_turn(
                 {
                     Ok(completion) => completion,
                     Err(error) => {
-                        finish_active_search_group(
-                            &connection,
-                            &session_id,
-                            search_group.take(),
-                            true,
-                        );
                         if *execution_cancellation.borrow() {
                             return cancelled_or_limited(
                                 history,
@@ -819,7 +809,6 @@ async fn run_agent_turn(
                     }
                 };
                 let Completion::Completed((next_summary, usage)) = completion else {
-                    finish_active_search_group(&connection, &session_id, search_group.take(), true);
                     return cancelled_or_limited(
                         history,
                         &expired,
@@ -838,7 +827,6 @@ async fn run_agent_turn(
                     .max_cost_usd
                     .is_some_and(|limit| used_cost >= limit)
                 {
-                    finish_active_search_group(&connection, &session_id, search_group.take(), true);
                     return limited_turn(
                         history,
                         StopReason::MaxTurnRequests,
@@ -879,7 +867,6 @@ async fn run_agent_turn(
         {
             Ok(completion) => completion,
             Err(error) => {
-                finish_active_search_group(&connection, &session_id, search_group.take(), true);
                 if *execution_cancellation.borrow() {
                     return cancelled_or_limited(
                         history,
@@ -893,7 +880,6 @@ async fn run_agent_turn(
             }
         };
         let Completion::Completed(mut turn) = completion else {
-            finish_active_search_group(&connection, &session_id, search_group.take(), true);
             return cancelled_or_limited(
                 history,
                 &expired,
@@ -917,7 +903,6 @@ async fn run_agent_turn(
                     "Error: tool not executed because the model token limit was reached",
                 ));
             }
-            finish_active_search_group(&connection, &session_id, search_group.take(), true);
             return limited_turn(
                 history,
                 StopReason::MaxTokens,
@@ -927,7 +912,6 @@ async fn run_agent_turn(
             );
         }
         if turn.tool_calls.is_empty() {
-            finish_active_search_group(&connection, &session_id, search_group.take(), false);
             return Ok(Completion::Completed(TurnOutcome {
                 history,
                 stop_reason: StopReason::EndTurn,
@@ -947,30 +931,6 @@ async fn run_agent_turn(
                 continue;
             }
             tool_calls += 1;
-            if crate::tools::is_search_tool(call) {
-                if search_group.is_none() {
-                    let group_id = format!("search-group-{}", Uuid::new_v4());
-                    crate::tools::begin_search_group(&connection, &session_id, &group_id);
-                    search_group = Some(SearchPresentationGroup {
-                        id: group_id,
-                        count: 0,
-                        failed: 0,
-                    });
-                }
-                let group = search_group.as_mut().expect("search group initialized");
-                group.count += 1;
-                let output = match crate::tools::execute_grouped_search(call, &cwd) {
-                    Ok(output) => output,
-                    Err(error) => {
-                        group.failed += 1;
-                        format!("Error: {error}")
-                    }
-                };
-                history.push(provider::tool_message(call, &output));
-                round_results.push(tool_fingerprint(call, &output));
-                continue;
-            }
-            finish_active_search_group(&connection, &session_id, search_group.take(), false);
             let output = tokio::time::timeout_at(
                 deadline + Duration::from_secs(5),
                 crate::tools::execute(
@@ -988,7 +948,6 @@ async fn run_agent_turn(
             round_results.push(tool_fingerprint(call, &output));
         }
         if *execution_cancellation.borrow() {
-            finish_active_search_group(&connection, &session_id, search_group.take(), true);
             return cancelled_or_limited(
                 history,
                 &expired,
@@ -998,7 +957,6 @@ async fn run_agent_turn(
             );
         }
         if call_limit_reached {
-            finish_active_search_group(&connection, &session_id, search_group.take(), true);
             return limited_turn(
                 history,
                 StopReason::MaxTurnRequests,
@@ -1008,7 +966,6 @@ async fn run_agent_turn(
             );
         }
         if progress.record(round_results, settings.repeated_tool_limit) {
-            finish_active_search_group(&connection, &session_id, search_group.take(), true);
             return limited_turn(
                 history,
                 StopReason::MaxTurnRequests,
@@ -1019,7 +976,6 @@ async fn run_agent_turn(
         }
         message_id = agent_client_protocol::schema::v1::MessageId::new(Uuid::new_v4().to_string());
     }
-    finish_active_search_group(&connection, &session_id, search_group.take(), true);
     unreachable!("bounded agent loop always stops")
 }
 
@@ -1115,29 +1071,6 @@ impl ProgressTracker {
                         == self.recent[self.recent.len() - 1 - offset % period]
                 })
         })
-    }
-}
-
-struct SearchPresentationGroup {
-    id: String,
-    count: usize,
-    failed: usize,
-}
-
-fn finish_active_search_group(
-    connection: &ConnectionTo<Client>,
-    session_id: &SessionId,
-    group: Option<SearchPresentationGroup>,
-    interrupted: bool,
-) {
-    if let Some(group) = group {
-        crate::tools::finish_search_group(
-            connection,
-            session_id,
-            &group.id,
-            group.count,
-            group.failed + usize::from(interrupted),
-        );
     }
 }
 
@@ -1264,12 +1197,12 @@ mod tests {
     fn progress_detection_ignores_call_ids_and_argument_key_order() {
         let a = provider::ModelToolCall {
             id: "a".into(),
-            name: "read_file".into(),
-            arguments: r#"{"path":"x","limit":10}"#.into(),
+            name: "run_command".into(),
+            arguments: r#"{"command":"cat","args":["x"]}"#.into(),
         };
         let b = provider::ModelToolCall {
             id: "b".into(),
-            arguments: r#"{ "limit": 10, "path": "x" }"#.into(),
+            arguments: r#"{ "args": ["x"], "command": "cat" }"#.into(),
             ..a.clone()
         };
         assert_eq!(tool_fingerprint(&a, "same"), tool_fingerprint(&b, "same"));

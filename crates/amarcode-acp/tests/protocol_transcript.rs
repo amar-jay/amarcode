@@ -451,7 +451,7 @@ fn transcript_executes_tool_and_returns_result_to_model() {
     let (request_sender, request_receiver) = mpsc::channel();
     thread::spawn(move || {
         for body in [
-            "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"I should inspect the file.\",\"id\":\"reasoning-1\",\"index\":0}]}}]}\n\ndata: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-read\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"hello.txt\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
+            "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"I should inspect the file.\",\"id\":\"reasoning-1\",\"index\":0}]}}]}\n\ndata: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-read\",\"type\":\"function\",\"function\":{\"name\":\"run_command\",\"arguments\":\"{\\\"command\\\":\\\"/bin/cat\\\",\\\"args\\\":[\\\"hello.txt\\\"],\\\"cwd\\\":\\\".\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
             "data: {\"choices\":[{\"delta\":{\"content\":\"I read the file.\"}}]}\n\ndata: [DONE]\n\n",
         ] {
             let (mut socket, _) = accept_chat(&listener).expect("provider connection");
@@ -465,7 +465,6 @@ fn transcript_executes_tool_and_returns_result_to_model() {
 
     let workspace = std::env::temp_dir().join(format!("amarcode-tools-{}", Uuid::new_v4()));
     fs::create_dir(&workspace).expect("create workspace");
-    fs::write(workspace.join("hello.txt"), "hello from tool").expect("write fixture");
 
     let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
     initialize(&mut agent);
@@ -480,7 +479,19 @@ fn transcript_executes_tool_and_returns_result_to_model() {
         }
     }));
 
-    let (response, messages) = agent.response_with_messages(3);
+    let mut messages = Vec::new();
+    let response = loop {
+        let message = agent.output.recv_timeout(TIMEOUT).expect("ACP message");
+        if message.get("id").and_then(Value::as_u64) == Some(3) {
+            break message;
+        }
+        let method = message.get("method").and_then(Value::as_str);
+        if method == Some("session/update") || message.get("id").is_none() {
+            messages.push(message);
+            continue;
+        }
+        terminal_stub(&mut agent, &message, "hello from tool\n");
+    };
     assert_eq!(response["result"]["stopReason"], "end_turn");
     let updates = messages
         .iter()
@@ -524,7 +535,7 @@ fn transcript_executes_tool_and_returns_result_to_model() {
 }
 
 #[test]
-fn transcript_reports_file_edits_as_acp_diffs() {
+fn transcript_runs_file_work_through_os_commands() {
     let listener = match TcpListener::bind("127.0.0.1:0") {
         Ok(listener) => listener,
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -536,7 +547,7 @@ fn transcript_reports_file_edits_as_acp_diffs() {
     let address = listener.local_addr().expect("provider address");
     thread::spawn(move || {
         for body in [
-            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-edit\",\"type\":\"function\",\"function\":{\"name\":\"edit_file\",\"arguments\":\"{\\\"path\\\":\\\"note.txt\\\",\\\"old_text\\\":\\\"old\\\",\\\"new_text\\\":\\\"new\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-edit\",\"type\":\"function\",\"function\":{\"name\":\"run_command\",\"arguments\":\"{\\\"command\\\":\\\"sh\\\",\\\"args\\\":[\\\"-c\\\",\\\"printf new > note.txt\\\"],\\\"cwd\\\":\\\".\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n",
             "data: {\"choices\":[{\"delta\":{\"content\":\"Edited the file.\"}}]}\n\ndata: [DONE]\n\n",
         ] {
             let (mut socket, _) = accept_chat(&listener).expect("provider connection");
@@ -547,8 +558,6 @@ fn transcript_reports_file_edits_as_acp_diffs() {
 
     let workspace = std::env::temp_dir().join(format!("amarcode-edit-{}", Uuid::new_v4()));
     fs::create_dir(&workspace).expect("create workspace");
-    let path = workspace.join("note.txt");
-    fs::write(&path, "before old after\n").expect("write fixture");
 
     let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
     initialize(&mut agent);
@@ -563,40 +572,27 @@ fn transcript_reports_file_edits_as_acp_diffs() {
         }
     }));
 
-    let mut completed_diff = None;
+    let mut completed_text = None;
     loop {
         let message = agent.output.recv_timeout(TIMEOUT).expect("ACP message");
         if message.get("id").and_then(Value::as_u64) == Some(4) {
             assert_eq!(message["result"]["stopReason"], "end_turn");
             break;
         }
-        if message["method"] == "session/request_permission" {
-            let id = message["id"].clone();
-            agent.send(json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": { "outcome": { "outcome": "selected", "optionId": "allow-once" } }
-            }));
+        let method = message.get("method").and_then(Value::as_str);
+        if method == Some("session/update") || message.get("id").is_none() {
+            if let Some(update) = message.pointer("/params/update") {
+                if update["toolCallId"] == "call-edit" && update["status"] == "completed" {
+                    completed_text = update.pointer("/content/0/content/text").cloned();
+                }
+            }
             continue;
         }
-        let Some(update) = message.pointer("/params/update") else {
-            continue;
-        };
-        if update["toolCallId"] == "call-edit" && update["status"] == "completed" {
-            completed_diff = update.pointer("/content/0").cloned();
-        }
+        terminal_stub(&mut agent, &message, "wrote note.txt\n");
     }
 
-    let diff = completed_diff.expect("completed edit diff");
-    assert_eq!(diff["type"], "diff");
-    let canonical_path = path.canonicalize().expect("canonicalize edited path");
-    assert_eq!(diff["path"], canonical_path.to_string_lossy().as_ref());
-    assert_eq!(diff["oldText"], "before old after\n");
-    assert_eq!(diff["newText"], "before new after\n");
-    assert_eq!(
-        fs::read_to_string(&path).expect("read edited file"),
-        "before new after\n"
-    );
+    let text = completed_text.expect("completed command text");
+    assert!(text.as_str().unwrap().contains("wrote note.txt"));
     let _ = fs::remove_dir_all(workspace);
 }
 
@@ -675,12 +671,8 @@ fn transcript_uses_permissioned_acp_terminal_lifecycle() {
                     message["params"]["toolCall"]["rawInput"]["args"],
                     json!(["hello terminal"])
                 );
-                assert!(message["params"]["options"]
-                    .as_array()
-                    .is_some_and(|options| options.iter().any(|option| {
-                        option["optionId"] == "allow-always" && option["kind"] == "allow_always"
-                    })));
-                json!({ "outcome": { "outcome": "selected", "optionId": "allow-always" } })
+                assert_two_permission_options(&message);
+                json!({ "outcome": { "outcome": "selected", "optionId": "full-access" } })
             }
             "terminal/create" => {
                 assert_eq!(message["params"]["command"], "/bin/echo");
@@ -769,8 +761,42 @@ fn tool_sse(calls: Vec<Value>) -> String {
     )
 }
 
-fn read_call(id: &str, path: &str) -> Value {
-    json!({"index":0,"id":id,"type":"function","function":{"name":"read_file","arguments":json!({"path":path}).to_string()}})
+fn command_call(id: &str, command: &str, args: &[&str]) -> Value {
+    json!({"index":0,"id":id,"type":"function","function":{"name":"run_command","arguments":json!({"command":command,"args":args,"cwd":"."}).to_string()}})
+}
+
+fn assert_two_permission_options(message: &Value) {
+    let options = message["params"]["options"]
+        .as_array()
+        .expect("two permission options");
+    assert_eq!(options.len(), 2);
+    assert!(options
+        .iter()
+        .any(|option| { option["optionId"] == "full-access" && option["kind"] == "allow_always" }));
+    assert!(options
+        .iter()
+        .any(|option| { option["optionId"] == "auto-approve" && option["kind"] == "allow_once" }));
+}
+
+fn terminal_stub(agent: &mut AgentProcess, message: &Value, output: &str) {
+    let method = message["method"].as_str().expect("agent method");
+    let id = message["id"].clone();
+    let result = match method {
+        "session/request_permission" => {
+            assert_two_permission_options(message);
+            json!({ "outcome": { "outcome": "selected", "optionId": "auto-approve" } })
+        }
+        "terminal/create" => json!({ "terminalId": "terminal-1" }),
+        "terminal/wait_for_exit" => json!({ "exitCode": 0 }),
+        "terminal/output" => json!({
+            "output": output,
+            "truncated": false,
+            "exitStatus": { "exitCode": 0 }
+        }),
+        "terminal/release" => json!({}),
+        other => panic!("unexpected agent request: {other}"),
+    };
+    agent.send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
 }
 
 #[test]
@@ -913,7 +939,7 @@ fn transcript_does_not_retry_auth_errors_or_execute_truncated_tool_calls() {
             } else {
                 let body = format!(
                     "data: {}\n\n",
-                    json!({"choices":[{"delta":{"tool_calls":[read_call("partial", "never-read")]}}]})
+                    json!({"choices":[{"delta":{"tool_calls":[command_call("partial", "cat", &["never-read"])]}}]})
                 );
                 write_sse(&mut socket, &body);
             }
@@ -958,9 +984,13 @@ fn transcript_stops_on_round_call_and_repetition_limits_and_keeps_balanced_histo
             for index in 0..rounds {
                 let (mut socket, _) = accept_chat(&listener).unwrap();
                 provider_request(&mut socket);
-                let mut calls = vec![read_call(&format!("call-{index}"), "missing-file")];
+                let mut calls = vec![command_call(
+                    &format!("call-{index}"),
+                    "cat",
+                    &["missing-file"],
+                )];
                 if rounds == 1 {
-                    let mut second = read_call("second", "other-file");
+                    let mut second = command_call("second", "cat", &["other-file"]);
                     second["index"] = json!(1);
                     calls.push(second);
                 }
@@ -971,7 +1001,35 @@ fn transcript_stops_on_round_call_and_repetition_limits_and_keeps_balanced_histo
         initialize(&mut agent);
         let session = new_session(&mut agent, 2, "/workspace");
         prompt(&mut agent, 3, &session, "bounded work");
-        let (response, messages) = agent.response_with_messages(3);
+        let mut messages = Vec::new();
+        let response = loop {
+            let message = agent.output.recv_timeout(TIMEOUT).expect("ACP message");
+            if message.get("id").and_then(Value::as_u64) == Some(3) {
+                break message;
+            }
+            let method = message.get("method").and_then(Value::as_str);
+            if method == Some("session/update") || message.get("id").is_none() {
+                messages.push(message);
+                continue;
+            }
+            let id = message["id"].clone();
+            let result = match method {
+                Some("session/request_permission") => {
+                    assert_two_permission_options(&message);
+                    json!({ "outcome": { "outcome": "selected", "optionId": "auto-approve" } })
+                }
+                Some("terminal/create") => json!({ "terminalId": "terminal-1" }),
+                Some("terminal/wait_for_exit") => json!({ "exitCode": 1 }),
+                Some("terminal/output") => json!({
+                    "output": "cat: missing-file: no such file\n",
+                    "truncated": false,
+                    "exitStatus": { "exitCode": 1 }
+                }),
+                Some("terminal/release") => json!({}),
+                other => panic!("unexpected agent request: {other:?}"),
+            };
+            agent.send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+        };
         assert_eq!(
             response["result"]["stopReason"], "max_turn_requests",
             "{response}"
@@ -1067,19 +1125,21 @@ fn transcript_compacts_and_continues_the_same_turn_past_legacy_token_budget() {
             }
             assert!(request["max_tokens"].as_u64().unwrap() > 1);
             let delta = match round {
-                0 => json!({"tool_calls":[read_call("read-large", "large.txt")]}),
+                0 => json!({"tool_calls":[command_call("read-large", "cat", &["large.txt"])]}),
                 1 => {
                     let text = request["messages"].to_string();
                     assert!(text.contains("original objective"));
                     assert!(text.contains("Completed read of large.txt"));
                     assert!(!text.contains("historical evidence"));
-                    json!({"tool_calls":[read_call("verify", "verification.txt")]})
+                    json!({"tool_calls":[command_call("verify", "cat", &["verification.txt"])]})
                 }
                 2 => {
                     let messages = request["messages"].as_array().unwrap();
                     assert!(messages.iter().any(|message| message["role"] == "tool"
                         && message["tool_call_id"] == "verify"
-                        && message["content"] == "verification passed"));
+                        && message["content"]
+                            .as_str()
+                            .is_some_and(|text| text.contains("verification passed"))));
                     json!({"content":"Completed and verified."})
                 }
                 _ => panic!("unexpected continuation request"),
@@ -1105,7 +1165,45 @@ fn transcript_compacts_and_continues_the_same_turn_past_legacy_token_budget() {
     initialize(&mut agent);
     let session = new_session(&mut agent, 2, workspace.to_str().unwrap());
     prompt(&mut agent, 3, &session, "original objective");
-    let (response, messages) = agent.response_with_messages(3);
+    let large_output = "historical evidence ".repeat(2000);
+    let mut outputs = 0;
+    let mut messages = Vec::new();
+    let response = loop {
+        let message = agent.output.recv_timeout(TIMEOUT).expect("ACP message");
+        if message.get("id").and_then(Value::as_u64) == Some(3) {
+            break message;
+        }
+        let method = message.get("method").and_then(Value::as_str);
+        if method == Some("session/update") || message.get("id").is_none() {
+            messages.push(message);
+            continue;
+        }
+        let id = message["id"].clone();
+        let result = match method {
+            Some("session/request_permission") => {
+                assert_two_permission_options(&message);
+                json!({ "outcome": { "outcome": "selected", "optionId": "auto-approve" } })
+            }
+            Some("terminal/create") => json!({ "terminalId": "terminal-1" }),
+            Some("terminal/wait_for_exit") => json!({ "exitCode": 0 }),
+            Some("terminal/output") => {
+                outputs += 1;
+                let text = if outputs == 1 {
+                    large_output.clone()
+                } else {
+                    "verification passed".to_owned()
+                };
+                json!({
+                    "output": text,
+                    "truncated": false,
+                    "exitStatus": { "exitCode": 0 }
+                })
+            }
+            Some("terminal/release") => json!({}),
+            other => panic!("unexpected agent request: {other:?}"),
+        };
+        agent.send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+    };
     assert_eq!(response["result"]["stopReason"], "end_turn", "{response}");
     assert!(!messages
         .iter()
@@ -1241,7 +1339,7 @@ fn transcript_time_budget_kills_and_releases_an_active_terminal() {
         }
         let result = match method {
             "session/request_permission" => {
-                json!({"outcome":{"outcome":"selected","optionId":"allow-once"}})
+                json!({"outcome":{"outcome":"selected","optionId":"auto-approve"}})
             }
             "terminal/create" => json!({"terminalId":"long-running"}),
             "terminal/output" => {
@@ -1275,7 +1373,7 @@ fn transcript_cost_budget_stops_requests_and_persists_reported_session_cost() {
     thread::spawn(move || {
         let (mut socket, _) = accept_chat(&listener).unwrap();
         provider_request(&mut socket);
-        let body = json!({"choices":[{"delta":{"tool_calls":[read_call("cost", "missing-file")]}}],
+        let body = json!({"choices":[{"delta":{"tool_calls":[command_call("cost", "cat", &["missing-file"])]}}],
             "usage":{"prompt_tokens":100,"completion_tokens":5,"cost":0.02}});
         write_sse(&mut socket, &format!("data: {body}\n\ndata: [DONE]\n\n"));
     });
@@ -1286,7 +1384,19 @@ fn transcript_cost_budget_stops_requests_and_persists_reported_session_cost() {
     initialize(&mut agent);
     let session = new_session(&mut agent, 2, "/workspace");
     prompt(&mut agent, 3, &session, "respect cost budget");
-    let (response, messages) = agent.response_with_messages(3);
+    let mut messages = Vec::new();
+    let response = loop {
+        let message = agent.output.recv_timeout(TIMEOUT).expect("ACP message");
+        if message.get("id").and_then(Value::as_u64) == Some(3) {
+            break message;
+        }
+        let method = message.get("method").and_then(Value::as_str);
+        if method == Some("session/update") || message.get("id").is_none() {
+            messages.push(message);
+            continue;
+        }
+        terminal_stub(&mut agent, &message, "done\n");
+    };
     assert_eq!(
         response["result"]["stopReason"], "max_turn_requests",
         "{response}"
@@ -1314,7 +1424,7 @@ fn transcript_model_output_limit_reports_max_tokens_without_executing_calls() {
             &mut socket,
             &format!(
                 "data: {}\n\ndata: [DONE]\n\n",
-                json!({"choices":[{"delta":{"tool_calls":[read_call("limited", "never-read")]},"finish_reason":"length"}]})
+                json!({"choices":[{"delta":{"tool_calls":[command_call("limited", "cat", &["never-read"])]},"finish_reason":"length"}]})
             ),
         );
     });

@@ -164,28 +164,28 @@ Authentication, audio, embedded context, and MCP capabilities are not advertised
 ## Tools
 
 OpenAI-compatible function calling is executed as an iterative model → tool →
-model loop. The built-in tools are `read_file`, `list_directory`, `search_text`,
-`edit_file`, `write_file`, `move_file`, `delete_file`, and `run_command`.
-`edit_file` performs one exact,
-uniquely matched text replacement, rejecting stale or ambiguous edits without
-changing the file. `read_file` accepts UTF-8 byte `offset` and `limit` values;
-partial reads return the exact `next_offset` needed to continue. All paths are
-restricted to the session workspace, symlink
-escapes are rejected, and output is bounded. Moving never overwrites an existing
-destination, and deletion accepts files only. `edit_file`, `write_file`,
-`move_file`, `delete_file`, and `run_command` require approval through ACP
-`session/request_permission`. Permission prompts offer allow/reject once and
-allow/reject for the session. Remembered decisions use exact operation keys:
-the target path for writes, and the executable, full argument vector, and
-working directory for commands. They are discarded when the ACP session closes.
+model loop. The only built-in tool is `run_command`: every read, write, edit,
+search, git, build, and test runs as an OS command. Couple related steps into
+one call with the platform shell instead of many small calls (for example
+`sh -c "cat hello.txt && git status"` on Linux/macOS, or
+`powershell -Command "..."` on Windows). The working directory stays inside the
+session workspace, symlink escapes are rejected, and output is bounded.
+
+`run_command` requires approval through ACP `session/request_permission`.
+Permission prompts offer exactly two options: `full-access` and `auto-approve`.
+Auto-approve allows one command and prompts again for the next sensitive
+action. Full access grants the command and disables every later prompt in that
+ACP session. Dismissing the prompt denies that command once. Remembered
+decisions use the exact executable, full argument vector, and working
+directory. They are discarded when the ACP session closes.
 
 Commands use ACP's client-owned terminal lifecycle: `terminal/create`, an
 embedded terminal tool-call update, `terminal/wait_for_exit`, `terminal/output`,
 and `terminal/release`. Cancellation sends `terminal/kill` before release. The
 executable and argument vector are kept separate rather than interpreted by a
 shell. Amarcode requires a permission matching the exact command, arguments,
-and workspace-relative working directory before it starts a process; an
-`allow_always` permission remains reusable for that ACP session.
+and workspace-relative working directory before it starts a process; a
+`full-access` permission disables further prompts for that ACP session.
 
 Tool calls are streamed to the client using typed ACP `tool_call` and
 `tool_call_update` events. Calls and results remain structured in provider

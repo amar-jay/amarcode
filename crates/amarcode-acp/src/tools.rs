@@ -1,4 +1,8 @@
-use std::{collections::HashMap, path::Path, sync::Mutex};
+use std::{
+    collections::HashMap,
+    path::{Component, Path, PathBuf},
+    sync::Mutex,
+};
 
 use crate::provider::ModelToolCall;
 use agent_client_protocol::{
@@ -14,108 +18,37 @@ use agent_client_protocol::{
 use serde_json::{json, Value};
 use tokio::sync::watch;
 
-mod filesystem;
-
-use filesystem::{
-    delete_file, edit_file, existing_path, list_directory, move_file, read_file, search_text,
-    write_file, FileChange,
-};
-
 const MAX_OUTPUT: usize = 64 * 1024;
-
-pub fn is_search_tool(call: &ModelToolCall) -> bool {
-    matches!(call.name.as_str(), "search_text" | "list_directory")
-}
-
-/// Execute a read-only search call without publishing its individual ACP
-/// lifecycle. The runtime uses this for multi-call batches and publishes one
-/// synthetic search lifecycle while retaining every real result in model
-/// history.
-pub fn execute_grouped_search(call: &ModelToolCall, workspace: &Path) -> Result<String, String> {
-    let arguments = serde_json::from_str::<Value>(&call.arguments)
-        .map_err(|error| format!("invalid arguments: {error}"))?;
-    match call.name.as_str() {
-        "search_text" => search_text(workspace, &arguments),
-        "list_directory" => list_directory(workspace, &arguments),
-        other => Err(format!("cannot group non-search tool: {other}")),
-    }
-}
-
-pub fn begin_search_group(
-    connection: &ConnectionTo<Client>,
-    session_id: &SessionId,
-    group_id: &str,
-) {
-    let started = AcpToolCall::new(group_id.to_owned(), "Searching")
-        .kind(ToolKind::Search)
-        .status(ToolCallStatus::InProgress)
-        .raw_input(json!({ "grouped": true }));
-    let _ = connection.send_notification(SessionNotification::new(
-        session_id.clone(),
-        SessionUpdate::ToolCall(started),
-    ));
-}
-
-pub fn finish_search_group(
-    connection: &ConnectionTo<Client>,
-    session_id: &SessionId,
-    group_id: &str,
-    count: usize,
-    failed: usize,
-) {
-    let status = if failed == 0 {
-        ToolCallStatus::Completed
-    } else {
-        ToolCallStatus::Failed
-    };
-    let summary = if failed == 0 {
-        format!("Completed {count} search operations")
-    } else {
-        format!("Completed {count} search operations with {failed} failure(s)")
-    };
-    let fields = ToolCallUpdateFields::new()
-        .status(status)
-        .content(vec![ToolCallContent::from(ContentBlock::Text(
-            agent_client_protocol::schema::v1::TextContent::new(summary.clone()),
-        ))])
-        .raw_output(json!({
-            "operationCount": count,
-            "failedOperationCount": failed,
-            "text": summary,
-        }));
-    let _ = connection.send_notification(SessionNotification::new(
-        session_id.clone(),
-        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(group_id.to_owned(), fields)),
-    ));
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum PermissionKey {
-    WriteFile {
-        path: String,
-    },
-    MoveFile {
-        source_path: String,
-        destination_path: String,
-    },
-    DeleteFile {
-        path: String,
-    },
     RunCommand {
         command: String,
         args: Vec<String>,
         cwd: String,
     },
+    FileWrite {
+        path: String,
+    },
 }
 
-/// Decisions selected with an ACP `*_always` option, scoped to one session.
+/// Permission decisions for one ACP session.
+///
+/// The dialog offers exactly two options: `full-access` remembers the grant
+/// and disables every later prompt in the session, while `auto-approve`
+/// allows one command and prompts again for the next sensitive action.
+/// Dismissing the prompt denies that command once without remembering.
 #[derive(Debug, Default)]
 pub struct PermissionState {
     remembered: Mutex<HashMap<PermissionKey, bool>>,
+    full_access: Mutex<bool>,
 }
 
 impl PermissionState {
     fn decision(&self, key: &PermissionKey) -> Option<bool> {
+        if self.full_access.lock().ok()?.clone() {
+            return Some(true);
+        }
         self.remembered.lock().ok()?.get(key).copied()
     }
 
@@ -123,6 +56,17 @@ impl PermissionState {
         if let Ok(mut remembered) = self.remembered.lock() {
             remembered.insert(key, allowed);
         }
+    }
+
+    fn grant_full_access(&self) {
+        if let Ok(mut full_access) = self.full_access.lock() {
+            *full_access = true;
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn has_full_access(&self) -> bool {
+        self.full_access.lock().ok().is_some_and(|flag| *flag)
     }
 }
 
@@ -156,6 +100,14 @@ pub async fn execute(
         SessionUpdate::ToolCall(started.clone()),
     ));
 
+    if call.name != "run_command" && call.name != "file_command" {
+        return finish(
+            connection,
+            session_id,
+            call,
+            Err(format!("unknown tool: {}", call.name)),
+        );
+    }
     if let Some(permission_key) = permission_key(call, &arguments) {
         let allowed = if let Some(allowed) = permissions.decision(&permission_key) {
             allowed
@@ -165,24 +117,14 @@ pub async fn execute(
                 ToolCallUpdate::from(started),
                 vec![
                     PermissionOption::new(
-                        "allow-once",
-                        "Allow once",
-                        PermissionOptionKind::AllowOnce,
-                    ),
-                    PermissionOption::new(
-                        "allow-always",
-                        "Allow for this session",
+                        "full-access",
+                        "Full access",
                         PermissionOptionKind::AllowAlways,
                     ),
                     PermissionOption::new(
-                        "reject-once",
-                        "Reject",
-                        PermissionOptionKind::RejectOnce,
-                    ),
-                    PermissionOption::new(
-                        "reject-always",
-                        "Reject for this session",
-                        PermissionOptionKind::RejectAlways,
+                        "auto-approve",
+                        "Auto approve",
+                        PermissionOptionKind::AllowOnce,
                     ),
                 ],
             ));
@@ -212,42 +154,115 @@ pub async fn execute(
     if *cancellation.borrow() {
         return finish(connection, session_id, call, Err("cancelled".into()));
     }
-    if call.name == "run_command" {
-        return run_command(
-            workspace,
-            &arguments,
-            connection,
-            session_id,
-            call,
-            cancellation,
-        )
-        .await;
-    }
-    if call.name == "edit_file" {
+    if call.name == "file_command" {
         return finish_file_change(
             connection,
             session_id,
             call,
-            edit_file(workspace, &arguments),
+            apply_file_command(workspace, &arguments),
         );
     }
-    if call.name == "write_file" {
-        return finish_file_change(
-            connection,
-            session_id,
-            call,
-            write_file(workspace, &arguments),
-        );
+    return run_command(
+        workspace,
+        &arguments,
+        connection,
+        session_id,
+        call,
+        cancellation,
+    )
+    .await;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileChange {
+    path: PathBuf,
+    old_text: Option<String>,
+    new_text: String,
+    summary: String,
+}
+
+/// Create a new file or apply one exact, uniquely matched edit.
+/// Pure workspace I/O shared by the ACP wrapper and unit tests.
+fn apply_file_command(workspace: &Path, args: &Value) -> Result<FileChange, String> {
+    let relative = safe_relative(required_str(args, "path")?)?;
+    let operation = required_str(args, "operation")?;
+    match operation {
+        "create" => {
+            let content = required_str(args, "content")?.to_owned();
+            let path = workspace.join(&relative);
+            let parent = path.parent().ok_or_else(|| "invalid path".to_string())?;
+            let canonical_root = workspace
+                .canonicalize()
+                .map_err(|e| format!("invalid workspace: {e}"))?;
+            let canonical_parent = parent
+                .canonicalize()
+                .map_err(|e| format!("parent directory does not exist: {e}"))?;
+            if !canonical_parent.starts_with(&canonical_root) {
+                return Err("path escapes workspace".into());
+            }
+            if path.exists() {
+                let canonical_target = path
+                    .canonicalize()
+                    .map_err(|e| format!("invalid destination: {e}"))?;
+                if !canonical_target.starts_with(&canonical_root) {
+                    return Err("path escapes workspace".into());
+                }
+            }
+            let old_text = if path.exists() {
+                Some(
+                    std::fs::read_to_string(&path)
+                        .map_err(|e| format!("failed to read {}: {e}", path.display()))?,
+                )
+            } else {
+                None
+            };
+            std::fs::write(&path, &content)
+                .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+            Ok(FileChange {
+                path: path.clone(),
+                old_text,
+                new_text: content.clone(),
+                summary: format!("Wrote {} bytes to {}", content.len(), path.display()),
+            })
+        }
+        "edit" => {
+            let path = existing_path(workspace, required_str(args, "path")?)?;
+            if !path.is_file() {
+                return Err(format!("not a file: {}", path.display()));
+            }
+            let old_text = required_str(args, "old_text")?;
+            if old_text.is_empty() {
+                return Err("old_text must not be empty".into());
+            }
+            let new_text = required_str(args, "content")?;
+            let contents = std::fs::read_to_string(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            let matches = contents.match_indices(old_text).count();
+            if matches == 0 {
+                return Err("old_text was not found; the file was not changed".into());
+            }
+            if matches > 1 {
+                return Err(format!(
+                    "old_text matched {matches} locations; include more surrounding context so it is unique"
+                ));
+            }
+            let updated = contents.replacen(old_text, new_text, 1);
+            std::fs::write(&path, updated.as_bytes())
+                .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+            Ok(FileChange {
+                path: path.clone(),
+                old_text: Some(contents),
+                new_text: updated,
+                summary: format!(
+                    "Replaced {} bytes with {} bytes in {}",
+                    old_text.len(),
+                    new_text.len(),
+                    path.display()
+                ),
+            })
+        }
+        _ => Err("operation must be \"create\" or \"edit\"".into()),
     }
-    let result = match call.name.as_str() {
-        "read_file" => read_file(workspace, &arguments),
-        "list_directory" => list_directory(workspace, &arguments),
-        "search_text" => search_text(workspace, &arguments),
-        "move_file" => move_file(workspace, &arguments),
-        "delete_file" => delete_file(workspace, &arguments),
-        other => Err(format!("unknown tool: {other}")),
-    };
-    finish(connection, session_id, call, result)
 }
 
 fn finish_file_change(
@@ -284,16 +299,6 @@ fn finish_file_change(
 
 fn permission_key(call: &ModelToolCall, arguments: &Value) -> Option<PermissionKey> {
     match call.name.as_str() {
-        "write_file" | "edit_file" => Some(PermissionKey::WriteFile {
-            path: arguments.get("path")?.as_str()?.to_owned(),
-        }),
-        "move_file" => Some(PermissionKey::MoveFile {
-            source_path: arguments.get("source_path")?.as_str()?.to_owned(),
-            destination_path: arguments.get("destination_path")?.as_str()?.to_owned(),
-        }),
-        "delete_file" => Some(PermissionKey::DeleteFile {
-            path: arguments.get("path")?.as_str()?.to_owned(),
-        }),
         "run_command" => Some(PermissionKey::RunCommand {
             command: arguments.get("command")?.as_str()?.to_owned(),
             args: optional_string_array(arguments, "args").ok()?,
@@ -302,6 +307,9 @@ fn permission_key(call: &ModelToolCall, arguments: &Value) -> Option<PermissionK
                 .and_then(Value::as_str)
                 .unwrap_or(".")
                 .to_owned(),
+        }),
+        "file_command" => Some(PermissionKey::FileWrite {
+            path: arguments.get("path")?.as_str()?.to_owned(),
         }),
         _ => None,
     }
@@ -317,14 +325,11 @@ fn permission_outcome<E>(
         return false;
     };
     match selected.option_id.to_string().as_str() {
-        "allow-once" => true,
-        "allow-always" => {
+        "auto-approve" => true,
+        "full-access" => {
             permissions.remember(key, true);
+            permissions.grant_full_access();
             true
-        }
-        "reject-always" => {
-            permissions.remember(key, false);
-            false
         }
         _ => false,
     }
@@ -474,14 +479,39 @@ fn optional_string_array(args: &Value, key: &str) -> Result<Vec<String>, String>
 
 fn tool_kind(name: &str) -> ToolKind {
     match name {
-        "read_file" => ToolKind::Read,
-        "list_directory" | "search_text" => ToolKind::Search,
-        "write_file" | "edit_file" => ToolKind::Edit,
-        "move_file" => ToolKind::Move,
-        "delete_file" => ToolKind::Delete,
         "run_command" => ToolKind::Execute,
+        "file_command" => ToolKind::Edit,
         _ => ToolKind::Other,
     }
+}
+
+fn existing_path(workspace: &Path, value: &str) -> Result<PathBuf, String> {
+    let root = workspace
+        .canonicalize()
+        .map_err(|e| format!("invalid workspace: {e}"))?;
+    let path = workspace
+        .join(safe_relative(value)?)
+        .canonicalize()
+        .map_err(|e| format!("path not found: {e}"))?;
+    if !path.starts_with(&root) {
+        return Err("path escapes workspace".into());
+    }
+    Ok(path)
+}
+
+fn safe_relative(value: &str) -> Result<PathBuf, String> {
+    let path = Path::new(value);
+    if path.is_absolute()
+        || path.components().any(|part| {
+            matches!(
+                part,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("path must be relative and remain inside the workspace".into());
+    }
+    Ok(path.to_owned())
 }
 
 fn tool_title(call: &ModelToolCall, args: &Value) -> String {
@@ -505,21 +535,13 @@ fn tool_title(call: &ModelToolCall, args: &Value) -> String {
             format!("{command} {suffix}")
         };
     }
-    if call.name == "move_file" {
-        let source = args
-            .get("source_path")
+    if call.name == "file_command" {
+        return args
+            .get("path")
             .and_then(Value::as_str)
-            .unwrap_or("<invalid source>");
-        let destination = args
-            .get("destination_path")
-            .and_then(Value::as_str)
-            .unwrap_or("<invalid destination>");
-        return format!("move file {source} → {destination}");
+            .map_or_else(|| call.name.clone(), |path| format!("file {path}"));
     }
-    args.get("path").and_then(Value::as_str).map_or_else(
-        || call.name.clone(),
-        |path| format!("{} {path}", call.name.replace('_', " ")),
-    )
+    call.name.clone()
 }
 
 fn quote_command_part(value: &str) -> String {
@@ -618,9 +640,6 @@ fn truncate(mut value: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::filesystem::{
-        delete_file, edit_file, move_file, read_file, safe_relative, write_file,
-    };
     use super::*;
     use agent_client_protocol::schema::v1::{RequestPermissionResponse, SelectedPermissionOutcome};
 
@@ -632,12 +651,24 @@ mod tests {
         }
     }
 
+    fn selected(option: &'static str) -> Result<RequestPermissionResponse, ()> {
+        Ok(RequestPermissionResponse::new(
+            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option)),
+        ))
+    }
+
     #[test]
-    fn groups_only_read_only_search_operations() {
-        assert!(is_search_tool(&model_call("search_text")));
-        assert!(is_search_tool(&model_call("list_directory")));
-        assert!(!is_search_tool(&model_call("read_file")));
-        assert!(!is_search_tool(&model_call("run_command")));
+    fn only_command_and_file_tools_have_permission_keys() {
+        let command = ModelToolCall {
+            id: "call-1".into(),
+            name: "run_command".into(),
+            arguments: String::new(),
+        };
+        assert!(permission_key(&command, &json!({ "command": "cargo" })).is_some());
+        assert!(
+            permission_key(&model_call("file_command"), &json!({ "path": "a.txt" })).is_some()
+        );
+        assert!(permission_key(&model_call("read_file"), &json!({})).is_none());
     }
 
     #[test]
@@ -691,239 +722,61 @@ mod tests {
         );
         assert_eq!(first, same);
         assert_ne!(first, different);
-
-        let write = permission_key(
-            &model_call("write_file"),
-            &json!({ "path": "src/lib.rs", "content": "full" }),
-        );
-        let edit = permission_key(
-            &model_call("edit_file"),
-            &json!({ "path": "src/lib.rs", "old_text": "old", "new_text": "new" }),
-        );
-        assert_eq!(write, edit);
     }
 
     #[test]
-    fn targeted_edit_replaces_one_unique_match() {
-        let root =
-            std::env::temp_dir().join(format!("amarcode-edit-root-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).expect("create root");
-        let path = root.join("example.txt");
-        std::fs::write(&path, "before\nold block\nafter\n").expect("write fixture");
-
-        let result = edit_file(
-            &root,
-            &json!({
-                "path": "example.txt",
-                "old_text": "old block",
-                "new_text": "new block"
-            }),
-        )
-        .expect("edit file");
-
-        assert!(result.summary.contains("Replaced 9 bytes with 9 bytes"));
-        assert_eq!(
-            result.path,
-            path.canonicalize().expect("canonicalize edited path")
-        );
-        assert_eq!(
-            result.old_text.as_deref(),
-            Some("before\nold block\nafter\n")
-        );
-        assert_eq!(result.new_text, "before\nnew block\nafter\n");
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("read result"),
-            "before\nnew block\nafter\n"
-        );
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn targeted_edit_rejects_stale_and_ambiguous_matches_without_writing() {
-        let root =
-            std::env::temp_dir().join(format!("amarcode-edit-root-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).expect("create root");
-        let path = root.join("example.txt");
-        let original = "repeat\nmiddle\nrepeat\n";
-        std::fs::write(&path, original).expect("write fixture");
-
-        let missing = edit_file(
-            &root,
-            &json!({ "path": "example.txt", "old_text": "stale", "new_text": "new" }),
-        );
-        assert!(missing
-            .expect_err("reject stale edit")
-            .contains("not found"));
-        let ambiguous = edit_file(
-            &root,
-            &json!({ "path": "example.txt", "old_text": "repeat", "new_text": "new" }),
-        );
-        assert!(ambiguous
-            .expect_err("reject ambiguous edit")
-            .contains("matched 2 locations"));
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("read unchanged file"),
-            original
-        );
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn read_file_pages_without_losing_utf8_content() {
-        let root =
-            std::env::temp_dir().join(format!("amarcode-read-root-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).expect("create root");
-        let path = root.join("example.txt");
-        std::fs::write(&path, "ab🙂cd").expect("write fixture");
-
-        let first = read_file(
-            &root,
-            &json!({ "path": "example.txt", "offset": 0, "limit": 4 }),
-        )
-        .expect("read first page");
-        assert_eq!(first, "ab\n[partial read: bytes 0..2 of 8; next_offset=2]");
-        let second = read_file(
-            &root,
-            &json!({ "path": "example.txt", "offset": 2, "limit": 4 }),
-        )
-        .expect("read second page");
-        assert_eq!(second, "🙂\n[partial read: bytes 2..6 of 8; next_offset=6]");
-        let third = read_file(
-            &root,
-            &json!({ "path": "example.txt", "offset": 6, "limit": 4 }),
-        )
-        .expect("read final page");
-        assert_eq!(third, "cd");
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn read_file_rejects_invalid_offsets_and_limits() {
-        let root =
-            std::env::temp_dir().join(format!("amarcode-read-root-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).expect("create root");
-        std::fs::write(root.join("example.txt"), "🙂").expect("write fixture");
-
-        let split_character = read_file(&root, &json!({ "path": "example.txt", "offset": 1 }));
-        assert!(split_character
-            .expect_err("reject split character")
-            .contains("UTF-8 character boundary"));
-        let beyond_end = read_file(&root, &json!({ "path": "example.txt", "offset": 5 }));
-        assert!(beyond_end
-            .expect_err("reject offset beyond end")
-            .contains("beyond end of file"));
-        let zero_limit = read_file(&root, &json!({ "path": "example.txt", "limit": 0 }));
-        assert!(zero_limit
-            .expect_err("reject zero limit")
-            .contains("limit must be between"));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn move_file_renames_without_overwriting() {
-        let root =
-            std::env::temp_dir().join(format!("amarcode-move-root-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).expect("create root");
-        std::fs::write(root.join("source.txt"), "source").expect("write source");
-
-        move_file(
-            &root,
-            &json!({ "source_path": "source.txt", "destination_path": "renamed.txt" }),
-        )
-        .expect("move file");
-        assert!(!root.join("source.txt").exists());
-        assert_eq!(
-            std::fs::read_to_string(root.join("renamed.txt")).expect("read moved file"),
-            "source"
-        );
-
-        std::fs::write(root.join("other.txt"), "other").expect("write other");
-        let overwrite = move_file(
-            &root,
-            &json!({ "source_path": "renamed.txt", "destination_path": "other.txt" }),
-        );
-        assert!(overwrite
-            .expect_err("reject overwrite")
-            .contains("destination already exists"));
-        assert_eq!(
-            std::fs::read_to_string(root.join("other.txt")).expect("read unchanged destination"),
-            "other"
-        );
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn delete_file_removes_files_but_rejects_directories() {
-        let root =
-            std::env::temp_dir().join(format!("amarcode-delete-root-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).expect("create root");
-        std::fs::write(root.join("delete-me.txt"), "content").expect("write fixture");
-        std::fs::create_dir(root.join("keep-directory")).expect("create directory");
-
-        delete_file(&root, &json!({ "path": "delete-me.txt" })).expect("delete file");
-        assert!(!root.join("delete-me.txt").exists());
-        let directory = delete_file(&root, &json!({ "path": "keep-directory" }));
-        assert!(directory
-            .expect_err("reject directory")
-            .contains("not a directory"));
-        assert!(root.join("keep-directory").is_dir());
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn always_outcomes_are_remembered() {
+    fn auto_approve_allows_once_without_remembering() {
         let permissions = PermissionState::default();
-        let allowed_key = PermissionKey::WriteFile {
-            path: "src/lib.rs".into(),
+        let key = PermissionKey::RunCommand {
+            command: "cargo".into(),
+            args: vec!["test".into()],
+            cwd: ".".into(),
         };
-        let allowed = RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
-            SelectedPermissionOutcome::new("allow-always"),
-        ));
         assert!(permission_outcome(
-            Ok::<_, ()>(allowed),
+            selected("auto-approve"),
             &permissions,
-            allowed_key.clone(),
+            key.clone()
         ));
-        assert_eq!(permissions.decision(&allowed_key), Some(true));
-
-        let rejected_key = PermissionKey::WriteFile {
-            path: "src/main.rs".into(),
-        };
-        let rejected = RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
-            SelectedPermissionOutcome::new("reject-always"),
-        ));
-        assert!(!permission_outcome(
-            Ok::<_, ()>(rejected),
-            &permissions,
-            rejected_key.clone(),
-        ));
-        assert_eq!(permissions.decision(&rejected_key), Some(false));
+        assert!(!permissions.has_full_access());
+        assert_eq!(permissions.decision(&key), None);
     }
 
-    #[cfg(unix)]
     #[test]
-    fn write_rejects_symlink_that_targets_outside_workspace() {
-        use std::os::unix::fs::symlink;
+    fn full_access_remembers_and_disables_later_prompts() {
+        let permissions = PermissionState::default();
+        let key = PermissionKey::RunCommand {
+            command: "cargo".into(),
+            args: vec!["test".into()],
+            cwd: ".".into(),
+        };
+        assert!(permission_outcome(
+            selected("full-access"),
+            &permissions,
+            key
+        ));
+        assert!(permissions.has_full_access());
+        let other = PermissionKey::RunCommand {
+            command: "rm".into(),
+            args: vec!["-rf".into()],
+            cwd: ".".into(),
+        };
+        assert_eq!(permissions.decision(&other), Some(true));
+    }
 
-        let root =
-            std::env::temp_dir().join(format!("amarcode-tool-root-{}", uuid::Uuid::new_v4()));
-        let outside =
-            std::env::temp_dir().join(format!("amarcode-tool-outside-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).expect("create root");
-        std::fs::write(&outside, "secret").expect("create outside file");
-        symlink(&outside, root.join("escape.txt")).expect("create symlink");
-
-        let result = write_file(
-            &root,
-            &json!({ "path": "escape.txt", "content": "overwrite" }),
-        );
-        assert_eq!(result.expect_err("reject escape"), "path escapes workspace");
-        assert_eq!(
-            std::fs::read_to_string(&outside).expect("read outside"),
-            "secret"
-        );
-
-        let _ = std::fs::remove_dir_all(root);
-        let _ = std::fs::remove_file(outside);
+    #[test]
+    fn dismissal_denies_without_remembering() {
+        let permissions = PermissionState::default();
+        let key = PermissionKey::RunCommand {
+            command: "cargo".into(),
+            args: vec!["test".into()],
+            cwd: ".".into(),
+        };
+        assert!(!permission_outcome(
+            selected("reject-once"),
+            &permissions,
+            key.clone()
+        ));
+        assert!(!permissions.has_full_access());
+        assert_eq!(permissions.decision(&key), None);
     }
 }
