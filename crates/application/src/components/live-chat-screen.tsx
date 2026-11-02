@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom";
+import { chatHeaderHostAtom } from "@/state/chat-header";
 import { QueuedPrompts } from "./queued-prompts";
 import { ChatHistoryLoader } from "./chat-history-loader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -99,6 +101,7 @@ function TurnLoadingIndicator({ label = "Thinking" }: { label?: string }) {
  * agent atoms); this component is render + wire-up only.
  */
 export function LiveChatScreen() {
+  const headerHost = useAtomValue(chatHeaderHostAtom);
   const [conversationView, setConversationView] =
     useState<ConversationView>("chat");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -345,118 +348,127 @@ export function LiveChatScreen() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col">
-      <header className="mr-2 flex min-h-9 items-center border-b px-6 py-1">
-        {showSearch ? (
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
-            <div className="relative w-full max-w-sm">
-              <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                ref={searchInputRef}
-                type="search"
-                value={searchQuery}
-                onChange={(event) => {
-                  setSearchQuery(event.target.value);
-                  setActiveMatchIndex(0);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") closeSearch();
-                  if (event.key === "Enter")
-                    moveSearchResult(event.shiftKey ? -1 : 1);
-                }}
-                placeholder={
-                  live.detail?.has_older_messages
-                    ? "Find in loaded messages"
-                    : "Find in chat"
-                }
-                aria-label="Find in chat"
-                className="pr-16 pl-7 [&::-webkit-search-cancel-button]:hidden"
-              />
-              <span className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-[10px] tabular-nums text-muted-foreground">
-                {normalizedSearchQuery
-                  ? matchingBlockKeys.length
-                    ? `${safeActiveMatchIndex + 1} / ${matchingBlockKeys.length}`
-                    : "No results"
-                  : ""}
-              </span>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={!matchingBlockKeys.length}
-              aria-label="Previous result"
-              title="Previous result (Shift+Enter)"
-              onClick={() => moveSearchResult(-1)}
-            >
-              <ChevronUp className="size-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={!matchingBlockKeys.length}
-              aria-label="Next result"
-              title="Next result (Enter)"
-              onClick={() => moveSearchResult(1)}
-            >
-              <ChevronDown className="size-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Close chat search"
-              title="Close chat search (Escape)"
-              onClick={closeSearch}
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
-        ) : (
-          <>
-            <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
-              {live.detail?.chat.title ?? session.chat.title ?? "Loading chat"}
-            </h1>
-            <div className="ml-auto flex">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Toggle
-                    size="sm"
-                    pressed={conversationView === "activity"}
-                    onPressedChange={(pressed) => {
-                      closeSearch();
-                      setConversationView(pressed ? "activity" : "chat");
+      {headerHost &&
+        createPortal(
+          <header className="flex h-9 min-w-0 flex-1 items-center gap-2 px-2">
+            {showSearch ? (
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+                <div className="relative w-full max-w-sm">
+                  <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    ref={searchInputRef}
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => {
+                      setSearchQuery(event.target.value);
+                      setActiveMatchIndex(0);
                     }}
-                    aria-label={
-                      conversationView === "activity"
-                        ? "Show conversation"
-                        : "Show activity"
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") closeSearch();
+                      if (event.key === "Enter")
+                        moveSearchResult(event.shiftKey ? -1 : 1);
+                    }}
+                    placeholder={
+                      live.detail?.has_older_messages
+                        ? "Find in loaded messages"
+                        : "Find in chat"
                     }
-                  >
-                    <RotateCwFadingClock className="size-4" />
-                  </Toggle>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {conversationView === "activity"
-                    ? "Show conversation"
-                    : "Show activity"}
-                </TooltipContent>
-              </Tooltip>
+                    aria-label="Find in chat"
+                    className="pr-16 pl-7 [&::-webkit-search-cancel-button]:hidden"
+                  />
+                  <span className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-[10px] tabular-nums text-muted-foreground">
+                    {normalizedSearchQuery
+                      ? matchingBlockKeys.length
+                        ? `${safeActiveMatchIndex + 1} / ${matchingBlockKeys.length}`
+                        : "No results"
+                      : ""}
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={!matchingBlockKeys.length}
+                  aria-label="Previous result"
+                  title="Previous result (Shift+Enter)"
+                  onClick={() => moveSearchResult(-1)}
+                >
+                  <ChevronUp className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={!matchingBlockKeys.length}
+                  aria-label="Next result"
+                  title="Next result (Enter)"
+                  onClick={() => moveSearchResult(1)}
+                >
+                  <ChevronDown className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Close chat search"
+                  title="Close chat search (Escape)"
+                  onClick={closeSearch}
+                >
+                  <X className="size-4" />
+                </Button>
+              </div>
+            ) : (
+              <>
+                <h1
+                  data-tauri-drag-region
+                  className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground"
+                >
+                  {live.detail?.chat.title ??
+                    session.chat.title ??
+                    "Loading chat"}
+                </h1>
+                <div className="ml-auto flex">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Toggle
+                        size="sm"
+                        pressed={conversationView === "activity"}
+                        onPressedChange={(pressed) => {
+                          closeSearch();
+                          setConversationView(pressed ? "activity" : "chat");
+                        }}
+                        aria-label={
+                          conversationView === "activity"
+                            ? "Show conversation"
+                            : "Show activity"
+                        }
+                      >
+                        <RotateCwFadingClock className="size-4" />
+                      </Toggle>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {conversationView === "activity"
+                        ? "Show conversation"
+                        : "Show activity"}
+                    </TooltipContent>
+                  </Tooltip>
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Find in chat"
-                title="Find in chat (Ctrl+F)"
-                onClick={openSearch}
-              >
-                <Search className="size-4" />
-              </Button>
-            </div>
-          </>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Find in chat"
+                    title="Find in chat (Ctrl+F)"
+                    onClick={openSearch}
+                  >
+                    <Search className="size-4" />
+                  </Button>
+                </div>
+              </>
+            )}
+          </header>,
+          headerHost,
         )}
-      </header>
       <Conversation
         initial="instant"
         resize="instant"

@@ -60,9 +60,9 @@ export function ChatStateIndicators({
   if (!status) return null;
 
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-      <status.Icon className={status.className} aria-hidden="true" />
-      {status.label}
+    <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <status.Icon className={`${status.className} shrink-0`} aria-hidden="true" />
+      <span className="truncate">{status.label}</span>
     </span>
   );
 }

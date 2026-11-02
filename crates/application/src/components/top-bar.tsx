@@ -1,7 +1,8 @@
+import { chatHeaderHostAtom } from "@/state/chat-header";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { isWeb } from "@/lib/platform";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   Minus,
   PanelRightClose,
@@ -27,6 +28,7 @@ import {
 } from "@/state";
 
 export function TopBar() {
+  const setHeaderHost = useSetAtom(chatHeaderHostAtom);
   const { openMobile } = useSidebar();
   const [sheetOpen, setSheetOpen] = useAtom(sidePanelOpenAtom);
   const [workspaceMaximized, setWorkspaceMaximized] = useAtom(
@@ -61,13 +63,20 @@ export function TopBar() {
         />
         <div
           data-tauri-drag-region
-          className="flex h-full min-w-0 flex-1 items-center gap-2 px-3 select-none"
+          className="flex h-full shrink-0 items-center gap-2 px-3 select-none"
         >
           <img src="/acp-mark.svg" alt="" className="size-4" />
-          <span className="text-xs font-medium border-r pr-2">AMARCODE</span>
+          <span className="hidden text-xs font-medium border-r pr-2 sm:block">
+            AMARCODE
+          </span>
         </div>
+        <div
+          ref={setHeaderHost}
+          data-tauri-drag-region
+          className="flex h-full min-w-0 flex-1 items-center"
+        />
         {live && (
-          <div className="pointer-events-none absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center select-none">
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 flex max-w-[30vw] -translate-x-1/2 items-center justify-center bg-sidebar px-2 select-none">
             <ChatStateIndicators
               loading={live.loading}
               isWorking={isWorking}
