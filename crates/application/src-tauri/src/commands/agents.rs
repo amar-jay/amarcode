@@ -48,3 +48,19 @@ pub async fn set_amarcode_acp_config(
 ) -> Result<AmarcodeAcpConfigResult, String> {
     client.set_amarcode_acp_config(params).await
 }
+
+#[tauri::command]
+pub async fn agent_setup(
+    client: State<'_, DaemonClient>,
+    agent_id: String,
+    action: amarcode_protocol::rpc::AgentSetupAction,
+    method_id: Option<String>,
+) -> Result<amarcode_protocol::rpc::AgentSetupResult, String> {
+    client
+        .agent_setup(amarcode_protocol::rpc::AgentSetupParams {
+            agent_id,
+            action,
+            method_id,
+        })
+        .await
+}

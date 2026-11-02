@@ -27,6 +27,7 @@ pub mod methods {
     pub const SUBSCRIBE_EVENTS: &str = "subscribe_events";
     pub const LIST_AGENTS: &str = "list_agents";
     pub const INSTALL_AGENT: &str = "install_agent";
+    pub const AGENT_SETUP: &str = "agent_setup";
     pub const AUTHENTICATE_AGENT: &str = "authenticate_agent";
     pub const GET_AMARCODE_ACP_CONFIG: &str = "get_amarcode_acp_config";
     pub const SET_AMARCODE_ACP_CONFIG: &str = "set_amarcode_acp_config";
@@ -611,4 +612,50 @@ pub struct WorkspaceSearchResult {
     pub matches: Vec<WorkspaceSearchMatch>,
     pub truncated: bool,
     pub skipped_files: u32,
+}
+
+/// Setup is a polled job so human login can outlive an RPC connection.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSetupAction {
+    Check,
+    SignIn,
+    Status,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AgentSetupParams {
+    pub agent_id: String,
+    pub action: AgentSetupAction,
+    #[serde(default)]
+    pub method_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AgentAuthMethod {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub supported: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSetupStatus {
+    Checking,
+    SigningIn,
+    Ready,
+    AuthRequired,
+    Error,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AgentSetupResult {
+    /// Bounded, ephemeral agent output for login links and device codes.
+    pub output: Option<String>,
+    pub status: AgentSetupStatus,
+    pub methods: Vec<AgentAuthMethod>,
+    pub message: Option<String>,
 }

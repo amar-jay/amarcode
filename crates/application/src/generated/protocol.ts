@@ -139,6 +139,20 @@ export type SubscribeEventsParams = { chat_id: string | null, run_id: string | n
 
 export type InstallAgentParams = { agent_id: string, };
 
+export type AgentSetupAction = "check" | "sign_in" | "status" | "cancel";
+
+export type AgentSetupParams = { agent_id: string, action: AgentSetupAction, method_id: string | null, };
+
+export type AgentAuthMethod = { id: string, name: string, description: string | null, supported: boolean, };
+
+export type AgentSetupStatus = "checking" | "signing_in" | "ready" | "auth_required" | "error" | "cancelled";
+
+export type AgentSetupResult = {
+/**
+ * Bounded, ephemeral agent output for login links and device codes.
+ */
+output: string | null, status: AgentSetupStatus, methods: Array<AgentAuthMethod>, message: string | null, };
+
 export type AuthenticateAgentParams = { agent_id: string, method_id: string | null, };
 
 export type AuthenticateAgentResult = { ok: boolean, };

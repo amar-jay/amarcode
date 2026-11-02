@@ -97,6 +97,13 @@ impl DaemonClient {
         self.call(methods::INSTALL_AGENT, params).await
     }
 
+    pub async fn agent_setup(
+        &self,
+        params: amarcode_protocol::rpc::AgentSetupParams,
+    ) -> Result<amarcode_protocol::rpc::AgentSetupResult, String> {
+        self.call(methods::AGENT_SETUP, params).await
+    }
+
     pub async fn authenticate_agent(
         &self,
         params: AuthenticateAgentParams,

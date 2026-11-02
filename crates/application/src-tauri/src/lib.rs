@@ -71,6 +71,7 @@ pub fn run() {
             commands::agents::list_agents,
             commands::agents::install_agent,
             commands::agents::authenticate_agent,
+            commands::agents::agent_setup,
             commands::agents::get_amarcode_acp_config,
             commands::agents::set_amarcode_acp_config,
             commands::chats::create_chat,

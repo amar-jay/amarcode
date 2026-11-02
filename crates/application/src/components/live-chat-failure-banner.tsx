@@ -7,7 +7,8 @@ import {
   Unplug,
 } from "lucide-react";
 import type { AgentFailureKind } from "@/types";
-import { daemonApi } from "@/api";
+import { useSetAtom } from "jotai";
+import { agentSetupTargetAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 import {
   Alert,
@@ -56,21 +57,11 @@ export function LiveChatFailureBanner({
   onSignedIn,
   onDeleteChat,
 }: LiveChatFailureBannerProps) {
-  const [signingIn, setSigningIn] = useState(false);
+  const openSetup = useSetAtom(agentSetupTargetAtom);
   const [deleting, setDeleting] = useState(false);
   const { title, Icon } = failureBannerCopy(errorKind);
   const showSignIn = errorKind === "auth_required" && Boolean(authRequired);
-  const authMethods = Array.isArray(authRequired?.methods)
-    ? authRequired.methods.filter(
-        (method): method is { id: string; name?: string } =>
-          typeof method === "object" &&
-          method !== null &&
-          !Array.isArray(method) &&
-          typeof method.id === "string",
-      )
-    : [];
-  const preferredAuthMethod = authMethods[0];
-  const busy = signingIn || deleting;
+  const busy = deleting;
 
   return (
     <Alert
@@ -93,33 +84,14 @@ export function LiveChatFailureBanner({
               disabled={busy}
               onClick={() => {
                 if (!authRequired) return;
-                setSigningIn(true);
-                void daemonApi
-                  .authenticateAgent(
-                    authRequired.agentId,
-                    preferredAuthMethod?.id,
-                  )
-                  .then(() => {
-                    notify("Sign-in completed", "success");
-                    onSignedIn();
-                  })
-                  .catch((cause: unknown) => {
-                    notify(
-                      cause instanceof Error ? cause.message : "Sign-in failed",
-                      "error",
-                    );
-                  })
-                  .finally(() => setSigningIn(false));
+                openSetup({
+                  id: authRequired.agentId,
+                  name: authRequired.agentId,
+                  onReady: onSignedIn,
+                });
               }}
             >
-              {signingIn ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <LoaderCircle className="size-3.5 animate-spin" />
-                  Signing in…
-                </span>
-              ) : (
-                (preferredAuthMethod?.name ?? "Sign in")
-              )}
+              Sign in
             </Button>
           )}
           {canDeleteChat && (

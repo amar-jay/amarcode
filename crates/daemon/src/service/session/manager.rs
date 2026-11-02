@@ -1,6 +1,7 @@
 //! `SessionManager` public API for runs, prompts, cancel, and agent replies.
 
 mod agent_requests;
+mod agent_setup;
 mod lifecycle;
 mod prompt;
 mod transport;
@@ -43,6 +44,7 @@ use super::{
 };
 
 pub struct SessionManager {
+    setup: agent_setup::SetupJobs,
     agents: AgentManager,
     attachments: AttachmentStore,
     inner: Arc<SessionInner>,
@@ -56,6 +58,7 @@ impl SessionManager {
         attachments_dir: PathBuf,
     ) -> Self {
         Self {
+            setup: Default::default(),
             agents,
             attachments: AttachmentStore::new(attachments_dir),
             inner: Arc::new(SessionInner {

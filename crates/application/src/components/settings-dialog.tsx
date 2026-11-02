@@ -1,3 +1,4 @@
+import { AgentSetupButton } from "@/components/agent-setup-button";
 import { isWeb } from "@/lib/platform";
 import { daemonConnectionGenerationAtom } from "@/state/daemon-events";
 import type {
@@ -115,7 +116,11 @@ import {
 import type { AgentInfo } from "@/types";
 import { AgentLogo } from "@/components/agent-logo";
 import { Badge } from "@/components/ui/badge";
-import { installAgentAtom, installingAgentIdsAtom } from "@/state/agents";
+import {
+  agentSetupTargetAtom,
+  installAgentAtom,
+  installingAgentIdsAtom,
+} from "@/state/agents";
 import { notify } from "@/lib/notify";
 
 type SettingsPage =
@@ -780,6 +785,7 @@ function AgentDefaultsPanel({
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const installAgent = useSetAtom(installAgentAtom);
+  const openSetup = useSetAtom(agentSetupTargetAtom);
   const installingAgentIds = useAtomValue(installingAgentIdsAtom);
   const selectedAgent = getPreferredAgent(agents, defaultAgentId);
   const availableAgents = agents.filter((agent) => agent.available);
@@ -793,6 +799,7 @@ function AgentDefaultsPanel({
     setInstallingId(agent.id);
     try {
       const result = await installAgent(agent.id);
+      openSetup({ id: result.agent.id, name: result.agent.name });
       onDefaultAgentChange(result.agent.id);
       setAgentPickerOpen(false);
       const name = result.agent.name.replace(/\s*\bACP\s*$/i, "");
@@ -824,7 +831,7 @@ function AgentDefaultsPanel({
       installingId === agent.id || installingAgentIds.includes(agent.id);
     return (
       <CommandItem
-        className="grid w-full! cursor-pointer grid-cols-[1rem_minmax(0,1fr)_2rem] items-center gap-2 rounded-none [&>svg:last-child]:hidden data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
+        className="grid w-full! cursor-pointer grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 rounded-none [&>svg:last-child]:hidden data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
         disabled={installingId !== null && !installing}
         title={agent.unavailable_reason ?? undefined}
         key={agent.id}
@@ -866,9 +873,13 @@ function AgentDefaultsPanel({
             )}
           </button>
         ) : (
-          <Check
-            className={`size-4 justify-self-end ${agent.id === selectedAgent?.id ? "opacity-100" : "opacity-0"}`}
-          />
+          <span className="flex items-center gap-1">
+            {agent.id === selectedAgent?.id && <Check className="size-4" />}
+            <AgentSetupButton
+              agent={agent}
+              onOpen={() => setAgentPickerOpen(false)}
+            />
+          </span>
         )}
       </CommandItem>
     );

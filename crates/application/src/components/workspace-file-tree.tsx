@@ -508,11 +508,12 @@ export function WorkspaceChangedFiles({
       </div>
       {validWorkspace && changes.length > 0 && (
         <div className="shrink-0 space-y-2 border-t bg-muted/20 p-2.5">
-          <div className="flex items-center justify-between font-mono text-[0.65rem] text-muted-foreground">
+         {/* 
+         <div className="flex items-center justify-between font-mono text-[0.65rem] text-muted-foreground">
             <span>
               {stagedCount} staged · {unstagedCount} unstaged
             </span>
-            {/* {unstagedCount > 0 && (
+            {unstagedCount > 0 && (
               <button
                 type="button"
                 className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-foreground/75 outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
@@ -526,8 +527,9 @@ export function WorkspaceChangedFiles({
                 )}
                 Stage all
               </button>
-            )} */}
+            )} 
           </div>
+          */}
           <form
             className="flex gap-1.5"
             onSubmit={(event) => {

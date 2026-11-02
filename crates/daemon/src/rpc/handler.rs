@@ -85,6 +85,10 @@ pub async fn dispatch(app: &App, method: &str, params: Value) -> Result<Dispatch
             Ok(DispatchOutcome::Result(list_agents(app)?))
         }
         methods::INSTALL_AGENT => Ok(DispatchOutcome::Result(install_agent(app, params).await?)),
+        methods::AGENT_SETUP => {
+            let p = parse_params(params)?;
+            to_value(app.sessions.agent_setup(p)?).map(DispatchOutcome::Result)
+        }
         methods::AUTHENTICATE_AGENT => Ok(DispatchOutcome::Result(
             authenticate_agent(app, params).await?,
         )),

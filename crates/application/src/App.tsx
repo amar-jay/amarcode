@@ -1,3 +1,4 @@
+import { AgentSetupDialog } from "@/components/agent-setup-dialog";
 import { isWeb } from "@/lib/platform";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -214,6 +215,7 @@ export default function App() {
         open={commandPaletteOpen}
         onOpenChange={setCommandPaletteOpen}
       />
+      <AgentSetupDialog />
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}

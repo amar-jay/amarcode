@@ -252,6 +252,12 @@ export const daemonApi = {
     runtime_status: "ready" | "auth_required" | "unavailable" | "error";
     runtime_message?: string | null;
   }> => invoke("install_agent", { agentId }),
+  agentSetup: (
+    agentId: string,
+    action: import("./generated/protocol").AgentSetupAction,
+    methodId?: string,
+  ): Promise<import("./generated/protocol").AgentSetupResult> =>
+    invoke("agent_setup", { agentId, action, methodId }),
   authenticateAgent: (
     agentId: string,
     methodId?: string,

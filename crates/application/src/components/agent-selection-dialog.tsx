@@ -1,5 +1,6 @@
 "use client";
 
+import { AgentSetupButton } from "@/components/agent-setup-button";
 import { AgentInfo } from "@/types";
 import {
   Command,
@@ -14,7 +15,11 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { PromptInputButton } from "@/components/ai-elements/prompt-input";
 import { Download, LoaderCircle } from "lucide-react";
 import { AgentLogo } from "@/components/agent-logo";
-import { installAgentAtom, installingAgentIdsAtom } from "@/state/agents";
+import {
+  agentSetupTargetAtom,
+  installAgentAtom,
+  installingAgentIdsAtom,
+} from "@/state/agents";
 import { notify } from "@/lib/notify";
 
 function stripAcpSuffix(value: string): string {
@@ -33,6 +38,7 @@ export function AgentSelectionDialog({
   const [open, setOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const installAgent = useSetAtom(installAgentAtom);
+  const openSetup = useSetAtom(agentSetupTargetAtom);
   const installingAgentIds = useAtomValue(installingAgentIdsAtom);
 
   const selectedName =
@@ -44,6 +50,7 @@ export function AgentSelectionDialog({
     setInstallingId(agent.id);
     try {
       const result = await installAgent(agent.id);
+      openSetup({ id: result.agent.id, name: result.agent.name });
       setSelectedAgent(result.agent.id);
       setOpen(false);
       if (result.runtime_status === "ready") {
@@ -103,6 +110,9 @@ export function AgentSelectionDialog({
             </span>
           )}
         </span>
+        {agent.available && (
+          <AgentSetupButton agent={agent} onOpen={() => setOpen(false)} />
+        )}
         {!agent.available && (
           <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-primary">
             {installing ? (

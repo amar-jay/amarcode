@@ -119,3 +119,13 @@ export const selectAgentByIdAtom = atom(null, (get, set, agentId: string) => {
 export const selectAgentAtom = atom(null, (_get, set, agent: AgentInfo) => {
   if (agent.available) set(selectedAgentIdAtom, agent.id);
 });
+
+/** Session-scoped readiness is deliberately separate from executable availability. */
+export const agentSetupResultsAtom = atom<
+  Record<string, import("@/generated/protocol").AgentSetupResult>
+>({});
+export const agentSetupTargetAtom = atom<{
+  id: string;
+  name: string;
+  onReady?: () => void;
+} | null>(null);

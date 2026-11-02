@@ -122,6 +122,15 @@ describe("remote browser transport", () => {
   it("maps adapter inputs and unwraps results while preserving structured protocol values", async () => {
     await connectBrowserDaemon("wss://daemon.example/rpc", token);
     expect(await browserInvoke("list_agents")).toEqual([{ id: "agent" }]);
+    await browserInvoke("agent_setup", {
+      agentId: "agent",
+      action: "sign_in",
+      methodId: "browser",
+    });
+    expect(requests.at(-1)).toEqual({
+      method: "agent_setup",
+      params: { agent_id: "agent", action: "sign_in", method_id: "browser" },
+    });
     const params = { chat_id: "chat", prompt: { text: "Follow up" } };
     await browserInvoke("enqueue_prompt", { params });
     expect(requests.at(-1)).toEqual({ method: "enqueue_prompt", params });
