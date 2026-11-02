@@ -124,8 +124,8 @@ export function AppSidebar({
         className="inset-y-auto! top-9! bottom-0! h-auto!  select-none"
       >
         <SidebarHeader className="gap-0 border-b border-sidebar-border">
-          <div className="flex items-center gap-1">
-            <SidebarMenu className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+          <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col-reverse">
+            <SidebarMenu className="min-w-0 flex-1">
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={false}
@@ -133,7 +133,7 @@ export function AppSidebar({
                   onClick={onNewChat}
                 >
                   <Plus />
-                  <span>New chat</span>
+                  <span className="group-data-[collapsible=icon]:hidden">New chat</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -143,7 +143,7 @@ export function AppSidebar({
             />
           </div>
         </SidebarHeader>
-        <SidebarContent className="px-2 py-2">
+        <SidebarContent className="px-2 py-2 group-data-[collapsible=icon]:overflow-y-auto">
           <RecentChats
             activeChatId={activeChatId}
             runningChatIds={runningChatIds}

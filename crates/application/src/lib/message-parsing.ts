@@ -485,11 +485,13 @@ export function groupChatBlocks(
         block.items[0]?.message.agent_run_id
         ? preceding.item.message.content
         : "";
-    const streaming = block.items.some(
-      (item) =>
-        item.message.status === "streaming" ||
-        (turnWorking && item.message.id === messages.at(-1)?.message.id),
-    );
+    // Message statuses can lag behind turn completion. Only the current
+    // turn's trailing block may animate; historical chunks are not liveness.
+    const streaming =
+      turnWorking &&
+      block.items.some(
+        (item) => item.message.id === messages.at(-1)?.message.id,
+      );
     const cached = cache?.get(block.key);
     if (
       cached &&
@@ -517,12 +519,7 @@ export function groupChatBlocks(
         previous.item.message.content,
       );
     }
-    block.streaming = block.items.some(
-      (item) =>
-        item.message.status === "streaming" ||
-        (turnWorking &&
-          item.message.id === messages[messages.length - 1]?.message.id),
-    );
+    block.streaming = streaming;
     block.status = block.items.some((item) => item.message.status === "failed")
       ? "failed"
       : block.items.some((item) => item.message.status === "interrupted")

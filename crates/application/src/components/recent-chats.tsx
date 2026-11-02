@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  useSidebar,
   SidebarGroup,
   SidebarGroupContent,
   SidebarMenu,
@@ -84,6 +85,7 @@ export function RecentChats({
   onRenameChat,
   onTogglePin,
 }: RecentChatsProps) {
+  const { setOpen } = useSidebar();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [now, setNow] = useState(() => Date.now());
@@ -115,14 +117,25 @@ export function RecentChats({
       <ContextMenuTrigger asChild>
         <SidebarMenuItem>
           <SidebarMenuButton
+            aria-label={chat.title}
             isActive={chat.id === activeChatId}
             aria-current={chat.id === activeChatId ? "page" : undefined}
             onClick={() => onSelectChat(chat.id)}
             tooltip={chat.title}
             className="relative pr-8 md:group-has-data-[sidebar=menu-action]/menu-item:pr-2 hover:bg-sidebar-accent/50 data-[active=true]:bg-sidebar-accent data-[active=true]:hover:bg-sidebar-accent before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary before:opacity-0 data-[active=true]:before:opacity-100"
           >
-            <span className="min-w-0 flex-1 truncate">{chat.title}</span>
-            <span className="flex w-6 shrink-0 items-center justify-end md:group-hover/menu-item:opacity-0 md:group-focus-within/menu-item:opacity-0 md:group-has-data-[state=open]/menu-item:opacity-0">
+            <span
+              aria-hidden="true"
+              className="hidden size-4 shrink-0 items-center justify-center text-[10px] font-medium uppercase group-data-[collapsible=icon]:flex"
+            >
+              {runningChatIds.has(chat.id) ? (
+                <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+              ) : (
+                chat.title.trim().slice(0, 2) || "?"
+              )}
+            </span>
+            <span className="min-w-0 flex-1 truncate group-data-[collapsible=icon]:hidden">{chat.title}</span>
+            <span className="group-data-[collapsible=icon]:hidden flex w-6 shrink-0 items-center justify-end md:group-hover/menu-item:opacity-0 md:group-focus-within/menu-item:opacity-0 md:group-has-data-[state=open]/menu-item:opacity-0">
               {runningChatIds.has(chat.id) ? (
                 <span role="status" aria-label="Running">
                   <LoaderCircle
@@ -198,7 +211,21 @@ export function RecentChats({
   );
 
   return (
-    <SidebarGroup className="p-0 group-data-[collapsible=icon]:hidden">
+    <SidebarGroup className="p-0">
+      <SidebarMenu className="mb-2 hidden group-data-[collapsible=icon]:flex">
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            aria-label="Search chats"
+            tooltip="Search chats"
+            onClick={() => {
+              setOpen(true);
+              setIsSearchOpen(true);
+            }}
+          >
+            <Search />
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
       {pinnedChats.length > 0 && (
         <div className="mb-3">
           <div className="flex h-8 items-center gap-1.5 pl-2 text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
@@ -209,7 +236,7 @@ export function RecentChats({
           </SidebarGroupContent>
         </div>
       )}
-      <div className="relative h-8 group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0">
+      <div className="relative h-8 group-data-[collapsible=icon]:hidden">
         <div
           className={`absolute inset-0 flex items-center justify-between pl-2 transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none ${
             isSearchOpen

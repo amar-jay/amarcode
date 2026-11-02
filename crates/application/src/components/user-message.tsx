@@ -141,7 +141,17 @@ export const UserMessage = memo(function UserMessage({
   const [detailedBlock, setDetailedBlock] = useState<ChatBlock | null>(null);
   const detailRequest = useRef<Promise<void> | null>(null);
 
-  const displayedBlock = detailedBlock ?? block;
+  // Deferred details enrich content, but liveness always comes from live state.
+  const displayedBlock =
+    detailedBlock?.kind === "assistant" && block.kind === "assistant"
+      ? {
+          ...detailedBlock,
+          streaming: block.streaming,
+          status: block.status,
+          startedAt: block.startedAt,
+          completedAt: block.completedAt,
+        }
+      : block;
   const hasDeferredParts = useMemo(
     () =>
       block.kind === "assistant" &&

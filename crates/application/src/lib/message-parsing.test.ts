@@ -14,6 +14,40 @@ function toolPart(
 }
 
 describe("assistant tool presentation", () => {
+  it("stops animating stale streaming chunks when the turn completes", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => undefined,
+    });
+    const { groupChatBlocks } = await import("./message-parsing");
+    const chunk: MessageDetail = {
+      message: {
+        id: "chunk", chat_id: "chat", agent_run_id: "run",
+        role: "assistant", content: "Working", status: "streaming",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:01Z",
+      },
+      parts: [], agent_id: "agent",
+    };
+    const final: MessageDetail = {
+      ...chunk,
+      message: { ...chunk.message, id: "final", content: "Done",
+        status: "complete", updated_at: "2026-01-01T00:00:05Z" },
+    };
+    const cache: import("./message-parsing").ChatBlockCache = new Map();
+    const active = groupChatBlocks([chunk, final], true, false, cache)[0];
+    expect(active.kind === "assistant" && active.streaming).toBe(true);
+    const finished = groupChatBlocks([chunk, final], false, false, cache)[0];
+    expect(finished).toMatchObject({ streaming: false, status: "complete",
+      completedAt: final.message.updated_at });
+    expect(finished).not.toBe(active);
+    const nextPrompt: MessageDetail = {
+      ...final, message: { ...final.message, id: "next", role: "user" },
+    };
+    expect(groupChatBlocks([chunk, final, nextPrompt], true, false)[0])
+      .toMatchObject({ streaming: false });
+  });
+
   it("renders structured edits as file changes instead of duplicate edit steps", async () => {
     vi.stubGlobal("localStorage", {
       getItem: () => null,
