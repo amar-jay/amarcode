@@ -1,5 +1,7 @@
 "use client";
 
+import { PromptHistory, type PromptSnapshot } from "@/lib/prompt-history";
+
 import {
   Command,
   CommandEmpty,
@@ -198,7 +200,10 @@ export interface AttachmentsContext {
 
 export interface TextInputContext {
   value: string;
-  setInput: (v: string) => void;
+  setInput: (v: string, selection?: { start: number; end: number }) => void;
+  captureSelection: (start: number, end: number) => void;
+  undo: () => PromptSnapshot | null;
+  redo: () => PromptSnapshot | null;
   clear: () => void;
 }
 
@@ -260,7 +265,32 @@ export const PromptInputProvider = ({
 }: PromptInputProviderProps) => {
   // ----- textInput state
   const [textInput, setTextInput] = useState(initialTextInput);
-  const clearInput = useCallback(() => setTextInput(""), []);
+  const history = useRef(new PromptHistory(initialTextInput));
+  const setInput = useCallback(
+    (value: string, selection?: { start: number; end: number }) => {
+      history.current.set(value, selection);
+      setTextInput(value);
+    },
+    [],
+  );
+  const captureSelection = useCallback(
+    (start: number, end: number) => history.current.selection(start, end),
+    [],
+  );
+  const undo = useCallback(() => {
+    const snapshot = history.current.undo();
+    if (snapshot) setTextInput(snapshot.value);
+    return snapshot;
+  }, []);
+  const redo = useCallback(() => {
+    const snapshot = history.current.redo();
+    if (snapshot) setTextInput(snapshot.value);
+    return snapshot;
+  }, []);
+  const clearInput = useCallback(() => {
+    history.current = new PromptHistory();
+    setTextInput("");
+  }, []);
 
   // ----- attachments state (global when wrapped)
   const [attachmentFiles, setAttachmentFiles] = useState<
@@ -358,11 +388,23 @@ export const PromptInputProvider = ({
       attachments,
       textInput: {
         clear: clearInput,
-        setInput: setTextInput,
+        setInput,
+        captureSelection,
+        undo,
+        redo,
         value: textInput,
       },
     }),
-    [textInput, clearInput, attachments, __registerFileInput],
+    [
+      textInput,
+      clearInput,
+      setInput,
+      captureSelection,
+      undo,
+      redo,
+      attachments,
+      __registerFileInput,
+    ],
   );
 
   return (
@@ -1003,6 +1045,35 @@ export const PromptInputTextarea = ({
         return;
       }
 
+      if (
+        controller &&
+        !isComposing &&
+        !e.nativeEvent.isComposing &&
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        (e.key.toLowerCase() === "z" ||
+          (e.key.toLowerCase() === "y" && !e.shiftKey))
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        controller.textInput.captureSelection(
+          e.currentTarget.selectionStart,
+          e.currentTarget.selectionEnd,
+        );
+        const snapshot =
+          e.shiftKey || e.key.toLowerCase() === "y"
+            ? controller.textInput.redo()
+            : controller.textInput.undo();
+        if (snapshot) {
+          const textarea = e.currentTarget;
+          requestAnimationFrame(() => {
+            if (textarea.isConnected)
+              textarea.setSelectionRange(snapshot.start, snapshot.end);
+          });
+        }
+        return;
+      }
+
       if (e.key === "Enter") {
         if (isComposing || e.nativeEvent.isComposing) {
           return;
@@ -1037,7 +1108,7 @@ export const PromptInputTextarea = ({
         }
       }
     },
-    [onKeyDown, isComposing, attachments],
+    [onKeyDown, isComposing, attachments, controller],
   );
 
   const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = useCallback(
@@ -1125,7 +1196,10 @@ export const PromptInputTextarea = ({
   const controlledProps = controller
     ? {
         onChange: (e: ChangeEvent<HTMLTextAreaElement>) => {
-          controller.textInput.setInput(e.currentTarget.value);
+          controller.textInput.setInput(e.currentTarget.value, {
+            start: e.currentTarget.selectionStart,
+            end: e.currentTarget.selectionEnd,
+          });
           onChange?.(e);
         },
         value: controller.textInput.value,
@@ -1145,6 +1219,13 @@ export const PromptInputTextarea = ({
       placeholder={placeholder}
       {...props}
       {...controlledProps}
+      onBeforeInput={(event) => {
+        controller?.textInput.captureSelection(
+          event.currentTarget.selectionStart,
+          event.currentTarget.selectionEnd,
+        );
+        props.onBeforeInput?.(event);
+      }}
     />
   );
 };
