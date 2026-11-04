@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 amarcode-protocol = { path = "../../protocol" }
 arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
 base64 = "0.22"
+brotli = "8"
 futures-util = { version = "0.3", features = ["sink"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

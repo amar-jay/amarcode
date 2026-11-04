@@ -116,11 +116,7 @@ import {
 import type { AgentInfo } from "@/types";
 import { AgentLogo } from "@/components/agent-logo";
 import { Badge } from "@/components/ui/badge";
-import {
-  agentSetupTargetAtom,
-  installAgentAtom,
-  installingAgentIdsAtom,
-} from "@/state/agents";
+import { installAgentAtom, installingAgentIdsAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 
 type SettingsPage =
@@ -785,7 +781,6 @@ function AgentDefaultsPanel({
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const installAgent = useSetAtom(installAgentAtom);
-  const openSetup = useSetAtom(agentSetupTargetAtom);
   const installingAgentIds = useAtomValue(installingAgentIdsAtom);
   const selectedAgent = getPreferredAgent(agents, defaultAgentId);
   const availableAgents = agents.filter((agent) => agent.available);
@@ -799,20 +794,10 @@ function AgentDefaultsPanel({
     setInstallingId(agent.id);
     try {
       const result = await installAgent(agent.id);
-      openSetup({ id: result.agent.id, name: result.agent.name });
       onDefaultAgentChange(result.agent.id);
       setAgentPickerOpen(false);
       const name = result.agent.name.replace(/\s*\bACP\s*$/i, "");
-      if (result.runtime_status === "ready") {
-        notify(`${name} installed`, "success");
-      } else if (result.runtime_status === "auth_required") {
-        notify(`${name} installed: sign in required`, "info");
-      } else {
-        notify(
-          result.runtime_message ?? `${name} installed but is not ready`,
-          "error",
-        );
-      }
+      notify(`${name} installed`, "success");
     } catch (error) {
       console.error("Failed to install agent:", error);
       notify(

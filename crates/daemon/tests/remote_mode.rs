@@ -129,7 +129,9 @@ time.sleep(120)"#;
     assert_eq!(
         output,
         format!(
-            "Remote URL: wss://my-remote.trycloudflare.com/rpc\nAccess token: {}\n",
+            "Remote URL: {}\nAccess token: {}\n",
+            amarcode_daemon::remote::short_remote_url("wss://my-remote.trycloudflare.com/rpc")
+                .unwrap(),
             "a".repeat(64)
         )
     );

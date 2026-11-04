@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { LoaderCircle } from "lucide-react";
-import { daemonConnectionGenerationAtom } from "@/state/daemon-events";
+import {
+  agentSignInRequiredAtom,
+  daemonConnectionGenerationAtom,
+} from "@/state/daemon-events";
 import { daemonApi } from "@/api";
 import { agentSetupResultsAtom, agentSetupTargetAtom } from "@/state/agents";
 import type { AgentSetupAction, AgentSetupResult } from "@/generated/protocol";
@@ -81,11 +84,15 @@ function Setup({
   const [requesting, setRequesting] = useState(false);
   const [methodId, setMethodId] = useState("");
   const saveResults = useSetAtom(agentSetupResultsAtom);
+  const setAuthRequired = useSetAtom(agentSignInRequiredAtom);
   const alive = useRef(true);
   const requestSequence = useRef(0);
   const accept = (next: AgentSetupResult) => {
     setResult(next);
-    if (next.status === "ready") target.onReady?.();
+    if (next.status === "ready") {
+      setAuthRequired((previous) => ({ ...previous, [target.id]: false }));
+      target.onReady?.();
+    }
     saveResults((previous) => ({ ...previous, [target.id]: next }));
     setMethodId((current) =>
       next.methods.some((m) => m.id === current && m.supported)
@@ -178,11 +185,10 @@ function Setup({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            Set up {target.name.replace(/\s*\bACP\s*$/i, "")}
+            Sign in to {target.name.replace(/\s*\bACP\s*$/i, "")}
           </DialogTitle>
           <DialogDescription>
-            Check readiness or sign in using the agent’s supported login
-            methods.
+            This agent requires authentication. Use its supported login method.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm" aria-live="polite">

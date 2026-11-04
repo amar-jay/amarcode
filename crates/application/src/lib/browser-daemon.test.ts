@@ -7,7 +7,9 @@ import {
   browserRpc,
   connectBrowserDaemon,
   disconnectBrowserDaemon,
+  isShortRemoteLink,
   normalizeRemoteUrl,
+  resolveRemoteUrl,
 } from "./browser-daemon";
 class Socket {
   static instances: Socket[] = [];
@@ -71,10 +73,21 @@ beforeEach(() => {
   vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ ticket: "b".repeat(64), web_api_version: 1 }),
-    })),
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("https://updates.amarcode.amarjay.com/r/")) {
+        return {
+          ok: true,
+          json: async () => ({
+            url: "wss://my-remote.trycloudflare.com/rpc",
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ ticket: "b".repeat(64), web_api_version: 1 }),
+      };
+    }),
   );
 });
 afterEach(() => {
@@ -95,6 +108,45 @@ describe("remote browser transport", () => {
       "https://daemon.example/other",
     ])
       expect(() => normalizeRemoteUrl(bad)).toThrow();
+  });
+  it("resolves branded short links before connecting", async () => {
+    const short = "https://updates.amarcode.amarjay.com/r/abcDEF123_-";
+    expect(isShortRemoteLink(short)).toBe(true);
+    expect(await resolveRemoteUrl(short)).toBe(
+      "wss://my-remote.trycloudflare.com/rpc",
+    );
+    await connectBrowserDaemon(short, token);
+    expect(storage.get("amarcode-web-url")).toBe(
+      "wss://my-remote.trycloudflare.com/rpc",
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      short,
+      expect.objectContaining({
+        redirect: "error",
+        credentials: "omit",
+        headers: { accept: "application/json" },
+      }),
+    );
+  });
+  it("rejects resolver errors and destinations outside quick tunnels", async () => {
+    const short = "https://updates.amarcode.amarjay.com/r/abcDEF123_-";
+    for (const destination of [
+      "wss://evil.example/rpc",
+      "wss://host.trycloudflare.com:8443/rpc",
+      "wss://host.trycloudflare.com/rpc?token=secret",
+      "wss://host.trycloudflare.com/terminal",
+    ]) {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ url: destination }),
+      } as Response);
+      await expect(resolveRemoteUrl(short)).rejects.toThrow();
+    }
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false } as Response);
+    await expect(resolveRemoteUrl(short)).rejects.toThrow("invalid");
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
+    await expect(resolveRemoteUrl(short)).rejects.toThrow("network");
+    expect(Socket.instances).toHaveLength(0);
   });
   it("authenticates with tickets and stores no token", async () => {
     await connectBrowserDaemon("https://daemon.example", token);

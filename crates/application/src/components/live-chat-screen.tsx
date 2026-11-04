@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/tooltip";
 import AppPromptInput from "./main-prompt-input";
 import { ActivityView } from "./activity/activity-view";
-import { LiveChatFailureBanner } from "./live-chat-failure-banner";
+import { LiveChatFailureToast } from "./live-chat-failure-toast";
 import { PendingAgentRequestCard } from "./pending-agent-request";
 import {
   activeSessionAtom,
@@ -550,7 +550,7 @@ export function LiveChatScreen() {
           />
         )}
         {live.error && (
-          <LiveChatFailureBanner
+          <LiveChatFailureToast
             error={live.error}
             errorKind={live.errorKind}
             authRequired={live.authRequired}

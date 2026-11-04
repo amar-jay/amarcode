@@ -1,9 +1,14 @@
 //! Desktop connection preferences. Credentials never cross back into the webview.
 use super::ssh::{self, SshTunnelConfig, SshTunnelManager};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::OnceLock};
 use tauri::Manager;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+const REMOTE_LINK_ORIGIN: &str = "https://updates.amarcode.amarjay.com";
+const REMOTE_LINK_PREFIX: &str = "/r/";
+const REMOTE_LINK_MAX_PAYLOAD: usize = 512;
 
 static SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static CHANGES: OnceLock<tokio::sync::watch::Sender<u64>> = OnceLock::new();
@@ -114,6 +119,72 @@ pub fn is_remote() -> Result<bool, String> {
     Ok(load()?.info().remote)
 }
 
+fn cloudflare_tunnel_wss(url: &str) -> bool {
+    if url.len() > 256 || url.contains('#') {
+        return false;
+    }
+    let Ok(request) = url.into_client_request() else {
+        return false;
+    };
+    let uri = request.uri();
+    uri.scheme_str() == Some("wss")
+        && uri.path() == "/rpc"
+        && uri.query().is_none()
+        && uri
+            .host()
+            .and_then(|host| host.strip_suffix(".trycloudflare.com"))
+            .is_some_and(|label| {
+                !label.is_empty()
+                    && label.len() <= 63
+                    && !label.starts_with('-')
+                    && !label.ends_with('-')
+                    && label
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            })
+        && uri.port_u16().is_none()
+        && uri
+            .authority()
+            .is_some_and(|authority| !authority.as_str().contains('@'))
+}
+
+fn decode_remote_link(payload: &str) -> Option<String> {
+    if payload.is_empty()
+        || payload.len() > REMOTE_LINK_MAX_PAYLOAD
+        || !payload
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return None;
+    }
+    let compressed = URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let mut plain = Vec::new();
+    let mut reader =
+        std::io::Read::take(brotli::Decompressor::new(compressed.as_slice(), 4096), 257);
+    std::io::copy(&mut reader, &mut plain).ok()?;
+    if plain.len() > 256 {
+        return None;
+    }
+    let url = String::from_utf8(plain).ok()?;
+    cloudflare_tunnel_wss(&url).then_some(url)
+}
+
+/// Expand branded short links from the updates Worker into the underlying WSS URL.
+pub fn resolve_remote_url(url: &str) -> Result<String, String> {
+    let trimmed = url.trim();
+    let Some(payload) = trimmed
+        .strip_prefix(REMOTE_LINK_ORIGIN)
+        .and_then(|rest| rest.strip_prefix(REMOTE_LINK_PREFIX))
+        .filter(|payload| {
+            !payload.is_empty() && !payload.contains('/') && !payload.contains(['?', '#'])
+        })
+    else {
+        return Ok(trimmed.to_owned());
+    };
+    decode_remote_link(payload)
+        .ok_or_else(|| "This remote link is invalid or no longer available".into())
+}
+
 pub fn validate(url: &str, token: &str) -> Result<(), String> {
     let request = url
         .into_client_request()
@@ -142,7 +213,7 @@ pub fn validate(url: &str, token: &str) -> Result<(), String> {
 }
 
 pub async fn save(url: String, token: String) -> Result<ConnectionInfo, String> {
-    save_target(url, None, token).await
+    save_target(resolve_remote_url(&url)?, None, token).await
 }
 
 async fn save_target(
@@ -340,5 +411,47 @@ mod tests {
             assert!(validate(url, &token).is_err(), "{url}");
         }
         assert!(validate("wss://example.com/rpc", "short").is_err());
+    }
+
+    #[test]
+    fn short_remote_links_decode_to_cloudflare_tunnel_urls() {
+        assert_eq!(
+            decode_remote_link("GyQA-EVveF74fZ_kozRKWpNRSuFFluJLSL8ZFamnLl78dZiGMGgH").as_deref(),
+            Some("wss://my-remote.trycloudflare.com/rpc")
+        );
+        let target = "wss://my-remote.trycloudflare.com/rpc";
+        let mut compressed = Vec::new();
+        {
+            use std::io::Write;
+            let mut writer = brotli::CompressorWriter::new(&mut compressed, 4096, 5, 22);
+            writer.write_all(target.as_bytes()).unwrap();
+            writer.flush().unwrap();
+        }
+        let payload = URL_SAFE_NO_PAD.encode(compressed);
+        let short = format!("{REMOTE_LINK_ORIGIN}{REMOTE_LINK_PREFIX}{payload}");
+        assert_eq!(resolve_remote_url(&short).unwrap(), target);
+        assert!(resolve_remote_url(&format!(
+            "{REMOTE_LINK_ORIGIN}{REMOTE_LINK_PREFIX}not-valid"
+        ))
+        .is_err());
+        assert_eq!(
+            resolve_remote_url("wss://example.com/rpc").unwrap(),
+            "wss://example.com/rpc"
+        );
+        for target in [
+            "a".repeat(100_000),
+            "wss://nested.host.trycloudflare.com/rpc".into(),
+            "wss://host.trycloudflare.com:8443/rpc".into(),
+            "wss://user:secret@host.trycloudflare.com/rpc".into(),
+            "wss://host.trycloudflare.com/rpc#secret".into(),
+        ] {
+            let mut compressed = Vec::new();
+            {
+                use std::io::Write;
+                let mut writer = brotli::CompressorWriter::new(&mut compressed, 4096, 5, 22);
+                writer.write_all(target.as_bytes()).unwrap();
+            }
+            assert!(decode_remote_link(&URL_SAFE_NO_PAD.encode(compressed)).is_none());
+        }
     }
 }

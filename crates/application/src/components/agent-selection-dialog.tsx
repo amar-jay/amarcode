@@ -15,11 +15,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { PromptInputButton } from "@/components/ai-elements/prompt-input";
 import { Download, LoaderCircle } from "lucide-react";
 import { AgentLogo } from "@/components/agent-logo";
-import {
-  agentSetupTargetAtom,
-  installAgentAtom,
-  installingAgentIdsAtom,
-} from "@/state/agents";
+import { installAgentAtom, installingAgentIdsAtom } from "@/state/agents";
 import { notify } from "@/lib/notify";
 
 function stripAcpSuffix(value: string): string {
@@ -38,7 +34,6 @@ export function AgentSelectionDialog({
   const [open, setOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const installAgent = useSetAtom(installAgentAtom);
-  const openSetup = useSetAtom(agentSetupTargetAtom);
   const installingAgentIds = useAtomValue(installingAgentIdsAtom);
 
   const selectedName =
@@ -50,23 +45,9 @@ export function AgentSelectionDialog({
     setInstallingId(agent.id);
     try {
       const result = await installAgent(agent.id);
-      openSetup({ id: result.agent.id, name: result.agent.name });
       setSelectedAgent(result.agent.id);
       setOpen(false);
-      if (result.runtime_status === "ready") {
-        notify(`${stripAcpSuffix(result.agent.name)} installed`, "success");
-      } else if (result.runtime_status === "auth_required") {
-        notify(
-          `${stripAcpSuffix(result.agent.name)} installed: sign in required`,
-          "info",
-        );
-      } else {
-        notify(
-          result.runtime_message ??
-            `${stripAcpSuffix(result.agent.name)} installed but is not ready`,
-          "error",
-        );
-      }
+      notify(`${stripAcpSuffix(result.agent.name)} installed`, "success");
     } catch (error) {
       console.error("Failed to install agent:", error);
       notify(
@@ -120,7 +101,6 @@ export function AgentSelectionDialog({
             ) : (
               <Download className="size-3.5" />
             )}
-            {installing ? "Installing" : "Install"}
           </span>
         )}
       </CommandItem>

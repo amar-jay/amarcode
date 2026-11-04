@@ -237,7 +237,8 @@ export const applySessionSnapshotAtom = atom(
       authRequired:
         snapshot.error_kind === "auth_required" ? live.authRequired : null,
     });
-    if (snapshot.error_message) announceAgentFailure(snapshot.error_message);
+    if (snapshot.error_message && snapshot.error_kind !== "auth_required")
+      announceAgentFailure(snapshot.error_message);
     if (request && shouldAutomaticallyApprove) {
       set(
         autoApprovalsInFlightAtom,

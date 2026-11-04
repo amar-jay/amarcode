@@ -5,6 +5,26 @@ let target = "";
 let secret = "";
 const sockets = new Set<WebSocket>();
 let generation = 0;
+const REMOTE_LINK_ORIGIN = "https://updates.amarcode.amarjay.com";
+const REMOTE_LINK_PREFIX = "/r/";
+
+export function isShortRemoteLink(input: string) {
+  try {
+    const url = new URL(input.trim());
+    return (
+      url.origin === REMOTE_LINK_ORIGIN &&
+      url.pathname.startsWith(REMOTE_LINK_PREFIX) &&
+      !url.pathname.slice(REMOTE_LINK_PREFIX.length).includes("/") &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function normalizeRemoteUrl(input: string) {
   const url = new URL(input.trim());
   if (url.protocol === "https:") url.protocol = "wss:";
@@ -21,6 +41,44 @@ export function normalizeRemoteUrl(input: string) {
     );
   url.pathname = "/rpc";
   return url.toString();
+}
+
+/** Expand branded short links via the updates Worker, then normalize. */
+export async function resolveRemoteUrl(input: string) {
+  const trimmed = input.trim();
+  if (!isShortRemoteLink(trimmed)) return normalizeRemoteUrl(trimmed);
+  let response: Response;
+  try {
+    response = await fetch(trimmed, {
+      headers: {
+        accept: "application/json",
+      },
+      credentials: "omit",
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    throw new Error(
+      "Cannot resolve this remote link. Check your network and try again.",
+    );
+  }
+  if (!response.ok)
+    throw new Error("This remote link is invalid or no longer available.");
+  const body = (await response.json()) as { url?: unknown };
+  if (typeof body.url !== "string" || body.url.length > 256)
+    throw new Error("This remote link is invalid or no longer available.");
+  const destination = new URL(body.url);
+  if (
+    destination.protocol !== "wss:" ||
+    !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.trycloudflare\.com$/.test(
+      destination.hostname,
+    ) ||
+    destination.port ||
+    destination.pathname !== "/rpc"
+  )
+    throw new Error("This remote link is invalid or no longer available.");
+  return normalizeRemoteUrl(body.url);
 }
 export function disconnectBrowserDaemon() {
   generation++;
@@ -167,11 +225,11 @@ export async function browserRpc<T>(
         reject(new Error("Invalid daemon response."));
       }
     };
-    ws.send(`${JSON.stringify({ method, params })  }\n`);
+    ws.send(`${JSON.stringify({ method, params })}\n`);
   });
 }
 export async function connectBrowserDaemon(url: string, token: string) {
-  const normalized = normalizeRemoteUrl(url);
+  const normalized = await resolveRemoteUrl(url);
   if (!/^[A-Za-z0-9_-]{32,512}$/.test(token.trim()))
     throw new Error("Enter a valid daemon access token.");
   disconnectBrowserDaemon();
@@ -242,7 +300,7 @@ export async function browserEvents(
       reject(new Error("Daemon connection lost."));
     };
     ws.send(
-      `${JSON.stringify({ method: "subscribe_events", params: filter })  }\n`,
+      `${JSON.stringify({ method: "subscribe_events", params: filter })}\n`,
     );
   });
 }

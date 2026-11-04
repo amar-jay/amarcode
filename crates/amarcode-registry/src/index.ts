@@ -1,4 +1,5 @@
 import installer from "../assets/install.sh" with { type: "text" };
+import { resolveRemoteLinkResponse } from "./remote-link";
 
 export interface Env {
   DAEMON_ARTIFACTS: R2Bucket;
@@ -292,6 +293,9 @@ export async function handleRequest(
       ? new Response(null, { status: 200 })
       : json({ status: "ok", service: "amarcode-registry" });
   }
+
+  const remoteLink = resolveRemoteLinkResponse(request, url.pathname);
+  if (remoteLink) return remoteLink;
 
   if (request.method !== "GET" && request.method !== "HEAD") {
     return json({ error: "method not allowed" }, 405, { allow: "GET, HEAD" });

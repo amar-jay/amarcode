@@ -12,6 +12,38 @@ type EventListener = (event: EditorEvent) => void;
  */
 export const lastDaemonEventAtom = atom<EditorEvent | null>(null);
 
+/** Sign-in is offered only after an agent reports an authentication failure. */
+export const agentSignInRequiredAtom = atom<Record<string, boolean>>({});
+export const rememberAgentAuthEventAtom = atom(
+  null,
+  (get, set, event: EditorEvent) => {
+    let id: string | null = null;
+    let required = false;
+    if (event.type === "agentAuthRequired") {
+      id = event.payload.agent_id;
+      required = true;
+    } else if (event.type === "agentConnectionChanged") {
+      id = event.payload.agent_id;
+      if (
+        !event.payload.connected &&
+        event.payload.error_kind !== "auth_required"
+      )
+        return;
+      required = event.payload.error_kind === "auth_required";
+    } else if (event.type === "sessionStateUpdated") {
+      const snapshot = event.payload.snapshot;
+      if (snapshot.error_kind !== "auth_required") return;
+      id = snapshot.agent_id;
+      required = true;
+    }
+    if (id)
+      set(agentSignInRequiredAtom, {
+        ...get(agentSignInRequiredAtom),
+        [id]: required,
+      });
+  },
+);
+
 export type TurnSnapshot = {
   run_id: string;
   user_message_id: string;
@@ -53,6 +85,10 @@ export const rememberSessionSnapshotAtom = atom(
       !known || known.daemon_instance_id === snapshot.daemon_instance_id;
     const existing = sameInstance ? previous[snapshot.chat_id] : undefined;
     if (existing && existing.revision > snapshot.revision) return false;
+    set(rememberAgentAuthEventAtom, {
+      type: "sessionStateUpdated",
+      payload: { snapshot },
+    });
     if (!sameInstance) set(latestTurnByChatAtom, {});
     set(sessionSnapshotsAtom, {
       ...(sameInstance ? previous : {}),
@@ -93,6 +129,7 @@ export function ensureDaemonEventStream(store: JotaiStore) {
   const generation = store.get(daemonConnectionGenerationAtom) + 1;
   store.set(daemonConnectionGenerationAtom, generation);
   streamStarted = true;
+  store.set(agentSignInRequiredAtom, {});
   store.set(daemonEventStreamStateAtom, {
     status: reconnectAttempt > 0 ? "reconnecting" : "connecting",
     error: store.get(daemonEventStreamStateAtom).error,
@@ -106,6 +143,8 @@ export function ensureDaemonEventStream(store: JotaiStore) {
       (event) => {
         const s = activeStore(store);
         if (s.get(daemonConnectionGenerationAtom) !== generation) return;
+        if (event.type !== "sessionStateUpdated")
+          s.set(rememberAgentAuthEventAtom, event);
         if (event.type === "sessionStateUpdated")
           s.set(rememberSessionSnapshotAtom, event.payload.snapshot);
         s.set(lastDaemonEventAtom, event);

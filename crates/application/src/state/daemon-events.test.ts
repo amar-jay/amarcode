@@ -11,8 +11,43 @@ vi.mock("@/api", () => ({
   },
 }));
 
-const { daemonEventStreamStateAtom, ensureDaemonEventStream } =
-  await import("./daemon-events");
+const {
+  daemonEventStreamStateAtom,
+  ensureDaemonEventStream,
+  agentSignInRequiredAtom,
+  rememberAgentAuthEventAtom,
+} = await import("./daemon-events");
+
+test("offers sign-in only after an auth failure and clears it on successful connection", () => {
+  const store = createStore();
+  expect(store.get(agentSignInRequiredAtom)).toEqual({});
+  store.set(rememberAgentAuthEventAtom, {
+    type: "agentConnectionChanged",
+    payload: {
+      agent_id: "test-agent",
+      connected: false,
+      error_kind: "timeout",
+      error_message: "timeout",
+    },
+  });
+  expect(store.get(agentSignInRequiredAtom)).toEqual({});
+  store.set(rememberAgentAuthEventAtom, {
+    type: "agentAuthRequired",
+    payload: { agent_id: "test-agent", run_id: null, methods: [] },
+  });
+  expect(store.get(agentSignInRequiredAtom)["test-agent"]).toBe(true);
+  expect(store.get(agentSignInRequiredAtom)["other-agent"]).toBeUndefined();
+  store.set(rememberAgentAuthEventAtom, {
+    type: "agentConnectionChanged",
+    payload: {
+      agent_id: "test-agent",
+      connected: true,
+      error_kind: null,
+      error_message: null,
+    },
+  });
+  expect(store.get(agentSignInRequiredAtom)["test-agent"]).toBe(false);
+});
 
 test("propagates a disconnect and starts one replacement event stream", async () => {
   const store = createStore();

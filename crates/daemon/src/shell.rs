@@ -8,8 +8,9 @@ use std::{
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
 fn terminal_url(value: &str) -> Result<String> {
-    let mut url = reqwest::Url::parse(value.trim())
-        .map_err(|_| Error::msg("Enter a valid wss:// daemon URL"))?;
+    let value = crate::remote::resolve_remote_url(value)?;
+    let mut url =
+        reqwest::Url::parse(&value).map_err(|_| Error::msg("Enter a valid wss:// daemon URL"))?;
     let loopback = matches!(
         url.host_str(),
         Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
@@ -302,6 +303,13 @@ mod tests {
             "wss://host.example/terminal"
         );
         assert!(terminal_url("ws://127.0.0.1:43721").is_ok());
+        let branded =
+            crate::remote::short_remote_url("wss://my-remote.trycloudflare.com/rpc").unwrap();
+        assert_eq!(
+            terminal_url(&branded).unwrap(),
+            "wss://my-remote.trycloudflare.com/terminal"
+        );
+        assert!(terminal_url("https://updates.amarcode.amarjay.com/r/invalid").is_err());
         for url in [
             "ws://host.example",
             "https://host.example",

@@ -11,7 +11,7 @@ Use the remote machine’s URL and access token. Projects and agents run on that
 
 1. Open **Settings → Connection**.
 2. Choose **Remote daemon**.
-3. Paste the `wss://` URL, including `/rpc`.
+3. Paste the Remote URL the daemon printed (a short `updates.amarcode.amarjay.com/r/…` link, or the full `wss://…/rpc` URL).
 4. Paste the access token.
 5. Choose **Verify and apply**.
 
@@ -43,6 +43,6 @@ If the connection fails, see [troubleshooting](/docs/remote/troubleshooting/).
 
 ## Connect in a browser
 
-Open [Amarcode remote](https://remote.amarcode.amarjay.com), paste the daemon’s secure URL and access token, and choose **Connect**. Use an up-to-date daemon with browser access support.
+Open [Amarcode remote](https://remote.amarcode.amarjay.com), paste the daemon’s Remote URL and access token, and choose **Connect**. Use an up-to-date daemon with browser access support.
 
 Projects and agents run on the remote machine. Your token stays in the tab’s memory; reload or disconnect to clear it. You can reconnect using the same URL and token while that daemon remains available.

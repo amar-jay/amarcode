@@ -33,7 +33,7 @@ To start with a project folder selected:
 amarcoded --remote /path/to/project
 ```
 
-Copy the URL and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, paste both, and select **Verify and apply**.
+Copy the Remote URL (short link on `updates.amarcode.amarjay.com`) and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, paste both, and select **Verify and apply**.
 
 Leave this command running. Ctrl+C stops the daemon. If you start it again and the URL changes, update the connection settings.
 

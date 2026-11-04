@@ -148,3 +148,8 @@ Remote installer and release requirements: [remote daemon guide](../../docs/remo
 The remote installer is maintained in `assets/install.sh` and served at
 `https://updates.amarcode.amarjay.com/install.sh`. The landing site redirects
 `https://amarcode.amarjay.com/install.sh` to this canonical endpoint.
+
+Remote daemons also print short share links at `/r/<payload>`. Those paths
+Brotli-decode a Cloudflare quick-tunnel `wss://…/rpc` URL and either 302 to the
+HTTPS equivalent or return `{ "url": "wss://…" }` when clients send
+`Accept: application/json`.

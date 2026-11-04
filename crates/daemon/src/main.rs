@@ -49,7 +49,7 @@ enum LifecycleCommand {
     Run,
     /// Open an interactive shell on a remote daemon (URL and access token).
     Ssh {
-        /// Remote daemon ws:// loopback or wss:// public URL; prompted if omitted.
+        /// Remote link or daemon ws:// loopback / wss:// URL; prompted if omitted.
         url: Option<String>,
         /// Private token file; otherwise AMARCODE_WS_TOKEN_FILE or a hidden prompt.
         #[arg(long)]

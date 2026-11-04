@@ -112,7 +112,7 @@ export function DaemonConnectionSettings() {
             <Input
               value={form.url}
               onChange={(event) => patch({ url: event.target.value })}
-              placeholder="wss://daemon.example.com/rpc"
+              placeholder="https://updates.amarcode.amarjay.com/r/…"
               autoCapitalize="none"
               spellCheck={false}
             />
@@ -136,7 +136,8 @@ export function DaemonConnectionSettings() {
             </label>
             <p className="text-xs text-muted-foreground">
               Project folders, Git commands, and agents run on the remote host.{" "}
-              Enter the remote URL ending in /rpc.
+              Paste the Remote URL printed by the daemon (short link or
+              wss://…/rpc).
             </p>
           </>
         )}

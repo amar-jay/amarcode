@@ -66,7 +66,7 @@ function RemoteWeb() {
             autoComplete="url"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://your-daemon.example.com"
+            placeholder="https://updates.amarcode.amarjay.com/r/…"
             required
             disabled={busy}
           />

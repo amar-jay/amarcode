@@ -13,10 +13,8 @@ use std::{
 };
 
 use crate::{
-    acp::AcpClient,
-    protocol::{rpc::InstallAgentResult, AgentRpcMethod, AgentRuntimeStatus},
+    protocol::{rpc::InstallAgentResult, AgentRuntimeStatus},
     registry::{self, BinaryDistribution, PackageDistribution, RegistryAgent},
-    service::session::{classify_acp_failure, with_stderr_detail},
     store::AgentDefinition,
     Error, Result,
 };
@@ -24,7 +22,6 @@ use crate::{
 use super::agent_manager::AgentManager;
 
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-const RUNTIME_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl AgentManager {
     /// Bring agents that were installed before registry synchronization up to
@@ -104,11 +101,10 @@ impl AgentManager {
             )));
         }
 
-        let (runtime_status, runtime_message) = self.probe_runtime(&updated.id)?;
         Ok(InstallAgentResult {
             agent: self.agent_info(&updated)?,
-            runtime_status,
-            runtime_message,
+            runtime_status: AgentRuntimeStatus::Ready,
+            runtime_message: None,
         })
     }
 
@@ -173,53 +169,6 @@ impl AgentManager {
             }
         }
         Ok(true)
-    }
-
-    fn probe_runtime(&self, agent_id: &str) -> Result<(AgentRuntimeStatus, Option<String>)> {
-        let resolved = self.resolve(agent_id)?;
-        let (client, _inbound) = AcpClient::spawn(
-            &resolved.command.to_string_lossy(),
-            &resolved.arguments,
-            &resolved.environment,
-            None,
-        )
-        .map_err(|error| {
-            let failure = classify_acp_failure(&error);
-            Error::msg(failure.message)
-        })?;
-        let result = client.request(
-            AgentRpcMethod::Initialize,
-            serde_json::json!({
-                "protocolVersion": 1,
-                "clientCapabilities": {},
-                "clientInfo": {
-                    "name": "amarcode-daemon",
-                    "title": "Amarcode Daemon",
-                    "version": env!("CARGO_PKG_VERSION"),
-                }
-            }),
-            RUNTIME_PROBE_TIMEOUT,
-        );
-        let stderr = client.stderr_tail();
-        let _ = client.kill();
-        match result {
-            Ok(_) => Ok((AgentRuntimeStatus::Ready, None)),
-            Err(error) => {
-                let failure = with_stderr_detail(classify_acp_failure(&error), &stderr);
-                let status = match failure.kind {
-                    crate::protocol::AgentFailureKind::AuthRequired => {
-                        AgentRuntimeStatus::AuthRequired
-                    }
-                    crate::protocol::AgentFailureKind::Unavailable => {
-                        AgentRuntimeStatus::Unavailable
-                    }
-                    crate::protocol::AgentFailureKind::AdapterExited
-                    | crate::protocol::AgentFailureKind::Timeout
-                    | crate::protocol::AgentFailureKind::Error => AgentRuntimeStatus::Error,
-                };
-                Ok((status, Some(failure.message)))
-            }
-        }
     }
 }
 
