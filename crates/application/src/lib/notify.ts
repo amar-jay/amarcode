@@ -6,6 +6,14 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { toast, type ExternalToast } from "sonner";
+import { createElement } from "react";
+import type { LucideIcon } from "lucide-react";
+import { ToastIconAction } from "@/components/toast-icon-action";
+
+type IconToastAction = { label: string; icon: LucideIcon; onClick: () => void };
+type NotifyToastOptions = Omit<ExternalToast, "action"> & {
+  action?: ExternalToast["action"] | IconToastAction;
+};
 
 export type NotificationKind = "success" | "error" | "info" | "warning";
 
@@ -24,9 +32,17 @@ async function hasNotificationPermission(): Promise<boolean> {
 async function sendWhenAppIsUnfocused(title: string, body: string) {
   if (isWeb) return;
   try {
+    const pageIsFocused = () =>
+      typeof document !== "undefined" && document.hasFocus();
     // The Tauri bridge is absent when the Vite app is opened in a browser.
-    if (await getCurrentWindow().isFocused()) return;
+    if (pageIsFocused()) return;
+    const window = getCurrentWindow();
+    if (await window.isFocused()) return;
     if (!(await hasNotificationPermission())) return;
+    // Permission checks (and the permission dialog) can outlive a focus change.
+    // Recheck native focus, then synchronously check the webview before dispatch.
+    if (await window.isFocused()) return;
+    if (pageIsFocused()) return;
     sendNotification({ title, body });
   } catch {
     // Native notifications are an enhancement; the in-app toast still works.
@@ -46,8 +62,23 @@ export function notify(
 }
 
 /** For Sonner features such as an action button that have no OS equivalent. */
-export function notifyToast(message: string, options?: ExternalToast) {
-  toast(message, options);
+export function notifyToast(message: string, options?: NotifyToastOptions) {
+  const action = options?.action;
+  if (action && typeof action === "object" && "icon" in action) {
+    const id = toast(message, {
+      ...options,
+      action: createElement(ToastIconAction, {
+        label: action.label,
+        icon: action.icon,
+        onClick: () => {
+          action.onClick();
+          toast.dismiss(id);
+        },
+      }),
+    });
+  } else {
+    toast(message, options as ExternalToast | undefined);
+  }
   const body =
     typeof options?.description === "string" ? options.description : message;
   void sendWhenAppIsUnfocused("Amarcode", body);

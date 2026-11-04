@@ -5,6 +5,7 @@ import {
   LoaderCircle,
   Minus,
   Plus,
+  RotateCw,
 } from "lucide-react";
 import { daemonApi, type WorkspaceChange } from "@/api";
 import {
@@ -21,7 +22,7 @@ import {
   fileGitStatus,
   gitStatusClass,
 } from "@/lib/workspace-git-status";
-import { toast } from "sonner";
+import { notifyToast } from "@/lib/notify";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 type FileNode = {
@@ -171,13 +172,17 @@ export function useWorkspaceFileTree(
       if (currentRequestId === requestId.current) setFiles(files);
     } catch (cause) {
       if (currentRequestId !== requestId.current) return;
-      toast(cause instanceof Error ? cause.message : "Could not load files.", {
-        dismissible: false,
-        action: {
-          label: "Retry",
-          onClick: () => void refreshRef.current?.(),
+      notifyToast(
+        cause instanceof Error ? cause.message : "Could not load files.",
+        {
+          dismissible: false,
+          action: {
+            label: "Retry",
+            icon: RotateCw,
+            onClick: () => void refreshRef.current?.(),
+          },
         },
-      });
+      );
     } finally {
       if (currentRequestId === requestId.current) setIsLoading(false);
     }

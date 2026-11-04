@@ -2,6 +2,7 @@ import { isWeb } from "@/lib/platform";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { notify, notifyToast } from "@/lib/notify";
+import { Download } from "lucide-react";
 import {
   applyUpdatePlan,
   checkUpdatePlan,
@@ -42,7 +43,11 @@ export function useUpdates(
             duration: 15_000,
             description:
               "Update Amarcode and its connected background service together.",
-            action: { label: "Review update", onClick: () => setOpen(true) },
+            action: {
+              label: "Review update",
+              icon: Download,
+              onClick: () => setOpen(true),
+            },
           });
       } else if (manual) {
         setOpen(false);

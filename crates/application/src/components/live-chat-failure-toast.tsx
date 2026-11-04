@@ -3,6 +3,7 @@ import type { AgentFailureKind } from "@/types";
 import { useSetAtom } from "jotai";
 import { agentSetupTargetAtom } from "@/state/agents";
 import { notify, notifyToast } from "@/lib/notify";
+import { LogIn, Trash2 } from "lucide-react";
 
 type LiveChatFailureToastProps = {
   error: string;
@@ -64,6 +65,7 @@ export function LiveChatFailureToast({
       auth && agentId
         ? {
             label: "Sign in",
+            icon: LogIn,
             onClick: () =>
               openSetup({
                 id: agentId,
@@ -74,6 +76,7 @@ export function LiveChatFailureToast({
         : !auth && canDeleteChat
           ? {
               label: "Delete chat",
+              icon: Trash2,
               onClick: () => {
                 if (deleting.current) return;
                 deleting.current = true;
