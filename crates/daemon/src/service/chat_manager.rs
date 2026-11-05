@@ -112,7 +112,7 @@ impl ChatManager {
         let chat = self.get_required(id)?;
         let mut detailed = Vec::with_capacity(messages.len());
         for message in messages {
-            let parts = self.store.message_parts(&message.id)?;
+            let parts = self.store.display_message_parts(&message.id)?;
             let run = message
                 .agent_run_id
                 .as_deref()

@@ -289,7 +289,7 @@ fn get_message_parts(app: &App, params: Value) -> Result<Value> {
     let p: amarcode_protocol::rpc::GetMessagePartsParams = parse_params(params)?;
     let mut parts = Vec::new();
     for message_id in p.message_ids {
-        parts.extend(app.store.message_parts(&message_id)?);
+        parts.extend(app.store.display_message_parts(&message_id)?);
     }
     to_value(parts)
 }

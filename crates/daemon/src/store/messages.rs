@@ -139,6 +139,12 @@ impl Store {
         transaction.commit().map_err(to_error)
     }
 
+    /// Client projection: fold reasoning tool snapshots and adjacent thoughts.
+    /// Keep raw parts intact so later tool updates can still address their IDs.
+    pub fn display_message_parts(&self, message_id: &str) -> Result<Vec<MessagePart>> {
+        Ok(coalesce_reasoning(self.message_parts(message_id)?))
+    }
+
     pub fn message_parts(&self, message_id: &str) -> Result<Vec<MessagePart>> {
         let connection = self.connection()?;
         let mut statement = connection
@@ -189,5 +195,179 @@ impl Store {
             .map_err(to_error)?;
         rows.collect::<std::result::Result<_, _>>()
             .map_err(to_error)
+    }
+}
+
+/// Tool updates contain replacement snapshots, not text deltas. Resolve the
+/// latest content first, then emit it at the tool's original position.
+fn coalesce_reasoning(parts: Vec<MessagePart>) -> Vec<MessagePart> {
+    use crate::protocol::MessagePartKind;
+    use serde_json::{json, Value};
+    use std::collections::{HashMap, HashSet};
+
+    let mut tools: HashMap<String, Value> = HashMap::new();
+    for part in &parts {
+        if part.kind != MessagePartKind::ToolCall {
+            continue;
+        }
+        let Ok(Value::Object(value)) = serde_json::from_str::<Value>(&part.content_json) else {
+            continue;
+        };
+        let Some(id) = value.get("toolCallId").and_then(Value::as_str) else {
+            continue;
+        };
+        let record = tools.entry(id.to_owned()).or_insert_with(|| json!({}));
+        for (key, value) in value {
+            record[&key] = value;
+        }
+    }
+    let mut seen = HashSet::new();
+    let mut result: Vec<MessagePart> = Vec::new();
+    for mut part in parts {
+        if part.kind == MessagePartKind::ToolCall {
+            if let Ok(value) = serde_json::from_str::<Value>(&part.content_json) {
+                if let Some(id) = value.get("toolCallId").and_then(Value::as_str) {
+                    if let Some(record) = tools.get(id).filter(|record| {
+                        matches!(
+                            record.get("kind").and_then(Value::as_str),
+                            Some("think" | "thinking")
+                        )
+                    }) {
+                        if !seen.insert(id.to_owned()) {
+                            continue;
+                        }
+                        let text = record
+                            .get("content")
+                            .and_then(Value::as_array)
+                            .map(|content| {
+                                content
+                                    .iter()
+                                    .filter_map(|entry| {
+                                        let block = if entry.get("type").and_then(Value::as_str)
+                                            == Some("content")
+                                        {
+                                            entry.get("content")?
+                                        } else {
+                                            entry
+                                        };
+                                        block.get("text").and_then(Value::as_str)
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            })
+                            .unwrap_or_default();
+                        // Preserve contentless thought tools (and their title) as-is.
+                        if !text.is_empty() {
+                            part.kind = MessagePartKind::Thinking;
+                            part.content_json = json!({ "text": text }).to_string();
+                        }
+                    }
+                }
+            }
+        }
+        if part.kind == MessagePartKind::Thinking {
+            if let Some(previous) = result
+                .last_mut()
+                .filter(|previous| previous.kind == MessagePartKind::Thinking)
+            {
+                if let (Ok(left), Ok(right)) = (
+                    serde_json::from_str::<Value>(&previous.content_json),
+                    serde_json::from_str::<Value>(&part.content_json),
+                ) {
+                    if let (Some(left), Some(right)) = (
+                        left.get("text").and_then(Value::as_str),
+                        right.get("text").and_then(Value::as_str),
+                    ) {
+                        previous.content_json =
+                            json!({ "text": format!("{left}\n\n{right}") }).to_string();
+                        continue;
+                    }
+                }
+            }
+        }
+        result.push(part);
+    }
+    result
+}
+
+#[cfg(test)]
+mod reasoning_tests {
+    use super::*;
+    use crate::protocol::MessagePartKind;
+    use serde_json::{json, Value};
+
+    fn part(ordinal: i64, kind: MessagePartKind, value: Value) -> MessagePart {
+        MessagePart {
+            message_id: "message".into(),
+            ordinal,
+            kind,
+            content_json: value.to_string(),
+        }
+    }
+
+    #[test]
+    fn merges_adjacent_thoughts_using_latest_tool_snapshot() {
+        use MessagePartKind::*;
+        let parts = coalesce_reasoning(vec![
+            part(0, Thinking, json!({"text":"First"})),
+            part(
+                1,
+                ToolCall,
+                json!({"toolCallId":"a", "kind":"think", "content":[{"type":"content", "content":{"type":"text", "text":"partial"}}]}),
+            ),
+            part(
+                2,
+                ToolCall,
+                json!({"toolCallId":"a", "content":[{"type":"content", "content":{"type":"text", "text":"Complete"}}]}),
+            ),
+            part(3, Thinking, json!({"text":"Last"})),
+        ]);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].ordinal, 0);
+        assert_eq!(
+            serde_json::from_str::<Value>(&parts[0].content_json).unwrap()["text"],
+            "First\n\nComplete\n\nLast"
+        );
+    }
+
+    #[test]
+    fn text_and_real_tools_break_reasoning_groups() {
+        use MessagePartKind::*;
+        for boundary in [
+            part(1, Text, json!({"text":"Answer"})),
+            part(1, ToolCall, json!({"toolCallId":"read", "kind":"read"})),
+        ] {
+            let parts = coalesce_reasoning(vec![
+                part(0, Thinking, json!({"text":"Before"})),
+                boundary,
+                part(2, Thinking, json!({"text":"After"})),
+            ]);
+            assert_eq!(parts.len(), 3);
+        }
+    }
+
+    #[test]
+    fn late_thought_updates_do_not_create_a_second_group_after_text() {
+        use MessagePartKind::*;
+        let parts = coalesce_reasoning(vec![
+            part(
+                0,
+                ToolCall,
+                json!({"toolCallId":"a", "kind":"think", "content":[{"type":"text", "text":"First"}]}),
+            ),
+            part(1, Text, json!({"text":"Answer"})),
+            part(
+                2,
+                ToolCall,
+                json!({"toolCallId":"a", "status":"completed", "content":[{"type":"text", "text":"Final"}]}),
+            ),
+            part(3, Thinking, json!({"text":"Next"})),
+        ]);
+        assert_eq!(parts.len(), 3);
+        assert_eq!(
+            serde_json::from_str::<Value>(&parts[0].content_json).unwrap()["text"],
+            "Final"
+        );
+        assert_eq!(parts[1].kind, Text);
     }
 }
