@@ -23,7 +23,7 @@ function fixture(capacity = "5") {
     TUNNEL_CF_API_TOKEN: "account-secret",
     TUNNEL_CF_ACCOUNT_ID: "account",
     TUNNEL_CF_ZONE_ID: "zone",
-    TUNNEL_DOMAIN: "amarcode.example.com",
+    TUNNEL_DOMAIN: "example.com",
     TUNNEL_CAPACITY: capacity,
   };
   const tunnels = new Map<string, { id: string; name: string }>();
@@ -210,6 +210,7 @@ const request = (
     headers: {
       authorization: `Bearer ${options.secret ?? "a".repeat(64)}`,
       "content-type": "application/json",
+      "x-amarcode-tunnel-hostnames": "short-v2",
     },
     body:
       options.method === "DELETE"
@@ -238,9 +239,7 @@ describe("persistent tunnel allocation", () => {
       tunnel_token: string;
       dns_ready_after: number;
     };
-    expect(assignment.url).toMatch(
-      /^wss:\/\/[a-f0-9]{8}\.amarcode\.example\.com\/rpc$/,
-    );
+    expect(assignment.url).toMatch(/^wss:\/\/[a-f0-9]{8}\.example\.com\/rpc$/);
     expect(assignment.tunnel_token).toBe("connector-token");
     expect(assignment.dns_ready_after).toBeGreaterThan(Date.now());
     expect(assignment.dns_ready_after).toBeLessThanOrEqual(Date.now() + 15_000);
@@ -281,6 +280,59 @@ describe("persistent tunnel allocation", () => {
     expect(((await next.json()) as { hostname: string }).hostname).not.toBe(
       first.hostname,
     );
+  });
+
+  test("migrates nested and UUID hostnames on reconnect, recovering interrupted configuration", async () => {
+    for (const legacy of [
+      "12345678.amarcode.example.com",
+      "m-legacy.example.com",
+    ]) {
+      const f = fixture();
+      const id = crypto.randomUUID();
+      await f.allocator.fetch(request(id));
+      const db =
+        await f.storage.get<
+          Record<string, { hostname: string; dnsReadyAfter?: number }>
+        >("installations");
+      db![id].hostname = legacy;
+      db![id].dnsReadyAfter = 1;
+      await f.storage.put("installations", db);
+      for (const record of f.records.values()) record.name = legacy;
+      f.failConfiguration();
+      expect((await f.restart().fetch(request(id))).status).toBe(502);
+      const migrated = await f.restart().fetch(request(id));
+      expect(migrated.status).toBe(200);
+      const assignment = (await migrated.json()) as {
+        hostname: string;
+        dns_ready_after: number;
+      };
+      expect(assignment.hostname).toMatch(/^[a-f0-9]{8}\.example\.com$/);
+      expect(assignment.dns_ready_after).toBeGreaterThan(Date.now());
+      expect([...f.records.values()].map((record) => record.name)).toEqual([
+        assignment.hostname,
+      ]);
+      expect(f.tunnels.size).toBe(1);
+      expect((await f.restart().fetch(request(id))).status).toBe(200);
+    }
+  });
+
+  test("older daemons get compatible first-level names and newer ones can migrate to short names", async () => {
+    const f = fixture();
+    const id = crypto.randomUUID();
+    const old = request(id);
+    old.headers.delete("x-amarcode-tunnel-hostnames");
+    const response = await f.allocator.fetch(old);
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { hostname: string }).hostname).toBe(
+      `m-${id}.example.com`,
+    );
+    const upgraded = await f.restart().fetch(request(id));
+    expect(upgraded.status).toBe(200);
+    expect(((await upgraded.json()) as { hostname: string }).hostname).toMatch(
+      /^[a-f0-9]{8}\.example\.com$/,
+    );
+    expect(f.records.size).toBe(1);
+    expect(f.tunnels.size).toBe(1);
   });
 
   test("listener port changes keep the installation hostname and update ingress", async () => {

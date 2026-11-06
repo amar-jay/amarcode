@@ -102,7 +102,8 @@ async fn request(
 ) -> Result<reqwest::Response> {
     let mut request = client()?
         .request(method, format!("{ALLOCATOR}/v1/tunnels/{}", identity.id))
-        .bearer_auth(&identity.credential);
+        .bearer_auth(&identity.credential)
+        .header("x-amarcode-tunnel-hostnames", "short-v2");
     if let Some(port) = port {
         request = request
             .body(serde_json::json!({"port": port}).to_string())
@@ -145,14 +146,15 @@ async fn allocate(port: u16) -> Result<Assignment> {
 fn validate_assignment(value: &Assignment, identity: &Identity, port: u16) -> Result<()> {
     let url =
         reqwest::Url::parse(&value.url).map_err(|_| Error::msg("Invalid allocated tunnel URL"))?;
-    let short_hostname = value
-        .hostname
-        .strip_suffix(".amarcode.amarjay.com")
-        .is_some_and(|label| {
-            label.len() == 8
-                && label
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    let short_hostname = [".amarjay.com", ".amarcode.amarjay.com"]
+        .iter()
+        .any(|suffix| {
+            value.hostname.strip_suffix(suffix).is_some_and(|label| {
+                label.len() == 8
+                    && label
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            })
         });
     let legacy_hostname = value.hostname.starts_with(&format!("m-{}.", identity.id));
     if value.installation_id != identity.id
@@ -195,7 +197,13 @@ pub async fn run(
     if address.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
         return Err(Error::msg("Named tunnels require a 127.0.0.1 listener"));
     }
+    eprintln!("Requesting named tunnel allocation...");
+    let started = tokio::time::Instant::now();
     let assignment = allocate(address.port()).await?;
+    eprintln!(
+        "Named tunnel assigned in {:.1}s; starting connector...",
+        started.elapsed().as_secs_f64()
+    );
     // Token never appears in process arguments or logs. File is deleted on exit.
     let mut token_file = tempfile::NamedTempFile::new_in(root()?)?;
     token_file.write_all(assignment.tunnel_token.as_bytes())?;
@@ -228,6 +236,10 @@ pub async fn run(
             .saturating_sub(now)
             .min(30_000);
         if grace_ms > 0 {
+            eprintln!(
+                "Waiting {:.1}s for new DNS records to propagate...",
+                grace_ms as f64 / 1000.0
+            );
             tokio::time::sleep(Duration::from_millis(grace_ms)).await;
         }
 
@@ -236,17 +248,50 @@ pub async fn run(
             .timeout(Duration::from_secs(5))
             .build()
             .map_err(|_| Error::msg("Cannot initialize tunnel HTTP client"))?;
+        eprintln!("Checking public TLS and daemon connectivity...");
         let endpoint = format!("https://{}/web/session", assignment.hostname);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
         loop {
             // Validate the actual production browser path, with the daemon's token.
-            if let Ok(response) = client
+            let attempt = client
                 .post(&endpoint)
                 .header("origin", crate::rpc::web_auth::WEB_ORIGIN)
                 .bearer_auth(token)
                 .send()
-                .await
-            {
+                .await;
+            let mut last_failure =
+                String::from("invalid browser ticket response or CORS configuration");
+            let response = match attempt {
+                Ok(response) => {
+                    if !response.status().is_success() {
+                        last_failure = format!(
+                            "HTTP {} from the public endpoint",
+                            response.status().as_u16()
+                        );
+                    }
+                    Some(response)
+                }
+                Err(error) => {
+                    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+                    while let Some(cause) = source {
+                        let message = cause.to_string().to_ascii_lowercase();
+                        if message.contains("certificate")
+                            || message.contains("handshakefailure")
+                            || message.contains("handshake failure")
+                        {
+                            return Err(Error::msg(format!("TLS handshake failed for {}. Check Cloudflare edge certificate coverage for this hostname. Retrying cannot repair a missing certificate.", assignment.hostname)));
+                        }
+                        source = cause.source();
+                    }
+                    if error.is_timeout() {
+                        last_failure = "public request timed out".into();
+                    } else if error.is_connect() {
+                        last_failure = "DNS lookup or public connection failed".into();
+                    }
+                    None
+                }
+            };
+            if let Some(response) = response {
                 if response.status().is_success()
                     && response
                         .headers()
@@ -268,7 +313,7 @@ pub async fn run(
                 }
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(Error::msg("Named tunnel did not become reachable within 60 seconds. The assignment is retained; check connector egress/DNS and retry."));
+                return Err(Error::msg(format!("Named tunnel did not become reachable within 60 seconds: {last_failure}. The assignment is retained; check connector egress/DNS and retry.")));
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
@@ -408,19 +453,19 @@ mod tests {
             tunnel_token: "connector-secret".into(),
         };
         assert!(validate_assignment(&assignment, &identity, 43721).is_ok());
-        assignment.hostname = "a7c42e19.amarcode.amarjay.com".into();
+        assignment.hostname = "a7c42e19.amarjay.com".into();
         assignment.url = format!("wss://{}/rpc", assignment.hostname);
         assert!(validate_assignment(&assignment, &identity, 43721).is_ok());
         for invalid in [
             "a7c42e19.evil.example",
-            "a7c42e19.amarcode.amarjay.com.evil.example",
-            "a7c42e1.amarcode.amarjay.com",
+            "a7c42e19.amarjay.com.evil.example",
+            "a7c42e1.amarjay.com",
         ] {
             assignment.hostname = invalid.into();
             assignment.url = format!("wss://{invalid}/rpc");
             assert!(validate_assignment(&assignment, &identity, 43721).is_err());
         }
-        assignment.hostname = "a7c42e19.amarcode.amarjay.com".into();
+        assignment.hostname = "a7c42e19.amarjay.com".into();
         assignment.url = "wss://unrelated.example/rpc".into();
         assert!(validate_assignment(&assignment, &identity, 43721).is_err());
         assignment.url = format!("wss://{}/rpc?token=bad", assignment.hostname);

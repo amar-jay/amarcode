@@ -193,7 +193,7 @@ Configure these on the existing Worker before enabling named tunnels:
 | `TUNNEL_CF_API_TOKEN` | Scoped Cloudflare API token with Tunnel Write on the account and DNS Write on the selected zone |
 | `TUNNEL_CF_ACCOUNT_ID` | Account holding the tunnels and DNS zone |
 | `TUNNEL_CF_ZONE_ID` | DNS zone for machine hostnames |
-| `TUNNEL_DOMAIN` | Parent domain; production uses `amarcode.amarjay.com`, producing `<8-hex-characters>.amarcode.amarjay.com` |
+| `TUNNEL_DOMAIN` | Parent domain; production uses `amarjay.com`, producing `<8-hex-characters>.amarjay.com` |
 | `TUNNEL_CAPACITY` | Positive integer, default `5` in Wrangler configuration |
 
 Use a Worker secret for the API token. Other settings may be
@@ -202,12 +202,16 @@ TUNNEL_CF_API_TOKEN` from this directory, and repeat for the required settings.
 Never put credentials in source control. Deploy with the checked-in Durable
 Object binding and `tunnel-allocator-v1` SQLite migration.
 
-Production needs an edge certificate covering `*.amarcode.amarjay.com` before
-deploying this configuration. Ordinary Universal SSL for `amarjay.com` does not
-cover this nested domain. Short names are random eight-character hex labels,
-checked against all retained installations and tombstones. Existing allocations
-keep their saved hostname, including during recovery. New allocations use the
-configured parent domain. DNS records are proxied CNAMEs targeting each installation's own
+Production uses first-level names under `amarjay.com`, covered by the zone's
+Universal SSL. Do not switch to nested names without provisioning matching edge
+certificates. Short names are random eight-character hex labels, checked against
+retained installations, migration history, and tombstones. Updated daemons send
+`X-Amarcode-Tunnel-Hostnames: short-v2`; older daemons receive compatible
+`m-<installation-id>.amarjay.com` names. Existing nested or UUID allocations
+migrate on authenticated reconnect without losing the installation credential or
+consuming another slot. Migration persists both DNS names until the new route is
+configured and the old DNS record has been removed; interrupted migrations retry.
+DNS records are proxied CNAMEs targeting each installation's own
 `<tunnel-id>.cfargotunnel.com`. No unrelated installations share tunnel tokens.
 The allocator does not proxy application traffic or receive daemon access tokens.
 

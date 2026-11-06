@@ -10,6 +10,8 @@ export interface TunnelEnv {
 type Installation = {
   credentialHash: string;
   hostname: string;
+  previousHostname?: string;
+  retiredHostnames?: string[];
   port: number;
   status:
     | "provisioning"
@@ -31,7 +33,15 @@ export interface AllocationStorage {
 export const TUNNEL_IDLE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const CLEANUP_PATH = "/internal/cleanup";
 function newHostname(db: Database, domain: string): string {
-  const reserved = new Set(Object.values(db).map((record) => record.hostname));
+  const reserved = new Set(
+    Object.values(db).flatMap((record) =>
+      [
+        record.hostname,
+        record.previousHostname,
+        ...(record.retiredHostnames ?? []),
+      ].filter((value): value is string => Boolean(value)),
+    ),
+  );
   for (let attempt = 0; attempt < 32; attempt++) {
     const label = Array.from(
       crypto.getRandomValues(new Uint8Array(4)),
@@ -179,6 +189,7 @@ export class Allocator {
         delete record.tunnelId;
         delete record.dnsId;
         delete record.dnsReadyAfter;
+        delete record.previousHostname;
         delete record.disconnectedSince;
         record.status = "reclaimed";
         await this.storage.put("installations", db);
@@ -192,6 +203,13 @@ export class Allocator {
   }
 
   private async removeDns(record: Installation) {
+    if (record.previousHostname) {
+      await this.removeDns({
+        ...record,
+        hostname: record.previousHostname,
+        previousHostname: undefined,
+      });
+    }
     const dns = `/zones/${this.env.TUNNEL_CF_ZONE_ID}/dns_records`;
     const records = await this.api<{ id: string; content: string }[]>(
       `${dns}?type=CNAME&name=${encodeURIComponent(record.hostname)}`,
@@ -301,11 +319,40 @@ export class Allocator {
       record = db[id] = {
         credentialHash,
         hostname: record?.hostname ?? newHostname(db, domain),
+        retiredHostnames: record?.retiredHostnames,
         port: port!,
         status: "provisioning",
         disconnectedSince: Date.now(),
       };
       await this.storage.put("installations", db); // Reserve capacity BEFORE provisioning.
+    }
+    if (
+      request.method === "PUT" &&
+      ["ready", "provisioning"].includes(record.status)
+    ) {
+      // Older daemons only accept m-<full installation ID> names. Keep them
+      // operational while newer daemons opt in to short hostnames.
+      const shortNames =
+        request.headers.get("x-amarcode-tunnel-hostnames") === "short-v2";
+      const label = record.hostname.endsWith(`.${domain}`)
+        ? record.hostname.slice(0, -domain.length - 1)
+        : "";
+      const desired = shortNames
+        ? /^[a-f0-9]{8}$/.test(label)
+          ? record.hostname
+          : newHostname(db, domain)
+        : `m-${id}.${domain}`;
+      if (record.hostname !== desired && !record.previousHostname) {
+        record.retiredHostnames = [
+          ...(record.retiredHostnames ?? []),
+          record.hostname,
+        ];
+        record.previousHostname = record.hostname;
+        record.hostname = desired;
+        record.status = "provisioning";
+        delete record.dnsReadyAfter;
+        await this.storage.put("installations", db);
+      }
     }
     if (
       port !== undefined &&
@@ -409,6 +456,14 @@ export class Allocator {
       // Let new authoritative DNS records propagate before clients query them.
       // An immediate lookup can seed a resolver's negative cache for minutes.
       record.dnsReadyAfter ??= Date.now() + 15_000;
+      if (record.previousHostname) {
+        await this.removeDns({
+          ...record,
+          hostname: record.previousHostname,
+          previousHostname: undefined,
+        });
+        delete record.previousHostname;
+      }
       record.status = "ready";
       await this.storage.put("installations", db);
     }
