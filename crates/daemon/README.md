@@ -101,16 +101,15 @@ for contributor documentation.
 ## Persistent public tunnel enrollment
 
 `amarcoded --remote` and `amarcoded tunnel` use a named tunnel by default. The
-registry Worker must be configured with Cloudflare account/zone settings and an
-enrollment code; see [allocator setup](../amarcode-registry/README.md#persistent-named-tunnels).
-Provide `AMARCODE_TUNNEL_ENROLLMENT_CODE` for first enrollment. The private
+registry Worker must be configured with Cloudflare account/zone settings; see [allocator setup](../amarcode-registry/README.md#persistent-named-tunnels).
+First registration is automatic. The private
 `named-installation.json` identity lives beside `remote.json`, outside the data
 child directory. Preserve it across restarts; no heartbeat lease is required.
 Each installation has a distinct tunnel and stable hostname. Initial capacity is
 five installations, including offline ones during a seven-day inactivity grace
 period. The Worker checks daily and reclaims disconnected tunnels after that
 period. Keep the local identity: it can recover the same hostname without an
-enrollment code when capacity is available.
+manual setup when capacity is available.
 
 Run `amarcoded tunnel --rm` before purging an installation to revoke its named
 allocation and free capacity. Public access uses named tunnels exclusively.

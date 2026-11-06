@@ -107,9 +107,6 @@ async fn request(
         request = request
             .body(serde_json::json!({"port": port}).to_string())
             .header("content-type", "application/json");
-        if let Ok(code) = std::env::var("AMARCODE_TUNNEL_ENROLLMENT_CODE") {
-            request = request.header("x-amarcode-enrollment", code);
-        }
     }
     let response = request
         .send()
@@ -119,7 +116,7 @@ async fn request(
         200..=299 => Ok(response),
         401 => Err(Error::msg("Named installation credential rejected")),
         403 => Err(Error::msg(
-            "Set AMARCODE_TUNNEL_ENROLLMENT_CODE to enroll this installation",
+            "Named tunnel allocation was denied by the server",
         )),
         409 => Err(Error::msg("Named tunnel installation capacity reached")),
         410 => Err(Error::msg(
@@ -196,7 +193,6 @@ pub async fn run(
     let mut child = Command::new(cloudflared)
         .args(["tunnel", "run", "--token-file"])
         .arg(token_file.path())
-        .env_remove("AMARCODE_TUNNEL_ENROLLMENT_CODE")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

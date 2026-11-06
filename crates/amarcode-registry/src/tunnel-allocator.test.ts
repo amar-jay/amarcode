@@ -24,7 +24,6 @@ function fixture(capacity = "5") {
     TUNNEL_CF_ACCOUNT_ID: "account",
     TUNNEL_CF_ZONE_ID: "zone",
     TUNNEL_DOMAIN: "example.com",
-    TUNNEL_ENROLLMENT_CODE: "invite-secret",
     TUNNEL_CAPACITY: capacity,
   };
   const tunnels = new Map<string, { id: string; name: string }>();
@@ -203,7 +202,6 @@ const request = (
   options: {
     method?: string;
     secret?: string;
-    enrollment?: string;
     port?: number;
   } = {},
 ) =>
@@ -211,7 +209,6 @@ const request = (
     method: options.method ?? "PUT",
     headers: {
       authorization: `Bearer ${options.secret ?? "a".repeat(64)}`,
-      "x-amarcode-enrollment": options.enrollment ?? "invite-secret",
       "content-type": "application/json",
     },
     body:
@@ -231,7 +228,7 @@ describe("persistent tunnel allocation", () => {
     expect(body).not.toContain("account-secret");
     expect(f.calls).toHaveLength(1);
   });
-  test("enrolls once and reconnects after allocator restart without enrollment code", async () => {
+  test("automatically enrolls with a private credential and reconnects after allocator restart", async () => {
     const f = fixture();
     const id = crypto.randomUUID();
     const first = await f.allocator.fetch(request(id));
@@ -246,7 +243,7 @@ describe("persistent tunnel allocation", () => {
     expect(assignment.dns_ready_after).toBeGreaterThan(Date.now());
     expect(assignment.dns_ready_after).toBeLessThanOrEqual(Date.now() + 15_000);
     expect(first.headers.get("cache-control")).toBe("no-store");
-    const reconnect = await f.restart().fetch(request(id, { enrollment: "" }));
+    const reconnect = await f.restart().fetch(request(id, {}));
     expect((await reconnect.json()) as typeof assignment).toEqual(assignment);
     expect(f.tunnels.size).toBe(1);
     expect(f.records.size).toBe(1);
@@ -257,9 +254,7 @@ describe("persistent tunnel allocation", () => {
     const first = (await (await f.allocator.fetch(request(id))).json()) as {
       url: string;
     };
-    const next = await f
-      .restart()
-      .fetch(request(id, { port: 43888, enrollment: "" }));
+    const next = await f.restart().fetch(request(id, { port: 43888 }));
     expect(next.status).toBe(200);
     const value = (await next.json()) as { url: string; port: number };
     expect(value.url).toBe(first.url);
@@ -268,12 +263,12 @@ describe("persistent tunnel allocation", () => {
     expect(f.tunnels.size).toBe(1);
     expect(f.records.size).toBe(1);
   });
-  test("authenticates enrollment, reconnect and deletion before touching Cloudflare", async () => {
+  test("rejects malformed initial credentials and authenticates reconnect and deletion", async () => {
     const f = fixture();
     const id = crypto.randomUUID();
     expect(
-      (await f.allocator.fetch(request(id, { enrollment: "wrong" }))).status,
-    ).toBe(403);
+      (await f.allocator.fetch(request(id, { secret: "invalid" }))).status,
+    ).toBe(401);
     expect(f.calls.length).toBe(0);
     await f.allocator.fetch(request(id));
     const count = f.calls.length;
@@ -304,9 +299,7 @@ describe("persistent tunnel allocation", () => {
     const id = crypto.randomUUID();
     f.loseCreate();
     expect((await f.allocator.fetch(request(id))).status).toBe(502);
-    expect(
-      (await f.restart().fetch(request(id, { enrollment: "" }))).status,
-    ).toBe(200);
+    expect((await f.restart().fetch(request(id, {}))).status).toBe(200);
     expect(f.tunnels.size).toBe(1);
   });
   test("partial provisioning reserves capacity and resumes on retry", async () => {
@@ -407,13 +400,9 @@ describe("daily tunnel cleanup", () => {
       f.calls.some((c) => c.startsWith("PATCH") || c.endsWith("/connections")),
     ).toBe(false);
     expect(
-      (
-        await f
-          .restart()
-          .fetch(request(id, { enrollment: "", secret: "b".repeat(64) }))
-      ).status,
+      (await f.restart().fetch(request(id, { secret: "b".repeat(64) }))).status,
     ).toBe(401);
-    const recovered = await f.restart().fetch(request(id, { enrollment: "" }));
+    const recovered = await f.restart().fetch(request(id, {}));
     expect(recovered.status).toBe(200);
     expect(((await recovered.json()) as { hostname: string }).hostname).toBe(
       first.hostname,
@@ -430,9 +419,7 @@ describe("daily tunnel cleanup", () => {
     expect((await f.allocator.fetch(request(crypto.randomUUID()))).status).toBe(
       200,
     );
-    expect(
-      (await f.allocator.fetch(request(id, { enrollment: "" }))).status,
-    ).toBe(409);
+    expect((await f.allocator.fetch(request(id, {}))).status).toBe(409);
     expect(
       (await f.allocator.fetch(request(id, { method: "DELETE" }))).status,
     ).toBe(200);
@@ -475,7 +462,7 @@ describe("daily tunnel cleanup", () => {
     });
     db![id].disconnectedSince = 1;
     await f.storage.put("installations", db);
-    await f.restart().fetch(request(id, { enrollment: "" }));
+    await f.restart().fetch(request(id, {}));
     expect(await f.allocator.cleanup(Date.now())).toEqual({
       reclaimed: 0,
       failed: 0,
@@ -528,9 +515,7 @@ describe("daily tunnel cleanup", () => {
       failed: 0,
     });
     expect(f.records.size).toBe(0);
-    expect(
-      (await f.restart().fetch(request(id, { enrollment: "" }))).status,
-    ).toBe(200);
+    expect((await f.restart().fetch(request(id, {}))).status).toBe(200);
   });
 
   test("recovers lost deletion responses when Cloudflare returns soft-deleted tunnels", async () => {

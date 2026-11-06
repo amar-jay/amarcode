@@ -5,7 +5,6 @@ export interface TunnelEnv {
   TUNNEL_CF_ACCOUNT_ID?: string;
   TUNNEL_CF_ZONE_ID?: string;
   TUNNEL_DOMAIN?: string;
-  TUNNEL_ENROLLMENT_CODE?: string;
   TUNNEL_CAPACITY?: string;
 }
 type Installation = {
@@ -234,8 +233,7 @@ export class Allocator {
       !env.TUNNEL_CF_API_TOKEN ||
       !env.TUNNEL_CF_ACCOUNT_ID ||
       !env.TUNNEL_CF_ZONE_ID ||
-      !env.TUNNEL_DOMAIN ||
-      !env.TUNNEL_ENROLLMENT_CODE
+      !env.TUNNEL_DOMAIN
     )
       return reply({ error: "Named tunnels are not configured." }, 503);
     const domain = env.TUNNEL_DOMAIN;
@@ -259,11 +257,6 @@ export class Allocator {
     let record = db[id];
     if (record && record.credentialHash !== credentialHash)
       return reply({ error: "Invalid installation credential." }, 401);
-    if (!record && request.method === "PUT") {
-      const enrollment = request.headers.get("x-amarcode-enrollment") ?? "";
-      if ((await hash(enrollment)) !== (await hash(env.TUNNEL_ENROLLMENT_CODE)))
-        return reply({ error: "A valid enrollment code is required." }, 403);
-    }
     let port: number | undefined;
     if (request.method === "PUT") {
       const body = (await request.json().catch(() => {

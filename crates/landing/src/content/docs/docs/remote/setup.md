@@ -23,10 +23,10 @@ Use the start command printed by the installer; it works in your current termina
 
 ## Start and connect
 
-Public remote access uses a persistent named hostname. Obtain an enrollment code
-from your Amarcode operator and supply `AMARCODE_TUNNEL_ENROLLMENT_CODE` for the
-first start. Your private installation identity is saved on this machine; later
-starts reuse the same hostname without requiring the code. The operator must
+Public remote access uses a persistent named hostname. First-time registration
+is automatic; no enrollment code or environment variable is needed. Your private
+installation identity is saved on this machine; later starts reuse the same
+hostname. The operator must
 configure and deploy the named-tunnel allocator before first enrollment.
 
 
@@ -45,7 +45,7 @@ Copy the Remote URL (a stable `wss://m-<id>.<operator-domain>/rpc` address) and 
 Leave this command running. Ctrl+C stops the daemon. Starting it again reuses the same URL. Offline machines retain their allocation for a seven-day inactivity grace period.
 The Worker checks daily and then reclaims disconnected tunnels to free capacity.
 Preserving the local identity lets the same machine recover its hostname without
-a new enrollment code, provided capacity is available.
+manual registration, provided capacity is available.
 
 See [connect from the desktop](/docs/remote/connect/).
 
