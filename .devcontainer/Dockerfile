@@ -6,8 +6,11 @@ ENV PATH=${BUN_INSTALL}/bin:${PATH}
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        ca-certificates \
         curl \
         file \
+        openssl \
+        python3 \
         libayatana-appindicator3-dev \
         libgtk-3-dev \
         libssl-dev \
