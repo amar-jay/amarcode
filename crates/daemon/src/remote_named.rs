@@ -123,7 +123,7 @@ async fn request(
         )),
         409 => Err(Error::msg("Named tunnel installation capacity reached")),
         410 => Err(Error::msg(
-            "Named installation was removed; run amarcoded tunnel-remove to reset local enrollment",
+            "Named installation was removed; run amarcoded tunnel --rm to reset local enrollment",
         )),
         503 => Err(Error::msg(
             "Named tunnel allocator is not configured on the server",

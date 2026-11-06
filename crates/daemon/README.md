@@ -109,6 +109,6 @@ child directory. Preserve it across restarts; no heartbeat lease is required.
 Each installation has a distinct tunnel and stable hostname. Initial capacity is
 five installations, including offline ones.
 
-Run `amarcoded tunnel-remove` before purging an installation to revoke its named
+Run `amarcoded tunnel --rm` before purging an installation to revoke its named
 allocation and free capacity. Public access uses named tunnels exclusively.
 `--no-tunnel` continues to bypass public provisioning.

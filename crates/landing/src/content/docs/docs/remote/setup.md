@@ -97,7 +97,7 @@ The listener is `127.0.0.1:43721`. Reach it through your own path, then connect 
 Stop the connector and run:
 
 ```sh
-amarcoded tunnel-remove
+amarcoded tunnel --rm
 ```
 
 This revokes the connector, removes its public DNS record, and frees installation

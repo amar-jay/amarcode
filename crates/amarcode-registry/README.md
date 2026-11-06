@@ -220,7 +220,7 @@ grace period before the daemon probes the public hostname; normal reconnects
 reuse the persisted deadline. Connector credentials live in a temporary private file, not
 process arguments. The daemon's application access token remains separate.
 
-Stop the connector, then run `amarcoded tunnel-remove` to revoke the allocation
+Stop the connector, then run `amarcoded tunnel --rm` to revoke the allocation
 before purging the installation. Stopping a daemon alone keeps its allocation.
 Public access uses named tunnels exclusively; `--no-tunnel` stays loopback-only.
 The browser accepts full named WSS URLs without any UI changes.
