@@ -1,7 +1,7 @@
 [package]
 name = "amarcode"
 version = "0.1.0"
-description = "A desktop workspace for ACP coding agents"
+description = "A desktop workspace for amarcode coding agents"
 authors = ["amarjay <abdelmanan.abdelrahman@gmail.com>"]
 edition = "2021"
 
