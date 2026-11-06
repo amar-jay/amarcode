@@ -42,7 +42,10 @@ amarcoded --remote /path/to/project
 
 Copy the Remote URL (a stable `wss://m-<id>.<operator-domain>/rpc` address) and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, paste both, and select **Verify and apply**.
 
-Leave this command running. Ctrl+C stops the daemon. Starting it again reuses the same URL. Offline machines retain their allocation.
+Leave this command running. Ctrl+C stops the daemon. Starting it again reuses the same URL. Offline machines retain their allocation for a seven-day inactivity grace period.
+The Worker checks daily and then reclaims disconnected tunnels to free capacity.
+Preserving the local identity lets the same machine recover its hostname without
+a new enrollment code, provided capacity is available.
 
 See [connect from the desktop](/docs/remote/connect/).
 

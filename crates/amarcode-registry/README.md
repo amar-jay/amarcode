@@ -167,7 +167,23 @@ including offline and partially provisioned installations. Repeated enrollment
 with the same identity resumes provisioning instead of consuming another slot.
 Removal deletes DNS, rotates credentials, disconnects connectors, deletes the tunnel, and retains a
 hostname tombstone. Failed removal can be retried with the same identity.
-There are no leases or automatic offline reclamation.
+A daily Cron Trigger (`0 0 * * *`, midnight UTC) checks Cloudflare's connector
+status. After seven days of observed disconnection, it deletes the tunnel and
+its DNS record and frees capacity. Healthy, degraded, or unrecognized statuses
+reset the timer; API failures skip that installation. Existing records without
+an inactivity timestamp receive a full grace period on their first check.
+Authenticated allocation requests also reset the timer to allow connector startup.
+Daily sampling can miss short connections between checks.
+
+Automatic cleanup preserves the installation credential hash and hostname. A
+returning owner can provision a new tunnel with the same identity and hostname,
+without an enrollment code, provided capacity is available. Explicit removal is
+permanent and still requires a new installation identity afterward. Cleanup never
+force-disconnects connectors. Partial cleanup retains capacity and retries the
+following day; reconnects during pending cleanup return a retryable error.
+No daemon heartbeat or extra authentication mechanism is required. The schedule
+calls the allocator through its private Worker binding, without a public cleanup
+endpoint. Logs contain only reclaimed and failed counts.
 
 ### Operator configuration
 
@@ -198,9 +214,9 @@ Provisioning is not a single Cloudflare transaction. The allocator recovers lost
 create responses by finding its deterministic tunnel name and hostname. Retry
 failed operations with the same local identity. Do not delete the Durable Object
 storage while provisioned resources exist: it holds ownership and capacity state.
-Back up each daemon's private `named-installation.json`. If it is lost, an
-operator must clean up the orphaned resources and allocator record; a new identity
-cannot take ownership of an existing allocation.
+Back up each daemon's private `named-installation.json`. If it is lost, the daily
+cleanup eventually reclaims its disconnected resources. A new identity cannot
+take ownership of the old hostname or credential record.
 
 ### Daemon enrollment
 
@@ -221,7 +237,8 @@ reuse the persisted deadline. Connector credentials live in a temporary private 
 process arguments. The daemon's application access token remains separate.
 
 Stop the connector, then run `amarcoded tunnel --rm` to revoke the allocation
-before purging the installation. Stopping a daemon alone keeps its allocation.
+before purging the installation. Stopping a daemon keeps its allocation until
+the daily inactivity cleanup reclaims it after the seven-day grace period.
 Public access uses named tunnels exclusively; `--no-tunnel` stays loopback-only.
 The browser accepts full named WSS URLs without any UI changes.
 

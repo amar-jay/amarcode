@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   Allocator,
+  TUNNEL_IDLE_GRACE_MS,
+  cleanupTunnelAllocations,
+  routeTunnelAllocation,
   type AllocationStorage,
   type TunnelEnv,
 } from "./tunnel-allocator";
@@ -25,6 +28,10 @@ function fixture(capacity = "5") {
     TUNNEL_CAPACITY: capacity,
   };
   const tunnels = new Map<string, { id: string; name: string }>();
+  const deletedTunnels = new Map<
+    string,
+    { id: string; name: string; deleted_at: string }
+  >();
   const records = new Map<
     string,
     { id: string; name: string; content: string }
@@ -36,6 +43,11 @@ function fixture(capacity = "5") {
   let loseDnsResponse = false;
   let failDisconnect = false;
   let redirectApi = false;
+  let tunnelStatus = "inactive";
+  let failStatus: boolean | string = false;
+  let failDnsDelete = false;
+  let reconnectOnDelete = false;
+  let loseDeleteResponse = false;
   const fetcher = async function (
     this: unknown,
     input: string | URL | Request,
@@ -112,17 +124,58 @@ function fixture(capacity = "5") {
       ).toBeGreaterThan(32);
       result = {};
     } else if (method === "DELETE" && path.includes("/dns_records/")) {
+      if (failDnsDelete) {
+        failDnsDelete = false;
+        throw new Error("DNS deletion unavailable");
+      }
       records.delete(path.split("/").at(-1)!);
       result = {};
     } else if (method === "DELETE" && path.includes("/cfd_tunnel/")) {
-      tunnels.delete(path.split("/").at(-1)!);
+      if (reconnectOnDelete) throw new Error("Tunnel has active connections");
+      const id = path.split("/").at(-1)!;
+      const tunnel = tunnels.get(id);
+      if (deletedTunnels.has(id)) throw new Error("Tunnel already deleted");
+      if (tunnel)
+        deletedTunnels.set(id, {
+          ...tunnel,
+          deleted_at: new Date().toISOString(),
+        });
+      tunnels.delete(id);
+      if (loseDeleteResponse) {
+        loseDeleteResponse = false;
+        throw new Error("Lost tunnel deletion response");
+      }
       result = {};
+    } else if (method === "GET" && path.includes("/cfd_tunnel/")) {
+      if (failStatus === true || failStatus === path.split("/").at(-1))
+        throw new Error("status API unavailable");
+      const tunnel =
+        tunnels.get(path.split("/").at(-1)!) ??
+        deletedTunnels.get(path.split("/").at(-1)!);
+      if (!tunnel) return new Response(null, { status: 404 });
+      result = { ...tunnel, status: tunnelStatus };
     } else throw new Error(`Unexpected API request ${method} ${path}`);
     return Response.json({ success: true, result });
   } as typeof fetch;
   const restart = () => new Allocator(storage, env, fetcher);
   return {
     allocator: restart(),
+    storage,
+    setStatus: (value: string) => {
+      tunnelStatus = value;
+    },
+    failStatus: (value: boolean | string) => {
+      failStatus = value;
+    },
+    failDnsDelete: () => {
+      failDnsDelete = true;
+    },
+    reconnectOnDelete: () => {
+      reconnectOnDelete = true;
+    },
+    loseDelete: () => {
+      loseDeleteResponse = true;
+    },
     restart,
     tunnels,
     records,
@@ -329,5 +382,263 @@ describe("persistent tunnel allocation", () => {
       (await f.restart().fetch(request(id, { method: "DELETE" }))).status,
     ).toBe(200);
     expect(f.tunnels.size).toBe(0);
+  });
+});
+
+describe("daily tunnel cleanup", () => {
+  const later = () => Date.now() + TUNNEL_IDLE_GRACE_MS + 1000;
+
+  test("retains allocations for seven days, then reclaims and permits authenticated owner recovery", async () => {
+    const f = fixture("1");
+    const id = crypto.randomUUID();
+    const first = (await (await f.allocator.fetch(request(id))).json()) as {
+      hostname: string;
+    };
+    expect(
+      await f.allocator.cleanup(Date.now() + TUNNEL_IDLE_GRACE_MS - 1000),
+    ).toEqual({ reclaimed: 0, failed: 0 });
+    expect(await f.restart().cleanup(later())).toEqual({
+      reclaimed: 1,
+      failed: 0,
+    });
+    expect(f.records.size).toBe(0);
+    expect(f.tunnels.size).toBe(0);
+    expect(
+      f.calls.some((c) => c.startsWith("PATCH") || c.endsWith("/connections")),
+    ).toBe(false);
+    expect(
+      (
+        await f
+          .restart()
+          .fetch(request(id, { enrollment: "", secret: "b".repeat(64) }))
+      ).status,
+    ).toBe(401);
+    const recovered = await f.restart().fetch(request(id, { enrollment: "" }));
+    expect(recovered.status).toBe(200);
+    expect(((await recovered.json()) as { hostname: string }).hostname).toBe(
+      first.hostname,
+    );
+    expect(f.tunnels.size).toBe(1);
+    expect(f.records.size).toBe(1);
+  });
+
+  test("reclaimed owners compete for capacity and explicit removal stays permanent", async () => {
+    const f = fixture("1");
+    const id = crypto.randomUUID();
+    await f.allocator.fetch(request(id));
+    await f.allocator.cleanup(later());
+    expect((await f.allocator.fetch(request(crypto.randomUUID()))).status).toBe(
+      200,
+    );
+    expect(
+      (await f.allocator.fetch(request(id, { enrollment: "" }))).status,
+    ).toBe(409);
+    expect(
+      (await f.allocator.fetch(request(id, { method: "DELETE" }))).status,
+    ).toBe(200);
+    expect((await f.allocator.fetch(request(id))).status).toBe(410);
+    expect(f.tunnels.size).toBe(1);
+  });
+
+  test("healthy, degraded and unknown states reset disconnection tracking", async () => {
+    for (const status of ["healthy", "degraded", "unexpected"]) {
+      const f = fixture();
+      await f.allocator.fetch(request(crypto.randomUUID()));
+      f.setStatus(status);
+      expect(await f.allocator.cleanup(later())).toEqual({
+        reclaimed: 0,
+        failed: 0,
+      });
+      f.setStatus("down");
+      await f.allocator.cleanup(later() + 1000);
+      expect(await f.allocator.cleanup(later() + 2000)).toEqual({
+        reclaimed: 0,
+        failed: 0,
+      });
+      expect(f.tunnels.size).toBe(1);
+    }
+  });
+
+  test("legacy records receive a full grace period and authenticated reconnect resets it", async () => {
+    const f = fixture();
+    const id = crypto.randomUUID();
+    await f.allocator.fetch(request(id));
+    const db =
+      await f.storage.get<Record<string, { disconnectedSince?: number }>>(
+        "installations",
+      );
+    delete db![id].disconnectedSince;
+    await f.storage.put("installations", db);
+    expect(await f.restart().cleanup(later())).toEqual({
+      reclaimed: 0,
+      failed: 0,
+    });
+    db![id].disconnectedSince = 1;
+    await f.storage.put("installations", db);
+    await f.restart().fetch(request(id, { enrollment: "" }));
+    expect(await f.allocator.cleanup(Date.now())).toEqual({
+      reclaimed: 0,
+      failed: 0,
+    });
+  });
+
+  test("status API failures never trigger deletion", async () => {
+    const f = fixture();
+    await f.allocator.fetch(request(crypto.randomUUID()));
+    f.failStatus(true);
+    expect(await f.allocator.cleanup(later())).toEqual({
+      reclaimed: 0,
+      failed: 1,
+    });
+    expect(f.calls.some((c) => c.startsWith("DELETE"))).toBe(false);
+    expect(f.tunnels.size).toBe(1);
+  });
+
+  test("a failing installation does not prevent cleanup of other installations", async () => {
+    const f = fixture();
+    await f.allocator.fetch(request(crypto.randomUUID()));
+    await f.allocator.fetch(request(crypto.randomUUID()));
+    const failedTunnel = [...f.tunnels.keys()][0];
+    f.failStatus(failedTunnel);
+    expect(await f.allocator.cleanup(later())).toEqual({
+      reclaimed: 1,
+      failed: 1,
+    });
+    expect([...f.tunnels.keys()]).toEqual([failedTunnel]);
+    expect(f.records.size).toBe(1);
+  });
+
+  test("partial cleanup retains capacity and resumes after allocator restart", async () => {
+    const f = fixture("1");
+    const id = crypto.randomUUID();
+    await f.allocator.fetch(request(id));
+    f.failDnsDelete();
+    expect(await f.allocator.cleanup(later())).toEqual({
+      reclaimed: 0,
+      failed: 1,
+    });
+    expect(f.tunnels.size).toBe(0);
+    expect(f.records.size).toBe(1);
+    expect((await f.allocator.fetch(request(crypto.randomUUID()))).status).toBe(
+      409,
+    );
+    expect((await f.allocator.fetch(request(id))).status).toBe(409);
+    expect(await f.restart().cleanup(later())).toEqual({
+      reclaimed: 1,
+      failed: 0,
+    });
+    expect(f.records.size).toBe(0);
+    expect(
+      (await f.restart().fetch(request(id, { enrollment: "" }))).status,
+    ).toBe(200);
+  });
+
+  test("recovers lost deletion responses when Cloudflare returns soft-deleted tunnels", async () => {
+    const f = fixture();
+    await f.allocator.fetch(request(crypto.randomUUID()));
+    f.loseDelete();
+    expect(await f.allocator.cleanup(later())).toEqual({
+      reclaimed: 0,
+      failed: 1,
+    });
+    expect(f.records.size).toBe(1);
+    expect(await f.restart().cleanup(later())).toEqual({
+      reclaimed: 1,
+      failed: 0,
+    });
+    expect(f.records.size).toBe(0);
+    expect(
+      f.calls.filter(
+        (c) => c.startsWith("DELETE") && c.includes("/cfd_tunnel/"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("cleanup and simultaneous enrollments share the capacity queue", async () => {
+    const f = fixture("1");
+    await f.allocator.fetch(request(crypto.randomUUID()));
+    const [summary, first, second] = await Promise.all([
+      f.allocator.cleanup(later()),
+      f.allocator.fetch(request(crypto.randomUUID())),
+      f.allocator.fetch(request(crypto.randomUUID())),
+    ]);
+    expect(summary).toEqual({ reclaimed: 1, failed: 0 });
+    expect([first.status, second.status]).toEqual([200, 409]);
+    expect(f.tunnels.size).toBe(1);
+    expect(f.records.size).toBe(1);
+  });
+
+  test("cleans up interrupted provisioning even when the create response was lost", async () => {
+    const f = fixture();
+    f.loseCreate();
+    expect((await f.allocator.fetch(request(crypto.randomUUID()))).status).toBe(
+      502,
+    );
+    expect(await f.restart().cleanup(later())).toEqual({
+      reclaimed: 1,
+      failed: 0,
+    });
+    expect(f.tunnels.size).toBe(0);
+  });
+
+  test("does not force-disconnect a connector that reconnects during cleanup", async () => {
+    const f = fixture();
+    await f.allocator.fetch(request(crypto.randomUUID()));
+    f.reconnectOnDelete();
+    expect(await f.allocator.cleanup(later())).toEqual({
+      reclaimed: 0,
+      failed: 1,
+    });
+    expect(f.tunnels.size).toBe(1);
+    expect(f.records.size).toBe(1);
+    expect(
+      f.calls.some((c) => c.startsWith("PATCH") || c.endsWith("/connections")),
+    ).toBe(false);
+    f.setStatus("healthy");
+    expect(await f.restart().cleanup(later())).toEqual({
+      reclaimed: 0,
+      failed: 0,
+    });
+  });
+
+  test("scheduled cleanup uses the singleton binding and has no public route", async () => {
+    let called = false;
+    const env = {
+      TUNNEL_ALLOCATOR: {
+        idFromName(name: string) {
+          expect(name).toBe("installations-v1");
+          return "singleton";
+        },
+        get(id: string) {
+          expect(id).toBe("singleton");
+          return {
+            async fetch(request: Request) {
+              expect(new URL(request.url).pathname).toBe("/internal/cleanup");
+              expect(request.method).toBe("POST");
+              called = true;
+              return Response.json({ reclaimed: 0, failed: 0 });
+            },
+          };
+        },
+      },
+    } as unknown as TunnelEnv;
+    await cleanupTunnelAllocations(env);
+    expect(called).toBe(true);
+    called = false;
+    expect(
+      await routeTunnelAllocation(
+        new Request("https://public/internal/cleanup", { method: "POST" }),
+        env,
+      ),
+    ).toBeNull();
+    expect(called).toBe(false);
+    const f = fixture();
+    const response = await f.allocator.fetch(
+      new Request("https://allocator/v1/tunnels/internal/cleanup", {
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(f.calls).toHaveLength(0);
   });
 });

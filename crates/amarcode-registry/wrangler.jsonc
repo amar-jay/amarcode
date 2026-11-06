@@ -5,6 +5,7 @@
   "compatibility_date": "2026-08-11",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "triggers": { "crons": ["0 0 * * *"] },
   "durable_objects": {
     "bindings": [
       { "name": "TUNNEL_ALLOCATOR", "class_name": "TunnelAllocator" },

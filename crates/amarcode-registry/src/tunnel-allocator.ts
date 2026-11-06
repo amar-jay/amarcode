@@ -12,7 +12,14 @@ type Installation = {
   credentialHash: string;
   hostname: string;
   port: number;
-  status: "provisioning" | "ready" | "deleting" | "deleted";
+  status:
+    | "provisioning"
+    | "ready"
+    | "reclaiming"
+    | "reclaimed"
+    | "deleting"
+    | "deleted";
+  disconnectedSince?: number;
   tunnelId?: string;
   dnsId?: string;
   dnsReadyAfter?: number;
@@ -22,6 +29,8 @@ export interface AllocationStorage {
   get<T>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
 }
+export const TUNNEL_IDLE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+const CLEANUP_PATH = "/internal/cleanup";
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SECRET = /^[a-f0-9]{64}$/;
@@ -97,6 +106,92 @@ export class Allocator {
     this.queue = next.then(() => undefined);
     return next;
   }
+  // Share the same queue as enrollment/removal so capacity and cleanup cannot race.
+  cleanup(now = Date.now()) {
+    const next = this.queue.then(() => this.sweep(now));
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  private async sweep(now: number) {
+    const summary = { reclaimed: 0, failed: 0 };
+    if (
+      !this.env.TUNNEL_CF_API_TOKEN ||
+      !this.env.TUNNEL_CF_ACCOUNT_ID ||
+      !this.env.TUNNEL_CF_ZONE_ID
+    )
+      throw new Error("Named tunnels are not configured");
+    const db = (await this.storage.get<Database>("installations")) ?? {};
+    const account = `/accounts/${this.env.TUNNEL_CF_ACCOUNT_ID}/cfd_tunnel`;
+    for (const [id, record] of Object.entries(db)) {
+      if (["deleted", "deleting", "reclaimed"].includes(record.status))
+        continue;
+      try {
+        if (!record.tunnelId) {
+          const tunnels = await this.api<{ id: string; name: string }[]>(
+            `${account}?name=amarcode-${id}&is_deleted=false`,
+          );
+          record.tunnelId = tunnels.find(
+            (t) => t.name === `amarcode-${id}`,
+          )?.id;
+        }
+        const tunnel = record.tunnelId
+          ? await this.api<{ status: string; deleted_at?: string | null }>(
+              `${account}/${record.tunnelId}`,
+              "GET",
+              undefined,
+              true,
+            )
+          : undefined;
+        // Unknown/degraded status is never evidence of disconnection.
+        if (
+          tunnel &&
+          !tunnel.deleted_at &&
+          tunnel.status !== "down" &&
+          tunnel.status !== "inactive"
+        ) {
+          delete record.disconnectedSince;
+          if (record.status === "reclaiming") record.status = "ready";
+          await this.storage.put("installations", db);
+          continue;
+        }
+        record.disconnectedSince ??= now;
+        await this.storage.put("installations", db);
+        if (now - record.disconnectedSince < TUNNEL_IDLE_GRACE_MS) continue;
+        record.status = "reclaiming";
+        await this.storage.put("installations", db);
+        // Do not force-disconnect or rotate credentials here. Cloudflare refuses
+        // ordinary tunnel deletion if a connector raced us and reconnected.
+        if (record.tunnelId && !tunnel?.deleted_at)
+          await this.api(`${account}/${record.tunnelId}`, "DELETE");
+        await this.removeDns(record);
+        delete record.tunnelId;
+        delete record.dnsId;
+        delete record.dnsReadyAfter;
+        delete record.disconnectedSince;
+        record.status = "reclaimed";
+        await this.storage.put("installations", db);
+        summary.reclaimed++;
+      } catch {
+        // Preserve capacity and retry partial deletions on the next daily run.
+        summary.failed++;
+      }
+    }
+    return summary;
+  }
+
+  private async removeDns(record: Installation) {
+    const dns = `/zones/${this.env.TUNNEL_CF_ZONE_ID}/dns_records`;
+    const records = await this.api<{ id: string; content: string }[]>(
+      `${dns}?type=CNAME&name=${encodeURIComponent(record.hostname)}`,
+    );
+    for (const entry of records) {
+      if (entry.content !== `${record.tunnelId}.cfargotunnel.com`)
+        throw new Error("DNS ownership mismatch");
+      await this.api(`${dns}/${entry.id}`, "DELETE");
+    }
+  }
+
   private async api<T>(
     path: string,
     method = "GET",
@@ -183,22 +278,27 @@ export class Allocator {
         return reply({ error: "Invalid listener port." }, 400);
       port = Number(body.port);
     }
-    if (!record) {
+    if (
+      !record ||
+      (record.status === "reclaimed" && request.method === "PUT")
+    ) {
       if (request.method === "DELETE")
         return reply({ error: "Installation not found." }, 404);
       const capacity = Number(env.TUNNEL_CAPACITY ?? "5");
       if (!Number.isInteger(capacity) || capacity < 1)
         return reply({ error: "Invalid capacity configuration." }, 503);
       if (
-        Object.values(db).filter((r) => r.status !== "deleted").length >=
-        capacity
+        Object.values(db).filter(
+          (r) => !["deleted", "reclaimed"].includes(r.status),
+        ).length >= capacity
       )
         return reply({ error: "Installation capacity reached." }, 409);
       record = db[id] = {
         credentialHash,
-        hostname: `m-${id}.${domain}`,
+        hostname: record?.hostname ?? `m-${id}.${domain}`,
         port: port!,
         status: "provisioning",
+        disconnectedSince: Date.now(),
       };
       await this.storage.put("installations", db); // Reserve capacity BEFORE provisioning.
     }
@@ -211,11 +311,24 @@ export class Allocator {
       record.status = "provisioning";
       await this.storage.put("installations", db);
     }
+    if (request.method === "PUT" && record.status === "reclaiming")
+      return reply(
+        { error: "Tunnel cleanup is pending; retry after daily cleanup." },
+        409,
+      );
+    if (
+      request.method === "PUT" &&
+      ["ready", "provisioning"].includes(record.status)
+    ) {
+      // Authenticated reconnects receive a full grace period to start cloudflared.
+      record.disconnectedSince = Date.now();
+      await this.storage.put("installations", db);
+    }
     const account = `/accounts/${env.TUNNEL_CF_ACCOUNT_ID}/cfd_tunnel`;
     const dns = `/zones/${env.TUNNEL_CF_ZONE_ID}/dns_records`;
     const name = `amarcode-${id}`;
     // Recover a successful create whose response or storage write was lost.
-    if (!record.tunnelId && record.status !== "deleted") {
+    if (!record.tunnelId && !["deleted", "reclaimed"].includes(record.status)) {
       const existing = await this.api<{ id: string; name: string }[]>(
         `${account}?name=${name}&is_deleted=false`,
       );
@@ -226,15 +339,7 @@ export class Allocator {
       if (record.status === "deleted") return reply({ status: "deleted" });
       record.status = "deleting";
       await this.storage.put("installations", db);
-      // Discover DNS too, in case a create succeeded before its response was lost.
-      const records = await this.api<{ id: string; content: string }[]>(
-        `${dns}?type=CNAME&name=${encodeURIComponent(record.hostname)}`,
-      );
-      for (const entry of records) {
-        if (entry.content !== `${record.tunnelId}.cfargotunnel.com`)
-          throw new Error("DNS ownership mismatch");
-        await this.api(`${dns}/${entry.id}`, "DELETE");
-      }
+      await this.removeDns(record);
       if (record.tunnelId) {
         // Stop old credentials from reconnecting between disconnection and deletion.
         const secret = btoa(
@@ -319,7 +424,12 @@ export class TunnelAllocator {
   constructor(state: DurableObjectState, env: TunnelEnv) {
     this.allocator = new Allocator(state.storage, env);
   }
-  fetch(request: Request) {
+  async fetch(request: Request) {
+    // Only reachable via the Worker binding; public routes forward /v1/tunnels/ only.
+    if (new URL(request.url).pathname === CLEANUP_PATH) {
+      if (request.method !== "POST") return reply({ error: "Use POST." }, 405);
+      return reply(await this.allocator.cleanup());
+    }
     return this.allocator.fetch(request);
   }
 }
@@ -334,4 +444,20 @@ export async function routeTunnelAllocation(
   return env.TUNNEL_ALLOCATOR.get(
     env.TUNNEL_ALLOCATOR.idFromName("installations-v1"),
   ).fetch(request);
+}
+
+export async function cleanupTunnelAllocations(env: TunnelEnv): Promise<void> {
+  if (!env.TUNNEL_ALLOCATOR)
+    throw new Error("Tunnel allocator binding is missing");
+  const response = await env.TUNNEL_ALLOCATOR.get(
+    env.TUNNEL_ALLOCATOR.idFromName("installations-v1"),
+  ).fetch(new Request(`https://allocator${CLEANUP_PATH}`, { method: "POST" }));
+  if (!response.ok) throw new Error("Tunnel cleanup failed");
+  const summary = (await response.json()) as {
+    reclaimed: number;
+    failed: number;
+  };
+  console.log("Tunnel cleanup", summary);
+  if (summary.failed)
+    throw new Error("Some tunnel cleanups failed; retained for retry");
 }

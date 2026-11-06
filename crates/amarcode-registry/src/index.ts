@@ -1,4 +1,8 @@
-import { routeTunnelAllocation, type TunnelEnv } from "./tunnel-allocator";
+import {
+  cleanupTunnelAllocations,
+  routeTunnelAllocation,
+  type TunnelEnv,
+} from "./tunnel-allocator";
 export { TunnelAllocator } from "./tunnel-allocator";
 import installer from "../assets/install.sh" with { type: "text" };
 
@@ -332,6 +336,9 @@ export async function handleRequest(
 }
 
 export default {
+  async scheduled(_controller, env) {
+    await cleanupTunnelAllocations(env);
+  },
   fetch(request, env) {
     return handleRequest(request, env);
   },
