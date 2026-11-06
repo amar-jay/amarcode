@@ -34,6 +34,10 @@ use crate::{
     provider::{self, Completion, ModelLimits, ModelTurn},
 };
 
+// Fixed per-turn limits; configuration cannot override these.
+const MAX_TOOL_ROUNDS: usize = 1_000;
+const MAX_TOOL_CALLS: usize = 1_000;
+
 #[derive(Clone)]
 struct Runtime {
     config: Arc<Config>,
@@ -799,7 +803,7 @@ async fn run_agent_turn(
     let mut used_cost = 0_f64;
     let mut tool_calls = 0;
     let mut progress = ProgressTracker::default();
-    for round in 0..=settings.max_tool_rounds {
+    for round in 0..=MAX_TOOL_ROUNDS {
         if *execution_cancellation.borrow() {
             return cancelled_or_limited(
                 history,
@@ -809,7 +813,7 @@ async fn run_agent_turn(
                 &session_id,
             );
         }
-        if round == settings.max_tool_rounds {
+        if round == MAX_TOOL_ROUNDS {
             return limited_turn(
                 history,
                 StopReason::MaxTurnRequests,
@@ -993,8 +997,8 @@ async fn run_agent_turn(
         for call in &turn.tool_calls {
             // Fill every result, even on a budget stop, to avoid leaving orphan
             // tool calls in the history saved for the next user turn.
-            if tool_calls >= settings.max_tool_calls || *execution_cancellation.borrow() {
-                call_limit_reached |= tool_calls >= settings.max_tool_calls;
+            if tool_calls >= MAX_TOOL_CALLS || *execution_cancellation.borrow() {
+                call_limit_reached |= tool_calls >= MAX_TOOL_CALLS;
                 history.push(provider::tool_message(
                     call,
                     "Error: tool not executed because the turn was stopped",

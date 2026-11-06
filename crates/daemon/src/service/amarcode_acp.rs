@@ -50,13 +50,21 @@ struct ReleaseArtifact {
 struct ProviderFile {
     name: String,
     provider: ProviderConfig,
-    #[serde(default)]
+    // Deserialize these only to migrate the legacy combined file.
+    #[serde(default, skip_serializing)]
     active_profile_id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     profiles: Vec<SavedProfile>,
     // Retain adapter options (persistence, context, reliability, etc.) when editing providers.
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Daemon-owned profile selection and saved credentials, never read by ACP.
+#[derive(Debug, Deserialize, Serialize)]
+struct ProfileStore {
+    active_profile_id: String,
+    profiles: Vec<SavedProfile>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -69,7 +77,7 @@ struct SavedProfile {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 struct ProviderConfig {
     base_url: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     api_key: String,
     model: String,
     #[serde(flatten)]
@@ -113,6 +121,13 @@ impl AgentManager {
                 ..Default::default()
             }
         };
+        let profiles_path = self.amarcode_acp_profiles_path();
+        if profiles_path.exists() {
+            let bytes = fs::read(&profiles_path).map_err(|error| Error::msg(error.to_string()))?;
+            let saved: ProfileStore = serde_json::from_slice(&bytes).map_err(Error::from)?;
+            file.active_profile_id = saved.active_profile_id;
+            file.profiles = saved.profiles;
+        }
         if file.active_profile_id.is_empty() {
             if !file.provider.base_url.trim().is_empty() && !is_free(&file.provider) {
                 file.active_profile_id = uuid::Uuid::new_v4().to_string();
@@ -125,9 +140,54 @@ impl AgentManager {
                 file.active_profile_id = FREE_PROFILE.into();
                 file.provider = free_provider();
             }
-            write_private_json(&path, &file)?;
         }
+        self.save_provider_profiles(&mut file)?;
         Ok(file)
+    }
+
+    fn save_provider_profiles(&self, file: &mut ProviderFile) -> Result<()> {
+        file.name = AGENT_ID.into();
+        // Remove only obsolete options, preserving supported runtime overrides.
+        if let Some(agent) = file
+            .extra
+            .get_mut("agent")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            agent.remove("max_tool_rounds");
+            agent.remove("max_tool_calls");
+            if agent.is_empty() {
+                file.extra.remove("agent");
+            }
+        }
+        for profile in &mut file.profiles {
+            let provider = &mut profile.provider;
+            if reqwest::Url::parse(&provider.base_url)
+                .ok()
+                .is_some_and(|url| url.host_str() == Some("openrouter.ai"))
+                && provider.extra.get("reasoning") == Some(&serde_json::json!({"enabled":true}))
+            {
+                provider.extra.remove("reasoning");
+            }
+        }
+        file.provider = if file.active_profile_id == FREE_PROFILE {
+            free_provider()
+        } else {
+            file.profiles
+                .iter()
+                .find(|p| p.id == file.active_profile_id)
+                .ok_or_else(|| Error::msg("active provider profile not found"))?
+                .provider
+                .clone()
+        };
+        // Commit saved credentials first so migration cannot discard inactive profiles.
+        write_private_json_if_changed(
+            &self.amarcode_acp_profiles_path(),
+            &ProfileStore {
+                active_profile_id: file.active_profile_id.clone(),
+                profiles: file.profiles.clone(),
+            },
+        )?;
+        write_private_json_if_changed(&self.amarcode_acp_config_path(), file)
     }
 
     pub fn set_amarcode_acp_config(
@@ -256,17 +316,7 @@ impl AgentManager {
                 }
             }
         }
-        file.provider = if file.active_profile_id == FREE_PROFILE {
-            free_provider()
-        } else {
-            file.profiles
-                .iter()
-                .find(|p| p.id == file.active_profile_id)
-                .ok_or_else(|| Error::msg("active provider profile not found"))?
-                .provider
-                .clone()
-        };
-        write_private_json(&self.amarcode_acp_config_path(), &file)?;
+        self.save_provider_profiles(&mut file)?;
         self.refresh_builtin_definition()?;
         Ok(profiles_result(&file))
     }
@@ -306,6 +356,11 @@ impl AgentManager {
                 tracing::warn!(%error, "failed updating built-in amarcode-acp; retaining installed release");
             }
         }
+    }
+
+    fn amarcode_acp_profiles_path(&self) -> PathBuf {
+        self.credentials_dir()
+            .join(format!("{AGENT_ID}.profiles.json"))
     }
 
     pub(crate) fn amarcode_acp_config_path(&self) -> PathBuf {
@@ -364,6 +419,14 @@ pub(crate) fn config_file_is_ready(path: &Path) -> bool {
     read_provider_file(path)
         .map(|file| config_result(file.provider).configured)
         .unwrap_or(false)
+}
+
+fn write_private_json_if_changed(path: &Path, value: &impl Serialize) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(value).map_err(Error::from)?;
+    if path.exists() && fs::read(path).map_err(|error| Error::msg(error.to_string()))? == bytes {
+        return Ok(());
+    }
+    write_private_json(path, value)
 }
 
 fn write_private_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -651,7 +714,7 @@ mod tests {
                 "name":AGENT_ID,
                 "provider":{"base_url":"https://legacy.example/v1","model":"legacy",
                     "api_key":"legacy-key","reasoning":{"enabled":false}},
-                "agent":{"max_tool_rounds":8}
+                "agent":{"max_tool_rounds":8,"max_tool_calls":12,"max_turn_seconds":60}
             }),
         )
         .unwrap();
@@ -666,15 +729,85 @@ mod tests {
             })
             .unwrap();
         let file = read_provider_file(&path).unwrap();
-        assert_eq!(file.extra["agent"]["max_tool_rounds"], 8);
+        assert_eq!(file.name, AGENT_ID);
         assert_eq!(
-            file.profiles[0].provider.extra["reasoning"]["enabled"],
+            file.extra["agent"],
+            serde_json::json!({"max_turn_seconds":60})
+        );
+        assert!(file.profiles.is_empty());
+        let saved: ProfileStore =
+            serde_json::from_slice(&fs::read(manager.amarcode_acp_profiles_path()).unwrap())
+                .unwrap();
+        assert_eq!(
+            saved.profiles[0].provider.extra["reasoning"]["enabled"],
             false
         );
         fs::write(&path, b"invalid-json").unwrap();
         assert!(manager.amarcode_acp_config().is_err());
         assert!(manager.sync_builtin_preset().is_ok());
         assert_eq!(fs::read(&path).unwrap(), b"invalid-json");
+    }
+
+    #[test]
+    fn combined_file_migration_preserves_inactive_profiles_and_repairs_runtime_selection() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = manager(root.path());
+        let path = manager.amarcode_acp_config_path();
+        write_private_json(
+            &path,
+            &serde_json::json!({
+                "name":"openrouter-code",
+                "provider":{"base_url":FREE_URL,"model":DEFAULT_MODEL,"api_key":""},
+                "active_profile_id":FREE_PROFILE,
+                "profiles":[{
+                    "id":"saved", "name":"OpenRouter",
+                    "provider":{"base_url":"https://openrouter.ai/api/v1", "api_key":"saved-key",
+                        "model":"saved-model", "reasoning":{"enabled":true}}
+                }],
+                "agent":{"max_tool_rounds":1000,"max_tool_calls":1000},
+                "context":{"context_length":32768},
+                "persistence":{"path":"custom.sessions.json"}
+            }),
+        )
+        .unwrap();
+        let result = manager.amarcode_acp_config().unwrap();
+        assert_eq!(result.active_profile_id, FREE_PROFILE);
+        assert_eq!(result.profiles.len(), 2);
+        let runtime: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(runtime["name"], AGENT_ID);
+        for obsolete in ["profiles", "active_profile_id", "agent"] {
+            assert!(runtime.get(obsolete).is_none());
+        }
+        assert!(runtime["provider"].get("api_key").is_none());
+        assert_eq!(runtime["context"]["context_length"], 32768);
+        assert_eq!(runtime["persistence"]["path"], "custom.sessions.json");
+        let saved: ProfileStore =
+            serde_json::from_slice(&fs::read(manager.amarcode_acp_profiles_path()).unwrap())
+                .unwrap();
+        assert_eq!(saved.profiles[0].provider.api_key, "saved-key");
+        assert!(!saved.profiles[0].provider.extra.contains_key("reasoning"));
+        manager
+            .update_amarcode_acp_config(SetAmarcodeAcpConfigParams {
+                action: AcpProfileAction::Activate,
+                profile_id: Some("saved".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(active_key(&manager), "saved-key");
+        // A stale derived file after an interrupted write is repaired from saved selection.
+        write_private_json(&path, &runtime).unwrap();
+        let reopened = super::tests::manager(root.path());
+        assert_eq!(
+            reopened.amarcode_acp_config().unwrap().active_profile_id,
+            "saved"
+        );
+        assert_eq!(active_key(&reopened), "saved-key");
+        let before = fs::read(&path).unwrap();
+        let profiles_path = manager.amarcode_acp_profiles_path();
+        fs::write(&profiles_path, b"invalid-json").unwrap();
+        assert!(manager.amarcode_acp_config().is_err());
+        assert_eq!(fs::read(&profiles_path).unwrap(), b"invalid-json");
+        assert_eq!(fs::read(&path).unwrap(), before);
     }
 
     #[test]
@@ -733,13 +866,17 @@ mod tests {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mode = manager
-                    .amarcode_acp_config_path()
-                    .metadata()
-                    .expect("config metadata")
-                    .permissions()
-                    .mode();
-                assert_eq!(mode & 0o077, 0);
+                for path in [
+                    manager.amarcode_acp_config_path(),
+                    manager.amarcode_acp_profiles_path(),
+                ] {
+                    let mode = path
+                        .metadata()
+                        .expect("config metadata")
+                        .permissions()
+                        .mode();
+                    assert_eq!(mode & 0o077, 0);
+                }
             }
 
             let cleared = manager

@@ -12,7 +12,7 @@ amarcode-acp --config /path/to/amarcode-acp.json
 
 `--config` is required.
 
-Configuration:
+Minimal standalone configuration:
 
 ```json
 {
@@ -20,35 +20,26 @@ Configuration:
   "provider": {
     "base_url": "https://api.openai.com/v1",
     "api_key": "sk-...",
-    "model": "gpt-4.1",
-    "reasoning": { "enabled": true }
-  },
-  "persistence": {
-    "enabled": true,
-    "ttl_seconds": 86400,
-    "path": "amarcode-acp.sessions.json"
-  },
-  "agent": {
-    "max_tool_rounds": 30,
-    "max_tool_calls": 120,
-    "max_turn_seconds": 900,
-    "repeated_tool_limit": 3
-  },
-  "reliability": {
-    "connect_timeout_seconds": 10,
-    "request_timeout_seconds": 180,
-    "stream_idle_timeout_seconds": 45,
-    "max_retries": 3,
-    "retry_base_ms": 250,
-    "retry_max_ms": 10000
-  },
-  "context": {
-    "max_tool_result_bytes": 16384,
-    "max_workspace_bytes": 24576,
-    "summary_tokens": 1024
+    "model": "gpt-4.1"
   }
 }
 ```
+
+The desktop manages this runtime file automatically. Saved providers and the
+active profile ID live separately in `credentials/amarcode-acp.profiles.json`,
+owned by the daemon. The daemon migrates older combined files while preserving
+saved credentials, then derives the selected `provider` in `amarcode-acp.json`.
+The built-in adapter uses the stable name `amarcode-acp`.
+
+Optional `persistence`, `agent`, `reliability`, and `context` blocks override
+runtime defaults; they do not need to be present. Persistence defaults to enabled,
+a 24-hour TTL, and a session store beside the config. Agent defaults are a
+900-second turn budget and a repeated-result limit of 3. Provider-specific
+`reasoning` is optional; OpenRouter enables it by default.
+
+Each user turn has fixed limits of 1,000 tool rounds and 1,000 tool calls.
+These limits cannot be overridden by configuration; legacy `agent.max_tool_rounds`
+and `agent.max_tool_calls` fields are ignored.
 
 `name` is the stable identifier advertised to Amarcode. It must contain only
 lowercase ASCII letters, digits, `.`, `_`, or `-`. The display title is derived
@@ -56,9 +47,9 @@ by splitting the name on `.`, `_`, and `-`, then capitalizing each word; for
 example, `local_qwen-coder.v2` is displayed as `Local Qwen Coder V2`. This lets
 several configured `amarcode-acp` instances advertise distinct identities.
 
-Leave `base_url` unset to use the built-in service. The desktop selects that
-default; do not copy a service URL into this file. Dictation does not use this
-provider block.
+The desktop selects Amarcode Free by default and writes its service URL and
+default model into the runtime file. Standalone configurations require
+`provider.base_url` and `provider.model`. Dictation does not use this provider block.
 
 `provider.baseUrl` and `provider.apiKey` are also accepted for compatibility
 with camelCase configuration producers. Keep this file private because it

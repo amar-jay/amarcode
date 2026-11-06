@@ -23,6 +23,13 @@ Use the start command printed by the installer; it works in your current termina
 
 ## Start and connect
 
+Public remote access uses a persistent named hostname. First-time registration
+is automatic; no enrollment code or environment variable is needed. Your private
+installation identity is saved on this machine; later starts reuse the same
+hostname. The operator must
+configure and deploy the named-tunnel allocator before first enrollment.
+
+
 ```sh
 amarcoded --remote
 ```
@@ -33,9 +40,12 @@ To start with a project folder selected:
 amarcoded --remote /path/to/project
 ```
 
-Copy the Remote URL (short link on `updates.amarcode.amarjay.com`) and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, paste both, and select **Verify and apply**.
+Copy the Remote URL (a stable `wss://a7c42e19.amarjay.com/rpc` address) and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, paste both, and select **Verify and apply**.
 
-Leave this command running. Ctrl+C stops the daemon. If you start it again and the URL changes, update the connection settings.
+Leave this command running. Ctrl+C stops the daemon. Starting it again reuses the same URL. Offline machines retain their allocation for a seven-day inactivity grace period.
+The Worker checks daily and then reclaims disconnected tunnels to free capacity.
+Preserving the local identity lets the same machine recover its hostname without
+manual registration, provided capacity is available.
 
 See [connect from the desktop](/docs/remote/connect/).
 
@@ -60,7 +70,7 @@ Copy the URL and token. Detach with **Ctrl+B**, then **D**. Come back with:
 tmux attach-session -t amarcode
 ```
 
-`tmux` survives a closed terminal. It does not survive stopping the container or rebooting the machine. If the daemon exits, start it again and copy the new URL.
+`tmux` survives a closed terminal. It does not survive stopping the container or rebooting the machine. If the daemon exits, start it again to reconnect using the same URL.
 
 ## Use a service
 
@@ -83,3 +93,20 @@ amarcoded --remote --no-tunnel
 ```
 
 The listener is `127.0.0.1:43721`. Reach it through your own path, then connect with its URL and token.
+
+
+## Remove a named allocation
+
+Stop the connector and run:
+
+```sh
+amarcoded tunnel --rm
+```
+
+This revokes the connector, removes its public DNS record, and frees installation
+capacity. The old hostname is never assigned to another installation. Run this
+before purging local installation data. Keep `named-installation.json` private
+and preserve it across normal restarts and daemon upgrades.
+
+Public remote access uses named tunnels exclusively. The private loopback mode
+above does not require allocator enrollment.

@@ -1,6 +1,6 @@
 [package]
 name = "amarcode-daemon"
-version = "0.9.6"
+version = "0.9.12"
 description = "Background service for Amarcode"
 edition = "2021"
 
@@ -16,7 +16,6 @@ path = "src/bin/test-client-cli.rs"
 agent-client-protocol = "2"
 amarcode-protocol = { path = "../protocol" }
 base64 = "0.22"
-brotli = "8"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"

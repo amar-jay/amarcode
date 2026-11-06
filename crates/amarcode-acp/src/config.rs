@@ -61,11 +61,7 @@ impl Config {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if self.agent.max_tool_rounds == 0
-            || self.agent.max_tool_calls == 0
-            || self.agent.max_turn_seconds == 0
-            || self.agent.repeated_tool_limit < 2
-        {
+        if self.agent.max_turn_seconds == 0 || self.agent.repeated_tool_limit < 2 {
             return Err(
                 "agent limits must be positive; repeated_tool_limit must be at least 2".into(),
             );
@@ -116,8 +112,6 @@ impl Config {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct AgentConfig {
-    pub max_tool_rounds: usize,
-    pub max_tool_calls: usize,
     pub max_turn_seconds: u64,
     pub repeated_tool_limit: usize,
     /// Enforced between requests only when the provider reports USD cost.
@@ -127,8 +121,6 @@ pub struct AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            max_tool_rounds: 30,
-            max_tool_calls: 120,
             max_turn_seconds: 900,
             repeated_tool_limit: 3,
             max_cost_usd: None,
@@ -293,20 +285,19 @@ mod tests {
     fn old_configs_receive_defaults_and_partial_overrides_work() {
         let default = config(json!({}));
         assert!(default.validate().is_ok());
-        assert_eq!(default.agent.max_tool_rounds, 30);
+        assert_eq!(default.agent.max_turn_seconds, 900);
         let custom = config(
-            json!({"agent":{"max_tool_rounds":8},"reliability":{"max_retries":0},"context":{"context_length":8192}}),
+            json!({"agent":{"max_turn_seconds":60},"reliability":{"max_retries":0},"context":{"context_length":8192}}),
         );
         assert!(custom.validate().is_ok());
-        assert_eq!(custom.agent.max_tool_rounds, 8);
-        assert_eq!(custom.agent.max_tool_calls, 120);
+        assert_eq!(custom.agent.max_turn_seconds, 60);
         assert_eq!(custom.reliability.max_retries, 0);
     }
 
     #[test]
     fn invalid_limits_are_rejected_before_transport_starts() {
         for options in [
-            json!({"agent":{"max_tool_rounds":0}}),
+            json!({"agent":{"max_turn_seconds":0}}),
             json!({"agent":{"repeated_tool_limit":1}}),
             json!({"agent":{"max_cost_usd":-1}}),
             json!({"reliability":{"max_retries":11}}),

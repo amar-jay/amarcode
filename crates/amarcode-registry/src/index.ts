@@ -1,7 +1,12 @@
+import {
+  cleanupTunnelAllocations,
+  routeTunnelAllocation,
+  type TunnelEnv,
+} from "./tunnel-allocator";
+export { TunnelAllocator } from "./tunnel-allocator";
 import installer from "../assets/install.sh" with { type: "text" };
-import { resolveRemoteLinkResponse } from "./remote-link";
 
-export interface Env {
+export interface Env extends TunnelEnv {
   DAEMON_ARTIFACTS: R2Bucket;
   GITHUB_TOKEN: string;
 }
@@ -294,8 +299,8 @@ export async function handleRequest(
       : json({ status: "ok", service: "amarcode-registry" });
   }
 
-  const remoteLink = resolveRemoteLinkResponse(request, url.pathname);
-  if (remoteLink) return remoteLink;
+  const allocation = await routeTunnelAllocation(request, env);
+  if (allocation) return allocation;
 
   if (request.method !== "GET" && request.method !== "HEAD") {
     return json({ error: "method not allowed" }, 405, { allow: "GET, HEAD" });
@@ -331,6 +336,9 @@ export async function handleRequest(
 }
 
 export default {
+  async scheduled(_controller, env) {
+    await cleanupTunnelAllocations(env);
+  },
   fetch(request, env) {
     return handleRequest(request, env);
   },
