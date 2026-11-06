@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
 import {
   Allocator,
   TUNNEL_IDLE_GRACE_MS,
@@ -23,7 +23,7 @@ function fixture(capacity = "5") {
     TUNNEL_CF_API_TOKEN: "account-secret",
     TUNNEL_CF_ACCOUNT_ID: "account",
     TUNNEL_CF_ZONE_ID: "zone",
-    TUNNEL_DOMAIN: "example.com",
+    TUNNEL_DOMAIN: "amarcode.example.com",
     TUNNEL_CAPACITY: capacity,
   };
   const tunnels = new Map<string, { id: string; name: string }>();
@@ -238,7 +238,9 @@ describe("persistent tunnel allocation", () => {
       tunnel_token: string;
       dns_ready_after: number;
     };
-    expect(assignment.url).toBe(`wss://m-${id}.example.com/rpc`);
+    expect(assignment.url).toMatch(
+      /^wss:\/\/[a-f0-9]{8}\.amarcode\.example\.com\/rpc$/,
+    );
     expect(assignment.tunnel_token).toBe("connector-token");
     expect(assignment.dns_ready_after).toBeGreaterThan(Date.now());
     expect(assignment.dns_ready_after).toBeLessThanOrEqual(Date.now() + 15_000);
@@ -248,6 +250,39 @@ describe("persistent tunnel allocation", () => {
     expect(f.tunnels.size).toBe(1);
     expect(f.records.size).toBe(1);
   });
+  test("short names cannot reuse a retired installation hostname", async () => {
+    const f = fixture();
+    const id = crypto.randomUUID();
+    const first = (await (await f.allocator.fetch(request(id))).json()) as {
+      hostname: string;
+    };
+    await f.allocator.fetch(request(id, { method: "DELETE" }));
+    const bytes = new Uint8Array(
+      first.hostname
+        .slice(0, 8)
+        .match(/../g)!
+        .map((byte) => parseInt(byte, 16)),
+    );
+    const random = spyOn(crypto, "getRandomValues");
+    random.mockImplementation(((array: Uint8Array) => {
+      array.set(bytes);
+      return array;
+    }) as typeof crypto.getRandomValues);
+    try {
+      expect(
+        (await f.allocator.fetch(request(crypto.randomUUID()))).status,
+      ).toBe(503);
+      expect(f.tunnels.size).toBe(0);
+    } finally {
+      random.mockRestore();
+    }
+    const next = await f.allocator.fetch(request(crypto.randomUUID()));
+    expect(next.status).toBe(200);
+    expect(((await next.json()) as { hostname: string }).hostname).not.toBe(
+      first.hostname,
+    );
+  });
+
   test("listener port changes keep the installation hostname and update ingress", async () => {
     const f = fixture();
     const id = crypto.randomUUID();

@@ -40,7 +40,7 @@ To start with a project folder selected:
 amarcoded --remote /path/to/project
 ```
 
-Copy the Remote URL (a stable `wss://m-<id>.<operator-domain>/rpc` address) and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, paste both, and select **Verify and apply**.
+Copy the Remote URL (a stable `wss://a7c42e19.amarcode.amarjay.com/rpc` address) and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, paste both, and select **Verify and apply**.
 
 Leave this command running. Ctrl+C stops the daemon. Starting it again reuses the same URL. Offline machines retain their allocation for a seven-day inactivity grace period.
 The Worker checks daily and then reclaims disconnected tunnels to free capacity.

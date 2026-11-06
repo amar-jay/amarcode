@@ -145,6 +145,16 @@ async fn allocate(port: u16) -> Result<Assignment> {
 fn validate_assignment(value: &Assignment, identity: &Identity, port: u16) -> Result<()> {
     let url =
         reqwest::Url::parse(&value.url).map_err(|_| Error::msg("Invalid allocated tunnel URL"))?;
+    let short_hostname = value
+        .hostname
+        .strip_suffix(".amarcode.amarjay.com")
+        .is_some_and(|label| {
+            label.len() == 8
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        });
+    let legacy_hostname = value.hostname.starts_with(&format!("m-{}.", identity.id));
     if value.installation_id != identity.id
         || value.port != port
         || url.scheme() != "wss"
@@ -155,7 +165,7 @@ fn validate_assignment(value: &Assignment, identity: &Identity, port: u16) -> Re
         || !url.username().is_empty()
         || url.password().is_some()
         || url.port().is_some()
-        || !value.hostname.starts_with(&format!("m-{}.", identity.id))
+        || !(short_hostname || legacy_hostname)
         || value.tunnel_token.is_empty()
         || value.tunnel_token.len() > 8192
     {
@@ -398,6 +408,19 @@ mod tests {
             tunnel_token: "connector-secret".into(),
         };
         assert!(validate_assignment(&assignment, &identity, 43721).is_ok());
+        assignment.hostname = "a7c42e19.amarcode.amarjay.com".into();
+        assignment.url = format!("wss://{}/rpc", assignment.hostname);
+        assert!(validate_assignment(&assignment, &identity, 43721).is_ok());
+        for invalid in [
+            "a7c42e19.evil.example",
+            "a7c42e19.amarcode.amarjay.com.evil.example",
+            "a7c42e1.amarcode.amarjay.com",
+        ] {
+            assignment.hostname = invalid.into();
+            assignment.url = format!("wss://{invalid}/rpc");
+            assert!(validate_assignment(&assignment, &identity, 43721).is_err());
+        }
+        assignment.hostname = "a7c42e19.amarcode.amarjay.com".into();
         assignment.url = "wss://unrelated.example/rpc".into();
         assert!(validate_assignment(&assignment, &identity, 43721).is_err());
         assignment.url = format!("wss://{}/rpc?token=bad", assignment.hostname);

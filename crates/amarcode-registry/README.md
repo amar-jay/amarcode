@@ -193,7 +193,7 @@ Configure these on the existing Worker before enabling named tunnels:
 | `TUNNEL_CF_API_TOKEN` | Scoped Cloudflare API token with Tunnel Write on the account and DNS Write on the selected zone |
 | `TUNNEL_CF_ACCOUNT_ID` | Account holding the tunnels and DNS zone |
 | `TUNNEL_CF_ZONE_ID` | DNS zone for machine hostnames |
-| `TUNNEL_DOMAIN` | Parent domain, such as `example.com`, producing `m-<installation-id>.example.com` |
+| `TUNNEL_DOMAIN` | Parent domain; production uses `amarcode.amarjay.com`, producing `<8-hex-characters>.amarcode.amarjay.com` |
 | `TUNNEL_CAPACITY` | Positive integer, default `5` in Wrangler configuration |
 
 Use a Worker secret for the API token. Other settings may be
@@ -202,9 +202,12 @@ TUNNEL_CF_API_TOKEN` from this directory, and repeat for the required settings.
 Never put credentials in source control. Deploy with the checked-in Durable
 Object binding and `tunnel-allocator-v1` SQLite migration.
 
-Use the zone apex as `TUNNEL_DOMAIN` when relying on its ordinary wildcard TLS
-certificate. A nested parent domain needs certificate coverage at the machine
-hostname level. DNS records are proxied CNAMEs targeting each installation's own
+Production needs an edge certificate covering `*.amarcode.amarjay.com` before
+deploying this configuration. Ordinary Universal SSL for `amarjay.com` does not
+cover this nested domain. Short names are random eight-character hex labels,
+checked against all retained installations and tombstones. Existing allocations
+keep their saved hostname, including during recovery. New allocations use the
+configured parent domain. DNS records are proxied CNAMEs targeting each installation's own
 `<tunnel-id>.cfargotunnel.com`. No unrelated installations share tunnel tokens.
 The allocator does not proxy application traffic or receive daemon access tokens.
 

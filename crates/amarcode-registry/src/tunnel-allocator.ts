@@ -30,6 +30,18 @@ export interface AllocationStorage {
 }
 export const TUNNEL_IDLE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const CLEANUP_PATH = "/internal/cleanup";
+function newHostname(db: Database, domain: string): string {
+  const reserved = new Set(Object.values(db).map((record) => record.hostname));
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const label = Array.from(
+      crypto.getRandomValues(new Uint8Array(4)),
+      (byte) => byte.toString(16).padStart(2, "0"),
+    ).join("");
+    const hostname = `${label}.${domain}`;
+    if (!reserved.has(hostname)) return hostname;
+  }
+  throw new AllocationError(503, "Cannot allocate a unique hostname; retry.");
+}
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SECRET = /^[a-f0-9]{64}$/;
@@ -237,7 +249,7 @@ export class Allocator {
     )
       return reply({ error: "Named tunnels are not configured." }, 503);
     const domain = env.TUNNEL_DOMAIN;
-    // One-label machine names keep compatibility with ordinary zone TLS certificates.
+    // Machine names add one label; nested parent domains need matching edge certificates.
     if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(domain))
       return reply({ error: "Invalid tunnel domain configuration." }, 503);
     const url = new URL(request.url);
@@ -288,7 +300,7 @@ export class Allocator {
         return reply({ error: "Installation capacity reached." }, 409);
       record = db[id] = {
         credentialHash,
-        hostname: record?.hostname ?? `m-${id}.${domain}`,
+        hostname: record?.hostname ?? newHostname(db, domain),
         port: port!,
         status: "provisioning",
         disconnectedSince: Date.now(),
