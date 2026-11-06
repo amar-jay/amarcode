@@ -972,96 +972,80 @@ fn transcript_does_not_retry_auth_errors_or_execute_truncated_tool_calls() {
 }
 
 #[test]
-fn transcript_stops_on_round_call_and_repetition_limits_and_keeps_balanced_history() {
-    for (options, rounds, expected_text) in [
-        (
-            json!({"agent":{"max_tool_rounds":2}}),
-            2,
-            "tool-round limit",
-        ),
-        (json!({"agent":{"max_tool_calls":1}}), 1, "tool-call limit"),
-        (
-            json!({"agent":{"repeated_tool_limit":3}}),
-            3,
-            "no new results",
-        ),
-    ] {
-        let Some(listener) = provider_listener() else {
-            return;
+fn transcript_ignores_legacy_tool_limits_and_stops_on_repetition_with_balanced_history() {
+    let options = json!({"agent":{"max_tool_rounds":1,"max_tool_calls":1,"repeated_tool_limit":3}});
+    let rounds = 3;
+    let expected_text = "no new results";
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        for index in 0..rounds {
+            let (mut socket, _) = accept_chat(&listener).unwrap();
+            provider_request(&mut socket);
+            let calls = vec![command_call(
+                &format!("call-{index}"),
+                "cat",
+                &["missing-file"],
+            )];
+            write_sse(&mut socket, &tool_sse(calls));
+        }
+    });
+    let mut agent = AgentProcess::spawn_with_options(&format!("http://{address}/v1"), options);
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "bounded work");
+    let mut messages = Vec::new();
+    let response = loop {
+        let message = agent.output.recv_timeout(TIMEOUT).expect("ACP message");
+        if message.get("id").and_then(Value::as_u64) == Some(3) {
+            break message;
+        }
+        let method = message.get("method").and_then(Value::as_str);
+        if method == Some("session/update") || message.get("id").is_none() {
+            messages.push(message);
+            continue;
+        }
+        let id = message["id"].clone();
+        let result = match method {
+            Some("session/request_permission") => {
+                assert_two_permission_options(&message);
+                json!({ "outcome": { "outcome": "selected", "optionId": "auto-approve" } })
+            }
+            Some("terminal/create") => json!({ "terminalId": "terminal-1" }),
+            Some("terminal/wait_for_exit") => json!({ "exitCode": 1 }),
+            Some("terminal/output") => json!({
+                "output": "cat: missing-file: no such file\n",
+                "truncated": false,
+                "exitStatus": { "exitCode": 1 }
+            }),
+            Some("terminal/release") => json!({}),
+            other => panic!("unexpected agent request: {other:?}"),
         };
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            for index in 0..rounds {
-                let (mut socket, _) = accept_chat(&listener).unwrap();
-                provider_request(&mut socket);
-                let mut calls = vec![command_call(
-                    &format!("call-{index}"),
-                    "cat",
-                    &["missing-file"],
-                )];
-                if rounds == 1 {
-                    let mut second = command_call("second", "cat", &["other-file"]);
-                    second["index"] = json!(1);
-                    calls.push(second);
-                }
-                write_sse(&mut socket, &tool_sse(calls));
-            }
-        });
-        let mut agent = AgentProcess::spawn_with_options(&format!("http://{address}/v1"), options);
-        initialize(&mut agent);
-        let session = new_session(&mut agent, 2, "/workspace");
-        prompt(&mut agent, 3, &session, "bounded work");
-        let mut messages = Vec::new();
-        let response = loop {
-            let message = agent.output.recv_timeout(TIMEOUT).expect("ACP message");
-            if message.get("id").and_then(Value::as_u64) == Some(3) {
-                break message;
-            }
-            let method = message.get("method").and_then(Value::as_str);
-            if method == Some("session/update") || message.get("id").is_none() {
-                messages.push(message);
-                continue;
-            }
-            let id = message["id"].clone();
-            let result = match method {
-                Some("session/request_permission") => {
-                    assert_two_permission_options(&message);
-                    json!({ "outcome": { "outcome": "selected", "optionId": "auto-approve" } })
-                }
-                Some("terminal/create") => json!({ "terminalId": "terminal-1" }),
-                Some("terminal/wait_for_exit") => json!({ "exitCode": 1 }),
-                Some("terminal/output") => json!({
-                    "output": "cat: missing-file: no such file\n",
-                    "truncated": false,
-                    "exitStatus": { "exitCode": 1 }
-                }),
-                Some("terminal/release") => json!({}),
-                other => panic!("unexpected agent request: {other:?}"),
-            };
-            agent.send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
-        };
-        assert_eq!(
-            response["result"]["stopReason"], "max_turn_requests",
-            "{response}"
-        );
-        assert!(messages
-            .iter()
-            .any(|message| message["params"]["update"]["content"]["text"]
-                .as_str()
-                .is_some_and(|text| text.contains(expected_text))));
-        let saved: Value =
-            serde_json::from_slice(&fs::read(&agent.session_store_path).unwrap()).unwrap();
-        let history = saved["sessions"][0]["history"].as_array().unwrap();
-        assert_eq!(history[0]["content"], "bounded work");
-        for (index, message) in history.iter().enumerate() {
-            if let Some(calls) = message["tool_calls"].as_array() {
-                for (offset, call) in calls.iter().enumerate() {
-                    assert_eq!(history[index + offset + 1]["tool_call_id"], call["id"]);
-                }
+        agent.send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+    };
+    assert_eq!(
+        response["result"]["stopReason"], "max_turn_requests",
+        "{response}"
+    );
+    assert!(messages
+        .iter()
+        .any(|message| message["params"]["update"]["content"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains(expected_text))));
+    let saved: Value =
+        serde_json::from_slice(&fs::read(&agent.session_store_path).unwrap()).unwrap();
+    let history = saved["sessions"][0]["history"].as_array().unwrap();
+    assert_eq!(history[0]["content"], "bounded work");
+    for (index, message) in history.iter().enumerate() {
+        if let Some(calls) = message["tool_calls"].as_array() {
+            for (offset, call) in calls.iter().enumerate() {
+                assert_eq!(history[index + offset + 1]["tool_call_id"], call["id"]);
             }
         }
-        server.join().unwrap();
     }
+    server.join().unwrap();
 }
 
 #[test]
