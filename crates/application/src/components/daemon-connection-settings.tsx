@@ -136,8 +136,7 @@ export function DaemonConnectionSettings() {
             </label>
             <p className="text-xs text-muted-foreground">
               Project folders, Git commands, and agents run on the remote host.{" "}
-              Paste the Remote URL printed by the daemon (short link or
-              wss://…/rpc).
+              Paste the named Remote URL printed by the daemon (wss://…/rpc).
             </p>
           </>
         )}

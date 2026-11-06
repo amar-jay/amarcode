@@ -322,3 +322,12 @@ describe("handleRequest", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
   });
 });
+
+test("retired short-link routes return 404 without redirects", async () => {
+  const response = await handleRequest(
+    new Request("https://updates.example/r/GyQA-EVveF74fZ_kozRKWpNRSuFFluJLSL8ZFamnLl78dZiGMGgH"),
+    environment({}),
+  );
+  expect(response.status).toBe(404);
+  expect(response.headers.get("location")).toBeNull();
+});

@@ -73,6 +73,8 @@ enum LifecycleCommand {
     },
     /// Open Cloudflare access to an already-running authenticated instance.
     Tunnel,
+    /// Permanently revoke the named tunnel and reset this installation identity.
+    TunnelRemove,
     /// Enable/disable authenticated access to this instance; restart to apply.
     Access {
         #[arg(value_enum)]
@@ -227,6 +229,13 @@ async fn async_main(
         }
         return;
     }
+    if command == LifecycleCommand::TunnelRemove {
+        if let Err(error) = amarcode_daemon::remote::remove_named().await {
+            eprintln!("amarcoded tunnel-remove: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if command == LifecycleCommand::Tunnel {
         let outcome = match Config::get(DaemonTransport::Tcp) {
             Ok(config) => {
@@ -310,6 +319,7 @@ fn run_lifecycle_command(command: LifecycleCommand) -> amarcode_daemon::Result<(
         LifecycleCommand::Run
         | LifecycleCommand::Ssh { .. }
         | LifecycleCommand::Tunnel
+        | LifecycleCommand::TunnelRemove
         | LifecycleCommand::UpdateSupervisor { .. }
         | LifecycleCommand::Bootstrap { .. } => {
             unreachable!("run is handled by the async entrypoint")

@@ -16,7 +16,6 @@ path = "src/bin/test-client-cli.rs"
 agent-client-protocol = "2"
 amarcode-protocol = { path = "../protocol" }
 base64 = "0.22"
-brotli = "8"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"

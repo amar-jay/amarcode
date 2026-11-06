@@ -5,6 +5,20 @@
   "compatibility_date": "2026-08-11",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "durable_objects": {
+    "bindings": [
+      { "name": "TUNNEL_ALLOCATOR", "class_name": "TunnelAllocator" },
+    ],
+  },
+  "migrations": [
+    { "tag": "tunnel-allocator-v1", "new_sqlite_classes": ["TunnelAllocator"] },
+  ],
+  "vars": {
+    "TUNNEL_CAPACITY": "5",
+    "TUNNEL_CF_ACCOUNT_ID": "e1558dbdffc3158233b76ff148601171",
+    "TUNNEL_CF_ZONE_ID": "32d36ac968d68fa97a307c9a54e2ee7a",
+    "TUNNEL_DOMAIN": "amarjay.com",
+  },
   "rules": [{ "type": "Text", "globs": ["**/*.sh"], "fallthrough": true }],
   "secrets": {
     "required": ["GITHUB_TOKEN"],

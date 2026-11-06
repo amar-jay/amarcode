@@ -1,17 +1,10 @@
-//! Foreground remote mode, with optional Cloudflare or private loopback access.
+//! Foreground remote mode, with named Cloudflare access or private loopback access.
 use crate::{App, Config, Error, Result};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::Deserialize;
-use std::{env, fs, io::Write, path::PathBuf, process::Stdio};
-use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    process::Command,
-};
+use std::{env, fs, path::PathBuf};
 
-/// Public short-link origin served by the updates Cloudflare Worker.
-pub const REMOTE_LINK_ORIGIN: &str = "https://updates.amarcode.amarjay.com";
-const REMOTE_LINK_PREFIX: &str = "/r/";
-const REMOTE_LINK_MAX_PAYLOAD: usize = 512;
+/// Updates Worker origin that allocates persistent named tunnels.
+pub const REMOTE_ALLOCATOR_ORIGIN: &str = "https://updates.amarcode.amarjay.com";
 
 #[derive(Default, Deserialize)]
 pub struct Setup {
@@ -301,97 +294,6 @@ pub fn validate(config: &Config, no_tunnel: bool) -> Result<()> {
     Ok(())
 }
 
-fn tunnel_url(line: &str) -> Option<String> {
-    line.split_whitespace().find_map(|word| {
-        let word = word.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '|' | '(' | ')'));
-        let url = reqwest::Url::parse(word).ok()?;
-        (url.scheme() == "https"
-            && url.host_str()?.ends_with(".trycloudflare.com")
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.path() == "/"
-            && url.query().is_none()
-            && url.fragment().is_none())
-        .then(|| format!("wss://{}/rpc", url.host_str().unwrap()))
-    })
-}
-
-fn tunnel_target(url: &str) -> Option<&str> {
-    let parsed = reqwest::Url::parse(url).ok()?;
-    let label = parsed.host_str()?.strip_suffix(".trycloudflare.com")?;
-    (parsed.as_str() == url
-        && url.len() <= 256
-        && parsed.scheme() == "wss"
-        && !label.is_empty()
-        && label.len() <= 63
-        && !label.starts_with('-')
-        && !label.ends_with('-')
-        && label
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        && parsed.port().is_none()
-        && parsed.username().is_empty()
-        && parsed.password().is_none()
-        && parsed.path() == "/rpc"
-        && parsed.query().is_none()
-        && parsed.fragment().is_none())
-    .then_some(url)
-}
-
-/// Brotli-compress then base64url-encode a Cloudflare quick-tunnel WebSocket URL.
-pub fn encode_remote_link(wss_url: &str) -> Option<String> {
-    tunnel_target(wss_url)?;
-    let mut compressed = Vec::new();
-    {
-        let mut writer = brotli::CompressorWriter::new(&mut compressed, 4096, 5, 22);
-        writer.write_all(wss_url.as_bytes()).ok()?;
-        writer.flush().ok()?;
-    }
-    Some(URL_SAFE_NO_PAD.encode(compressed))
-}
-
-/// Decode a short-link payload back to a validated `wss://*.trycloudflare.com/rpc` URL.
-pub fn decode_remote_link(payload: &str) -> Option<String> {
-    if payload.is_empty()
-        || payload.len() > REMOTE_LINK_MAX_PAYLOAD
-        || !payload
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-    {
-        return None;
-    }
-    let compressed = URL_SAFE_NO_PAD.decode(payload).ok()?;
-    let mut plain = Vec::new();
-    let mut reader =
-        std::io::Read::take(brotli::Decompressor::new(compressed.as_slice(), 4096), 257);
-    std::io::copy(&mut reader, &mut plain).ok()?;
-    if plain.len() > 256 {
-        return None;
-    }
-    let url = String::from_utf8(plain).ok()?;
-    tunnel_target(&url).map(str::to_owned)
-}
-
-/// Resolve branded links locally; no credentials or network requests are needed.
-pub fn resolve_remote_url(value: &str) -> Result<String> {
-    let value = value.trim();
-    let prefix = format!("{REMOTE_LINK_ORIGIN}{REMOTE_LINK_PREFIX}");
-    match value.strip_prefix(&prefix) {
-        Some(payload) => {
-            decode_remote_link(payload).ok_or_else(|| Error::msg("Invalid remote link"))
-        }
-        None => Ok(value.to_owned()),
-    }
-}
-
-/// Brand the tunnel URL as `https://updates…/r/<payload>` for sharing and paste-to-connect.
-pub fn short_remote_url(wss_url: &str) -> Option<String> {
-    Some(format!(
-        "{REMOTE_LINK_ORIGIN}{REMOTE_LINK_PREFIX}{}",
-        encode_remote_link(wss_url)?
-    ))
-}
-
 pub async fn run(config: Config, setup: Setup, no_tunnel: bool) -> Result<()> {
     validate(&config, no_tunnel)?;
     crate::rpc::websocket::load_token(
@@ -407,6 +309,11 @@ pub async fn run(config: Config, setup: Setup, no_tunnel: bool) -> Result<()> {
         return server.await.map_err(|e| Error::msg(e.to_string()))?;
     }
     finish(config, setup, no_tunnel, server).await
+}
+
+/// Permanently revoke this installation's named tunnel and reset local enrollment.
+pub async fn remove_named() -> Result<()> {
+    crate::remote_named::remove().await
 }
 
 async fn finish(
@@ -430,112 +337,24 @@ async fn finish(
         .as_deref()
         .ok_or_else(|| Error::msg("Remote access token file is not configured"))?;
     let token = crate::rpc::websocket::load_token(token_path)?;
-    let address = config.daemon_addr.clone();
     let Some(cloudflared) = cloudflared else {
         announce_loopback(&config)?;
         return server
             .await
             .map_err(|error| Error::msg(error.to_string()))?;
     };
-    let mut tunnel = match Command::new(cloudflared)
-        .args(["tunnel", "--url", &format!("http://{address}")])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-    {
-        Ok(tunnel) => tunnel,
-        Err(error) => {
+    if let Ok(mode) = std::env::var("AMARCODE_TUNNEL_MODE") {
+        if mode != "named" {
             server.abort();
-            let _ = server.await;
-            return Err(Error::msg(format!("Cannot start cloudflared: {error}")));
+            return Err(Error::msg(
+                "Only named Cloudflare tunnels are supported; unset AMARCODE_TUNNEL_MODE",
+            ));
         }
-    };
-    let stderr = tunnel.stderr.take().expect("piped cloudflared stderr");
-    let output = tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        let mut announced = false;
-        while let Ok(Some(line)) = lines.next_line().await {
-            if !announced {
-                if let Some(url) = tunnel_url(&line) {
-                    let share = short_remote_url(&url).unwrap_or(url);
-                    println!("Remote URL: {share}\nAccess token: {token}");
-                    announced = true;
-                }
-            }
-        }
-    });
-    let outcome = tokio::select! {
-        biased;
-        _ = crate::rpc::server::shutdown_signal() => Ok(()),
-        result = &mut server => result.unwrap_or_else(|e| Err(Error::msg(e.to_string()))),
-        status = tunnel.wait() => Err(Error::msg(match status {
-            Ok(status) => format!("Cloudflare tunnel exited ({status}); remote daemon stopped. Run amarcode-daemon --remote to reconnect"),
-            Err(error) => format!("Cloudflare tunnel failed: {error}"),
-        })),
-    };
-    // Never leave a public tunnel pointing to another process after this daemon exits.
-    let _ = tunnel.kill().await;
+    }
+    let result = crate::remote_named::run(&config, cloudflared, &token, &mut server).await;
     if !server.is_finished() {
         server.abort();
         let _ = server.await;
     }
-    output.abort();
-    let _ = output.await;
-    outcome
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn formats_only_cloudflare_quick_tunnel_origins() {
-        assert_eq!(
-            tunnel_url("| https://test-project.trycloudflare.com |"),
-            Some("wss://test-project.trycloudflare.com/rpc".into())
-        );
-        for line in [
-            "https://evil.example",
-            "https://trycloudflare.com.evil.example",
-            "http://x.trycloudflare.com",
-            "https://x.trycloudflare.com/path",
-            "https://user@x.trycloudflare.com",
-        ] {
-            assert_eq!(tunnel_url(line), None);
-        }
-    }
-
-    #[test]
-    fn short_links_round_trip_only_cloudflare_tunnel_targets() {
-        let target = "wss://test-project.trycloudflare.com/rpc";
-        let short = short_remote_url(target).unwrap();
-        assert!(short.starts_with(&format!("{REMOTE_LINK_ORIGIN}{REMOTE_LINK_PREFIX}")));
-        let payload = short
-            .strip_prefix(&format!("{REMOTE_LINK_ORIGIN}{REMOTE_LINK_PREFIX}"))
-            .unwrap();
-        assert_eq!(decode_remote_link(payload).as_deref(), Some(target));
-        assert!(encode_remote_link("wss://evil.example/rpc").is_none());
-        assert!(decode_remote_link("!!!!").is_none());
-        assert!(decode_remote_link("").is_none());
-        // Fixture produced by Node's Brotli encoder, not this Rust implementation.
-        assert_eq!(
-            decode_remote_link("GyQA-EVveF74fZ_kozRKWpNRSuFFluJLSL8ZFamnLl78dZiGMGgH").as_deref(),
-            Some("wss://my-remote.trycloudflare.com/rpc")
-        );
-        for target in [
-            "a".repeat(100_000),
-            "wss://nested.host.trycloudflare.com/rpc".into(),
-            "wss://host.trycloudflare.com:8443/rpc".into(),
-            "wss://user:secret@host.trycloudflare.com/rpc".into(),
-            "wss://host.trycloudflare.com/rpc?secret=x".into(),
-        ] {
-            let mut compressed = Vec::new();
-            {
-                let mut writer = brotli::CompressorWriter::new(&mut compressed, 4096, 5, 22);
-                writer.write_all(target.as_bytes()).unwrap();
-            }
-            assert!(decode_remote_link(&URL_SAFE_NO_PAD.encode(compressed)).is_none());
-        }
-    }
+    result
 }

@@ -96,3 +96,19 @@ bun run protocol:check
 See the [development guide](../landing/src/content/docs/docs/contributing/development.md)
 and [protocol guide](../landing/src/content/docs/docs/contributing/protocol.md)
 for contributor documentation.
+
+
+## Persistent public tunnel enrollment
+
+`amarcoded --remote` and `amarcoded tunnel` use a named tunnel by default. The
+registry Worker must be configured with Cloudflare account/zone settings and an
+enrollment code; see [allocator setup](../amarcode-registry/README.md#persistent-named-tunnels).
+Provide `AMARCODE_TUNNEL_ENROLLMENT_CODE` for first enrollment. The private
+`named-installation.json` identity lives beside `remote.json`, outside the data
+child directory. Preserve it across restarts; no heartbeat lease is required.
+Each installation has a distinct tunnel and stable hostname. Initial capacity is
+five installations, including offline ones.
+
+Run `amarcoded tunnel-remove` before purging an installation to revoke its named
+allocation and free capacity. Public access uses named tunnels exclusively.
+`--no-tunnel` continues to bypass public provisioning.
