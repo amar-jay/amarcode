@@ -1,7 +1,14 @@
 //! Persistent installation enrollment. Cloudflare account credentials never leave the Worker.
 use crate::{Config, Error, Result};
 use serde::{Deserialize, Serialize};
-use std::{fs, io::Write, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    fs,
+    io::{IsTerminal, Write},
+    path::PathBuf,
+    process::Stdio,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
@@ -184,6 +191,73 @@ pub async fn remove() -> Result<()> {
     Ok(())
 }
 
+struct TunnelProgress {
+    message: Arc<Mutex<Option<String>>>,
+    animation: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl TunnelProgress {
+    fn new() -> Self {
+        let message = Arc::new(Mutex::new(None::<String>));
+        let animation =
+            if std::io::stderr().is_terminal() && std::env::var("TERM").as_deref() != Ok("dumb") {
+                let state = Arc::clone(&message);
+                Some(tokio::spawn(async move {
+                    let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                    let started = tokio::time::Instant::now();
+                    let mut frame = 0;
+                    let mut ticks = tokio::time::interval(Duration::from_millis(90));
+                    loop {
+                        ticks.tick().await;
+                        // Rendering and clearing share this lock: no frame can be
+                        // written after finish(), including on errors or Ctrl+C.
+                        let current = state.lock().unwrap();
+                        if let Some(text) = current.as_ref() {
+                            let mut stderr = std::io::stderr().lock();
+                            let _ = write!(
+                                stderr,
+                                "\r\x1b[2K{} {} ({:.0}s)",
+                                frames[frame % frames.len()],
+                                text,
+                                started.elapsed().as_secs_f64()
+                            );
+                            let _ = stderr.flush();
+                            frame += 1;
+                        }
+                    }
+                }))
+            } else {
+                None
+            };
+        Self { message, animation }
+    }
+
+    fn set(&self, text: &str) {
+        if self.animation.is_some() {
+            *self.message.lock().unwrap() = Some(text.into());
+        } else {
+            eprintln!("{text}");
+        }
+    }
+
+    fn finish(&self) {
+        let mut current = self.message.lock().unwrap();
+        *current = None;
+        if let Some(animation) = &self.animation {
+            animation.abort();
+            let mut stderr = std::io::stderr().lock();
+            let _ = write!(stderr, "\r\x1b[2K");
+            let _ = stderr.flush();
+        }
+    }
+}
+
+impl Drop for TunnelProgress {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
 pub async fn run(
     config: &Config,
     cloudflared: &std::path::Path,
@@ -197,13 +271,10 @@ pub async fn run(
     if address.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
         return Err(Error::msg("Named tunnels require a 127.0.0.1 listener"));
     }
-    eprintln!("Requesting named tunnel allocation...");
-    let started = tokio::time::Instant::now();
+    let progress = TunnelProgress::new();
+    progress.set("Reserving your tunnel…");
     let assignment = allocate(address.port()).await?;
-    eprintln!(
-        "Named tunnel assigned in {:.1}s; starting connector...",
-        started.elapsed().as_secs_f64()
-    );
+    progress.set("Connecting to Cloudflare…");
     // Token never appears in process arguments or logs. File is deleted on exit.
     let mut token_file = tempfile::NamedTempFile::new_in(root()?)?;
     token_file.write_all(assignment.tunnel_token.as_bytes())?;
@@ -236,10 +307,7 @@ pub async fn run(
             .saturating_sub(now)
             .min(30_000);
         if grace_ms > 0 {
-            eprintln!(
-                "Waiting {:.1}s for new DNS records to propagate...",
-                grace_ms as f64 / 1000.0
-            );
+            progress.set("Waiting for DNS to propagate…");
             tokio::time::sleep(Duration::from_millis(grace_ms)).await;
         }
 
@@ -248,7 +316,7 @@ pub async fn run(
             .timeout(Duration::from_secs(5))
             .build()
             .map_err(|_| Error::msg("Cannot initialize tunnel HTTP client"))?;
-        eprintln!("Checking public TLS and daemon connectivity...");
+        progress.set("Checking secure connection…");
         let endpoint = format!("https://{}/web/session", assignment.hostname);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
         loop {
@@ -306,6 +374,7 @@ pub async fn run(
                                 v["web_api_version"] == 1 && v["ticket"].as_str().is_some()
                             })
                         {
+                            progress.finish();
                             println!("Remote URL: {}\nAccess token: {token}", assignment.url);
                             return Ok::<(), Error>(());
                         }
