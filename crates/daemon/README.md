@@ -70,7 +70,8 @@ Local desktop connections use loopback TCP with one JSON RPC object per line.
 For remote connections, use the URL and token from
 [remote setup](../landing/src/content/docs/docs/remote/setup.md).
 [`amarcoded ssh`](../landing/src/content/docs/docs/remote/ssh.md) opens a shell
-on that machine. It is not a desktop connection type.
+on that machine. It is not a desktop connection type. For OpenSSH or another
+SSH client, see [standard SSH clients and port forwarding](../landing/src/content/docs/docs/remote/ssh.md#use-a-standard-ssh-client).
 
 ## Checks and debugging
 

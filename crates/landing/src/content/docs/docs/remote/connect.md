@@ -33,6 +33,9 @@ Folders on your desktop are not available there.
 
 In your own terminal, run `amarcoded ssh` and enter the same URL and token. See [remote terminal](/docs/remote/ssh/).
 
+To use OpenSSH or another SSH client instead, see
+[standard SSH clients](/docs/remote/ssh/#use-a-standard-ssh-client).
+
 ## Use this computer again
 
 Save editor drafts. Choose **Local daemon** and **Verify and apply**.
