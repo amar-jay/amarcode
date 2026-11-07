@@ -15,7 +15,6 @@ pub mod logging;
 pub mod protocol;
 pub mod registry;
 pub mod remote;
-mod remote_named;
 pub mod rpc;
 pub mod service;
 pub mod service_control;

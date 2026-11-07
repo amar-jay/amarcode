@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! Loopback CLI lifecycle coverage. Named connector lifecycle is covered in remote_named.
+//! Loopback CLI lifecycle coverage. Named connector lifecycle is covered in remote::tests.
 use std::{
     fs,
     io::Read,
