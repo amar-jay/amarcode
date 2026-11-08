@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION } from "@/generated/protocol";
+import { MAX_RPC_MESSAGE_BYTES, PROTOCOL_VERSION } from "@/generated/protocol";
 import type { EditorEvent, Health } from "@/types";
 
 let target = "";
@@ -107,7 +107,10 @@ async function socket() {
   });
 }
 function lines(data: unknown): unknown[] {
-  if (typeof data !== "string" || data.length > 48 * 1024 * 1024)
+  if (
+    typeof data !== "string" ||
+    new TextEncoder().encode(data).byteLength > MAX_RPC_MESSAGE_BYTES
+  )
     throw new Error("Invalid daemon response.");
   return data
     .split("\n")

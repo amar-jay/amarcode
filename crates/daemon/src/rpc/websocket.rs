@@ -25,8 +25,6 @@ use crate::{protocol::rpc::RpcResponse, App, Config, Error, Result};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(15);
-// Accommodates 25 MiB audio attachments after base64 encoding, plus RPC metadata.
-const MAX_MESSAGE_BYTES: usize = 36 * 1024 * 1024;
 pub(super) const MAX_CONNECTIONS: usize = 64;
 
 pub struct Listener {
@@ -118,8 +116,8 @@ impl State {
             return Ok(());
         };
         let config = WebSocketConfig::default()
-            .max_message_size(Some(MAX_MESSAGE_BYTES))
-            .max_frame_size(Some(MAX_MESSAGE_BYTES));
+            .max_message_size(Some(amarcode_protocol::MAX_RPC_MESSAGE_BYTES))
+            .max_frame_size(Some(amarcode_protocol::MAX_RPC_MESSAGE_BYTES));
         let mut terminal = false;
         #[allow(clippy::result_large_err)]
         // The handshake callback's HTTP response type is fixed by Tungstenite.

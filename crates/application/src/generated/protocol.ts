@@ -2,6 +2,7 @@
 // Do not edit by hand.
 
 export const PROTOCOL_VERSION = 13 as const;
+export const MAX_RPC_MESSAGE_BYTES = 67108864 as const;
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 

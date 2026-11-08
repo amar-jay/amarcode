@@ -37,8 +37,8 @@ impl Connection {
                 .map_err(|_| "Invalid access token")?,
         );
         let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
-            .max_message_size(Some(36 * 1024 * 1024))
-            .max_frame_size(Some(36 * 1024 * 1024));
+            .max_message_size(Some(amarcode_protocol::MAX_RPC_MESSAGE_BYTES))
+            .max_frame_size(Some(amarcode_protocol::MAX_RPC_MESSAGE_BYTES));
         // The workspace enables multiple rustls crypto backends; choose one
         // explicitly rather than relying on process-global provider inference.
         let roots = tokio_rustls::rustls::RootCertStore {

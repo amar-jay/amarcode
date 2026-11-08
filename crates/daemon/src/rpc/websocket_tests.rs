@@ -225,6 +225,50 @@ fn origin_allowlist_and_rpc_path_are_enforced() {
     assert!(!check("ws://localhost/other", None, &[]));
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_queue_accepts_four_maximum_size_images() {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let (mut client, app, server, directory) = start(true).await;
+    let chat = app
+        .chats
+        .create(directory.path().to_string_lossy(), None)
+        .unwrap();
+    app.store
+        .pause_prompt_queue(&chat.id, Some("Waiting for test"))
+        .unwrap();
+    let mut image = vec![0; 10 * 1024 * 1024];
+    image[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+    let attachment = json!({"mime_type":"image/png", "data":STANDARD.encode(image)});
+    let value = json!({"method":"enqueue_prompt", "params":{
+        "request_id":"maximum-images",
+        "prompt":{"chat_id":chat.id,"agent_id":"agent","text":"x".repeat(1024 * 1024),
+            "attachments":vec![attachment; 4]}
+    }});
+    let encoded = value.to_string();
+    assert!(encoded.len() > 36 * 1024 * 1024);
+    assert!(encoded.len() < amarcode_protocol::MAX_RPC_MESSAGE_BYTES);
+    client.send(Message::Text(encoded.into())).await.unwrap();
+    // Parsing and persisting this 54 MiB payload takes longer in debug builds.
+    let frame = timeout(Duration::from_secs(30), client.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let response: Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+    assert_eq!(
+        response["result"]["items"][0]["attachment_count"], 4,
+        "{response}"
+    );
+    assert_eq!(response["result"]["items"][0]["status"], "queued");
+    client.close(None).await.unwrap();
+    timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
 #[test]
 fn tls_configuration_is_required_only_for_remote_binds() {
     let mut config = test_config();
