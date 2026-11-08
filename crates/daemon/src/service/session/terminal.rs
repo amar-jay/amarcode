@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     io::Read,
     path::Path,
-    process::{Child, Command, ExitStatus, Stdio},
+    process::{Child, ExitStatus, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, Weak,
@@ -37,6 +37,7 @@ pub(super) struct TerminalManager {
 }
 
 struct TerminalProcess {
+    workload: crate::workload::Workload,
     terminal_id: String,
     run_id: String,
     session_id: String,
@@ -283,7 +284,8 @@ impl TerminalManager {
         }
         self.consume_permission(run_id, chat_id, agent_id, &root, &cwd, &request)?;
 
-        let mut command = Command::new(&request.command);
+        let workload = crate::workload::Workload::new();
+        let mut command = workload.command(&request.command);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -324,6 +326,7 @@ impl TerminalManager {
 
         let terminal_id = uuid::Uuid::new_v4().to_string();
         let process = Arc::new(TerminalProcess {
+            workload,
             terminal_id: terminal_id.clone(),
             run_id: run_id.to_owned(),
             session_id: request.session_id.to_string(),
@@ -658,6 +661,7 @@ fn join_readers(process: &TerminalProcess) {
 }
 
 fn kill_process(process: &TerminalProcess) -> Result<()> {
+    process.workload.terminate();
     let mut child = process
         .child
         .lock()

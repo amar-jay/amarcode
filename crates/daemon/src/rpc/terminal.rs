@@ -1,7 +1,7 @@
 //! One authenticated WebSocket owns one interactive PTY; disconnect closes it.
 use crate::{Error, Result};
 use futures_util::{SinkExt, StreamExt};
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, PtySize};
 use serde::Deserialize;
 use std::{
     io::{Read, Write},
@@ -39,6 +39,7 @@ fn size(cols: u16, rows: u16) -> Result<PtySize> {
     })
 }
 struct ChildGuard {
+    workload: crate::workload::Workload,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     stop: Arc<AtomicBool>,
     master: Box<dyn portable_pty::MasterPty + Send>,
@@ -46,6 +47,7 @@ struct ChildGuard {
 impl Drop for ChildGuard {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        self.workload.terminate();
         if self.child.try_wait().ok().flatten().is_some() {
             return;
         }
@@ -113,7 +115,8 @@ where
         .unwrap_or_else(|| "/bin/sh".into());
     #[cfg(windows)]
     let shell = std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into());
-    let mut command = CommandBuilder::new(shell);
+    let workload = crate::workload::Workload::new();
+    let mut command = workload.pty_command(shell);
     #[cfg(unix)]
     command.arg("-l");
     command.env("TERM", "xterm-256color");
@@ -143,6 +146,7 @@ where
         .map_err(|e| Error::msg(e.to_string()))?;
     drop(pair.slave);
     let mut session = ChildGuard {
+        workload,
         child,
         stop: Arc::new(AtomicBool::new(false)),
         master: pair.master,

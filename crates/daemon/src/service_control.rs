@@ -224,6 +224,12 @@ mod platform {
     pub fn install(executable: &Path, agent_path: Option<&OsStr>) -> Result<()> {
         let path = unit_path()?;
         let unit = systemd_unit(executable, agent_path)?;
+        // A sibling slice gives oomd individual workloads as victims instead
+        // of charging every agent/build to the daemon's service cgroup.
+        write_atomic(
+            &path.with_file_name("amarcode-workloads.slice"),
+            workload_slice().as_bytes(),
+        )?;
         write_atomic(&path, unit.as_bytes())?;
         checked(
             Command::new("systemctl").args(["--user", "daemon-reload"]),
@@ -246,9 +252,15 @@ mod platform {
         Ok(format!(
             "[Unit]\nDescription=Amarcode background service\nAfter=network.target\n\n\
              [Service]\nType=simple\nExecStart=\"{executable}\" run\n{path_environment}\
+             Environment=AMARCODE_WORKLOAD_ISOLATION=systemd\n\
+             MemoryAccounting=yes\nManagedOOMPreference=avoid\n\
              Restart=on-failure\nRestartSec=2\nTimeoutStopSec=15\n\n\
              [Install]\nWantedBy=default.target\n"
         ))
+    }
+
+    fn workload_slice() -> &'static str {
+        "[Unit]\nDescription=Amarcode agent and tool workloads\n\n[Slice]\nMemoryAccounting=yes\nMemoryHigh=60%\nMemoryMax=75%\nMemorySwapMax=25%\n"
     }
 
     pub fn uninstall() -> Result<()> {
@@ -266,6 +278,10 @@ mod platform {
         )?;
         fs::remove_file(&path)
             .map_err(|error| Error::msg(format!("failed to remove {}: {error}", path.display())))?;
+        let slice_path = path.with_file_name("amarcode-workloads.slice");
+        if slice_path.exists() {
+            fs::remove_file(slice_path)?;
+        }
         checked(
             Command::new("systemctl").args(["--user", "daemon-reload"]),
             "reload the systemd user manager",
@@ -390,6 +406,10 @@ mod platform {
             .unwrap();
             assert!(unit.contains("ExecStart=\"/opt/amarcode/amarcode-daemon\" run"));
             assert!(unit.contains("Environment=\"PATH=/usr/bin\""));
+            assert!(unit.contains("Environment=AMARCODE_WORKLOAD_ISOLATION=systemd"));
+            assert!(unit.contains("ManagedOOMPreference=avoid"));
+            assert!(super::workload_slice().contains("MemoryHigh=60%"));
+            assert!(super::workload_slice().contains("MemoryMax=75%"));
         }
     }
 }

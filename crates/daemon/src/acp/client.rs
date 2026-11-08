@@ -12,7 +12,7 @@ use std::{
     fmt,
     io::{BufRead, BufReader, Write},
     path::Path,
-    process::{Child, ChildStdin, Command, Stdio},
+    process::{Child, ChildStdin, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, Sender},
@@ -173,6 +173,7 @@ enum RequestDeadline {
 }
 
 pub struct AcpClient {
+    workload: crate::workload::Workload,
     stdin: Mutex<ChildStdin>,
     child: Mutex<Child>,
     next_id: AtomicU64,
@@ -192,7 +193,8 @@ impl AcpClient {
         environment: &[(String, String)],
         cwd: Option<&Path>,
     ) -> AcpResult<(Self, Receiver<AcpInbound>)> {
-        let mut process = Command::new(command);
+        let workload = crate::workload::Workload::new();
+        let mut process = workload.command(command);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -232,6 +234,7 @@ impl AcpClient {
 
         Ok((
             Self {
+                workload,
                 stdin: Mutex::new(stdin),
                 child: Mutex::new(child),
                 next_id: AtomicU64::new(1),
@@ -390,6 +393,7 @@ impl AcpClient {
 
 impl Drop for AcpClient {
     fn drop(&mut self) {
+        self.workload.terminate();
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
             let _ = child.wait();

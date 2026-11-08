@@ -51,6 +51,36 @@ foreground daemon against the same data directory.
 Logs are written to stderr and `{app_dir}/daemon.log`. Environment changes for
 an installed service must be applied to its service environment before restart.
 
+## Linux workload isolation
+
+Linux systemd installations launch each ACP agent, agent-requested terminal,
+and remote interactive shell in its own transient scope under
+`amarcode-workloads.slice`, outside `amarcode-daemon.service`. Tools launched by
+an agent inherit its scope. Stopping a workload kills its scope, including
+detached descendants; stopping the daemon stops its bound scopes as well.
+
+The installer writes a workload slice with aggregate RAM soft/hard limits of
+60%/75% of physical memory and a swap limit of 25%. Individual scopes default to
+25%/50% RAM soft/hard limits and 10% swap. Soft limits reclaim/throttle memory;
+hard limits confine an OOM to the workload cgroup. The daemon is marked as an
+OOM-avoid candidate rather than sharing the workload allocation.
+
+Set `AMARCODE_WORKLOAD_MEMORY_HIGH`, `AMARCODE_WORKLOAD_MEMORY_MAX`, and
+`AMARCODE_WORKLOAD_MEMORY_SWAP_MAX` in the daemon's service environment to tune
+individual scopes (systemd sizes such as `4G`, percentages, or `infinity`). Use a
+systemd drop-in for `amarcode-workloads.slice` to tune aggregate limits.
+Isolation requires Linux cgroup v2, a reachable systemd user manager, and
+systemd 254 or newer. Scope creation errors fail the workload launch; there is
+no automatic retry outside isolation.
+
+Installed services explicitly set `AMARCODE_WORKLOAD_ISOLATION=systemd`.
+Older registrations are recognized by their cgroup when possible; reinstall
+the service with the updated daemon to install aggregate limits too. Foreground
+daemons and non-Linux platforms retain direct process launching. Set
+`AMARCODE_WORKLOAD_ISOLATION=none` for a deliberately unmanaged development or
+test environment. This is resource isolation, not a filesystem or security
+sandbox. Already-running agents must be restarted to enter new scopes.
+
 ## Agents
 
 The daemon refreshes its agent catalog from the ACP registry at startup and
