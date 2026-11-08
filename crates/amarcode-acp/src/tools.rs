@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    io::Read,
     path::{Component, Path, PathBuf},
     sync::Mutex,
 };
@@ -246,15 +247,33 @@ fn read_workspace_file(workspace: &Path, args: &Value) -> Result<String, String>
     if !path.is_file() {
         return Err(format!("not a file or directory: {}", path.display()));
     }
-    let contents = std::fs::read(&path)
+    let file = std::fs::File::open(&path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    // Prefer UTF-8 text; fall back to a hex summary for binary files.
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("not a regular file: {}", path.display()));
+    }
+    // Read one extra byte to detect truncation without allocating the whole
+    // file, even if it grows after metadata was read.
+    let mut contents = Vec::new();
+    file.take(MAX_OUTPUT as u64 + 1)
+        .read_to_end(&mut contents)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    // A bounded read can end inside a UTF-8 character. Preserve the valid
+    // prefix rather than misclassifying that text file as binary.
     match std::str::from_utf8(&contents) {
         Ok(text) => Ok(truncate(text.to_owned())),
+        Err(error) if contents.len() > MAX_OUTPUT && error.error_len().is_none() => {
+            let text = std::str::from_utf8(&contents[..error.valid_up_to()])
+                .expect("UTF-8 error identifies a valid prefix");
+            Ok(truncate(format!("{text}\n[truncated]")))
+        }
         Err(_) => Ok(truncate(format!(
             "(binary file {}: {} bytes)",
             path.display(),
-            contents.len()
+            metadata.len()
         ))),
     }
 }
@@ -845,6 +864,46 @@ mod tests {
             read_workspace_file(&root, &json!({"operation":"read","path":"../escape"})).is_err()
         );
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn file_reads_stop_at_the_output_limit_and_preserve_split_utf8() {
+        use std::io::{Seek, SeekFrom, Write};
+
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("large.txt");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all("a".repeat(MAX_OUTPUT - 1).as_bytes())
+            .unwrap();
+        // The bounded read ends partway through this character.
+        file.write_all("€".as_bytes()).unwrap();
+        let size = 16 * 1024 * 1024;
+        file.set_len(size).unwrap();
+        file.seek(SeekFrom::End(-1)).unwrap();
+        // Reading the whole file would encounter this invalid UTF-8 byte and
+        // return a binary summary instead of the bounded text prefix.
+        file.write_all(&[0xff]).unwrap();
+        drop(file);
+        let args = json!({"operation":"read","path":"large.txt"});
+        let output = read_workspace_file(&root, &args).unwrap();
+        assert!(output.starts_with("aaaa"));
+        assert!(output.ends_with("\n[truncated]"));
+        assert!(output.len() <= MAX_OUTPUT);
+
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.write_all(&[0xff]).unwrap();
+        drop(file);
+        let output = read_workspace_file(&root, &args).unwrap();
+        assert!(output.starts_with("(binary file "));
+        assert!(output.ends_with(&format!(": {size} bytes)")));
+
+        // An incomplete character at a real EOF is still invalid UTF-8.
+        std::fs::write(&path, [0xe2, 0x82]).unwrap();
+        assert!(read_workspace_file(&root, &args)
+            .unwrap()
+            .starts_with("(binary file "));
         std::fs::remove_dir_all(root).unwrap();
     }
 
