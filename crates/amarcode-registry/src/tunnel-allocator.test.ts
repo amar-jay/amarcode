@@ -714,3 +714,134 @@ describe("daily tunnel cleanup", () => {
     expect(f.calls).toHaveLength(0);
   });
 });
+
+describe("enrollment body isolation", () => {
+  function streamed(body: ReadableStream<Uint8Array>) {
+    const base = request(crypto.randomUUID());
+    return new Request(base.url, {
+      method: "PUT",
+      headers: base.headers,
+      body,
+    });
+  }
+
+  test("unfinished bodies do not block enrollment, deletion, or cleanup", async () => {
+    const f = fixture();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const pending = f.allocator.fetch(
+      streamed(
+        new ReadableStream({
+          start(value) {
+            controller = value;
+            value.enqueue(new TextEncoder().encode("{"));
+          },
+        }),
+      ),
+    );
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        (async () => {
+          const id = crypto.randomUUID();
+          expect((await f.allocator.fetch(request(id))).status).toBe(200);
+          expect(
+            (await f.allocator.fetch(request(id, { method: "DELETE" }))).status,
+          ).toBe(200);
+          expect(await f.allocator.cleanup()).toEqual({
+            reclaimed: 0,
+            failed: 0,
+          });
+        })(),
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(
+            () => reject(new Error("Allocator queue blocked")),
+            1000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(deadline);
+      controller.close();
+      expect((await pending).status).toBe(400);
+    }
+  });
+
+  test("bounds actual streamed bytes and cancels oversized bodies", async () => {
+    const f = fixture();
+    let cancelled = false;
+    const req = streamed(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(600).fill(32));
+          controller.enqueue(new Uint8Array(600).fill(32));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+    );
+    req.headers.set("content-length", "2");
+    expect((await f.allocator.fetch(req)).status).toBe(413);
+    expect(cancelled).toBe(true);
+    expect(f.storage.values.size).toBe(0);
+    expect(f.calls).toEqual([]);
+    expect((await f.allocator.fetch(request(crypto.randomUUID()))).status).toBe(
+      200,
+    );
+  });
+
+  test("times out stalled bodies without waiting for cancellation to complete", async () => {
+    const f = fixture();
+    let cancelled = false;
+    const response = await f.allocator.fetch(
+      streamed(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+            return new Promise<void>(() => {});
+          },
+        }),
+      ),
+    );
+    expect(response.status).toBe(408);
+    expect(cancelled).toBe(true);
+    expect(f.storage.values.size).toBe(0);
+    expect(f.calls).toEqual([]);
+    expect((await f.allocator.fetch(request(crypto.randomUUID()))).status).toBe(
+      200,
+    );
+  }, 10_000);
+
+  test("rejects malformed JSON and failed uploads without reserving capacity", async () => {
+    const f = fixture();
+    expect(
+      (
+        await f.allocator.fetch(
+          streamed(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("{"));
+                controller.close();
+              },
+            }),
+          ),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await f.allocator.fetch(
+          streamed(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new Error("upload disconnected"));
+              },
+            }),
+          ),
+        )
+      ).status,
+    ).toBe(400);
+    expect(f.storage.values.size).toBe(0);
+    expect(f.calls).toEqual([]);
+  });
+});

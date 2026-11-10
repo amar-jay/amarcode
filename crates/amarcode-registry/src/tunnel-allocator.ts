@@ -88,6 +88,52 @@ class CloudflareApiError extends Error {
     super("Cloudflare API failed");
   }
 }
+// Enrollment is tiny ({port}); bound actual streamed bytes, not Content-Length.
+const ENROLLMENT_BODY_LIMIT = 1024;
+const ENROLLMENT_BODY_TIMEOUT_MS = 5_000;
+async function enrollmentBody(request: Request): Promise<unknown> {
+  if (!request.body) throw new AllocationError(400, "Invalid enrollment JSON.");
+  const reader = request.body.getReader();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      (async () => {
+        const decoder = new TextDecoder();
+        let size = 0;
+        let text = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > ENROLLMENT_BODY_LIMIT)
+            throw new AllocationError(
+              413,
+              "Enrollment body exceeds 1024 bytes.",
+            );
+          text += decoder.decode(value, { stream: true });
+        }
+        text += decoder.decode();
+        try {
+          return JSON.parse(text) as unknown;
+        } catch {
+          throw new AllocationError(400, "Invalid enrollment JSON.");
+        }
+      })(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new AllocationError(408, "Enrollment body timed out."));
+        }, ENROLLMENT_BODY_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    if (error instanceof AllocationError) throw error;
+    throw new AllocationError(400, "Could not read enrollment body.");
+  } finally {
+    clearTimeout(timer);
+    // A hostile stream's cancellation hook must not delay the response.
+    void reader.cancel().catch(() => undefined);
+  }
+}
 export class Allocator {
   private queue: Promise<unknown> = Promise.resolve();
   constructor(
@@ -96,36 +142,39 @@ export class Allocator {
     private fetcher: typeof fetch = fetch,
   ) {}
 
-  // Serialize the entire provisioning saga, including external API awaits.
+  // Read untrusted bodies outside the queue. Only state-dependent work and
+  // provisioning are serialized, so a slow upload cannot block other clients.
   fetch(request: Request): Promise<Response> {
-    const next = this.queue
-      .then(() => this.handle(request))
-      .catch((error) =>
-        reply(
-          {
-            ...(error instanceof CloudflareApiError
-              ? {
-                  upstream_status: error.upstreamStatus,
-                  upstream_codes: error.codes,
-                  operation: error.operation,
-                }
-              : {}),
-            ...(error instanceof AllocationError ||
-            error instanceof CloudflareApiError
-              ? {}
-              : {
-                  failure_type: error instanceof Error ? error.name : "unknown",
-                }),
-            error:
-              error instanceof AllocationError
-                ? error.message
-                : "Tunnel provisioning failed; retry the same installation.",
-          },
-          error instanceof AllocationError ? error.status : 502,
-        ),
-      );
-    this.queue = next.then(() => undefined);
-    return next;
+    return (async () => {
+      const body =
+        request.method === "PUT" ? await enrollmentBody(request) : undefined;
+      const next = this.queue.then(() => this.handle(request, body));
+      this.queue = next.catch(() => undefined);
+      return next;
+    })().catch((error) =>
+      reply(
+        {
+          ...(error instanceof CloudflareApiError
+            ? {
+                upstream_status: error.upstreamStatus,
+                upstream_codes: error.codes,
+                operation: error.operation,
+              }
+            : {}),
+          ...(error instanceof AllocationError ||
+          error instanceof CloudflareApiError
+            ? {}
+            : {
+                failure_type: error instanceof Error ? error.name : "unknown",
+              }),
+          error:
+            error instanceof AllocationError
+              ? error.message
+              : "Tunnel provisioning failed; retry the same installation.",
+        },
+        error instanceof AllocationError ? error.status : 502,
+      ),
+    );
   }
   // Share the same queue as enrollment/removal so capacity and cleanup cannot race.
   cleanup(now = Date.now()) {
@@ -257,7 +306,10 @@ export class Allocator {
       );
     return value.result;
   }
-  private async handle(request: Request): Promise<Response> {
+  private async handle(
+    request: Request,
+    enrollment: unknown,
+  ): Promise<Response> {
     const env = this.env;
     if (
       !env.TUNNEL_CF_API_TOKEN ||
@@ -289,9 +341,7 @@ export class Allocator {
       return reply({ error: "Invalid installation credential." }, 401);
     let port: number | undefined;
     if (request.method === "PUT") {
-      const body = (await request.json().catch(() => {
-        throw new AllocationError(400, "Invalid enrollment JSON.");
-      })) as { port?: unknown } | null;
+      const body = enrollment as { port?: unknown } | null;
       if (
         !body ||
         !Number.isInteger(body.port) ||
