@@ -29,6 +29,7 @@ const EVENT_BUS_CAPACITY: usize = 256;
 /// Top-level daemon process state.
 pub struct App {
     background: crate::shutdown::Background,
+    stop: crate::shutdown::Shutdown,
     pub config: Config,
     pub store: Arc<Store>,
     pub events: broadcast::Sender<EditorEvent>,
@@ -179,6 +180,7 @@ impl App {
         info!("application initialized");
         Ok(Self {
             background,
+            stop: crate::shutdown::Shutdown::default(),
             config,
             store,
             events,
@@ -229,7 +231,12 @@ impl App {
         Ok(())
     }
 
+    pub(crate) fn shutdown_handle(&self) -> crate::shutdown::Shutdown {
+        self.stop.clone()
+    }
+
     pub(crate) fn request_shutdown(&self) {
+        self.stop.cancel();
         if self.background.shutdown.cancel() {
             self.prompt_queue.close();
             let queue = Arc::clone(&self.prompt_queue);
@@ -283,10 +290,18 @@ impl App {
         }
         let app = Arc::new(self);
         let result = if let Some(access) = access {
-            tokio::select! {
-                result = rpc::server::run(Arc::clone(&app), listener) => result,
-                result = rpc::server::run(Arc::clone(&app), rpc::server::Listener::WebSocket(access)) => result,
-            }
+            // Both listeners share a stop signal and must finish draining before
+            // maintenance cleanup is joined. Dropping the losing future skips it.
+            let serve = |listener| async {
+                let result = rpc::server::run(Arc::clone(&app), listener).await;
+                app.request_shutdown();
+                result
+            };
+            let (local, remote) = tokio::join!(
+                serve(listener),
+                serve(rpc::server::Listener::WebSocket(access)),
+            );
+            local.and(remote)
         } else {
             rpc::server::run(Arc::clone(&app), listener).await
         };
@@ -305,6 +320,52 @@ mod tests {
         store::{AgentRun, Chat},
         App, Config,
     };
+
+    #[tokio::test]
+    async fn cooperative_stop_waits_for_background_cleanup() {
+        let root = tempfile::tempdir().unwrap();
+        let app = App::new(Config {
+            app_dir: root.path().to_owned(),
+            db_path: root.path().join("workspace.sqlite3"),
+            daemon_addr: "127.0.0.1:0".into(),
+            transport: Default::default(),
+            default_workspace_path: None,
+            acp_registry_source: None,
+            ws_token_file: None,
+            ws_tls_cert: None,
+            ws_tls_key: None,
+            ws_allowed_origins: vec![],
+        })
+        .await
+        .unwrap();
+        let cancelled = app.background.shutdown.clone();
+        let (started, worker_started) = tokio::sync::oneshot::channel();
+        let (cleaned, mut cleanup) = tokio::sync::oneshot::channel();
+        app.background.spawn("test-cleanup", move || {
+            started.send(()).unwrap();
+            while !cancelled.requested() {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            // Model cleanup that continues after cancellation was observed.
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            cleaned.send(()).unwrap();
+        });
+        worker_started.await.unwrap();
+        let stop = app.shutdown_handle();
+        let (ready, listening) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(app.run_with_ready(ready));
+        listening.await.unwrap();
+        stop.cancel();
+        tokio::time::timeout(std::time::Duration::from_secs(2), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(
+            cleanup.try_recv().is_ok(),
+            "server returned before its worker cleaned up"
+        );
+    }
 
     #[cfg(windows)]
     #[tokio::test]

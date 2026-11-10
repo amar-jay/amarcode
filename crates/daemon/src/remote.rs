@@ -186,11 +186,12 @@ pub async fn run_shared(local: Config, setup: Setup, no_tunnel: bool) -> Result<
     let listener = crate::rpc::websocket::Listener::bind(&remote).await?;
     let app = App::new(local).await?;
     let (ready, listening) = tokio::sync::oneshot::channel();
+    let stop = app.shutdown_handle();
     let server = tokio::spawn(app.run_with_access(listener, ready));
     if listening.await.is_err() {
         return server.await.map_err(|e| Error::msg(e.to_string()))?;
     }
-    finish(remote, setup, no_tunnel, server).await
+    finish(remote, setup, no_tunnel, server, Some(stop)).await
 }
 
 /// Attach Cloudflare to a live authenticated listener; never opens a database.
@@ -198,7 +199,14 @@ pub async fn tunnel(local: Config, setup: Setup) -> Result<()> {
     let remote = access_config(&local, &setup)?;
     validate(&remote, false)?;
     check_health(&remote).await?;
-    finish(remote, setup, false, tokio::spawn(std::future::pending())).await
+    finish(
+        remote,
+        setup,
+        false,
+        tokio::spawn(std::future::pending()),
+        None,
+    )
+    .await
 }
 
 async fn check_health(remote: &Config) -> Result<()> {
@@ -305,11 +313,12 @@ pub async fn run(config: Config, setup: Setup, no_tunnel: bool) -> Result<()> {
     )?;
     let app = App::new(config.clone()).await?;
     let (ready, listening) = tokio::sync::oneshot::channel();
+    let stop = app.shutdown_handle();
     let server = tokio::spawn(app.run_with_ready(ready));
     if listening.await.is_err() {
         return server.await.map_err(|e| Error::msg(e.to_string()))?;
     }
-    finish(config, setup, no_tunnel, server).await
+    finish(config, setup, no_tunnel, server, Some(stop)).await
 }
 
 async fn finish(
@@ -317,42 +326,70 @@ async fn finish(
     setup: Setup,
     no_tunnel: bool,
     mut server: tokio::task::JoinHandle<Result<()>>,
+    stop: Option<crate::shutdown::Shutdown>,
 ) -> Result<()> {
-    let cloudflared = if no_tunnel {
-        None
-    } else {
-        Some(
-            setup
-                .cloudflared
-                .as_deref()
-                .ok_or_else(|| Error::msg("Installed cloudflared is missing"))?,
-        )
-    };
-    let token_path = config
-        .ws_token_file
-        .as_deref()
-        .ok_or_else(|| Error::msg("Remote access token file is not configured"))?;
-    let token = crate::rpc::websocket::load_token(token_path)?;
-    let Some(cloudflared) = cloudflared else {
-        announce_loopback(&config)?;
-        return server
-            .await
-            .map_err(|error| Error::msg(error.to_string()))?;
-    };
-    if let Ok(mode) = std::env::var("AMARCODE_TUNNEL_MODE") {
-        if mode != "named" {
-            server.abort();
-            return Err(Error::msg(
-                "Only named Cloudflare tunnels are supported; unset AMARCODE_TUNNEL_MODE",
-            ));
+    // Every exit, including setup/token errors, must stop the server we own.
+    let result = async {
+        let cloudflared = if no_tunnel {
+            None
+        } else {
+            Some(
+                setup
+                    .cloudflared
+                    .as_deref()
+                    .ok_or_else(|| Error::msg("Installed cloudflared is missing"))?,
+            )
+        };
+        let token_path = config
+            .ws_token_file
+            .as_deref()
+            .ok_or_else(|| Error::msg("Remote access token file is not configured"))?;
+        let token = crate::rpc::websocket::load_token(token_path)?;
+        let Some(cloudflared) = cloudflared else {
+            announce_loopback(&config)?;
+            return (&mut server)
+                .await
+                .map_err(|error| Error::msg(error.to_string()))?;
+        };
+        if let Ok(mode) = std::env::var("AMARCODE_TUNNEL_MODE") {
+            if mode != "named" {
+                return Err(Error::msg(
+                    "Only named Cloudflare tunnels are supported; unset AMARCODE_TUNNEL_MODE",
+                ));
+            }
         }
+        run_named(&config, cloudflared, &token, &mut server).await
     }
-    let result = run_named(&config, cloudflared, &token, &mut server).await;
-    if !server.is_finished() {
-        server.abort();
-        let _ = server.await;
-    }
+    .await;
+    stop_server(&mut server, stop, Duration::from_secs(12)).await;
     result
+}
+
+async fn stop_server(
+    server: &mut tokio::task::JoinHandle<Result<()>>,
+    stop: Option<crate::shutdown::Shutdown>,
+    deadline: Duration,
+) {
+    if let Some(stop) = stop {
+        stop.cancel();
+        // The connector supervisor may already have consumed the server result.
+        if server.is_finished() {
+            return;
+        }
+        // Allow both the five-second RPC drain and five-second worker budget.
+        if tokio::time::timeout(deadline, &mut *server).await.is_ok() {
+            return;
+        }
+        tracing::warn!("Daemon exceeded tunnel shutdown deadline; aborting server task");
+    }
+    // Attach-only mode owns this placeholder task, never the live daemon.
+    server.abort();
+    if tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .is_err()
+    {
+        tracing::warn!("Daemon server task did not stop after abort");
+    }
 }
 
 // Persistent named-tunnel enrollment and connector lifecycle.
@@ -827,6 +864,101 @@ mod tests {
         let result = supervise_connector(child, output, async { Ok(()) }, &mut server).await;
         assert_eq!(result.unwrap_err().to_string(), "server failed");
         assert!(nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_err());
+    }
+
+    #[tokio::test]
+    async fn tunnel_setup_failure_gracefully_stops_owned_single_and_shared_servers() {
+        for shared in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let config = Config {
+                app_dir: root.path().to_owned(),
+                db_path: root.path().join("workspace.sqlite3"),
+                daemon_addr: "127.0.0.1:0".into(),
+                transport: Default::default(),
+                default_workspace_path: None,
+                acp_registry_source: None,
+                ws_token_file: None,
+                ws_tls_cert: None,
+                ws_tls_key: None,
+                ws_allowed_origins: vec![],
+            };
+            let app = App::new(config.clone()).await.unwrap();
+            let stop = app.shutdown_handle();
+            let queue = Arc::clone(&app.prompt_queue);
+            let (ready, listening) = tokio::sync::oneshot::channel();
+            let server = if shared {
+                let path = root.path().join("token");
+                fs::write(&path, "a".repeat(64)).unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+                }
+                let mut remote = config.clone();
+                remote.transport = crate::config::DaemonTransport::WebSocket;
+                remote.ws_token_file = Some(path);
+                let access = crate::rpc::websocket::Listener::bind(&remote)
+                    .await
+                    .unwrap();
+                tokio::spawn(app.run_with_access(access, ready))
+            } else {
+                tokio::spawn(app.run_with_ready(ready))
+            };
+            listening.await.unwrap();
+            let result = tokio::time::timeout(
+                Duration::from_secs(2),
+                finish(config.clone(), Setup::default(), false, server, Some(stop)),
+            )
+            .await
+            .expect("tunnel failure must finish daemon cleanup");
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                "Installed cloudflared is missing"
+            );
+            let error = queue
+                .update(crate::protocol::rpc::UpdatePromptQueueParams {
+                    chat_id: "unused".into(),
+                    action: "pause".into(),
+                    id: None,
+                    text: None,
+                })
+                .unwrap_err();
+            assert!(error.to_string().contains("shutting down"), "{error}");
+            // The server has released instance ownership, rather than leaving a
+            // detached task holding the database after an early setup error.
+            let next = App::new(config).await.unwrap();
+            next.request_shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn tunnel_shutdown_waits_for_cleanup_and_bounds_unresponsive_servers() {
+        let stop = crate::shutdown::Shutdown::default();
+        let signal = stop.clone();
+        let (cleaned, cleanup) = tokio::sync::oneshot::channel();
+        let mut server = tokio::spawn(async move {
+            signal.cancelled().await;
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            cleaned.send(()).unwrap();
+            Ok(())
+        });
+        stop_server(&mut server, Some(stop), Duration::from_secs(1)).await;
+        cleanup
+            .await
+            .expect("cleanup completed before shutdown returned");
+
+        let mut stuck = tokio::spawn(std::future::pending());
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            stop_server(
+                &mut stuck,
+                Some(crate::shutdown::Shutdown::default()),
+                Duration::from_millis(20),
+            ),
+        )
+        .await
+        .expect("fallback must be bounded");
+        assert!(stuck.is_finished());
     }
 
     #[test]

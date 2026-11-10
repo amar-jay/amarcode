@@ -95,6 +95,11 @@ prevents an unresponsive external library call from holding the process open;
 exceeded worker/client deadlines produce warnings. The independent daemon update
 supervisor retains its own lifecycle and durable job journal.
 
+Tunnel setup failures and connector exits request the same graceful shutdown.
+Shared local/remote listeners both drain before background workers are joined.
+Tunnel teardown allows twelve seconds for that cleanup before aborting the server
+task; attach-only tunnel mode does not stop the existing daemon.
+
 ## Agents
 
 The daemon loads its cached agent catalog before serving RPC and keeps a cached

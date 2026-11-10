@@ -33,12 +33,18 @@ pub async fn run(app: Arc<App>, listener: Listener) -> Result<()> {
     info!(%local, transport = ?app.config.transport, "rpc server listening");
     let mut clients = tokio::task::JoinSet::new();
     let slots = Arc::new(tokio::sync::Semaphore::new(websocket::MAX_CONNECTIONS));
+    let stop = app.shutdown_handle();
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
             _ = &mut shutdown => {
                 info!("shutdown signal received, stopping rpc server");
+                app.request_shutdown();
+                break;
+            }
+            _ = stop.cancelled() => {
+                info!("shutdown requested, stopping rpc server");
                 app.request_shutdown();
                 break;
             }

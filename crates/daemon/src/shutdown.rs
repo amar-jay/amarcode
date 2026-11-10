@@ -26,7 +26,7 @@ impl Shutdown {
             Ok(())
         }
     }
-    async fn cancelled(&self) {
+    pub(crate) async fn cancelled(&self) {
         while !self.requested() {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
