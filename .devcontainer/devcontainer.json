@@ -1,0 +1,3 @@
+{
+	"postCreateCommand": "curl -fsSL https://amarcode.amarjay.com/install.sh | bash"
+}
