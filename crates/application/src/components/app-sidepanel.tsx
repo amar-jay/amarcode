@@ -419,8 +419,8 @@ function AppSidePanel({ workspacePath }: AppSidePanelProps) {
                   ? "w-[50%] max-w-[60%]!"
                   : "w-96 max-w-[60%]!"
                 : workspaceFileTree.selectedPath
-                  ? "w-280 max-w-[80vw]!"
-                  : "w-96 max-w-[80vw]!",
+                  ? "data-[side=right]:w-160 max-w-[80vw]!"
+                  : "data-[side=right]:w-96 max-w-[80vw]!",
           )}
           showCloseButton={false}
         >
