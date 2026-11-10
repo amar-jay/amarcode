@@ -91,12 +91,11 @@ pub async fn connect(
             .parse()
             .map_err(|_| Error::msg("Invalid token"))?,
     );
-    // Reqwest and the listener enable different Rustls providers. Select one
-    // explicitly for this CLI process before Tungstenite builds its TLS client.
-    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+    let tls = amarcode_transport::client_config().map_err(Error::msg)?;
+    let connector = tokio_tungstenite::Connector::Rustls(std::sync::Arc::new(tls));
     let (mut socket, _) = tokio::time::timeout(
         std::time::Duration::from_secs(15),
-        tokio_tungstenite::connect_async(request),
+        tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector)),
     )
     .await
     .map_err(|_| Error::msg("Remote connection timed out"))?

@@ -1,0 +1,9 @@
+[package]
+name = "amarcode-transport"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls-pemfile = "2"
+webpki-roots = "1"

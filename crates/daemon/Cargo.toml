@@ -13,6 +13,7 @@ name = "daemon-test-cli"
 path = "src/bin/test-client-cli.rs"
 
 [dependencies]
+amarcode-transport = { path = "../transport" }
 agent-client-protocol = "2"
 amarcode-protocol = { path = "../protocol" }
 base64 = "0.22"

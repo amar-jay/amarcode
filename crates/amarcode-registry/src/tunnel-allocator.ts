@@ -7,7 +7,9 @@ export interface TunnelEnv {
   TUNNEL_DOMAIN?: string;
   TUNNEL_CAPACITY?: string;
 }
+type OriginTls = { server_name: string; ca_pool?: string };
 type Installation = {
+  originTls?: OriginTls;
   credentialHash: string;
   hostname: string;
   previousHostname?: string;
@@ -340,8 +342,12 @@ export class Allocator {
     if (record && record.credentialHash !== credentialHash)
       return reply({ error: "Invalid installation credential." }, 401);
     let port: number | undefined;
+    let originTls: OriginTls | undefined;
     if (request.method === "PUT") {
-      const body = enrollment as { port?: unknown } | null;
+      const body = enrollment as {
+        port?: unknown;
+        origin_tls?: unknown;
+      } | null;
       if (
         !body ||
         !Number.isInteger(body.port) ||
@@ -350,6 +356,28 @@ export class Allocator {
       )
         return reply({ error: "Invalid listener port." }, 400);
       port = Number(body.port);
+      if (body.origin_tls !== undefined) {
+        const tls = body.origin_tls as Partial<OriginTls> | null;
+        if (
+          !tls ||
+          typeof tls !== "object" ||
+          typeof tls.server_name !== "string" ||
+          tls.server_name.length > 253 ||
+          !/^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(
+            tls.server_name,
+          ) ||
+          (tls.ca_pool !== undefined &&
+            (typeof tls.ca_pool !== "string" ||
+              tls.ca_pool.length > 512 ||
+              !/^(?:\/|[A-Za-z]:[\\/])/.test(tls.ca_pool) ||
+              /[\r\n\0]/.test(tls.ca_pool)))
+        )
+          return reply({ error: "Invalid origin TLS settings." }, 400);
+        originTls = {
+          server_name: tls.server_name,
+          ...(tls.ca_pool !== undefined ? { ca_pool: tls.ca_pool } : {}),
+        };
+      }
     }
     if (
       !record ||
@@ -371,6 +399,7 @@ export class Allocator {
         hostname: record?.hostname ?? newHostname(db, domain),
         retiredHostnames: record?.retiredHostnames,
         port: port!,
+        originTls,
         status: "provisioning",
         disconnectedSince: Date.now(),
       };
@@ -410,6 +439,15 @@ export class Allocator {
       (record.status === "ready" || record.status === "provisioning")
     ) {
       record.port = port;
+      record.status = "provisioning";
+      await this.storage.put("installations", db);
+    }
+    if (
+      request.method === "PUT" &&
+      ["ready", "provisioning"].includes(record.status) &&
+      JSON.stringify(record.originTls) !== JSON.stringify(originTls)
+    ) {
+      record.originTls = originTls;
       record.status = "provisioning";
       await this.storage.put("installations", db);
     }
@@ -479,7 +517,18 @@ export class Allocator {
           ingress: [
             {
               hostname: record.hostname,
-              service: `http://127.0.0.1:${record.port}`,
+              service: `${record.originTls ? "https" : "http"}://127.0.0.1:${record.port}`,
+              ...(record.originTls
+                ? {
+                    originRequest: {
+                      originServerName: record.originTls.server_name,
+                      ...(record.originTls.ca_pool
+                        ? { caPool: record.originTls.ca_pool }
+                        : {}),
+                      noTLSVerify: false,
+                    },
+                  }
+                : {}),
             },
             { service: "http_status:404" },
           ],
@@ -525,6 +574,7 @@ export class Allocator {
       tunnel_token: token,
       port: record.port,
       dns_ready_after: record.dnsReadyAfter,
+      origin_tls: record.originTls,
     });
   }
 }

@@ -333,6 +333,7 @@ mod tests {
             ws_token_file: None,
             ws_tls_cert: None,
             ws_tls_key: None,
+            ws_client_ca: None,
             ws_allowed_origins: vec![],
         })
         .await

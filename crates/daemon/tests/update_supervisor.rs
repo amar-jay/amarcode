@@ -52,6 +52,7 @@ async fn update_rpc_reports_unavailable_for_custom_services_without_touching_reg
         ws_token_file: None,
         ws_tls_cert: None,
         ws_tls_key: None,
+        ws_client_ca: None,
         ws_allowed_origins: Vec::new(),
         acp_registry_source: None,
     })

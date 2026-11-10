@@ -11,19 +11,20 @@ pub mod cli_path;
 pub mod config;
 pub mod error;
 mod instance_lock;
-mod shutdown;
-mod workload;
 pub mod logging;
 pub mod protocol;
 pub mod registry;
 pub mod remote;
 pub mod rpc;
+mod security;
 pub mod service;
 pub mod service_control;
+mod shutdown;
 pub mod store;
 pub mod update;
 #[cfg(windows)]
 pub mod windows;
+mod workload;
 
 pub use app::App;
 pub use config::Config;

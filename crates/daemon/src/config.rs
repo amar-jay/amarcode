@@ -67,6 +67,8 @@ pub struct Config {
     pub ws_tls_cert: Option<PathBuf>,
     /// Matching PEM private key (AMARCODE_WS_TLS_KEY).
     pub ws_tls_key: Option<PathBuf>,
+    /// Trust anchors for mandatory client certificates (mTLS).
+    pub ws_client_ca: Option<PathBuf>,
     /// Allowed browser origins, comma-separated in AMARCODE_WS_ALLOW_ORIGIN.
     pub ws_allowed_origins: Vec<String>,
     /// Git URL or local Git repository used to populate the runtime registry
@@ -107,6 +109,14 @@ impl Config {
         let address: SocketAddr = self.daemon_addr.parse().map_err(|_| Error::msg(
             "AMARCODE_DAEMON_ADDR must be an IP address and port, e.g. 127.0.0.1:43822 or [::1]:43822"
         ))?;
+        crate::security::Policy::load()?.validate(self)?;
+        if self.ws_client_ca.is_some()
+            && (self.ws_tls_cert.is_none() || self.transport != DaemonTransport::WebSocket)
+        {
+            return Err(Error::msg(
+                "Client-certificate authentication requires a TLS WebSocket listener",
+            ));
+        }
         if self.transport == DaemonTransport::Tcp {
             if !address.ip().is_loopback() {
                 return Err(Error::msg(
@@ -177,12 +187,14 @@ impl Config {
             ws_token_file: None,
             ws_tls_cert: None,
             ws_tls_key: None,
+            ws_client_ca: None,
             ws_allowed_origins: Vec::new(),
         };
         if transport == DaemonTransport::WebSocket {
             config.ws_token_file = env_path("AMARCODE_WS_TOKEN_FILE");
             config.ws_tls_cert = env_path("AMARCODE_WS_TLS_CERT");
             config.ws_tls_key = env_path("AMARCODE_WS_TLS_KEY");
+            config.ws_client_ca = env_path("AMARCODE_WS_CLIENT_CA");
             config.ws_allowed_origins = env_text("AMARCODE_WS_ALLOW_ORIGIN")?
                 .unwrap_or_default()
                 .split(',')

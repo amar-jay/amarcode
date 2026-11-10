@@ -41,11 +41,15 @@ pub(super) struct State {
 }
 
 impl Listener {
+    #[cfg(test)]
+    pub(crate) fn local_addr(&self) -> std::io::Result<std::net::SocketAddr> {
+        self.socket.local_addr()
+    }
     pub async fn bind(config: &Config) -> Result<Self> {
         config.validate()?;
         let state = Arc::new(State::prepare(config)?);
         let socket = TcpListener::bind(&config.daemon_addr).await?;
-        info!(address = %socket.local_addr()?, transport = if state.tls.is_some() { "wss" } else { "ws" }, path = "/rpc", "WebSocket RPC listening");
+        info!(address = %socket.local_addr()?, transport = if state.tls.is_some() { "wss" } else { "ws" }, path = "/rpc", client_certificate_required = config.ws_client_ca.is_some(), "WebSocket RPC listening");
         Ok(Self { socket, state })
     }
 }
@@ -67,10 +71,24 @@ impl State {
                             Error::msg("TLS key file contains no supported PEM private key")
                         })?;
                 let provider = Arc::new(rustls::crypto::ring::default_provider());
+                let verifier = if let Some(path) = &config.ws_client_ca {
+                    let mut roots = rustls::RootCertStore::empty();
+                    for cert in amarcode_transport::certificates(path).map_err(Error::msg)? {
+                        roots.add(cert).map_err(|e| Error::msg(e.to_string()))?;
+                    }
+                    rustls::server::WebPkiClientVerifier::builder_with_provider(
+                        Arc::new(roots),
+                        Arc::clone(&provider),
+                    )
+                    .build()
+                    .map_err(|e| Error::msg(e.to_string()))?
+                } else {
+                    rustls::server::WebPkiClientVerifier::no_client_auth()
+                };
                 let config = rustls::ServerConfig::builder_with_provider(provider)
                     .with_safe_default_protocol_versions()
                     .map_err(|error| Error::msg(error.to_string()))?
-                    .with_no_client_auth()
+                    .with_client_cert_verifier(verifier)
                     .with_single_cert(certs, key)
                     .map_err(|error| {
                         Error::msg(format!("Invalid WebSocket TLS certificate/key: {error}"))

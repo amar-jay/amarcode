@@ -334,6 +334,7 @@ mod tests {
             ws_token_file: None,
             ws_tls_cert: None,
             ws_tls_key: None,
+            ws_client_ca: None,
             ws_allowed_origins: vec![],
         })
         .await
@@ -386,6 +387,7 @@ mod tests {
             ws_token_file: None,
             ws_tls_cert: None,
             ws_tls_key: None,
+            ws_client_ca: None,
             ws_allowed_origins: Vec::new(),
             daemon_addr: "127.0.0.1:0".into(),
             acp_registry_source: Some(
@@ -424,6 +426,7 @@ mod tests {
             ws_token_file: None,
             ws_tls_cert: None,
             ws_tls_key: None,
+            ws_client_ca: None,
             ws_allowed_origins: Vec::new(),
             daemon_addr: "127.0.0.1:0".to_owned(),
             acp_registry_source: None,

@@ -29,6 +29,7 @@ fn test_config() -> Config {
         ws_token_file: None,
         ws_tls_cert: None,
         ws_tls_key: None,
+        ws_client_ca: None,
         ws_allowed_origins: Vec::new(),
     }
 }
@@ -517,4 +518,90 @@ async fn browser_ticket_opens_real_rpc_and_rejects_replay() {
         service.abort();
     }
     drop(directory);
+}
+
+#[tokio::test]
+async fn mutual_tls_requires_trusted_client_cert_and_valid_server_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-certificates.py");
+    for name in ["trusted", "untrusted"] {
+        assert!(std::process::Command::new("python3")
+            .arg(&script)
+            .args(["dev-ca", "--hostname", "localhost", "--output"])
+            .arg(root.path().join(name))
+            .output()
+            .unwrap()
+            .status
+            .success());
+    }
+    let trusted = root.path().join("trusted");
+    for (identity, server_name, expected) in [
+        (Some("trusted"), "localhost", true),
+        (None, "localhost", false),
+        (Some("untrusted"), "localhost", false),
+        (Some("trusted"), "wrong.example", false),
+    ] {
+        let mut config = test_config();
+        config.transport = crate::config::DaemonTransport::WebSocket;
+        config.app_dir = root.path().join(uuid::Uuid::new_v4().to_string());
+        config.db_path = config.app_dir.join("store.sqlite3");
+        let token = root.path().join("token");
+        private_file(&token, "a".repeat(64).as_bytes());
+        config.ws_token_file = Some(token);
+        config.ws_tls_cert = Some(trusted.join("server-cert.pem"));
+        config.ws_tls_key = Some(trusted.join("server-key.pem"));
+        config.ws_client_ca = Some(trusted.join("ca.pem"));
+        let listener = Listener::bind(&config).await.unwrap();
+        let address = listener.socket.local_addr().unwrap();
+        let app = Arc::new(App::new(config).await.unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.socket.accept().await.unwrap();
+            listener.state.handle(stream, app, "mtls-test").await
+        });
+        let directory = identity.map(|name| root.path().join(name));
+        let client = amarcode_transport::client_config_with(
+            Some(&trusted.join("ca.pem")),
+            directory
+                .as_ref()
+                .map(|p| p.join("client-cert.pem"))
+                .as_deref(),
+            directory
+                .as_ref()
+                .map(|p| p.join("client-key.pem"))
+                .as_deref(),
+        )
+        .unwrap();
+        let tcp = TcpStream::connect(address).await.unwrap();
+        let result = tokio_rustls::TlsConnector::from(Arc::new(client))
+            .connect(
+                rustls::pki_types::ServerName::try_from(server_name).unwrap(),
+                tcp,
+            )
+            .await;
+        let success = if let Ok(tls) = result {
+            let mut request = "wss://localhost/rpc".into_client_request().unwrap();
+            request.headers_mut().insert(
+                "authorization",
+                format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
+            );
+            match client_async(request, tls).await {
+                Ok((mut socket, _)) => {
+                    socket
+                        .send(Message::Text(r#"{"method":"health"}"#.into()))
+                        .await
+                        .unwrap();
+                    let response = socket.next().await.unwrap().unwrap().into_text().unwrap();
+                    assert!(response.contains("ok"));
+                    true
+                }
+                Err(_) => false,
+            }
+        } else {
+            false
+        };
+        assert_eq!(success, expected, "client={identity:?}, name={server_name}");
+        let _ = tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .unwrap();
+    }
 }

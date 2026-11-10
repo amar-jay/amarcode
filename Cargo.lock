@@ -87,6 +87,7 @@ name = "amarcode"
 version = "0.1.0"
 dependencies = [
  "amarcode-protocol",
+ "amarcode-transport",
  "arboard",
  "base64 0.22.1",
  "futures-util",
@@ -130,6 +131,7 @@ version = "0.9.12"
 dependencies = [
  "agent-client-protocol",
  "amarcode-protocol",
+ "amarcode-transport",
  "base64 0.22.1",
  "chrono",
  "clap",
@@ -168,6 +170,15 @@ dependencies = [
  "serde",
  "serde_json",
  "ts-rs",
+]
+
+[[package]]
+name = "amarcode-transport"
+version = "0.1.0"
+dependencies = [
+ "rustls-pemfile",
+ "tokio-rustls",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]

@@ -102,6 +102,9 @@ pub fn configure_access(enabled: bool) -> Result<()> {
 
 /// Called before Tokio starts. Remote access shares the standard database.
 pub fn prepare(require_tunnel: bool) -> Result<Setup> {
+    if require_tunnel {
+        crate::security::Policy::load()?.require_tunnel_allowed()?;
+    }
     let root = remote_root()?;
     let setup: Setup = match fs::read(root.join("remote.json")) {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
@@ -169,6 +172,7 @@ pub fn access_config(local: &Config, setup: &Setup) -> Result<Config> {
         .or(Some(instance_root()?.join("access-token")));
     remote.ws_tls_cert = env::var_os("AMARCODE_WS_TLS_CERT").map(PathBuf::from);
     remote.ws_tls_key = env::var_os("AMARCODE_WS_TLS_KEY").map(PathBuf::from);
+    remote.ws_client_ca = env::var_os("AMARCODE_WS_CLIENT_CA").map(PathBuf::from);
     remote.ws_allowed_origins = env::var("AMARCODE_WS_ALLOW_ORIGIN")
         .unwrap_or_default()
         .split(',')
@@ -210,6 +214,10 @@ pub async fn tunnel(local: Config, setup: Setup) -> Result<()> {
 }
 
 async fn check_health(remote: &Config) -> Result<()> {
+    check_health_with_origin(remote, origin_tls(remote)?).await
+}
+
+async fn check_health_with_origin(remote: &Config, origin: Option<OriginTls>) -> Result<()> {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
     let token = crate::rpc::websocket::load_token(
@@ -218,7 +226,17 @@ async fn check_health(remote: &Config) -> Result<()> {
             .as_deref()
             .ok_or_else(|| Error::msg("Remote token file missing"))?,
     )?;
-    let mut request = format!("ws://{}/rpc", remote.daemon_addr)
+    let host = origin.as_ref().map(|tls| tls.server_name.as_str());
+    let port = remote
+        .daemon_addr
+        .parse::<std::net::SocketAddr>()
+        .map_err(|e| Error::msg(e.to_string()))?
+        .port();
+    let url = match host {
+        Some(host) => format!("wss://{host}:{port}/rpc"),
+        None => format!("ws://{}/rpc", remote.daemon_addr),
+    };
+    let mut request = url
         .into_client_request()
         .map_err(|e| Error::msg(e.to_string()))?;
     request.headers_mut().insert(
@@ -228,13 +246,21 @@ async fn check_health(remote: &Config) -> Result<()> {
             .map_err(|_| Error::msg("Invalid remote token"))?,
     );
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        let (mut socket, _) = tokio_tungstenite::connect_async(request)
-            .await
-            .map_err(|e| {
-                Error::msg(format!(
-                    "Start or restart the existing daemon before opening a tunnel: {e}"
-                ))
-            })?;
+        let tcp = tokio::net::TcpStream::connect(&remote.daemon_addr).await?;
+        let ca = origin
+            .as_ref()
+            .and_then(|tls| tls.ca_pool.as_deref())
+            .map(std::path::Path::new);
+        let tls = amarcode_transport::client_config_with(ca, None, None).map_err(Error::msg)?;
+        let connector = tokio_tungstenite::Connector::Rustls(Arc::new(tls));
+        let (mut socket, _) =
+            tokio_tungstenite::client_async_tls_with_config(request, tcp, None, Some(connector))
+                .await
+                .map_err(|e| {
+                    Error::msg(format!(
+                        "Start or restart the existing daemon before opening a tunnel: {e}"
+                    ))
+                })?;
         socket
             .send(Message::Text(
                 serde_json::json!({"method":"health"}).to_string().into(),
@@ -283,6 +309,15 @@ fn announce_loopback(config: &Config) -> Result<()> {
 }
 
 pub fn validate(config: &Config, no_tunnel: bool) -> Result<()> {
+    config.validate()?;
+    if !no_tunnel {
+        crate::security::Policy::load()?.require_tunnel_allowed()?;
+        if config.ws_client_ca.is_some() {
+            return Err(Error::msg(
+                "Managed tunnels do not support client certificates; use direct mTLS",
+            ));
+        }
+    }
     let address: std::net::SocketAddr = config
         .daemon_addr
         .parse()
@@ -290,10 +325,10 @@ pub fn validate(config: &Config, no_tunnel: bool) -> Result<()> {
     if config.transport != crate::config::DaemonTransport::WebSocket
         || !address.ip().is_loopback()
         || address.port() == 0
-        || config.ws_tls_cert.is_some()
-        || config.ws_tls_key.is_some()
     {
-        return Err(Error::msg("Remote mode requires a loopback WebSocket listener with a fixed port and no origin TLS; SSH or Cloudflare provides transport encryption"));
+        return Err(Error::msg(
+            "Remote mode requires a loopback WebSocket listener with a fixed port",
+        ));
     }
     if no_tunnel && address.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
         return Err(Error::msg(
@@ -398,6 +433,32 @@ struct Identity {
     id: String,
     credential: String,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct OriginTls {
+    server_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ca_pool: Option<String>,
+}
+fn origin_tls(config: &Config) -> Result<Option<OriginTls>> {
+    if config.ws_tls_cert.is_none() {
+        return Ok(None);
+    }
+    let server_name =
+        env::var("AMARCODE_TUNNEL_ORIGIN_SERVER_NAME").unwrap_or_else(|_| "localhost".into());
+    let ca_pool = env::var_os("AMARCODE_TUNNEL_ORIGIN_CA").map(PathBuf::from);
+    if let Some(path) = &ca_pool {
+        if !path.is_absolute() || !path.is_file() {
+            return Err(Error::msg(
+                "AMARCODE_TUNNEL_ORIGIN_CA must name an existing absolute PEM path",
+            ));
+        }
+        amarcode_transport::certificates(path).map_err(Error::msg)?;
+    }
+    Ok(Some(OriginTls {
+        server_name,
+        ca_pool: ca_pool.map(|p| p.to_string_lossy().into_owned()),
+    }))
+}
 #[derive(Deserialize)]
 struct Assignment {
     installation_id: String,
@@ -405,6 +466,8 @@ struct Assignment {
     url: String,
     tunnel_token: String,
     port: u16,
+    #[serde(default)]
+    origin_tls: Option<OriginTls>,
     #[serde(default)]
     dns_ready_after: Option<u64>,
 }
@@ -483,7 +546,7 @@ fn client() -> Result<reqwest::Client> {
 async fn request(
     method: reqwest::Method,
     identity: &Identity,
-    port: Option<u16>,
+    enrollment: Option<(u16, Option<OriginTls>)>,
 ) -> Result<reqwest::Response> {
     let mut request = client()?
         .request(
@@ -492,9 +555,13 @@ async fn request(
         )
         .bearer_auth(&identity.credential)
         .header("x-amarcode-tunnel-hostnames", "short-v2");
-    if let Some(port) = port {
+    if let Some((port, origin_tls)) = enrollment {
+        let mut body = serde_json::json!({"port": port});
+        if let Some(tls) = origin_tls {
+            body["origin_tls"] = serde_json::to_value(tls)?;
+        }
         request = request
-            .body(serde_json::json!({"port": port}).to_string())
+            .body(body.to_string())
             .header("content-type", "application/json");
     }
     let response = request
@@ -519,16 +586,25 @@ async fn request(
         )),
     }
 }
-async fn allocate(port: u16) -> Result<Assignment> {
+async fn allocate(port: u16, origin: Option<OriginTls>) -> Result<Assignment> {
     let identity = identity(true)?;
     let assignment: Assignment = serde_json::from_slice(
-        &request(reqwest::Method::PUT, &identity, Some(port))
-            .await?
-            .bytes()
-            .await
-            .map_err(|_| Error::msg("Cannot read tunnel allocation response"))?,
+        &request(
+            reqwest::Method::PUT,
+            &identity,
+            Some((port, origin.clone())),
+        )
+        .await?
+        .bytes()
+        .await
+        .map_err(|_| Error::msg("Cannot read tunnel allocation response"))?,
     )?;
     validate_assignment(&assignment, &identity, port)?;
+    if assignment.origin_tls != origin {
+        return Err(Error::msg(
+            "Allocator did not confirm the requested origin TLS settings; refusing tunnel startup",
+        ));
+    }
     Ok(assignment)
 }
 fn validate_assignment(value: &Assignment, identity: &Identity, port: u16) -> Result<()> {
@@ -653,9 +729,10 @@ async fn run_named(
     if address.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
         return Err(Error::msg("Named tunnels require a 127.0.0.1 listener"));
     }
+    crate::security::Policy::load()?.require_tunnel_allowed()?;
     let progress = TunnelProgress::new();
     progress.set("Reserving your tunnel…");
-    let assignment = allocate(address.port()).await?;
+    let assignment = allocate(address.port(), origin_tls(config)?).await?;
     progress.set("Connecting to Cloudflare…");
     // Token never appears in process arguments or logs. File is deleted on exit.
     let mut token_file = tempfile::NamedTempFile::new_in(remote_root()?)?;
@@ -880,6 +957,7 @@ mod tests {
                 ws_token_file: None,
                 ws_tls_cert: None,
                 ws_tls_key: None,
+                ws_client_ca: None,
                 ws_allowed_origins: vec![],
             };
             let app = App::new(config.clone()).await.unwrap();
@@ -961,6 +1039,87 @@ mod tests {
         assert!(stuck.is_finished());
     }
 
+    #[tokio::test]
+    async fn origin_health_checks_verify_tls_with_a_private_ca() {
+        let root = tempfile::tempdir().unwrap();
+        let certs = root.path().join("tls");
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/tls-certificates.py");
+        assert!(std::process::Command::new("python3")
+            .arg(script)
+            .args(["dev-ca", "--hostname", "localhost", "--output"])
+            .arg(&certs)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let token = root.path().join("token");
+        fs::write(&token, "a".repeat(64)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let local = Config {
+            app_dir: root.path().join("data"),
+            db_path: root.path().join("data/store.sqlite3"),
+            transport: Default::default(),
+            daemon_addr: "127.0.0.1:0".into(),
+            default_workspace_path: None,
+            acp_registry_source: None,
+            ws_token_file: None,
+            ws_tls_cert: None,
+            ws_tls_key: None,
+            ws_client_ca: None,
+            ws_allowed_origins: vec![],
+        };
+        let mut remote = local.clone();
+        remote.transport = crate::config::DaemonTransport::WebSocket;
+        remote.ws_token_file = Some(token);
+        remote.ws_tls_cert = Some(certs.join("server-cert.pem"));
+        remote.ws_tls_key = Some(certs.join("server-key.pem"));
+        let listener = crate::rpc::websocket::Listener::bind(&remote)
+            .await
+            .unwrap();
+        remote.daemon_addr = listener.local_addr().unwrap().to_string();
+        let app = App::new(local).await.unwrap();
+        let stop = app.shutdown_handle();
+        let (ready, listening) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(app.run_with_access(listener, ready));
+        listening.await.unwrap();
+        let origin = OriginTls {
+            server_name: "localhost".into(),
+            ca_pool: Some(certs.join("ca.pem").to_string_lossy().into_owned()),
+        };
+        assert!(check_health_with_origin(&remote, Some(origin.clone()))
+            .await
+            .is_ok());
+        assert!(check_health_with_origin(
+            &remote,
+            Some(OriginTls {
+                server_name: "wrong.example".into(),
+                ..origin
+            })
+        )
+        .await
+        .is_err());
+        assert!(check_health_with_origin(
+            &remote,
+            Some(OriginTls {
+                server_name: "localhost".into(),
+                ca_pool: None
+            })
+        )
+        .await
+        .is_err());
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
     #[test]
     fn identity_is_private_persistent_and_requires_explicit_creation() {
         let directory = tempfile::tempdir().unwrap();
@@ -997,6 +1156,7 @@ mod tests {
             port: 43721,
             dns_ready_after: None,
             tunnel_token: "connector-secret".into(),
+            origin_tls: None,
         };
         assert!(validate_assignment(&assignment, &identity, 43721).is_ok());
         assignment.hostname = "a7c42e19.amarjay.com".into();

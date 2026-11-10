@@ -37,6 +37,7 @@ function fixture(capacity = "5") {
   >();
   const calls: string[] = [];
   const services: string[] = [];
+  const originSettings: unknown[] = [];
   let loseCreateResponse = false;
   let failConfiguration = false;
   let loseDnsResponse = false;
@@ -90,8 +91,9 @@ function fixture(capacity = "5") {
         throw new Error("configuration unavailable");
       }
       const ingress = JSON.parse(String(init?.body)).config.ingress;
-      expect(ingress[0].service).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      expect(ingress[0].service).toMatch(/^https?:\/\/127\.0\.0\.1:\d+$/);
       services.push(ingress[0].service);
+      originSettings.push(ingress[0].originRequest);
       result = {};
     } else if (path.endsWith("/dns_records")) {
       if (method === "GET")
@@ -180,6 +182,7 @@ function fixture(capacity = "5") {
     records,
     calls,
     services,
+    originSettings,
     redirectApi: () => {
       redirectApi = true;
     },
@@ -843,5 +846,56 @@ describe("enrollment body isolation", () => {
     ).toBe(400);
     expect(f.storage.values.size).toBe(0);
     expect(f.calls).toEqual([]);
+  });
+});
+
+describe("verified origin TLS", () => {
+  test("provisions HTTPS, persists trust settings, and reconfigures existing HTTP tunnels", async () => {
+    const f = fixture();
+    const id = crypto.randomUUID();
+    const original = (await (await f.allocator.fetch(request(id))).json()) as {
+      hostname: string;
+    };
+    const tls = {
+      server_name: "localhost",
+      ca_pool: "/etc/amarcode/origin-ca.pem",
+    };
+    const enroll = () =>
+      new Request(request(id), {
+        body: JSON.stringify({ port: 43721, origin_tls: tls }),
+      });
+    const response = await f.allocator.fetch(enroll());
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      hostname: string;
+      origin_tls: unknown;
+    };
+    expect(body.hostname).toBe(original.hostname);
+    expect(body.origin_tls).toEqual(tls);
+    expect(f.services.at(-1)).toBe("https://127.0.0.1:43721");
+    expect(f.originSettings.at(-1)).toEqual({
+      originServerName: "localhost",
+      caPool: tls.ca_pool,
+      noTLSVerify: false,
+    });
+    const calls = f.services.length;
+    expect((await f.restart().fetch(enroll())).status).toBe(200);
+    expect(f.services.length).toBe(calls);
+  });
+  test("rejects malformed origin trust settings before provisioning", async () => {
+    for (const tls of [
+      null,
+      true,
+      {},
+      { server_name: "bad\nname" },
+      { server_name: "localhost", ca_pool: "relative.pem" },
+    ]) {
+      const f = fixture();
+      const req = new Request(request(crypto.randomUUID()), {
+        body: JSON.stringify({ port: 43721, origin_tls: tls }),
+      });
+      expect((await f.allocator.fetch(req)).status).toBe(400);
+      expect(f.calls).toEqual([]);
+    }
   });
 });

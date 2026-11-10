@@ -173,3 +173,9 @@ manual setup when capacity is available.
 Run `amarcoded tunnel --rm` before purging an installation to revoke its named
 allocation and free capacity. Public access uses named tunnels exclusively.
 `--no-tunnel` continues to bypass public provisioning.
+
+## Company TLS and certificates
+
+See [TLS.md](TLS.md) for direct TLS/mTLS, native-client certificates, fixed-path
+machine policy, development certificates and company CSRs, and optional verified
+Cloudflare origin TLS. Cloudflare still terminates public TLS in tunnel mode.

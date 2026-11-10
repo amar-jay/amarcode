@@ -41,16 +41,7 @@ impl Connection {
             .max_frame_size(Some(amarcode_protocol::MAX_RPC_MESSAGE_BYTES));
         // The workspace enables multiple rustls crypto backends; choose one
         // explicitly rather than relying on process-global provider inference.
-        let roots = tokio_rustls::rustls::RootCertStore {
-            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-        };
-        let tls = tokio_rustls::rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
-            tokio_rustls::rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .map_err(|e| e.to_string())?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+        let tls = amarcode_transport::client_config()?;
         let connector = tokio_tungstenite::Connector::Rustls(std::sync::Arc::new(tls));
         let (socket, _) = tokio::time::timeout(
             Duration::from_secs(15),

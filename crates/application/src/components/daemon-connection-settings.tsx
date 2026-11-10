@@ -60,7 +60,7 @@ export function DaemonConnectionSettings() {
   if (isWeb)
     return (
       <div className="space-y-3 text-sm">
-        <p>Connected directly to your remote daemon.</p>
+        <p>Connected to your remote daemon.</p>
         <p className="break-all text-xs text-muted-foreground">{saved?.url}</p>
         <Button variant="outline" onClick={() => window.location.reload()}>
           Disconnect / switch connection
@@ -136,7 +136,10 @@ export function DaemonConnectionSettings() {
             </label>
             <p className="text-xs text-muted-foreground">
               Project folders, Git commands, and agents run on the remote host.{" "}
-              Paste the named Remote URL printed by the daemon (wss://…/rpc).
+              Use a direct TLS endpoint or the Remote URL printed by the daemon
+              (wss://…/rpc). Cloudflare connections terminate TLS at Cloudflare;
+              use an approved direct endpoint when intermediaries must not read
+              project data.
             </p>
           </>
         )}

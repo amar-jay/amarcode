@@ -256,3 +256,14 @@ The browser accepts full named WSS URLs without any UI changes.
 The five-installation limit is administrative, not a Cloudflare tunnel quota.
 An organization must allow the chosen hostnames and the connector's outbound
 Cloudflare Tunnel traffic. Named hostnames do not change connector egress needs.
+
+### Verified origin TLS
+
+Enrollment accepts optional `origin_tls: {server_name, ca_pool?}`. The authenticated
+owner can update these alongside the listener port. HTTPS ingress enables
+certificate verification (`noTLSVerify: false`), with `originServerName` and an
+optional absolute CA bundle path on the connector host. The response echoes
+`origin_tls` so TLS-enabled daemons can reject older allocators that ignore it.
+Legacy requests without origin settings retain HTTP loopback ingress. Deploy this
+worker before enabling origin TLS in a daemon. Cloudflare still terminates public
+client TLS; see [daemon TLS deployment](../daemon/TLS.md).
