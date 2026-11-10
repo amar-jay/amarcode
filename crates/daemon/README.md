@@ -110,6 +110,12 @@ is deferred until an agent RPC.
 The built-in `amarcode-acp` preset is installed separately from signed releases;
 configure its provider and credentials in the desktop's Agent defaults settings.
 
+Registry installations are serialized per agent across manual installs and
+background updates. Binary downloads are extracted and validated in separate
+staging directories before publication, so failed downloads or checksum checks
+preserve the existing installation. Waiting for an installation lock is
+cancellable during shutdown.
+
 To initialize the pinned registry checkout for repository development:
 
 ```bash

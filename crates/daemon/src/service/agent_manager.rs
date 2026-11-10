@@ -8,9 +8,10 @@
 //! Does not own live ACP sessions. that is `session`.
 
 use std::{
+    collections::HashMap,
     ffi::OsString,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
 };
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -40,6 +41,7 @@ pub struct AgentManager {
     tools_dir: PathBuf,
     registry_dir: PathBuf,
     amarcode_acp_install_lock: Arc<Mutex<()>>,
+    registry_install_locks: Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>,
     pub(super) acp_provider_lock: Arc<Mutex<()>>,
 }
 
@@ -55,6 +57,7 @@ impl AgentManager {
             tools_dir,
             registry_dir,
             amarcode_acp_install_lock: Arc::new(Mutex::new(())),
+            registry_install_locks: Arc::new(Mutex::new(HashMap::new())),
             acp_provider_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -62,6 +65,20 @@ impl AgentManager {
     pub(crate) fn with_shutdown(mut self, shutdown: crate::shutdown::Shutdown) -> Self {
         self.shutdown = shutdown;
         self
+    }
+
+    pub(super) fn registry_install_lock(&self, agent_id: &str) -> Result<Arc<Mutex<()>>> {
+        let mut locks = self
+            .registry_install_locks
+            .lock()
+            .map_err(|_| Error::msg("Registry installation locks poisoned"))?;
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = locks.get(agent_id).and_then(Weak::upgrade) {
+            return Ok(lock);
+        }
+        let lock = Arc::new(Mutex::new(()));
+        locks.insert(agent_id.to_owned(), Arc::downgrade(&lock));
+        Ok(lock)
     }
 
     pub fn tools_dir(&self) -> &Path {

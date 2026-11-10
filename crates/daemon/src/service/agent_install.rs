@@ -9,6 +9,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::{Mutex, MutexGuard, TryLockError},
     time::Duration,
 };
 
@@ -43,11 +44,31 @@ impl AgentManager {
             {
                 continue;
             }
+            let lock = match self.registry_install_lock(agent_id) {
+                Ok(lock) => lock,
+                Err(error) => {
+                    tracing::warn!(%agent_id, %error, "could not lock agent update");
+                    continue;
+                }
+            };
+            let _guard = match install_guard(&lock, &self.shutdown) {
+                Ok(guard) => guard,
+                Err(error) => {
+                    tracing::warn!(%agent_id, %error, "could not lock agent update");
+                    continue;
+                }
+            };
+            // A manual install may have succeeded since startup's snapshot was
+            // taken. Never restore that stale snapshot over a newer binary.
+            let previous = match self.get(agent_id) {
+                Ok(Some(current)) if Path::new(&current.command).is_absolute() => current,
+                _ => previous.clone(),
+            };
             match self.materialize_current(agent_id) {
                 Ok(true) => tracing::info!(%agent_id, "updated installed ACP agent"),
                 Ok(false) => {}
                 Err(error) => {
-                    if let Err(restore_error) = self.save(previous) {
+                    if let Err(restore_error) = self.save(&previous) {
                         tracing::warn!(
                             %agent_id,
                             %error,
@@ -98,6 +119,8 @@ impl AgentManager {
             self.install_amarcode_acp()?;
             return self.builtin_install_result();
         }
+        let lock = self.registry_install_lock(agent_id)?;
+        let _guard = install_guard(&lock, &self.shutdown)?;
         self.materialize_current(agent_id)?;
 
         self.refresh_availability()?;
@@ -138,6 +161,7 @@ impl AgentManager {
     }
 
     /// Returns whether files or package caches were changed.
+    /// Caller holds the per-agent lock through publication and any rollback.
     fn materialize_current(&self, agent_id: &str) -> Result<bool> {
         self.shutdown.check()?;
         let agent = self
@@ -182,6 +206,23 @@ impl AgentManager {
             }
         }
         Ok(true)
+    }
+}
+
+// Waiters must remain cancellable even if another installation is stalled.
+fn install_guard<'a>(
+    lock: &'a Mutex<()>,
+    shutdown: &crate::shutdown::Shutdown,
+) -> Result<MutexGuard<'a, ()>> {
+    loop {
+        shutdown.check()?;
+        match lock.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(TryLockError::Poisoned(_)) => {
+                return Err(Error::msg("Agent installation lock poisoned"))
+            }
+            Err(TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(25)),
+        }
     }
 }
 
@@ -307,32 +348,42 @@ fn install_binary_distribution(
     shutdown: &crate::shutdown::Shutdown,
 ) -> Result<PathBuf> {
     let dest = tools_dir.join("agents").join(agent_id).join(version);
-    if dest.exists() {
-        fs::remove_dir_all(&dest).map_err(|error| {
-            Error::msg(format!(
-                "failed to clear previous install {}: {error}",
-                dest.display()
-            ))
-        })?;
+    let parent = dest
+        .parent()
+        .ok_or_else(|| Error::msg("Missing agent install parent"))?;
+    fs::create_dir_all(parent)?;
+    // Extract on the same filesystem, without touching the published version.
+    let staging = tempfile::Builder::new()
+        .prefix(".install-")
+        .tempdir_in(parent)?;
+    let payload = staging.path().join("payload");
+    fs::create_dir(&payload)?;
+    let command = PathBuf::from(binary.cmd.trim());
+    if command.is_absolute()
+        || command.components().any(|part| {
+            matches!(
+                part,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(Error::msg(
+            "Binary command must be relative to its installation",
+        ));
     }
-    fs::create_dir_all(&dest).map_err(|error| {
-        Error::msg(format!(
-            "failed to create install directory {}: {error}",
-            dest.display()
-        ))
-    })?;
-
     let archive_name = archive_file_name(&binary.archive);
-    let archive_path = dest.join(&archive_name);
+    let archive_path = staging.path().join(&archive_name);
     shutdown.check()?;
     download_file(&binary.archive, &archive_path, shutdown)?;
     if let Some(expected) = binary.sha256.as_deref() {
         verify_sha256(&archive_path, expected, shutdown)?;
     }
-    extract_archive(&archive_path, &dest, shutdown)?;
+    extract_archive(&archive_path, &payload, shutdown)?;
     let _ = fs::remove_file(&archive_path);
 
-    let executable = binary_executable_path(tools_dir, agent_id, version, binary);
+    let executable = payload.join(&command);
     if !executable.is_file() {
         return Err(Error::msg(format!(
             "installed archive for {agent_id} is missing executable {}",
@@ -350,7 +401,33 @@ fn install_binary_distribution(
         fs::set_permissions(&executable, permissions)
             .map_err(|error| Error::msg(error.to_string()))?;
     }
-    Ok(executable)
+    shutdown.check()?;
+    publish_binary_install(&payload, &dest)?;
+    Ok(binary_executable_path(tools_dir, agent_id, version, binary))
+}
+
+// Called while holding the per-agent lock. Preserve the previous directory if
+// publishing fails, and never delete its files during download or extraction.
+fn publish_binary_install(payload: &Path, destination: &Path) -> Result<()> {
+    let backup = destination.with_file_name(format!(".previous-{}", uuid::Uuid::new_v4()));
+    let replaced = destination.exists();
+    if replaced {
+        fs::rename(destination, &backup)?;
+    }
+    if let Err(error) = fs::rename(payload, destination) {
+        if replaced {
+            fs::rename(&backup, destination).map_err(|restore| Error::msg(format!(
+                "Failed publishing agent: {error}; restore failed: {restore}; previous installation retained at {}", backup.display()
+            )))?;
+        }
+        return Err(error.into());
+    }
+    if replaced {
+        if let Err(error) = fs::remove_dir_all(&backup) {
+            tracing::warn!(%error, path = %backup.display(), "could not remove previous agent installation");
+        }
+    }
+    Ok(())
 }
 
 fn binary_executable_path(
@@ -658,6 +735,229 @@ fn run_timed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn binary_manager(root: &Path, url: &str) -> (AgentManager, AgentDefinition) {
+        let store =
+            std::sync::Arc::new(crate::store::Store::open(&root.join("store.sqlite3")).unwrap());
+        let manager = AgentManager::new(store, root);
+        let manifest = root.join("acp-registry/binary-agent");
+        fs::create_dir_all(&manifest).unwrap();
+        fs::write(
+            manifest.join("agent.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "id": "binary-agent", "name": "Binary Agent", "version": "1.0.0",
+                "distribution": {"binary": {registry::current_binary_target().unwrap(): {
+                    "archive": url, "cmd": "agent"
+                }}}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let agent = AgentDefinition {
+            id: "binary-agent".into(),
+            name: "Binary Agent".into(),
+            command: "agent".into(),
+            arguments: vec![],
+            environment: vec![],
+            available: false,
+            created_at: "2026-01-01".into(),
+            updated_at: "2026-01-01".into(),
+        };
+        manager.save(&agent).unwrap();
+        (manager, agent)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_manual_installs_and_background_updates_download_once() {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            sync::{
+                atomic::{AtomicUsize, Ordering},
+                mpsc, Arc,
+            },
+        };
+        let root = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/agent", listener.local_addr().unwrap());
+        let (manager, previous) = binary_manager(root.path(), &url);
+        let count = Arc::new(AtomicUsize::new(0));
+        let downloads = Arc::clone(&count);
+        let (started, downloading) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let (done, finished) = mpsc::channel();
+        let http = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(2)))
+                            .unwrap();
+                        let mut header = Vec::new();
+                        while !header.ends_with(b"\r\n\r\n") {
+                            let mut byte = [0];
+                            stream.read_exact(&mut byte).unwrap();
+                            header.push(byte[0]);
+                        }
+                        if downloads.fetch_add(1, Ordering::SeqCst) == 0 {
+                            started.send(()).unwrap();
+                            wait.recv_timeout(Duration::from_secs(5)).unwrap();
+                        }
+                        let body = b"#!/bin/sh\nexit 0\n";
+                        write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .unwrap();
+                        stream.write_all(body).unwrap();
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if finished.try_recv().is_ok() {
+                            break;
+                        }
+                        assert!(std::time::Instant::now() < deadline, "install stalled");
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("{error}"),
+                }
+            }
+        });
+        let first = manager.clone();
+        let first = std::thread::spawn(move || first.install("binary-agent"));
+        downloading.recv_timeout(Duration::from_secs(3)).unwrap();
+        let second = manager.clone();
+        let second = std::thread::spawn(move || second.install("binary-agent"));
+        let updater = manager.clone();
+        let updater = std::thread::spawn(move || updater.update_installed(&[previous]));
+        // Keep the first download in flight while competing callers run.
+        std::thread::sleep(Duration::from_millis(100));
+        release.send(()).unwrap();
+        assert!(first.join().unwrap().unwrap().agent.available);
+        assert!(second.join().unwrap().unwrap().agent.available);
+        updater.join().unwrap();
+        done.send(()).unwrap();
+        http.join().unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        let installed = manager.get("binary-agent").unwrap().unwrap();
+        assert_eq!(
+            fs::read(&installed.command).unwrap(),
+            b"#!/bin/sh\nexit 0\n"
+        );
+        assert!(manager.is_available(&installed));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_staged_install_preserves_published_files_and_latest_definition() {
+        let root = tempfile::tempdir().unwrap();
+        let download = root.path().join("agent");
+        fs::write(&download, "#!/bin/sh\nexit 0\n").unwrap();
+        let (manager, stale) =
+            binary_manager(root.path(), &format!("file://{}", download.display()));
+        manager.install("binary-agent").unwrap();
+        let installed = manager.get("binary-agent").unwrap().unwrap();
+        let manifest = root.path().join("acp-registry/binary-agent/agent.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        value["distribution"]["binary"][registry::current_binary_target().unwrap()]["sha256"] =
+            "0".repeat(64).into();
+        fs::write(manifest, serde_json::to_vec(&value).unwrap()).unwrap();
+        // Exercise failure at the same version, where deleting the destination
+        // up front would destroy the working executable before checksum validation.
+        let binary = install_kind(
+            &registry::load_agent_manifest(manager.registry_dir(), "binary-agent").unwrap(),
+        )
+        .unwrap();
+        let InstallKind::Binary(binary) = binary else {
+            unreachable!()
+        };
+        assert!(install_binary_distribution(
+            manager.tools_dir(),
+            "binary-agent",
+            "1.0.0",
+            &binary,
+            &manager.shutdown
+        )
+        .is_err());
+        assert_eq!(
+            fs::read(&installed.command).unwrap(),
+            b"#!/bin/sh\nexit 0\n"
+        );
+        // A stale startup snapshot must not overwrite a later successful install
+        // when an update to a different version fails.
+        let mut value: serde_json::Value = serde_json::from_slice(
+            &fs::read(root.path().join("acp-registry/binary-agent/agent.json")).unwrap(),
+        )
+        .unwrap();
+        value["version"] = "2.0.0".into();
+        fs::write(
+            root.path().join("acp-registry/binary-agent/agent.json"),
+            serde_json::to_vec(&value).unwrap(),
+        )
+        .unwrap();
+        manager.update_installed(&[stale]);
+        assert_eq!(
+            manager.get("binary-agent").unwrap().unwrap().command,
+            installed.command
+        );
+        assert!(manager.is_available(&installed));
+        let parent = Path::new(&installed.command)
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        assert!(fs::read_dir(parent).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".install-")));
+    }
+
+    #[test]
+    fn failed_publish_restores_previous_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("1.0.0");
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("agent"), "working").unwrap();
+        assert!(
+            publish_binary_install(&root.path().join("missing-payload"), &destination).is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join("agent")).unwrap(),
+            "working"
+        );
+    }
+
+    #[test]
+    fn installation_lock_wait_is_cancellable_and_other_agents_are_independent() {
+        use std::sync::{mpsc, Arc};
+        let root = tempfile::tempdir().unwrap();
+        let manager = AgentManager::new(
+            Arc::new(crate::store::Store::open(&root.path().join("store.sqlite3")).unwrap()),
+            root.path(),
+        );
+        let lock = manager.registry_install_lock("one").unwrap();
+        let _held = lock.lock().unwrap();
+        let clone = manager.clone();
+        let waiting = clone.registry_install_lock("one").unwrap();
+        assert!(Arc::ptr_eq(&lock, &waiting));
+        let other = clone.registry_install_lock("two").unwrap();
+        assert!(other.try_lock().is_ok());
+        let shutdown = manager.shutdown.clone();
+        let (send, receive) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            send.send(install_guard(&waiting, &shutdown).is_err())
+                .unwrap();
+        });
+        manager.shutdown.cancel();
+        assert!(receive.recv_timeout(Duration::from_secs(1)).unwrap());
+        worker.join().unwrap();
+    }
 
     #[test]
     fn builtin_install_needs_no_sign_in_provider_or_runtime_probe() {
