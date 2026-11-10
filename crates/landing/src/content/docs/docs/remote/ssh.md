@@ -91,6 +91,13 @@ amarcoded ssh wss://your-host/rpc
 
 Commands run as the daemon’s user. Type `exit` or press Ctrl+D to leave.
 
+If this host requires company certificates or paired E2EE, set that native
+connection profile in the same shell **before** running `amarcoded ssh`. The CLI
+uses the same [certificate settings](/docs/remote/certificates/#configure-the-native-client)
+and [paired E2EE settings](/docs/remote/end-to-end/#use-the-cli) as the native
+desktop. A public WSS URL by itself does not select E2EE, and a paired client does
+not retry without encryption if negotiation fails.
+
 ## Open graphical X11 applications
 
 X11 forwarding is enabled automatically when a local X server and `xauth`

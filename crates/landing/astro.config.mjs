@@ -135,9 +135,27 @@ export default defineConfig({
         {
           label: "Remote daemon",
           items: [
+            { label: "Choose a connection", slug: "docs/remote/overview" },
             { label: "Set up a remote host", slug: "docs/remote/setup" },
+            { label: "Connect to your host", slug: "docs/remote/connect" },
+            {
+              label: "Run without the desktop",
+              slug: "docs/remote/standalone",
+            },
             { label: "Remote terminal", slug: "docs/remote/ssh" },
-            { label: "Connect from the desktop", slug: "docs/remote/connect" },
+            { label: "Encryption and trust", slug: "docs/remote/security" },
+            {
+              label: "Certificates and direct TLS",
+              slug: "docs/remote/certificates",
+            },
+            {
+              label: "Paired end-to-end encryption",
+              slug: "docs/remote/end-to-end",
+            },
+            {
+              label: "Company policy and revocation",
+              slug: "docs/remote/administration",
+            },
             {
               label: "Updates and troubleshooting",
               slug: "docs/remote/troubleshooting",

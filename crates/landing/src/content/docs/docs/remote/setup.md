@@ -7,7 +7,8 @@ Install the daemon on a Linux machine when you want its projects in Amarcode. Fi
 
 ## Before you start
 
-You need Linux, Bash, Python 3, and internet access.
+You need Linux, Bash, Python 3, `curl`, OpenSSL with Ed25519 support, and internet
+access. Install Git on the host for project Git operations and the agent catalog.
 
 ## Install
 
@@ -24,11 +25,10 @@ Use the start command printed by the installer; it works in your current termina
 ## Start and connect
 
 Public remote access uses a persistent named hostname. First-time registration
-is automatic; no enrollment code or environment variable is needed. Your private
-installation identity is saved on this machine; later starts reuse the same
-hostname. The operator must
-configure and deploy the named-tunnel allocator before first enrollment.
-
+is automatic for the standard setup; no enrollment code or certificate setup is
+needed. Your private installation identity is saved on this machine; later starts reuse the same
+hostname. If the service reports that named tunnels are unavailable or full,
+contact the service operator; local TLS certificates do not fix allocation errors.
 
 ```sh
 amarcoded --remote
@@ -42,15 +42,21 @@ amarcoded --remote /path/to/project
 
 Copy the Remote URL (a stable `wss://a7c42e19.amarjay.com/rpc` address) and access token. In the desktop, open **Settings → Connection**, choose **Remote daemon**, paste both, and select **Verify and apply**.
 
-Leave this command running. Ctrl+C stops the daemon. Starting it again reuses the same URL. Offline machines retain their allocation for a seven-day inactivity grace period.
+The remote desktop app does not need to be installed or open. Leave this command
+running; Ctrl+C in its terminal stops the daemon and connector. Closing a client
+window does not stop it. See [run without the desktop](/docs/remote/standalone/)
+for foreground, service, and separate-instance lifetimes.
+
+Starting it again reuses the same URL. Offline machines retain their allocation for a seven-day inactivity grace period.
 The Worker checks daily and then reclaims disconnected tunnels to free capacity.
 Preserving the local identity lets the same machine recover its hostname without
 manual registration, provided capacity is available.
 
-See [connect from the desktop](/docs/remote/connect/).
+See [connect to your host](/docs/remote/connect/).
 
 :::caution[Keep the token private]
-Anyone with the token can use the daemon on that machine.
+In the default token-only mode, anyone with the token can use the daemon on
+that machine. Keep it private even if you later add client certificates.
 :::
 
 ## Codespaces and containers without systemd
@@ -92,8 +98,22 @@ curl -fsSL https://amarcode.amarjay.com/install.sh | bash -s -- --no-tunnel
 amarcoded --remote --no-tunnel
 ```
 
-The listener is `127.0.0.1:43721`. Reach it through your own path, then connect with its URL and token.
+The listener is `127.0.0.1:43721`. Keep it running and follow the
+[SSH port-forwarding steps](/docs/remote/ssh/#connect-the-desktop-through-ssh-port-forwarding)
+to reach it from your own computer. A loopback address on your laptop is not the
+remote machine. This mode does not enroll a public tunnel.
 
+## Choose a company connection profile
+
+The default Cloudflare tunnel needs no certificates of your own, but Cloudflare
+terminates public TLS. For a company project, use the approved profile:
+
+- [Direct TLS and client certificates](/docs/remote/certificates/)
+- [Paired end-to-end encryption](/docs/remote/end-to-end/)
+- [Encryption and trust boundaries](/docs/remote/security/)
+
+Advanced security settings must be configured on the running host and the native
+client as described in those guides. They are not enabled by `--remote` alone.
 
 ## Remove a named allocation
 
@@ -103,6 +123,7 @@ Stop the connector and run:
 amarcoded tunnel --rm
 ```
 
+Use the same installation/root environment as the connector you intend to remove.
 This revokes the connector, removes its public DNS record, and frees installation
 capacity. The old hostname is never assigned to another installation. Run this
 before purging local installation data. Keep `named-installation.json` private
