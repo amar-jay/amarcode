@@ -134,7 +134,7 @@ export function RecentChats({
                 chat.title.trim().slice(0, 2) || "?"
               )}
             </span>
-            <span className="min-w-0 flex-1 truncate group-data-[collapsible=icon]:hidden">{chat.title}</span>
+            <span className="min-w-0 flex-1 select-none truncate group-data-[collapsible=icon]:hidden">{chat.title}</span>
             <span className="group-data-[collapsible=icon]:hidden flex w-6 shrink-0 items-center justify-end md:group-hover/menu-item:opacity-0 md:group-focus-within/menu-item:opacity-0 md:group-has-data-[state=open]/menu-item:opacity-0">
               {runningChatIds.has(chat.id) ? (
                 <span role="status" aria-label="Running">

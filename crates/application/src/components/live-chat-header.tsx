@@ -121,7 +121,7 @@ export function LiveChatHeader({
         <>
           <h1
             data-tauri-drag-region
-            className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground"
+            className="min-w-0 flex-1 select-none truncate text-xs font-medium text-muted-foreground"
           >
             {title}
           </h1>
