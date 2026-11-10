@@ -32,6 +32,7 @@ pub struct ConnectionInfo {
     pub remote: bool,
     pub url: String,
     pub has_token: bool,
+    pub end_to_end_required: bool,
     pub mode: ConnectionMode,
     pub ssh: Option<SshTunnelConfig>,
     /// Stable host preference scope, independent of the temporary SSH port.
@@ -67,6 +68,8 @@ impl ConnectionSettings {
             remote: self.ssh.is_some() || !self.url.is_empty(),
             url: self.url.clone(),
             has_token: !self.token.is_empty(),
+            end_to_end_required: std::env::var_os("AMARCODE_E2EE_CA")
+                .is_some_and(|value| !value.is_empty()),
             mode,
             ssh: self.ssh.clone(),
             scope,

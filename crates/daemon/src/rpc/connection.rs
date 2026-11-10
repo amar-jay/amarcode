@@ -334,6 +334,8 @@ mod tests {
             ws_tls_cert: None,
             ws_tls_key: None,
             ws_client_ca: None,
+            ws_client_crl: None,
+            e2ee: None,
             ws_allowed_origins: vec![],
         })
         .await

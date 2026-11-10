@@ -7,3 +7,7 @@ edition = "2021"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 rustls-pemfile = "2"
 webpki-roots = "1"
+tokio = { version = "1", features = ["io-util", "net", "time"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", features = ["sink"] }
+url = "2"

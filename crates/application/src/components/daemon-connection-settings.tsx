@@ -136,10 +136,9 @@ export function DaemonConnectionSettings() {
             </label>
             <p className="text-xs text-muted-foreground">
               Project folders, Git commands, and agents run on the remote host.{" "}
-              Use a direct TLS endpoint or the Remote URL printed by the daemon
-              (wss://…/rpc). Cloudflare connections terminate TLS at Cloudflare;
-              use an approved direct endpoint when intermediaries must not read
-              project data.
+              {saved?.endToEndRequired
+                ? "This native client profile requires paired end-to-end encryption. Relay services cannot decrypt the token or project traffic."
+                : "Use a direct TLS endpoint or the Remote URL printed by the daemon (wss://…/rpc). Cloudflare connections terminate TLS at Cloudflare; use a paired end-to-end encrypted profile or an approved direct endpoint when intermediaries must not read project data."}
             </p>
           </>
         )}

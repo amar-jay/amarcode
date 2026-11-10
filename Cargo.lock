@@ -176,8 +176,12 @@ dependencies = [
 name = "amarcode-transport"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "rustls-pemfile",
+ "tokio",
  "tokio-rustls",
+ "tokio-tungstenite",
+ "url",
  "webpki-roots 1.0.10",
 ]
 

@@ -173,6 +173,8 @@ pub fn access_config(local: &Config, setup: &Setup) -> Result<Config> {
     remote.ws_tls_cert = env::var_os("AMARCODE_WS_TLS_CERT").map(PathBuf::from);
     remote.ws_tls_key = env::var_os("AMARCODE_WS_TLS_KEY").map(PathBuf::from);
     remote.ws_client_ca = env::var_os("AMARCODE_WS_CLIENT_CA").map(PathBuf::from);
+    remote.ws_client_crl = env::var_os("AMARCODE_WS_CLIENT_CRL").map(PathBuf::from);
+    remote.e2ee = crate::config::e2ee_from_env()?;
     remote.ws_allowed_origins = env::var("AMARCODE_WS_ALLOW_ORIGIN")
         .unwrap_or_default()
         .split(',')
@@ -214,6 +216,64 @@ pub async fn tunnel(local: Config, setup: Setup) -> Result<()> {
 }
 
 async fn check_health(remote: &Config) -> Result<()> {
+    if let Some(identity) = &remote.e2ee {
+        use futures_util::StreamExt;
+        let origin = origin_tls(remote)?;
+        let ca = origin
+            .as_ref()
+            .and_then(|tls| tls.ca_pool.as_deref())
+            .map(std::path::Path::new);
+        let outer = amarcode_transport::client_config_with(ca, None, None).map_err(Error::msg)?;
+        let address: std::net::SocketAddr = remote
+            .daemon_addr
+            .parse()
+            .map_err(|_| Error::msg("Invalid remote address"))?;
+        let url = match &origin {
+            Some(origin) => format!(
+                "wss://{}:{}/e2ee-health",
+                origin.server_name,
+                address.port()
+            ),
+            None => format!("ws://{}/e2ee-health", address),
+        };
+        let ca = env::var_os("AMARCODE_E2EE_PROBE_CA")
+            .map(PathBuf::from)
+            .or_else(|| identity.client_ca.clone())
+            .ok_or_else(|| Error::msg("E2EE probe CA is missing"))?;
+        let client = amarcode_transport::encrypted::ClientIdentity {
+            tls: Arc::new(
+                amarcode_transport::client_config_with_crl(Some(&ca), None, None, None, true)
+                    .map_err(Error::msg)?,
+            ),
+            server_name: env::var("AMARCODE_E2EE_SERVER_NAME")
+                .unwrap_or_else(|_| "localhost".into()),
+        };
+        let mut socket = amarcode_transport::encrypted::connect_with_address(
+            &url,
+            "",
+            4096,
+            Some(client),
+            Arc::new(outer),
+            Some(&remote.daemon_addr),
+        )
+        .await
+        .map_err(Error::msg)?;
+        let response = tokio::time::timeout(Duration::from_secs(5), socket.next())
+            .await
+            .map_err(|_| Error::msg("Encrypted health probe timed out"))?;
+        if response
+            .and_then(|m| m.ok())
+            .and_then(|m| {
+                m.to_text()
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            })
+            .is_some_and(|v| v["status"] == "ok" && v["end_to_end"] == true)
+        {
+            return Ok(());
+        }
+        return Err(Error::msg("Encrypted health probe failed"));
+    }
     check_health_with_origin(remote, origin_tls(remote)?).await
 }
 
@@ -770,6 +830,62 @@ async fn run_named(
             tokio::time::sleep(Duration::from_millis(grace_ms)).await;
         }
 
+        if let Some(identity) = &config.e2ee {
+            use futures_util::StreamExt;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+            loop {
+                let probe_ca = env::var_os("AMARCODE_E2EE_PROBE_CA")
+                    .map(PathBuf::from)
+                    .or_else(|| identity.client_ca.clone())
+                    .ok_or_else(|| Error::msg("E2EE origin probe requires a server CA"))?;
+                let tls = amarcode_transport::client_config_with_crl(
+                    Some(&probe_ca),
+                    None,
+                    None,
+                    None,
+                    true,
+                )
+                .map_err(Error::msg)?;
+                let client = amarcode_transport::encrypted::ClientIdentity {
+                    tls: Arc::new(tls),
+                    server_name: env::var("AMARCODE_E2EE_SERVER_NAME")
+                        .unwrap_or_else(|_| "localhost".into()),
+                };
+                let outer_tls = amarcode_transport::client_config().map_err(Error::msg)?;
+                let attempt = amarcode_transport::encrypted::connect_with(
+                    &format!("wss://{}/e2ee-health", assignment.hostname),
+                    "",
+                    4096,
+                    Some(client),
+                    Arc::new(outer_tls),
+                )
+                .await;
+                if let Ok(mut socket) = attempt {
+                    if let Ok(Some(Ok(message))) =
+                        tokio::time::timeout(Duration::from_secs(5), socket.next()).await
+                    {
+                        if message
+                            .to_text()
+                            .ok()
+                            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+                            .is_some_and(|value| {
+                                value["status"] == "ok" && value["end_to_end"] == true
+                            })
+                        {
+                            progress.finish();
+                            println!("Remote URL: {}\nEnd-to-end TLS: required (paired native clients only)\nAccess token: {token}", assignment.url);
+                            return Ok::<(), Error>(());
+                        }
+                    }
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(Error::msg(
+                        "Encrypted tunnel did not become reachable; assignment retained",
+                    ));
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(5))
@@ -958,6 +1074,8 @@ mod tests {
                 ws_tls_cert: None,
                 ws_tls_key: None,
                 ws_client_ca: None,
+                ws_client_crl: None,
+                e2ee: None,
                 ws_allowed_origins: vec![],
             };
             let app = App::new(config.clone()).await.unwrap();
@@ -1071,6 +1189,8 @@ mod tests {
             ws_tls_cert: None,
             ws_tls_key: None,
             ws_client_ca: None,
+            ws_client_crl: None,
+            e2ee: None,
             ws_allowed_origins: vec![],
         };
         let mut remote = local.clone();

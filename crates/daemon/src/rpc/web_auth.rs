@@ -102,6 +102,7 @@ pub(super) async fn route<S: AsyncRead + AsyncWrite + Unpin>(
     token: &str,
     origins: &[String],
     auth: &BrowserAuth,
+    e2ee_required: bool,
 ) -> Result<Option<Replay<S>>> {
     let header = tokio::time::timeout(Duration::from_secs(10), async {
         let mut bytes = Vec::new();
@@ -141,7 +142,12 @@ pub(super) async fn route<S: AsyncRead + AsyncWrite + Unpin>(
     let origin = get("origin")
         .and_then(|v| std::str::from_utf8(v).ok())
         .filter(|o| allowed(o, origins));
-    let (status, body) = if origin.is_none() {
+    let (status, body) = if e2ee_required {
+        (
+            "426 Upgrade Required",
+            "{\"error\":\"This daemon requires a paired native E2EE client\"}".into(),
+        )
+    } else if origin.is_none() {
         ("403 Forbidden", "{\"error\":\"Origin rejected\"}".into())
     } else if request.method == Some("OPTIONS")
         && get("access-control-request-method") == Some(b"POST".as_slice())
@@ -268,7 +274,7 @@ mod tests {
             client.read_to_string(&mut response).await.unwrap();
             response
         };
-        let (result, response) = tokio::join!(route(server, TOKEN, &[], auth), client_io);
+        let (result, response) = tokio::join!(route(server, TOKEN, &[], auth, false), client_io);
         assert!(result.unwrap().is_none());
         response
     }
@@ -305,12 +311,29 @@ mod tests {
         assert_eq!(auth.tickets.lock().unwrap().len(), 0);
     }
     #[tokio::test]
+    async fn encrypted_listener_never_issues_browser_tickets() {
+        let auth = BrowserAuth::default();
+        let (mut client, server) = tokio::io::duplex(32768);
+        let request = format!("POST /web/session HTTP/1.1\r\nHost: localhost\r\nOrigin: {WEB_ORIGIN}\r\nAuthorization: Bearer {TOKEN}\r\n\r\n");
+        let io = async {
+            client.write_all(request.as_bytes()).await.unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).await.unwrap();
+            response
+        };
+        let (result, response) = tokio::join!(route(server, TOKEN, &[], &auth, true), io);
+        assert!(result.unwrap().is_none());
+        assert!(response.starts_with("HTTP/1.1 426"));
+        assert!(auth.tickets.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn non_ticket_headers_are_replayed_without_consuming_following_data() {
         let (mut client, server) = tokio::io::duplex(32768);
         let request = b"GET /rpc HTTP/1.1\r\nHost: localhost\r\n\r\nFRAME";
         client.write_all(request).await.unwrap();
         client.shutdown().await.unwrap();
-        let mut replay = route(server, TOKEN, &[], &BrowserAuth::default())
+        let mut replay = route(server, TOKEN, &[], &BrowserAuth::default(), false)
             .await
             .unwrap()
             .unwrap();

@@ -56,6 +56,11 @@ def main():
                     "-set_serial", str(secrets.randbits(127) + 1), "-days", "30", "-sha256", "-extfile", extension,
                     "-out", out / (name + "-cert.pem"))
             (out / "extensions.cnf").unlink()
+            (out / "index.txt").write_text("")
+            (out / "crlnumber").write_text("01\n")
+            (out / "ca.cnf").write_text("[ca]\ndefault_ca=issuer\n[issuer]\ndatabase=index.txt\ncertificate=ca.pem\nprivate_key=ca-key.pem\ncrlnumber=crlnumber\ndefault_md=sha256\ndefault_crl_days=1\n")
+            subprocess.run(["openssl", "ca", "-gencrl", "-config", "ca.cnf", "-out", "clients.crl.pem", "-batch"], cwd=out, check=True, stdout=subprocess.DEVNULL)
+
             run("verify", "-CAfile", out / "ca.pem", "-purpose", "sslserver", "-verify_hostname", args.hostname[0], out / "server-cert.pem") if not sans[0].startswith("IP:") else run("verify", "-CAfile", out / "ca.pem", "-purpose", "sslserver", "-verify_ip", args.hostname[0], out / "server-cert.pem")
             run("verify", "-CAfile", out / "ca.pem", "-purpose", "sslclient", out / "client-cert.pem")
         # Atomic publication; failed commands leave no partial identity behind.

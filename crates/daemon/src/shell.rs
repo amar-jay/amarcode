@@ -5,7 +5,7 @@ use std::{
     io::{IsTerminal, Read, Write},
     path::PathBuf,
 };
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::tungstenite::Message;
 
 fn terminal_url(value: &str) -> Result<String> {
     let value = value.trim();
@@ -82,23 +82,12 @@ pub async fn connect(
     {
         return Err(Error::msg("Invalid daemon access token"));
     }
-    let mut request = url
-        .into_client_request()
-        .map_err(|e| Error::msg(e.to_string()))?;
-    request.headers_mut().insert(
-        "authorization",
-        format!("Bearer {token}")
-            .parse()
-            .map_err(|_| Error::msg("Invalid token"))?,
-    );
-    let tls = amarcode_transport::client_config().map_err(Error::msg)?;
-    let connector = tokio_tungstenite::Connector::Rustls(std::sync::Arc::new(tls));
-    let (mut socket, _) = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector)),
+    let mut socket = amarcode_transport::encrypted::connect(
+        &url,
+        &token,
+        amarcode_protocol::MAX_RPC_MESSAGE_BYTES,
     )
     .await
-    .map_err(|_| Error::msg("Remote connection timed out"))?
     .map_err(|e| Error::msg(format!("Cannot open remote terminal: {e}")))?;
     let mut dimensions = crossterm::terminal::size()?;
     let mut open = serde_json::json!({"type":"open","cols":dimensions.0,"rows":dimensions.1});

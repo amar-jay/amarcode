@@ -112,6 +112,7 @@ export type DaemonConnectionInfo = {
   remote: boolean;
   url: string;
   hasToken: boolean;
+  endToEndRequired?: boolean;
   mode: "local" | "websocket" | "ssh";
   ssh: SshConnectionConfig | null;
   scope: string;

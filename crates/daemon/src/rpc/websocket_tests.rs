@@ -30,6 +30,8 @@ fn test_config() -> Config {
         ws_tls_cert: None,
         ws_tls_key: None,
         ws_client_ca: None,
+        ws_client_crl: None,
+        e2ee: None,
         ws_allowed_origins: Vec::new(),
     }
 }
@@ -460,7 +462,7 @@ async fn browser_ticket_opens_real_rpc_and_rejects_replay() {
     let state = Arc::new(state);
     let exchange = async {
         let (mut client, server) = tokio::io::duplex(32768);
-        let service = state.handle_stream(server, Arc::clone(&app), "browser-ticket");
+        let service = state.handle_stream(server, Arc::clone(&app), "browser-ticket", None);
         let request = async {
             client.write_all(format!("POST /web/session HTTP/1.1\r\nHost: localhost\r\nOrigin: https://remote.amarcode.amarjay.com\r\nAuthorization: Bearer {}\r\n\r\n", "a".repeat(64)).as_bytes()).await.unwrap();
             let mut response = String::new();
@@ -488,7 +490,7 @@ async fn browser_ticket_opens_real_rpc_and_rejects_replay() {
         let service_app = Arc::clone(&app);
         let service = tokio::spawn(async move {
             service_state
-                .handle_stream(server, service_app, "browser")
+                .handle_stream(server, service_app, "browser", None)
                 .await
         });
         let result = client_async(request, client).await;
@@ -604,4 +606,658 @@ async fn mutual_tls_requires_trusted_client_cert_and_valid_server_identity() {
             .await
             .unwrap();
     }
+}
+
+async fn encrypted_fixture() -> (
+    tempfile::TempDir,
+    Arc<App>,
+    tokio::task::JoinHandle<Result<()>>,
+    String,
+) {
+    let root = tempfile::tempdir().unwrap();
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-certificates.py");
+    assert!(std::process::Command::new("python3")
+        .arg(script)
+        .args(["dev-ca", "--hostname", "localhost", "--output"])
+        .arg(root.path().join("tls"))
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let mut config = test_config();
+    config.transport = crate::config::DaemonTransport::WebSocket;
+    config.app_dir = root.path().join("data");
+    config.db_path = config.app_dir.join("store.sqlite3");
+    let token = root.path().join("token");
+    private_file(&token, "a".repeat(64).as_bytes());
+    config.ws_token_file = Some(token);
+    config.e2ee = Some(amarcode_transport::TlsIdentity {
+        cert: root.path().join("tls/server-cert.pem"),
+        key: root.path().join("tls/server-key.pem"),
+        client_ca: Some(root.path().join("tls/ca.pem")),
+        client_crl: Some(root.path().join("tls/clients.crl.pem")),
+    });
+    let listener = Listener::bind(&config).await.unwrap();
+    let url = format!("ws://{}/rpc", listener.socket.local_addr().unwrap());
+    let app = Arc::new(App::new(config).await.unwrap());
+    let server_app = Arc::clone(&app);
+    let server = tokio::spawn(async move {
+        crate::rpc::server::run(
+            server_app,
+            crate::rpc::server::Listener::WebSocket(listener),
+        )
+        .await
+    });
+    (root, app, server, url)
+}
+fn paired_client(root: &Path) -> amarcode_transport::encrypted::ClientIdentity {
+    amarcode_transport::encrypted::ClientIdentity {
+        tls: Arc::new(
+            amarcode_transport::client_config_with_crl(
+                Some(&root.join("tls/ca.pem")),
+                Some(&root.join("tls/client-cert.pem")),
+                Some(&root.join("tls/client-key.pem")),
+                None,
+                true,
+            )
+            .unwrap(),
+        ),
+        server_name: "localhost".into(),
+    }
+}
+fn outer_config() -> Arc<rustls::ClientConfig> {
+    Arc::new(amarcode_transport::client_config_with(None, None, None).unwrap())
+}
+
+#[tokio::test]
+async fn encrypted_rpc_rejects_unpaired_legacy_and_revoked_clients_without_restart() {
+    let (root, app, server, url) = encrypted_fixture().await;
+    let mut client = amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        amarcode_protocol::MAX_RPC_MESSAGE_BYTES,
+        Some(paired_client(root.path())),
+        outer_config(),
+    )
+    .await
+    .unwrap();
+    client
+        .send(Message::Text(r#"{"method":"health"}"#.into()))
+        .await
+        .unwrap();
+    assert!(client
+        .next()
+        .await
+        .unwrap()
+        .unwrap()
+        .to_text()
+        .unwrap()
+        .contains("ok"));
+    assert!(amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        None,
+        outer_config()
+    )
+    .await
+    .is_err());
+    let unpaired = amarcode_transport::encrypted::ClientIdentity {
+        tls: Arc::new(
+            amarcode_transport::client_config_with_crl(
+                Some(&root.path().join("tls/ca.pem")),
+                None,
+                None,
+                None,
+                true,
+            )
+            .unwrap(),
+        ),
+        server_name: "localhost".into(),
+    };
+    assert!(amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        Some(unpaired),
+        outer_config()
+    )
+    .await
+    .is_err());
+    drop(client);
+    let original = std::fs::read(root.path().join("tls/clients.crl.pem")).unwrap();
+    let expired = std::process::Command::new("openssl")
+        .current_dir(root.path().join("tls"))
+        .args([
+            "ca",
+            "-gencrl",
+            "-config",
+            "ca.cnf",
+            "-crl_lastupdate",
+            "20200101000000Z",
+            "-crl_nextupdate",
+            "20200102000000Z",
+            "-out",
+            "expired.pem",
+            "-batch",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        expired.status.success(),
+        "{}",
+        String::from_utf8_lossy(&expired.stderr)
+    );
+    std::fs::copy(
+        root.path().join("tls/expired.pem"),
+        root.path().join("tls/clients.crl.pem"),
+    )
+    .unwrap();
+    assert!(amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        Some(paired_client(root.path())),
+        outer_config()
+    )
+    .await
+    .is_err());
+    // A syntactically valid CRL with a forged signature must also fail closed.
+    use base64::Engine as _;
+    let pem = String::from_utf8(original.clone()).unwrap();
+    let encoded: String = pem
+        .lines()
+        .filter(|line| !line.starts_with("---"))
+        .collect();
+    let mut der = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .unwrap();
+    let last = der.len() - 1;
+    der[last] ^= 1;
+    let forged = format!(
+        "-----BEGIN X509 CRL-----\n{}\n-----END X509 CRL-----\n",
+        base64::engine::general_purpose::STANDARD.encode(der)
+    );
+    std::fs::write(root.path().join("tls/clients.crl.pem"), forged).unwrap();
+    assert!(amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        Some(paired_client(root.path())),
+        outer_config()
+    )
+    .await
+    .is_err());
+    std::fs::write(root.path().join("tls/clients.crl.pem"), original).unwrap();
+    let mut client = amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        Some(paired_client(root.path())),
+        outer_config(),
+    )
+    .await
+    .unwrap();
+    // CRL changes are picked up by the existing server; no restart or cached
+    // TLS session can bypass revocation.
+    let revoke = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-crl.py");
+    assert!(std::process::Command::new("python3")
+        .arg(revoke)
+        .arg("--ca-directory")
+        .arg(root.path().join("tls"))
+        .args(["--revoke", "client-cert.pem"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        Some(paired_client(root.path())),
+        outer_config()
+    )
+    .await
+    .is_err());
+    let closed = tokio::time::timeout(Duration::from_secs(2), client.next())
+        .await
+        .unwrap();
+    assert!(!matches!(closed, Some(Ok(Message::Text(_)))));
+    drop(client);
+    // Corrupt or missing configured CRLs are never replaced with an allow-all policy.
+    std::fs::write(root.path().join("tls/clients.crl.pem"), "invalid").unwrap();
+    assert!(amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        Some(paired_client(root.path())),
+        outer_config()
+    )
+    .await
+    .is_err());
+    std::fs::remove_file(root.path().join("tls/clients.crl.pem")).unwrap();
+    assert!(amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        Some(paired_client(root.path())),
+        outer_config()
+    )
+    .await
+    .is_err());
+    app.request_shutdown();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn encrypted_probe_authenticates_origin_without_bearer_or_client_identity() {
+    let (root, app, server, url) = encrypted_fixture().await;
+    let identity = amarcode_transport::encrypted::ClientIdentity {
+        tls: Arc::new(
+            amarcode_transport::client_config_with_crl(
+                Some(&root.path().join("tls/ca.pem")),
+                None,
+                None,
+                None,
+                true,
+            )
+            .unwrap(),
+        ),
+        server_name: "localhost".into(),
+    };
+    let mut socket = amarcode_transport::encrypted::connect_with(
+        &url.replace("/rpc", "/e2ee-health"),
+        "",
+        4096,
+        Some(identity),
+        outer_config(),
+    )
+    .await
+    .unwrap();
+    let response = socket.next().await.unwrap().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(response.to_text().unwrap()).unwrap(),
+        json!({"status":"ok","end_to_end":true})
+    );
+    // Probe never accepts application requests, even with an unpaired client.
+    let _ = socket
+        .send(Message::Text(r#"{"method":"health"}"#.into()))
+        .await;
+    assert!(!matches!(socket.next().await, Some(Ok(Message::Text(_)))));
+    drop(socket);
+    app.request_shutdown();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn relay_cannot_read_tokens_or_rpc_and_tampered_or_replayed_records_fail() {
+    use std::sync::{
+        atomic::{AtomicU8, Ordering},
+        Mutex,
+    };
+    for corrupt in [1, 2] {
+        let (root, app, server, url) = encrypted_fixture().await;
+        let relay = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let relay_url = format!("ws://{}/rpc", relay.local_addr().unwrap());
+        let capture = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+        let traffic = Arc::clone(&capture);
+        let mode = Arc::new(AtomicU8::new(0));
+        let attack = Arc::clone(&mode);
+        let relay_task = tokio::spawn(async move {
+            let (tcp, _) = relay.accept().await.unwrap();
+            let mut front = accept_hdr_async_with_config(
+                tcp,
+                |request: &Request, mut response: Response| {
+                    assert!(!request.headers().contains_key("authorization"));
+                    assert_eq!(
+                        request.headers().get("sec-websocket-protocol").unwrap(),
+                        amarcode_transport::encrypted::PROTOCOL
+                    );
+                    response.headers_mut().insert(
+                        "sec-websocket-protocol",
+                        amarcode_transport::encrypted::PROTOCOL.parse().unwrap(),
+                    );
+                    Ok(response)
+                },
+                None,
+            )
+            .await
+            .unwrap();
+            let mut request = url.into_client_request().unwrap();
+            request.headers_mut().insert(
+                "sec-websocket-protocol",
+                amarcode_transport::encrypted::PROTOCOL.parse().unwrap(),
+            );
+            let (mut back, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+            let mut previous = None;
+            loop {
+                tokio::select! {
+                    message = front.next() => {
+                        let Some(Ok(mut message)) = message else { break; };
+                        if let Message::Binary(bytes) = &message {
+                            traffic.lock().unwrap().push(bytes.to_vec());
+                            let original = message.clone();
+                            match attack.swap(0, Ordering::SeqCst) {
+                                1 => { let mut damaged = bytes.to_vec(); let last = damaged.len()-1; damaged[last] ^= 1; message = Message::Binary(damaged.into()); },
+                                2 => { message = previous.clone().unwrap(); },
+                                _ => {},
+                            }
+                            previous = Some(original);
+                        }
+                        if back.send(message).await.is_err() { break; }
+                    },
+                    message = back.next() => {
+                        let Some(Ok(message)) = message else { break; };
+                        if let Message::Binary(bytes) = &message { traffic.lock().unwrap().push(bytes.to_vec()); }
+                        if front.send(message).await.is_err() { break; }
+                    }
+                }
+            }
+        });
+        let mut socket = amarcode_transport::encrypted::connect_with(
+            &relay_url,
+            &"a".repeat(64),
+            amarcode_protocol::MAX_RPC_MESSAGE_BYTES,
+            Some(paired_client(root.path())),
+            outer_config(),
+        )
+        .await
+        .unwrap();
+        let marker = format!("private-rpc-{}", uuid::Uuid::new_v4());
+        socket
+            .send(Message::Text(
+                json!({"method":marker,"params":{"attachment":"s".repeat(256 * 1024)}})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        assert!(socket
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_text()
+            .unwrap()
+            .contains(&marker));
+        for bytes in capture.lock().unwrap().iter() {
+            assert!(!bytes
+                .windows(marker.len())
+                .any(|window| window == marker.as_bytes()));
+            assert!(!bytes
+                .windows(64)
+                .any(|window| window == "a".repeat(64).as_bytes()));
+        }
+        mode.store(corrupt, Ordering::SeqCst);
+        socket
+            .send(Message::Text(r#"{"method":"health"}"#.into()))
+            .await
+            .unwrap();
+        let response = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .unwrap();
+        assert!(
+            !matches!(response, Some(Ok(Message::Text(_)))),
+            "altered or replayed records must never dispatch"
+        );
+        drop(socket);
+        tokio::time::timeout(Duration::from_secs(2), relay_task)
+            .await
+            .unwrap()
+            .unwrap();
+        app.request_shutdown();
+        server.await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn direct_mutual_tls_reloads_crls_and_disconnects_revoked_clients() {
+    let (root, original_app, original_server, _) = encrypted_fixture().await;
+    original_app.request_shutdown();
+    original_server.await.unwrap().unwrap();
+    drop(original_app);
+    let mut config = test_config();
+    config.transport = crate::config::DaemonTransport::WebSocket;
+    config.app_dir = root.path().join("direct-data");
+    config.db_path = config.app_dir.join("store.sqlite3");
+    config.ws_token_file = Some(root.path().join("token"));
+    config.ws_tls_cert = Some(root.path().join("tls/server-cert.pem"));
+    config.ws_tls_key = Some(root.path().join("tls/server-key.pem"));
+    config.ws_client_ca = Some(root.path().join("tls/ca.pem"));
+    config.ws_client_crl = Some(root.path().join("tls/clients.crl.pem"));
+    let listener = Listener::bind(&config).await.unwrap();
+    let url = format!(
+        "wss://localhost:{}/rpc",
+        listener.socket.local_addr().unwrap().port()
+    );
+    let app = Arc::new(App::new(config).await.unwrap());
+    let serve = Arc::clone(&app);
+    let server = tokio::spawn(async move {
+        crate::rpc::server::run(serve, crate::rpc::server::Listener::WebSocket(listener)).await
+    });
+    let outer = Arc::new(
+        amarcode_transport::client_config_with_crl(
+            Some(&root.path().join("tls/ca.pem")),
+            Some(&root.path().join("tls/client-cert.pem")),
+            Some(&root.path().join("tls/client-key.pem")),
+            None,
+            false,
+        )
+        .unwrap(),
+    );
+    let mut client = amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        None,
+        Arc::clone(&outer),
+    )
+    .await
+    .unwrap();
+    client
+        .send(Message::Text(r#"{"method":"health"}"#.into()))
+        .await
+        .unwrap();
+    assert!(client
+        .next()
+        .await
+        .unwrap()
+        .unwrap()
+        .to_text()
+        .unwrap()
+        .contains("ok"));
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-crl.py");
+    assert!(std::process::Command::new("python3")
+        .arg(script)
+        .arg("--ca-directory")
+        .arg(root.path().join("tls"))
+        .args(["--revoke", "client-cert.pem"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(
+        amarcode_transport::encrypted::connect_with(&url, &"a".repeat(64), 4096, None, outer)
+            .await
+            .is_err()
+    );
+    let response = tokio::time::timeout(Duration::from_secs(2), client.next())
+        .await
+        .unwrap();
+    assert!(!matches!(response, Some(Ok(Message::Text(_)))));
+    app.request_shutdown();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn encrypted_event_subscriptions_and_terminal_control_use_the_inner_channel() {
+    let (root, app, server, url) = encrypted_fixture().await;
+    let mut events = amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        Some(paired_client(root.path())),
+        outer_config(),
+    )
+    .await
+    .unwrap();
+    events
+        .send(Message::Text(
+            r#"{"method":"subscribe_events","params":{}}"#.into(),
+        ))
+        .await
+        .unwrap();
+    assert!(events
+        .next()
+        .await
+        .unwrap()
+        .unwrap()
+        .to_text()
+        .unwrap()
+        .contains("subscribed"));
+    app.events
+        .send(crate::protocol::EditorEvent::ChatUpdated {
+            chat_id: "encrypted-chat-marker".into(),
+        })
+        .unwrap();
+    assert!(events
+        .next()
+        .await
+        .unwrap()
+        .unwrap()
+        .to_text()
+        .unwrap()
+        .contains("encrypted-chat-marker"));
+    drop(events);
+    let mut terminal = amarcode_transport::encrypted::connect_with(
+        &url.replace("/rpc", "/terminal"),
+        &"a".repeat(64),
+        4096,
+        Some(paired_client(root.path())),
+        outer_config(),
+    )
+    .await
+    .unwrap();
+    // Reach the real terminal handler without starting a PTY or invoking a shell.
+    terminal
+        .send(Message::Text(
+            r#"{"type":"resize","cols":80,"rows":24}"#.into(),
+        ))
+        .await
+        .unwrap();
+    let response = terminal.next().await.unwrap().unwrap();
+    assert!(response
+        .to_text()
+        .unwrap()
+        .contains("Expected terminal open"));
+    drop(terminal);
+    app.request_shutdown();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn revocation_watchdog_closes_the_socket_while_handler_is_blocked() {
+    use std::io::Read;
+    let (root, app, server, _) = encrypted_fixture().await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let (socket, _) = listener.accept().await.unwrap();
+    let socket = socket.into_std().unwrap();
+    let state = State::prepare(&app.config).unwrap();
+    let identity = app.config.e2ee.clone().unwrap();
+    let chain = amarcode_transport::certificates(&root.path().join("tls/client-cert.pem")).unwrap();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let blocked = tokio::spawn(async move {
+        state
+            .with_revocation(
+                async move {
+                    tokio::task::block_in_place(|| {
+                        started.send(()).unwrap();
+                        let _ = wait.recv();
+                    });
+                    Ok(())
+                },
+                Some(&identity),
+                chain,
+                Some(&socket),
+            )
+            .await
+    });
+    ready.await.unwrap();
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-crl.py");
+    assert!(std::process::Command::new("python3")
+        .arg(script)
+        .arg("--ca-directory")
+        .arg(root.path().join("tls"))
+        .args(["--revoke", "client-cert.pem"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let read = tokio::task::block_in_place(|| client.read(&mut [0]));
+    assert!(
+        matches!(read, Ok(0))
+            || read.as_ref().is_err_and(|e| matches!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+            )),
+        "revocation must close the socket while the handler is blocked: {read:?}"
+    );
+    release.send(()).unwrap();
+    let _ = blocked.await.unwrap();
+    app.request_shutdown();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn paired_clients_check_server_revocation_on_each_new_connection() {
+    let (root, app, server, url) = encrypted_fixture().await;
+    let client = || amarcode_transport::encrypted::ClientIdentity {
+        tls: Arc::new(
+            amarcode_transport::client_config_with_crl(
+                Some(&root.path().join("tls/ca.pem")),
+                Some(&root.path().join("tls/client-cert.pem")),
+                Some(&root.path().join("tls/client-key.pem")),
+                Some(&root.path().join("tls/clients.crl.pem")),
+                true,
+            )
+            .unwrap(),
+        ),
+        server_name: "localhost".into(),
+    };
+    let socket = amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        Some(client()),
+        outer_config(),
+    )
+    .await
+    .unwrap();
+    drop(socket);
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-crl.py");
+    assert!(std::process::Command::new("python3")
+        .arg(script)
+        .arg("--ca-directory")
+        .arg(root.path().join("tls"))
+        .args(["--revoke", "server-cert.pem"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(amarcode_transport::encrypted::connect_with(
+        &url,
+        &"a".repeat(64),
+        4096,
+        Some(client()),
+        outer_config()
+    )
+    .await
+    .is_err());
+    app.request_shutdown();
+    server.await.unwrap().unwrap();
 }

@@ -69,6 +69,10 @@ pub struct Config {
     pub ws_tls_key: Option<PathBuf>,
     /// Trust anchors for mandatory client certificates (mTLS).
     pub ws_client_ca: Option<PathBuf>,
+    /// Signed CRLs for client revocation; reloaded for each handshake.
+    pub ws_client_crl: Option<PathBuf>,
+    /// Configuring this identity requires inner TLS for every WebSocket client.
+    pub e2ee: Option<amarcode_transport::TlsIdentity>,
     /// Allowed browser origins, comma-separated in AMARCODE_WS_ALLOW_ORIGIN.
     pub ws_allowed_origins: Vec<String>,
     /// Git URL or local Git repository used to populate the runtime registry
@@ -110,6 +114,16 @@ impl Config {
             "AMARCODE_DAEMON_ADDR must be an IP address and port, e.g. 127.0.0.1:43822 or [::1]:43822"
         ))?;
         crate::security::Policy::load()?.validate(self)?;
+        if self.ws_client_crl.is_some() && self.ws_client_ca.is_none() {
+            return Err(Error::msg("Client CRL requires AMARCODE_WS_CLIENT_CA"));
+        }
+        if let Some(identity) = &self.e2ee {
+            if identity.client_ca.is_none() || identity.client_crl.is_none() {
+                return Err(Error::msg(
+                    "E2EE requires a paired client CA and signed client CRL",
+                ));
+            }
+        }
         if self.ws_client_ca.is_some()
             && (self.ws_tls_cert.is_none() || self.transport != DaemonTransport::WebSocket)
         {
@@ -188,13 +202,17 @@ impl Config {
             ws_tls_cert: None,
             ws_tls_key: None,
             ws_client_ca: None,
+            ws_client_crl: None,
+            e2ee: None,
             ws_allowed_origins: Vec::new(),
         };
+        config.e2ee = e2ee_from_env()?;
         if transport == DaemonTransport::WebSocket {
             config.ws_token_file = env_path("AMARCODE_WS_TOKEN_FILE");
             config.ws_tls_cert = env_path("AMARCODE_WS_TLS_CERT");
             config.ws_tls_key = env_path("AMARCODE_WS_TLS_KEY");
             config.ws_client_ca = env_path("AMARCODE_WS_CLIENT_CA");
+            config.ws_client_crl = env_path("AMARCODE_WS_CLIENT_CRL");
             config.ws_allowed_origins = env_text("AMARCODE_WS_ALLOW_ORIGIN")?
                 .unwrap_or_default()
                 .split(',')
@@ -244,4 +262,23 @@ pub fn resolve_default() -> Result<PathBuf> {
     dirs::data_local_dir()
         .map(|root| root.join(APP_IDENTIFIER).join(DAEMON_DATA_DIRECTORY))
         .ok_or_else(|| Error::msg("platform local data directory is unavailable"))
+}
+
+pub(crate) fn e2ee_from_env() -> Result<Option<amarcode_transport::TlsIdentity>> {
+    let cert = env_path("AMARCODE_E2EE_TLS_CERT");
+    let key = env_path("AMARCODE_E2EE_TLS_KEY");
+    let client_ca = env_path("AMARCODE_E2EE_CLIENT_CA");
+    let client_crl = env_path("AMARCODE_E2EE_CLIENT_CRL");
+    match (cert, key) {
+        (None, None) if client_ca.is_none() && client_crl.is_none() => Ok(None),
+        (Some(cert), Some(key)) => Ok(Some(amarcode_transport::TlsIdentity {
+            cert,
+            key,
+            client_ca,
+            client_crl,
+        })),
+        _ => Err(Error::msg(
+            "E2EE requires server certificate/key, client CA, and client CRL",
+        )),
+    }
 }

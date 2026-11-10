@@ -10,6 +10,8 @@ pub(crate) struct Policy {
     pub allow_managed_tunnels: bool,
     pub allow_plaintext_loopback: bool,
     pub require_client_certificate: bool,
+    pub require_e2ee: bool,
+    pub require_certificate_revocation: bool,
 }
 impl Default for Policy {
     fn default() -> Self {
@@ -17,6 +19,8 @@ impl Default for Policy {
             allow_managed_tunnels: true,
             allow_plaintext_loopback: true,
             require_client_certificate: false,
+            require_e2ee: false,
+            require_certificate_revocation: false,
         }
     }
 }
@@ -81,11 +85,36 @@ impl Policy {
             ));
         }
         if self.require_client_certificate
-            && (config.transport != DaemonTransport::WebSocket || config.ws_client_ca.is_none())
+            && (config.transport != DaemonTransport::WebSocket
+                || (config.ws_client_ca.is_none()
+                    && config
+                        .e2ee
+                        .as_ref()
+                        .and_then(|tls| tls.client_ca.as_ref())
+                        .is_none()))
         {
             return Err(Error::msg(
                 "Machine security policy requires mutual TLS; configure AMARCODE_WS_CLIENT_CA",
             ));
+        }
+        if self.require_e2ee
+            && (config.transport != DaemonTransport::WebSocket || config.e2ee.is_none())
+        {
+            return Err(Error::msg(
+                "Machine policy requires end-to-end encrypted WebSocket transport",
+            ));
+        }
+        if self.require_certificate_revocation {
+            if config.ws_client_ca.is_some() && config.ws_client_crl.is_none() {
+                return Err(Error::msg("Machine policy requires signed client CRLs"));
+            }
+            if config
+                .e2ee
+                .as_ref()
+                .is_some_and(|tls| tls.client_ca.is_some() && tls.client_crl.is_none())
+            {
+                return Err(Error::msg("Machine policy requires an inner client CRL"));
+            }
         }
         Ok(())
     }
@@ -94,9 +123,6 @@ impl Policy {
             return Err(Error::msg(
                 "Machine security policy prohibits managed Cloudflare tunnels",
             ));
-        }
-        if self.require_client_certificate {
-            return Err(Error::msg("Managed tunnels cannot satisfy mandatory client-certificate authentication; use direct mTLS"));
         }
         Ok(())
     }
@@ -117,6 +143,8 @@ mod tests {
             ws_tls_cert: None,
             ws_tls_key: None,
             ws_client_ca: None,
+            ws_client_crl: None,
+            e2ee: None,
             ws_allowed_origins: vec![],
         }
     }
@@ -131,14 +159,34 @@ mod tests {
         config.ws_client_ca = Some("ca.pem".into());
         assert!(policy.validate(&config).is_ok());
         assert!(policy.require_tunnel_allowed().is_err());
-        assert!(Policy {
-            require_client_certificate: true,
-            ..Default::default()
-        }
-        .require_tunnel_allowed()
-        .is_err());
         assert!(serde_json::from_str::<Policy>(r#"{"allow_managed_tunels":true}"#).is_err());
     }
+    #[test]
+    fn encrypted_and_revocation_requirements_cannot_be_satisfied_by_legacy_tls_alone() {
+        let mut policy = Policy {
+            require_e2ee: true,
+            require_certificate_revocation: true,
+            require_client_certificate: true,
+            ..Default::default()
+        };
+        let mut config = config();
+        config.transport = DaemonTransport::WebSocket;
+        assert!(policy.validate(&config).is_err());
+        config.e2ee = Some(amarcode_transport::TlsIdentity {
+            cert: "server.pem".into(),
+            key: "key.pem".into(),
+            client_ca: Some("ca.pem".into()),
+            client_crl: None,
+        });
+        assert!(policy.validate(&config).is_err());
+        config.e2ee.as_mut().unwrap().client_crl = Some("clients.crl.pem".into());
+        assert!(policy.validate(&config).is_ok());
+        config.transport = DaemonTransport::Tcp;
+        assert!(policy.validate(&config).is_err());
+        policy.allow_managed_tunnels = false;
+        assert!(policy.require_tunnel_allowed().is_err());
+    }
+
     #[test]
     fn missing_policy_defaults_and_nonregular_policies_fail() {
         let root = tempfile::tempdir().unwrap();

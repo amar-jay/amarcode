@@ -65,7 +65,9 @@ async function socket() {
     throw new Error(
       response.status === 401
         ? "Invalid access token."
-        : "Browser access is unavailable. Update the daemon and check its browser origin configuration.",
+        : response.status === 426
+          ? "This daemon requires a paired native client for end-to-end encryption."
+          : "Browser access is unavailable. Update the daemon and check its browser origin configuration.",
     );
   const ticket = await response.json();
   if (

@@ -12,49 +12,24 @@ use tokio::{
         TcpStream,
     },
 };
-use tokio_tungstenite::{
-    tungstenite::{client::IntoClientRequest, Message},
-    MaybeTlsStream, WebSocketStream,
-};
+use tokio_tungstenite::tungstenite::Message;
 
 pub(super) enum Connection {
     Tcp {
         reader: Lines<BufReader<OwnedReadHalf>>,
         writer: OwnedWriteHalf,
     },
-    WebSocket(Box<WebSocketStream<MaybeTlsStream<TcpStream>>>),
+    WebSocket(Box<amarcode_transport::encrypted::Socket>),
 }
 impl Connection {
     pub(super) async fn remote(url: &str, token: &str) -> Result<Self, String> {
         super::remote::validate(url, token)?;
-        let mut request = url
-            .into_client_request()
-            .map_err(|_| "Invalid remote daemon URL")?;
-        request.headers_mut().insert(
-            "authorization",
-            format!("Bearer {token}")
-                .parse()
-                .map_err(|_| "Invalid access token")?,
-        );
-        let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
-            .max_message_size(Some(amarcode_protocol::MAX_RPC_MESSAGE_BYTES))
-            .max_frame_size(Some(amarcode_protocol::MAX_RPC_MESSAGE_BYTES));
-        // The workspace enables multiple rustls crypto backends; choose one
-        // explicitly rather than relying on process-global provider inference.
-        let tls = amarcode_transport::client_config()?;
-        let connector = tokio_tungstenite::Connector::Rustls(std::sync::Arc::new(tls));
-        let (socket, _) = tokio::time::timeout(
-            Duration::from_secs(15),
-            tokio_tungstenite::connect_async_tls_with_config(
-                request,
-                Some(config),
-                false,
-                Some(connector),
-            ),
+        let socket = amarcode_transport::encrypted::connect(
+            url,
+            token,
+            amarcode_protocol::MAX_RPC_MESSAGE_BYTES,
         )
-        .await
-        .map_err(|_| "Remote daemon connection timed out")?
-        .map_err(|error| format!("Remote daemon connection failed: {error}"))?;
+        .await?;
         Ok(Self::WebSocket(Box::new(socket)))
     }
     async fn connect() -> Result<Self, String> {
