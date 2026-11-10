@@ -11,6 +11,7 @@ pub mod cli_path;
 pub mod config;
 pub mod error;
 mod instance_lock;
+mod shutdown;
 mod workload;
 pub mod logging;
 pub mod protocol;

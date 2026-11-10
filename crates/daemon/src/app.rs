@@ -28,6 +28,7 @@ const EVENT_BUS_CAPACITY: usize = 256;
 
 /// Top-level daemon process state.
 pub struct App {
+    background: crate::shutdown::Background,
     pub config: Config,
     pub store: Arc<Store>,
     pub events: broadcast::Sender<EditorEvent>,
@@ -45,6 +46,7 @@ pub struct App {
 impl App {
     /// Open the store, refresh registry agents, and construct managers.
     pub async fn new(config: Config) -> Result<Self> {
+        let background = crate::shutdown::Background::new();
         config.validate()?;
         info!(
             app_dir = %config.app_dir.display(),
@@ -111,18 +113,19 @@ impl App {
         let tools_dir = config.app_dir.join("tools");
         std::fs::create_dir_all(&tools_dir).ok();
 
-        let agents = AgentManager::new(Arc::clone(&store), &config.app_dir);
+        let agents = AgentManager::new(Arc::clone(&store), &config.app_dir)
+            .with_shutdown(background.shutdown.clone());
         if let Err(error) = agents.refresh_availability() {
             warn!(%error, "failed refreshing agent availability");
         }
         let builtin_update_manager = agents.clone();
-        tokio::task::spawn_blocking(move || {
+        background.spawn("builtin-agent-update", move || {
             builtin_update_manager.update_amarcode_acp_if_installed();
         });
         #[cfg(not(windows))]
         if !installed_agents.is_empty() && registry_path.is_dir() {
             let update_manager = agents.clone();
-            tokio::task::spawn_blocking(move || {
+            background.spawn("registry-agent-update", move || {
                 update_manager.update_installed(&installed_agents);
             });
         }
@@ -150,14 +153,19 @@ impl App {
         );
 
         let update_config = config.clone();
-        tokio::task::spawn_blocking(move || {
-            if let Err(error) = crate::update::resume(&update_config) {
-                warn!(%error, "could not resume pending daemon update");
+        let update_shutdown = background.shutdown.clone();
+        background.spawn("update-recovery", move || {
+            if let Err(error) = crate::update::resume_cancellable(&update_config, &update_shutdown)
+            {
+                if !update_shutdown.requested() {
+                    warn!(%error, "could not resume pending daemon update");
+                }
             }
         });
 
         info!("application initialized");
         Ok(Self {
+            background,
             config,
             store,
             events,
@@ -197,7 +205,7 @@ impl App {
                         .sync_presets(&crate::registry::load_agents(&path)?)?;
                     if !installed_agents.is_empty() {
                         let update_manager = self.agents.clone();
-                        tokio::task::spawn_blocking(move || {
+                        self.background.spawn("registry-agent-update", move || {
                             update_manager.update_installed(&installed_agents);
                         });
                     }
@@ -206,6 +214,18 @@ impl App {
             })
             .await?;
         Ok(())
+    }
+
+    pub(crate) fn request_shutdown(&self) {
+        if self.background.shutdown.cancel() {
+            self.prompt_queue.close();
+            let queue = Arc::clone(&self.prompt_queue);
+            self.background
+                .spawn_cleanup("queue-shutdown", move || queue.shutdown());
+            let sessions = Arc::clone(&self.sessions);
+            self.background
+                .spawn_cleanup("session-shutdown", move || sessions.shutdown());
+        }
     }
 
     /// Serve the configured transport until shutdown.
@@ -249,14 +269,17 @@ impl App {
             let _ = ready.send(());
         }
         let app = Arc::new(self);
-        if let Some(access) = access {
+        let result = if let Some(access) = access {
             tokio::select! {
-                result = rpc::server::run(Arc::clone(&app), listener) => result?,
-                result = rpc::server::run(app, rpc::server::Listener::WebSocket(access)) => result?,
+                result = rpc::server::run(Arc::clone(&app), listener) => result,
+                result = rpc::server::run(Arc::clone(&app), rpc::server::Listener::WebSocket(access)) => result,
             }
         } else {
-            rpc::server::run(app, listener).await?;
-        }
+            rpc::server::run(Arc::clone(&app), listener).await
+        };
+        app.request_shutdown();
+        app.background.finish().await;
+        result?;
         info!("run finished");
         Ok(())
     }

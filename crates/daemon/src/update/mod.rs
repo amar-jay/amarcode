@@ -220,6 +220,14 @@ pub fn get(id: Option<&str>) -> Result<Option<DaemonUpdateJob>, String> {
 /// Resume a journaled job if the original RPC daemon exited before handing it
 /// to the native supervisor. This never runs inside the workspace DB lock.
 pub fn resume(config: &Config) -> Result<(), String> {
+    resume_cancellable(config, &crate::shutdown::Shutdown::default())
+}
+
+pub(crate) fn resume_cancellable(
+    config: &Config,
+    shutdown: &crate::shutdown::Shutdown,
+) -> Result<(), String> {
+    shutdown.check().map_err(|e| e.to_string())?;
     let root = release_root()?;
     let Some(record) = journal::load(&root, None)? else {
         return Ok(());
@@ -229,6 +237,7 @@ pub fn resume(config: &Config) -> Result<(), String> {
     }
     let _request = journal::lock(&root, "request.lock")?;
     if let Ok((_, _, executable)) = installed(config) {
+        shutdown.check().map_err(|e| e.to_string())?;
         launch(&executable, &root, false)?;
     }
     Ok(())

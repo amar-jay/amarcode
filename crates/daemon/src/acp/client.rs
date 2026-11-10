@@ -14,7 +14,7 @@ use std::{
     path::Path,
     process::{Child, ChildStdin, Stdio},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, Sender},
         Arc, Mutex,
     },
@@ -173,6 +173,7 @@ enum RequestDeadline {
 }
 
 pub struct AcpClient {
+    closed: AtomicBool,
     workload: crate::workload::Workload,
     stdin: Mutex<ChildStdin>,
     child: Mutex<Child>,
@@ -234,6 +235,7 @@ impl AcpClient {
 
         Ok((
             Self {
+                closed: AtomicBool::new(false),
                 workload,
                 stdin: Mutex::new(stdin),
                 child: Mutex::new(child),
@@ -293,7 +295,13 @@ impl AcpClient {
     ) -> AcpResult<Value> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
-        self.pending.lock().map_err(lock_error)?.insert(id, sender);
+        {
+            let mut pending = self.pending.lock().map_err(lock_error)?;
+            if self.closed.load(Ordering::Acquire) {
+                return Err(AcpError::ConnectionClosed);
+            }
+            pending.insert(id, sender);
+        }
 
         if let Err(error) = self.write_message(&json!({
             "jsonrpc": "2.0",
@@ -341,7 +349,15 @@ impl AcpClient {
     /// Stops the child process. Prefer `agent.shutdown` first when the adapter
     /// supports a graceful shutdown request.
     pub fn kill(&self) -> AcpResult<()> {
-        self.child.lock().map_err(lock_error)?.kill()?;
+        self.closed.store(true, Ordering::Release);
+        for (_, sender) in self.pending.lock().map_err(lock_error)?.drain() {
+            let _ = sender.send(PendingEvent::Response(Err(AcpError::ConnectionClosed)));
+        }
+        self.workload.terminate();
+        let mut child = self.child.lock().map_err(lock_error)?;
+        if child.try_wait()?.is_none() {
+            child.kill()?;
+        }
         Ok(())
     }
 

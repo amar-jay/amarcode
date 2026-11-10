@@ -322,8 +322,10 @@ impl AgentManager {
     }
 
     pub(crate) fn install_amarcode_acp(&self) -> Result<()> {
+        self.shutdown.check()?;
         let _install_guard = self.amarcode_acp_install_guard()?;
-        let (manifest, source_url) = fetch_verified_manifest()?;
+        self.shutdown.check()?;
+        let (manifest, source_url) = fetch_verified_manifest(&self.shutdown)?;
         let target = release_target()?;
         let artifact = manifest.artifacts.get(target).ok_or_else(|| {
             Error::msg(format!("amarcode-acp release has no artifact for {target}"))
@@ -339,13 +341,17 @@ impl AgentManager {
                 "amarcode-acp"
             });
         if !verify_file(&executable, artifact)? {
-            download_artifact(&source_url, artifact, &executable)?;
+            download_artifact(&source_url, artifact, &executable, &self.shutdown)?;
         }
+        self.shutdown.check()?;
         self.save_builtin_definition(&executable)?;
         Ok(())
     }
 
     pub fn update_amarcode_acp_if_installed(&self) {
+        if self.shutdown.requested() {
+            return;
+        }
         let installed = self
             .get(AGENT_ID)
             .ok()
@@ -353,7 +359,11 @@ impl AgentManager {
             .is_some_and(|agent| Path::new(&agent.command).is_file());
         if installed {
             if let Err(error) = self.install_amarcode_acp() {
-                tracing::warn!(%error, "failed updating built-in amarcode-acp; retaining installed release");
+                if self.shutdown.requested() {
+                    tracing::debug!("cancelled built-in agent update during shutdown");
+                } else {
+                    tracing::warn!(%error, "failed updating built-in amarcode-acp; retaining installed release");
+                }
             }
         }
     }
@@ -457,41 +467,53 @@ fn write_private_json(path: &Path, value: &impl Serialize) -> Result<()> {
     fs::rename(&temporary, path).map_err(|error| Error::msg(error.to_string()))
 }
 
-fn fetch_verified_manifest() -> Result<(ReleaseManifest, reqwest::Url)> {
-    let url = std::env::var("AMARCODE_ACP_RELEASE_URL")
-        .unwrap_or_else(|_| DEFAULT_RELEASE_URL.to_owned());
-    let manifest_url = reqwest::Url::parse(&url).map_err(|error| Error::msg(error.to_string()))?;
-    let signature_url = reqwest::Url::parse(&format!("{url}.sig"))
-        .map_err(|error| Error::msg(error.to_string()))?;
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(10 * 60))
-        .build()
-        .map_err(|error| Error::msg(error.to_string()))?;
-    let bytes = client
-        .get(manifest_url.clone())
-        .send()
-        .and_then(|response| response.error_for_status())
-        .map_err(|error| Error::msg(format!("failed to download amarcode-acp manifest: {error}")))?
-        .bytes()
-        .map_err(|error| Error::msg(error.to_string()))?;
-    if bytes.len() > MAX_MANIFEST_BYTES {
-        return Err(Error::msg("amarcode-acp manifest exceeds the safety limit"));
-    }
-    let signature = client
-        .get(signature_url)
-        .send()
-        .and_then(|response| response.error_for_status())
-        .map_err(|error| {
-            Error::msg(format!(
-                "failed to download amarcode-acp signature: {error}"
-            ))
-        })?
-        .text()
-        .map_err(|error| Error::msg(error.to_string()))?;
-    verify_signature(&bytes, signature.trim())?;
-    let manifest = serde_json::from_slice(&bytes)
-        .map_err(|error| Error::msg(format!("invalid amarcode-acp manifest: {error}")))?;
-    Ok((manifest, manifest_url))
+fn fetch_verified_manifest(
+    shutdown: &crate::shutdown::Shutdown,
+) -> Result<(ReleaseManifest, reqwest::Url)> {
+    shutdown.wait(async {
+        let url = std::env::var("AMARCODE_ACP_RELEASE_URL")
+            .unwrap_or_else(|_| DEFAULT_RELEASE_URL.to_owned());
+        let manifest_url =
+            reqwest::Url::parse(&url).map_err(|error| Error::msg(error.to_string()))?;
+        let signature_url = reqwest::Url::parse(&format!("{url}.sig"))
+            .map_err(|error| Error::msg(error.to_string()))?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10 * 60))
+            .build()
+            .map_err(|error| Error::msg(error.to_string()))?;
+        let bytes = client
+            .get(manifest_url.clone())
+            .send()
+            .await
+            .and_then(|response| response.error_for_status())
+            .map_err(|error| {
+                Error::msg(format!("failed to download amarcode-acp manifest: {error}"))
+            })?
+            .bytes()
+            .await
+            .map_err(|error| Error::msg(error.to_string()))?;
+        if bytes.len() > MAX_MANIFEST_BYTES {
+            return Err(Error::msg("amarcode-acp manifest exceeds the safety limit"));
+        }
+        shutdown.check()?;
+        let signature = client
+            .get(signature_url)
+            .send()
+            .await
+            .and_then(|response| response.error_for_status())
+            .map_err(|error| {
+                Error::msg(format!(
+                    "failed to download amarcode-acp signature: {error}"
+                ))
+            })?
+            .text()
+            .await
+            .map_err(|error| Error::msg(error.to_string()))?;
+        verify_signature(&bytes, signature.trim())?;
+        let manifest = serde_json::from_slice(&bytes)
+            .map_err(|error| Error::msg(format!("invalid amarcode-acp manifest: {error}")))?;
+        Ok((manifest, manifest_url))
+    })
 }
 
 fn verify_signature(bytes: &[u8], encoded: &str) -> Result<()> {
@@ -528,21 +550,31 @@ fn verify_file(path: &Path, artifact: &ReleaseArtifact) -> Result<bool> {
         && sha256(&bytes) == artifact.sha256.to_ascii_lowercase())
 }
 
-fn download_artifact(base: &reqwest::Url, artifact: &ReleaseArtifact, path: &Path) -> Result<()> {
+fn download_artifact(
+    base: &reqwest::Url,
+    artifact: &ReleaseArtifact,
+    path: &Path,
+    shutdown: &crate::shutdown::Shutdown,
+) -> Result<()> {
     let url = base
         .join(&artifact.url)
         .map_err(|error| Error::msg(error.to_string()))?;
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(10 * 60))
-        .build()
-        .map_err(|error| Error::msg(error.to_string()))?;
-    let bytes = client
-        .get(url)
-        .send()
-        .and_then(|response| response.error_for_status())
-        .map_err(|error| Error::msg(format!("failed to download amarcode-acp: {error}")))?
-        .bytes()
-        .map_err(|error| Error::msg(error.to_string()))?;
+    let bytes = shutdown.wait(async {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10 * 60))
+            .build()
+            .map_err(|error| Error::msg(error.to_string()))?;
+        client
+            .get(url)
+            .send()
+            .await
+            .and_then(|response| response.error_for_status())
+            .map_err(|error| Error::msg(format!("failed to download amarcode-acp: {error}")))?
+            .bytes()
+            .await
+            .map_err(|error| Error::msg(error.to_string()))
+    })?;
+    shutdown.check()?;
     if bytes.len() as u64 != artifact.size || sha256(&bytes) != artifact.sha256.to_ascii_lowercase()
     {
         return Err(Error::msg("amarcode-acp artifact verification failed"));

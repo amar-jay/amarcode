@@ -34,6 +34,7 @@ pub struct ResolvedAgent {
 
 #[derive(Clone)]
 pub struct AgentManager {
+    pub(super) shutdown: crate::shutdown::Shutdown,
     store: Arc<Store>,
     app_dir: PathBuf,
     tools_dir: PathBuf,
@@ -48,6 +49,7 @@ impl AgentManager {
         let tools_dir = app_dir.join("tools");
         let registry_dir = app_dir.join(crate::registry::CHECKOUT_DIRECTORY);
         Self {
+            shutdown: Default::default(),
             store,
             app_dir,
             tools_dir,
@@ -55,6 +57,11 @@ impl AgentManager {
             amarcode_acp_install_lock: Arc::new(Mutex::new(())),
             acp_provider_lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    pub(crate) fn with_shutdown(mut self, shutdown: crate::shutdown::Shutdown) -> Self {
+        self.shutdown = shutdown;
+        self
     }
 
     pub fn tools_dir(&self) -> &Path {

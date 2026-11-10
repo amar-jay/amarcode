@@ -51,6 +51,19 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
+    pub(crate) fn shutdown(&self) {
+        self.agents.shutdown.cancel();
+        self.shutdown_setup();
+        let chats = self
+            .inner
+            .state
+            .lock()
+            .map(|state| state.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for chat in chats {
+            let _ = self.cancel_if_running(&chat);
+        }
+    }
     pub fn new(
         store: Arc<Store>,
         agents: AgentManager,
@@ -124,6 +137,7 @@ impl SessionManager {
 
     /// Start a run while the caller holds this chat's prompt lock.
     fn start_run_locked(&self, chat_id: &str, agent_id: &str) -> Result<AgentRun> {
+        self.agents.shutdown.check()?;
         let chat = self
             .inner
             .store
@@ -180,31 +194,34 @@ impl SessionManager {
         // Ownership begins as soon as the ACP process exists, not only after
         // initialization. This lets legitimate startup requests through while
         // still giving inbound workers an exact run-id ownership check.
-        self.inner
+        let mut state = self
+            .inner
             .state
             .lock()
-            .map_err(|_| Error::msg("session lock poisoned"))?
-            .insert(
-                chat_id.to_owned(),
-                LiveRun {
+            .map_err(|_| Error::msg("session lock poisoned"))?;
+        self.agents.shutdown.check()?;
+        state.insert(
+            chat_id.to_owned(),
+            LiveRun {
+                run_id: run.id.clone(),
+                agent_id: agent_id.to_owned(),
+                client: Arc::clone(&client),
+                acp_session_id: None,
+                supports_images: false,
+                session_configuration: SessionConfiguration::default(),
+                commands: crate::protocol::SessionCommands {
                     run_id: run.id.clone(),
                     agent_id: agent_id.to_owned(),
-                    client: Arc::clone(&client),
-                    acp_session_id: None,
-                    supports_images: false,
-                    session_configuration: SessionConfiguration::default(),
-                    commands: crate::protocol::SessionCommands {
-                        run_id: run.id.clone(),
-                        agent_id: agent_id.to_owned(),
-                        revision: 0,
-                        commands: Vec::new(),
-                    },
-                    history_hydration: HistoryHydration::None,
-                    streaming_message_ids: HashMap::new(),
-                    last_streaming_message_id: None,
-                    active_user_message_id: None,
+                    revision: 0,
+                    commands: Vec::new(),
                 },
-            );
+                history_hydration: HistoryHydration::None,
+                streaming_message_ids: HashMap::new(),
+                last_streaming_message_id: None,
+                active_user_message_id: None,
+            },
+        );
+        drop(state);
         if let Some(catalog) = self.session_commands(chat_id)? {
             self.emit(EditorEvent::SessionCommandsUpdated {
                 chat_id: chat_id.to_owned(),

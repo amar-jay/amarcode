@@ -16,11 +16,30 @@ pub(super) struct SetupJob {
 }
 
 impl SessionManager {
+    pub(super) fn shutdown_setup(&self) {
+        let clients = self
+            .setup
+            .lock()
+            .map(|jobs| {
+                jobs.values()
+                    .filter_map(|job| {
+                        let mut job = job.lock().unwrap_or_else(|e| e.into_inner());
+                        job.cancelled = true;
+                        job.client.clone()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for client in clients {
+            let _ = client.kill();
+        }
+    }
     pub fn agent_setup(&self, params: AgentSetupParams) -> Result<AgentSetupResult> {
         let mut jobs = self
             .setup
             .lock()
             .map_err(|_| Error::msg("setup lock poisoned"))?;
+        self.agents.shutdown.check()?;
         if let Some(job) = jobs.get(&params.agent_id) {
             let mut job = job
                 .lock()

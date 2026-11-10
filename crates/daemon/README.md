@@ -81,6 +81,20 @@ daemons and non-Linux platforms retain direct process launching. Set
 test environment. This is resource isolation, not a filesystem or security
 sandbox. Already-running agents must be restarted to enter new scopes.
 
+## Shutdown
+
+SIGTERM and Ctrl-C cancel maintenance work before RPC clients are drained.
+Installer subprocess groups are killed, stalled built-in-agent HTTP requests
+are cancelled (including body reads), and no next agent update is started.
+Existing installed versions are retained. Active agent requests are interrupted;
+waiting prompts remain stored with their queue paused for explicit recovery.
+
+Maintenance workers are tracked and get a shared five-second shutdown budget.
+RPC draining is also bounded to five seconds. A final two-second runtime timeout
+prevents an unresponsive external library call from holding the process open;
+exceeded worker/client deadlines produce warnings. The independent daemon update
+supervisor retains its own lifecycle and durable job journal.
+
 ## Agents
 
 The daemon refreshes its agent catalog from the ACP registry at startup and

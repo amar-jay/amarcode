@@ -35,12 +35,15 @@ impl SessionManager {
         remove_pending_requests_for_run(&self.inner, &run_id);
         self.inner.terminals.release_run(&run_id);
 
-        let _ = self.acp_notify(
-            &run_id,
-            &live.client,
-            AgentRpcMethod::Cancel,
-            json!({ "sessionId": live.acp_session_id }),
-        );
+        let shutting_down = self.agents.shutdown.requested();
+        if !shutting_down {
+            let _ = self.acp_notify(
+                &run_id,
+                &live.client,
+                AgentRpcMethod::Cancel,
+                json!({ "sessionId": live.acp_session_id }),
+            );
+        }
         // Prefer session/close when the agent advertised it; cancel is enough for now.
         let _ = live.client.kill();
 
@@ -58,7 +61,14 @@ impl SessionManager {
                 run_id: run_id.clone(),
                 user_message_id,
                 status: TurnStatus::Cancelled,
-                stop_reason: Some("cancelled".into()),
+                stop_reason: Some(
+                    if shutting_down {
+                        "shutdown"
+                    } else {
+                        "cancelled"
+                    }
+                    .into(),
+                ),
                 error_message: None,
                 error_kind: None,
             });
@@ -163,6 +173,18 @@ impl SessionManager {
     }
 
     pub(super) fn fail_run(&self, run_id: &str, failure: &ClassifiedFailure) -> Result<()> {
+        if self.agents.shutdown.requested() {
+            self.inner
+                .store
+                .update_run(run_id, RunStatus::Stopped, None, None)?;
+            self.emit(EditorEvent::RunUpdated {
+                run_id: run_id.to_owned(),
+                status: RunStatus::Stopped,
+                error_message: None,
+                error_kind: None,
+            });
+            return Ok(());
+        }
         // If a prompt turn is open on this run, close it as failed first.
         if let Ok(mut guard) = self.inner.state.lock() {
             let hit = guard.iter_mut().find_map(|(chat_id, live)| {

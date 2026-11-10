@@ -31,6 +31,9 @@ impl AgentManager {
     /// daemon from starting with the last usable versions.
     pub fn update_installed(&self, installed_agents: &[AgentDefinition]) {
         for previous in installed_agents {
+            if self.shutdown.requested() {
+                break;
+            }
             let agent_id = &previous.id;
             if !self
                 .registry_dir()
@@ -52,6 +55,10 @@ impl AgentManager {
                             "failed updating ACP agent and restoring its previous definition"
                         );
                     } else {
+                        if self.shutdown.requested() {
+                            tracing::debug!(%agent_id, "cancelled agent update during shutdown; restored previous installation");
+                            break;
+                        }
                         tracing::warn!(
                             %agent_id,
                             %error,
@@ -60,6 +67,9 @@ impl AgentManager {
                     }
                 }
             }
+        }
+        if self.shutdown.requested() {
+            return;
         }
         if let Err(error) = self.refresh_availability() {
             tracing::warn!(%error, "failed refreshing ACP availability after updates");
@@ -129,6 +139,7 @@ impl AgentManager {
 
     /// Returns whether files or package caches were changed.
     fn materialize_current(&self, agent_id: &str) -> Result<bool> {
+        self.shutdown.check()?;
         let agent = self
             .get(agent_id)?
             .ok_or_else(|| Error::msg(format!("agent not found: {agent_id}")))?;
@@ -139,14 +150,14 @@ impl AgentManager {
                     return Ok(false);
                 }
                 ensure_runner("bun", &["bun", "bunx"])?;
-                prefetch_bun_package(&package.package)?;
+                prefetch_bun_package(&package.package, &self.shutdown)?;
             }
             InstallKind::Uvx(package) => {
                 if self.is_available(&agent) {
                     return Ok(false);
                 }
                 ensure_runner("uv", &["uv", "uvx"])?;
-                prefetch_uv_package(&package.package)?;
+                prefetch_uv_package(&package.package, &self.shutdown)?;
             }
             InstallKind::Binary(binary) => {
                 let expected =
@@ -159,12 +170,14 @@ impl AgentManager {
                     agent_id,
                     &manifest.version,
                     &binary,
+                    &self.shutdown,
                 )?;
                 let mut updated = agent;
                 updated.command = executable.to_string_lossy().into_owned();
                 updated.arguments = binary.args;
                 updated.environment = binary.env.into_iter().collect();
                 updated.available = false;
+                self.shutdown.check()?;
                 self.save(&updated)?;
             }
         }
@@ -240,7 +253,7 @@ fn which(name: &str) -> Option<PathBuf> {
     })
 }
 
-fn prefetch_bun_package(package: &str) -> Result<()> {
+fn prefetch_bun_package(package: &str, shutdown: &crate::shutdown::Shutdown) -> Result<()> {
     let temp = temp_dir("bun-prefetch")?;
     write_minimal_package_json(&temp)?;
     let result = run_timed(
@@ -250,12 +263,13 @@ fn prefetch_bun_package(package: &str) -> Result<()> {
             .current_dir(&temp),
         INSTALL_TIMEOUT,
         &format!("bun add {package}"),
+        shutdown,
     );
     let _ = fs::remove_dir_all(&temp);
     result.map(|_| ())
 }
 
-fn prefetch_uv_package(package: &str) -> Result<()> {
+fn prefetch_uv_package(package: &str, shutdown: &crate::shutdown::Shutdown) -> Result<()> {
     let temp = temp_dir("uv-prefetch")?;
     let requirement = uv_requirement(package);
     let result = run_timed(
@@ -267,6 +281,7 @@ fn prefetch_uv_package(package: &str) -> Result<()> {
             .arg(&requirement),
         INSTALL_TIMEOUT,
         &format!("uv pip install {requirement}"),
+        shutdown,
     );
     let _ = fs::remove_dir_all(&temp);
     result.map(|_| ())
@@ -289,6 +304,7 @@ fn install_binary_distribution(
     agent_id: &str,
     version: &str,
     binary: &BinaryDistribution,
+    shutdown: &crate::shutdown::Shutdown,
 ) -> Result<PathBuf> {
     let dest = tools_dir.join("agents").join(agent_id).join(version);
     if dest.exists() {
@@ -308,11 +324,12 @@ fn install_binary_distribution(
 
     let archive_name = archive_file_name(&binary.archive);
     let archive_path = dest.join(&archive_name);
-    download_file(&binary.archive, &archive_path)?;
+    shutdown.check()?;
+    download_file(&binary.archive, &archive_path, shutdown)?;
     if let Some(expected) = binary.sha256.as_deref() {
-        verify_sha256(&archive_path, expected)?;
+        verify_sha256(&archive_path, expected, shutdown)?;
     }
-    extract_archive(&archive_path, &dest)?;
+    extract_archive(&archive_path, &dest, shutdown)?;
     let _ = fs::remove_file(&archive_path);
 
     let executable = binary_executable_path(tools_dir, agent_id, version, binary);
@@ -365,7 +382,11 @@ fn archive_file_name(url: &str) -> String {
         .to_owned()
 }
 
-fn download_file(url: &str, destination: &Path) -> Result<()> {
+fn download_file(
+    url: &str,
+    destination: &Path,
+    shutdown: &crate::shutdown::Shutdown,
+) -> Result<()> {
     let status = run_timed(
         Command::new("curl")
             .args(["-fsSL", "--connect-timeout", "30", "-o"])
@@ -373,6 +394,7 @@ fn download_file(url: &str, destination: &Path) -> Result<()> {
             .arg(url),
         INSTALL_TIMEOUT,
         &format!("download {url}"),
+        shutdown,
     )?;
     if status.success() && destination.is_file() {
         Ok(())
@@ -381,26 +403,21 @@ fn download_file(url: &str, destination: &Path) -> Result<()> {
     }
 }
 
-fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
-    let output = Command::new("sha256sum")
-        .arg(path)
-        .output()
-        .or_else(|_| {
-            Command::new("shasum")
-                .args(["-a", "256"])
-                .arg(path)
-                .output()
-        })
-        .map_err(|error| Error::msg(format!("failed to hash {}: {error}", path.display())))?;
-    if !output.status.success() {
-        return Err(Error::msg(format!("failed to hash {}", path.display())));
+fn verify_sha256(path: &Path, expected: &str, shutdown: &crate::shutdown::Shutdown) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        shutdown.check()?;
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let actual = stdout
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let actual = format!("{:x}", hash.finalize());
     if actual != expected.to_ascii_lowercase() {
         return Err(Error::msg(format!(
             "checksum mismatch for {}: expected {expected}, got {actual}",
@@ -410,7 +427,12 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
     Ok(())
 }
 
-fn extract_archive(archive: &Path, destination: &Path) -> Result<()> {
+fn extract_archive(
+    archive: &Path,
+    destination: &Path,
+    shutdown: &crate::shutdown::Shutdown,
+) -> Result<()> {
+    shutdown.check()?;
     let name = archive
         .file_name()
         .and_then(|value| value.to_str())
@@ -437,7 +459,12 @@ fn extract_archive(archive: &Path, destination: &Path) -> Result<()> {
                 .arg(destination);
             command
         };
-        let status = run_timed(&mut command, INSTALL_TIMEOUT, "extract zip archive")?;
+        let status = run_timed(
+            &mut command,
+            INSTALL_TIMEOUT,
+            "extract zip archive",
+            shutdown,
+        )?;
         return if status.success() {
             Ok(())
         } else {
@@ -461,6 +488,7 @@ fn extract_archive(archive: &Path, destination: &Path) -> Result<()> {
                 .arg(destination),
             INSTALL_TIMEOUT,
             "extract archive",
+            shutdown,
         )?;
         return if status.success() {
             Ok(())
@@ -530,7 +558,9 @@ fn run_timed(
     command: &mut Command,
     timeout: Duration,
     label: &str,
+    shutdown: &crate::shutdown::Shutdown,
 ) -> Result<std::process::ExitStatus> {
+    shutdown.check()?;
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -555,7 +585,7 @@ fn run_timed(
     let result = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Ok(status),
-            Ok(None) if started.elapsed() > timeout => {
+            Ok(None) if shutdown.requested() || started.elapsed() > timeout => {
                 #[cfg(unix)]
                 {
                     let _ = nix::sys::signal::killpg(
@@ -565,6 +595,11 @@ fn run_timed(
                 }
                 let _ = child.kill();
                 let _ = child.wait();
+                if shutdown.requested() {
+                    break Err(Error::msg(format!(
+                        "{label} cancelled: daemon is shutting down"
+                    )));
+                }
                 break Err(Error::msg(format!(
                     "{label} timed out after {}s",
                     timeout.as_secs()
@@ -699,9 +734,14 @@ mod tests {
     fn install_commands_drain_large_output_and_return_bounded_failure_details() {
         let mut command = Command::new("sh");
         command.args(["-c", "head -c 262144 /dev/zero; head -c 262144 /dev/zero >&2; printf 'registry-install-failed' >&2; exit 7"]);
-        let error = run_timed(&mut command, Duration::from_secs(5), "test install")
-            .unwrap_err()
-            .to_string();
+        let error = run_timed(
+            &mut command,
+            Duration::from_secs(5),
+            "test install",
+            &crate::shutdown::Shutdown::default(),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("registry-install-failed"));
         assert!(error.contains("exit status: 7"));
         assert!(error.len() < 2 * INSTALL_OUTPUT_TAIL_BYTES + 256);
@@ -713,12 +753,67 @@ mod tests {
         let mut command = Command::new("sh");
         command.args(["-c", "printf 'download stalled' >&2; sleep 10"]);
         let started = std::time::Instant::now();
-        let error = run_timed(&mut command, Duration::from_millis(100), "test install")
-            .unwrap_err()
-            .to_string();
+        let error = run_timed(
+            &mut command,
+            Duration::from_millis(100),
+            "test install",
+            &crate::shutdown::Shutdown::default(),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("timed out"));
         assert!(error.contains("download stalled"));
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_cancels_running_install_commands_and_prevents_new_ones() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("started");
+        let shutdown = crate::shutdown::Shutdown::default();
+        let token = shutdown.clone();
+        let marker_path = marker.clone();
+        let worker = std::thread::spawn(move || {
+            let mut command = Command::new("sh");
+            command
+                .args([
+                    "-c",
+                    "touch \"$1\"; printf 'still downloading' >&2; sleep 60",
+                    "sh",
+                ])
+                .arg(marker_path);
+            run_timed(
+                &mut command,
+                Duration::from_secs(600),
+                "test install",
+                &token,
+            )
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !marker.exists() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let now = std::time::Instant::now();
+        shutdown.cancel();
+        let error = worker.join().unwrap().unwrap_err().to_string();
+        assert!(now.elapsed() < Duration::from_secs(2));
+        assert!(
+            error.contains("cancelled") && error.contains("still downloading"),
+            "{error}"
+        );
+        let next = root.path().join("next");
+        let mut command = Command::new("touch");
+        command.arg(&next);
+        assert!(run_timed(
+            &mut command,
+            Duration::from_secs(600),
+            "next install",
+            &shutdown
+        )
+        .is_err());
+        assert!(!next.exists());
     }
 
     #[test]
@@ -762,7 +857,8 @@ mod tests {
             return;
         }
         let package = "is-number@7.0.0";
-        prefetch_bun_package(package).expect("bun add should prefetch package");
+        prefetch_bun_package(package, &crate::shutdown::Shutdown::default())
+            .expect("bun add should prefetch package");
         let home_cache = dirs::home_dir()
             .expect("home")
             .join(".bun")

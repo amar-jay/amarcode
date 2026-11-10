@@ -441,9 +441,16 @@ mod tests {
             snapshot.pending_requests[1].kind,
             SessionRequestKind::Input
         ));
-        let serialized = serde_json::to_string(&state.snapshot("chat")).unwrap();
-        assert!(!serialized.contains("acp_id"));
-        assert!(!serialized.contains("99"));
+        let serialized = serde_json::to_value(state.snapshot("chat")).unwrap();
+        // Check the request projection, not substrings of the random daemon
+        // UUID (which can legitimately contain the transport ID's digits).
+        assert_eq!(
+            serialized["pending_requests"],
+            json!([
+                {"request_id":"second-alphabetically","kind":"approval","details":{"options":[]}},
+                {"request_id":"first-alphabetically","kind":"input","details":{"message":"question"}},
+            ])
+        );
         for revision in 1..=4 {
             assert!(
                 matches!(receiver.try_recv().unwrap(), EditorEvent::SessionStateUpdated { snapshot } if snapshot.revision == revision)

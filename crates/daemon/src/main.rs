@@ -185,8 +185,32 @@ fn main() {
     async_main(command, transport, remote, no_tunnel, workspace);
 }
 
-#[tokio::main]
-async fn async_main(
+fn async_main(
+    command: LifecycleCommand,
+    transport: DaemonTransport,
+    remote: Option<amarcode_daemon::remote::Setup>,
+    no_tunnel: bool,
+    workspace: Option<PathBuf>,
+) {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("amarcode-daemon: failed to initialize runtime: {error}");
+            std::process::exit(1);
+        }
+    };
+    runtime.block_on(run_async_main(
+        command, transport, remote, no_tunnel, workspace,
+    ));
+    // Cancellation handles normal work. Bound the final wait as well: Tokio
+    // cannot abort a blocked foreign-library/system resolver call.
+    runtime.shutdown_timeout(std::time::Duration::from_secs(2));
+}
+
+async fn run_async_main(
     command: LifecycleCommand,
     transport: DaemonTransport,
     remote: Option<amarcode_daemon::remote::Setup>,

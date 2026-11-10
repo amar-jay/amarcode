@@ -23,7 +23,9 @@ struct Workers {
     active: HashMap<String, Arc<AtomicBool>>,
     waiters: HashMap<String, Waiter>,
 }
+
 pub struct PromptQueue {
+    closing: AtomicBool,
     store: Arc<Store>,
     events: broadcast::Sender<EditorEvent>,
     execute: Arc<Execute>,
@@ -36,6 +38,7 @@ impl PromptQueue {
         execute: impl Fn(PromptParams, &AtomicBool) -> Result<PromptResult> + Send + Sync + 'static,
     ) -> Arc<Self> {
         Arc::new(Self {
+            closing: AtomicBool::new(false),
             store,
             events,
             execute: Arc::new(execute),
@@ -45,12 +48,46 @@ impl PromptQueue {
     pub fn state(&self, chat_id: &str) -> Result<PromptQueueState> {
         self.store.prompt_queue(chat_id)
     }
+
+    pub(crate) fn shutdown(&self) {
+        self.close();
+        let chats = if let Ok(mut workers) = self.workers.lock() {
+            for signal in workers.active.values() {
+                signal.store(true, Ordering::SeqCst);
+            }
+            for (_, waiter) in workers.waiters.drain() {
+                let _ = waiter.send(Err(Error::msg("Daemon is shutting down")));
+            }
+            workers.active.keys().cloned().collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        for chat in chats {
+            let _ = self.store.pause_prompt_queue(
+                &chat,
+                Some("Daemon is shutting down. Resume waiting messages after restart."),
+            );
+        }
+    }
+
+    pub(crate) fn close(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+    }
+
+    fn check_open(&self) -> Result<()> {
+        if self.closing.load(Ordering::SeqCst) {
+            Err(Error::msg("Daemon is shutting down"))
+        } else {
+            Ok(())
+        }
+    }
     fn changed(&self, chat_id: &str) {
         let _ = self.events.send(EditorEvent::ChatUpdated {
             chat_id: chat_id.into(),
         });
     }
     fn kick(self: &Arc<Self>, chat_id: &str, workers: &mut Workers) -> Result<()> {
+        self.check_open()?;
         if workers.active.contains_key(chat_id) || self.state(chat_id)?.paused {
             return Ok(());
         }
@@ -77,6 +114,7 @@ impl PromptQueue {
             .workers
             .lock()
             .map_err(|_| Error::msg("Queue lock poisoned"))?;
+        self.check_open()?;
         self.store.insert_prompt_job(id, &prompt)?;
         self.kick(&chat, &mut workers)?;
         let state = self.state(&chat)?;
@@ -93,6 +131,7 @@ impl PromptQueue {
                 .workers
                 .lock()
                 .map_err(|_| Error::msg("Queue lock poisoned"))?;
+            self.check_open()?;
             let queue = self.state(&chat)?;
             if queue.paused && !queue.items.is_empty() {
                 return Err(Error::msg(
@@ -119,6 +158,7 @@ impl PromptQueue {
             .workers
             .lock()
             .map_err(|_| Error::msg("Queue lock poisoned"))?;
+        self.check_open()?;
         match params.action.as_str() {
             "pause" => self
                 .store
@@ -173,7 +213,7 @@ impl PromptQueue {
                     .workers
                     .lock()
                     .map_err(|_| Error::msg("Queue lock poisoned"))?;
-                if self.state(chat)?.paused {
+                if self.closing.load(Ordering::SeqCst) || self.state(chat)?.paused {
                     workers.active.remove(chat);
                     return Ok(None);
                 }
@@ -199,7 +239,14 @@ impl PromptQueue {
             }))
             .unwrap_or_else(|_| Err(Error::msg("Prompt worker panicked")));
             let failure = if stopped.load(Ordering::SeqCst) {
-                Some("Stopped by you. Queue paused.".to_owned())
+                Some(
+                    if self.closing.load(Ordering::SeqCst) {
+                        "Daemon is shutting down. Queue paused."
+                    } else {
+                        "Stopped by you. Queue paused."
+                    }
+                    .to_owned(),
+                )
             } else {
                 match &result {
                     Err(error) => Some(error.to_string()),
@@ -251,5 +298,70 @@ impl PromptQueue {
             }
         }
         self.changed(chat);
+    }
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+
+    #[test]
+    fn shutdown_wakes_direct_rpcs_and_preserves_waiting_jobs() {
+        let store = Arc::new(Store::open(std::path::Path::new(":memory:")).unwrap());
+        let (events, _) = broadcast::channel(32);
+        let chat = crate::service::ChatManager::new(store.clone(), events.clone())
+            .create("/workspace", None)
+            .unwrap();
+        let (started, ready) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let wait = Mutex::new(wait);
+        let queue = PromptQueue::new(store, events, move |_, _| {
+            started.send(()).unwrap();
+            wait.lock().unwrap().recv().unwrap();
+            Err(Error::msg("test turn stopped"))
+        });
+        let prompt = PromptParams {
+            chat_id: chat.id.clone(),
+            agent_id: "agent".into(),
+            text: "first".into(),
+            attachments: vec![],
+            config_values: vec![],
+        };
+        let mut followup = prompt.clone();
+        followup.text = "waiting".into();
+        let direct = queue.clone();
+        let (result, receive) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            result.send(direct.prompt(prompt)).unwrap();
+        });
+        ready
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        queue.enqueue("followup", followup.clone()).unwrap();
+        queue.shutdown();
+        assert!(receive
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap()
+            .is_err());
+        worker.join().unwrap();
+        assert!(queue.enqueue("too-late", followup).is_err());
+        let state = queue.state(&chat.id).unwrap();
+        assert!(state.paused);
+        assert!(state
+            .items
+            .iter()
+            .any(|item| item.id == "followup" && item.status == "queued"));
+        release.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !queue.workers.lock().unwrap().active.is_empty() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(queue
+            .state(&chat.id)
+            .unwrap()
+            .items
+            .iter()
+            .any(|item| item.id == "followup" && item.status == "queued"));
     }
 }

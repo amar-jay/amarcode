@@ -39,6 +39,7 @@ pub async fn run(app: Arc<App>, listener: Listener) -> Result<()> {
         tokio::select! {
             _ = &mut shutdown => {
                 info!("shutdown signal received, stopping rpc server");
+                app.request_shutdown();
                 break;
             }
             Some(result) = clients.join_next(), if !clients.is_empty() => {
@@ -70,7 +71,14 @@ pub async fn run(app: Arc<App>, listener: Listener) -> Result<()> {
         }
     }
     clients.abort_all();
-    while clients.join_next().await.is_some() {}
+    if tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while clients.join_next().await.is_some() {}
+    })
+    .await
+    .is_err()
+    {
+        warn!("RPC clients exceeded shutdown deadline");
+    }
     info!("rpc server stopped");
     Ok(())
 }
