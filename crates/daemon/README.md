@@ -97,8 +97,11 @@ supervisor retains its own lifecycle and durable job journal.
 
 ## Agents
 
-The daemon refreshes its agent catalog from the ACP registry at startup and
-keeps a cached checkout under `{app_dir}/acp-registry` for offline use.
+The daemon loads its cached agent catalog before serving RPC and keeps a cached
+checkout under `{app_dir}/acp-registry` for offline use. On Linux and macOS, registry
+synchronization and installed-agent updates run in cancellable background work;
+registry network delays do not delay health checks. On Windows, synchronization
+is deferred until an agent RPC.
 The built-in `amarcode-acp` preset is installed separately from signed releases;
 configure its provider and credentials in the desktop's Agent defaults settings.
 

@@ -86,17 +86,8 @@ impl App {
         }
 
         let registry_path = crate::registry::checkout_path(&config.app_dir);
-        // On Windows, the desktop waits only briefly for service health.
-        // Defer network synchronization until an agent RPC, after TCP is bound.
-        #[cfg(not(windows))]
-        if let Some(source) = config.acp_registry_source.as_deref() {
-            match crate::registry::synchronize(&config.app_dir, source).await {
-                Ok(path) => info!(path = %path.display(), "ACP registry synchronized"),
-                Err(error) => {
-                    warn!(%error, "ACP registry synchronization failed; retaining any existing checkout")
-                }
-            }
-        }
+        // Load only local state before binding RPC. Registry network access must
+        // never consume the update supervisor's health-check deadline.
         if registry_path.is_dir() {
             match crate::registry::load_agents(&registry_path) {
                 Ok(agents) => {
@@ -123,10 +114,32 @@ impl App {
             builtin_update_manager.update_amarcode_acp_if_installed();
         });
         #[cfg(not(windows))]
-        if !installed_agents.is_empty() && registry_path.is_dir() {
+        {
             let update_manager = agents.clone();
-            background.spawn("registry-agent-update", move || {
-                update_manager.update_installed(&installed_agents);
+            let registry_store = Arc::clone(&store);
+            let registry_app_dir = config.app_dir.clone();
+            let registry_source = config.acp_registry_source.clone();
+            let registry_shutdown = background.shutdown.clone();
+            background.spawn("registry-refresh", move || {
+                if let Some(source) = registry_source {
+                    let result = registry_shutdown.wait(async {
+                        let path = crate::registry::synchronize(&registry_app_dir, &source).await?;
+                        registry_shutdown.check()?;
+                        let catalog = crate::registry::load_agents(&path)?;
+                        registry_store.sync_presets(&catalog)?;
+                        info!(count = catalog.len(), "ACP registry synchronized");
+                        Ok(())
+                    });
+                    if let Err(error) = result {
+                        if registry_shutdown.requested() {
+                            return;
+                        }
+                        warn!(%error, "ACP registry synchronization failed; retaining cached catalog");
+                    }
+                }
+                if !registry_shutdown.requested() && registry_path.is_dir() {
+                    update_manager.update_installed(&installed_agents);
+                }
             });
         }
         let chats = ChatManager::new(Arc::clone(&store), events.clone());

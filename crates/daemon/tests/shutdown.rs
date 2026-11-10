@@ -383,3 +383,163 @@ for line in sys.stdin:
         amarcode_daemon::protocol::RunStatus::Stopped
     );
 }
+
+#[test]
+#[cfg(not(windows))]
+fn stalled_registry_does_not_delay_health_or_cached_catalog_and_is_cancelled_on_shutdown() {
+    for cached in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let app = root.path().join("data");
+        std::fs::create_dir_all(&app).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let source = format!("http://{}/registry", listener.local_addr().unwrap());
+        if cached {
+            let checkout = app.join("acp-registry");
+            std::fs::create_dir_all(checkout.join("cached-agent")).unwrap();
+            assert!(Command::new("git")
+                .args(["init", "--quiet"])
+                .arg(&checkout)
+                .status()
+                .unwrap()
+                .success());
+            assert!(Command::new("git")
+                .arg("-C")
+                .arg(&checkout)
+                .args(["remote", "add", "origin", &source])
+                .status()
+                .unwrap()
+                .success());
+            std::fs::write(checkout.join("registry.schema.json"), "{}").unwrap();
+            std::fs::write(checkout.join("agent.schema.json"), "{}").unwrap();
+            std::fs::write(
+                checkout.join("cached-agent/agent.json"),
+                r#"{
+                "id":"cached-agent", "name":"Cached Agent", "version":"1.0.0",
+                "distribution":{"npx":{"package":"cached-agent@1.0.0"}}
+            }"#,
+            )
+            .unwrap();
+        }
+        let (received, request) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        listener.set_nonblocking(true).unwrap();
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "registry fetch never started");
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("registry listener: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut header = Vec::new();
+            while !header.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                header.push(byte[0]);
+            }
+            received.send(()).unwrap();
+            // Hold Git's response headers until the daemon has shut down.
+            let _ = wait.recv();
+        });
+        let (mut command, address) = command(root.path(), &app);
+        command.env("AMARCODE_ACP_REGISTRY_SOURCE", &source);
+        let mut daemon = Daemon {
+            child: command.spawn().unwrap(),
+            app: app.clone(),
+        };
+        request
+            .recv_timeout(Duration::from_secs(5))
+            .expect("registry HTTP request");
+        ready(&mut daemon, &address);
+        let mut stream = TcpStream::connect(&address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        writeln!(stream, "{{\"method\":\"list_agents\"}}").unwrap();
+        let mut reply = String::new();
+        BufReader::new(stream).read_line(&mut reply).unwrap();
+        assert!(reply.contains("amarcode-acp"), "{reply}");
+        if cached {
+            assert!(reply.contains("cached-agent"), "{reply}");
+        }
+        stop(&mut daemon);
+        release.send(()).unwrap();
+        server.join().unwrap();
+    }
+}
+
+#[test]
+#[cfg(not(windows))]
+fn background_registry_refresh_publishes_new_agents() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    std::fs::create_dir_all(source.join("fresh-agent")).unwrap();
+    for name in ["agent.schema.json", "registry.schema.json"] {
+        std::fs::write(source.join(name), "{}").unwrap();
+    }
+    std::fs::write(
+        source.join("fresh-agent/agent.json"),
+        r#"{
+        "id":"fresh-agent", "name":"Fresh Agent", "version":"1.0.0",
+        "distribution":{"npx":{"package":"fresh-agent@1.0.0"}}
+    }"#,
+    )
+    .unwrap();
+    for args in [
+        vec!["init", "--quiet", "--initial-branch=main"],
+        vec!["add", "."],
+        vec![
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "fixture",
+        ],
+    ] {
+        assert!(Command::new("git")
+            .current_dir(&source)
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    }
+    let app = root.path().join("data");
+    let (mut command, address) = command(root.path(), &app);
+    command.env("AMARCODE_ACP_REGISTRY_SOURCE", &source);
+    let mut daemon = Daemon {
+        child: command.spawn().unwrap(),
+        app,
+    };
+    ready(&mut daemon, &address);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut stream = TcpStream::connect(&address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        writeln!(stream, "{{\"method\":\"list_agents\"}}").unwrap();
+        let mut reply = String::new();
+        BufReader::new(stream).read_line(&mut reply).unwrap();
+        if reply.contains("fresh-agent") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "refreshed catalog not published: {reply}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    stop(&mut daemon);
+}
