@@ -33,10 +33,16 @@ import {
   releaseCommitMessage,
   type BinaryProductId,
 } from "./release/products";
+import {
+  checkWranglerAuthentication,
+  registryHasChanges,
+} from "./release/preflight";
 import { loadRemoteManifest, upload } from "./release/r2";
 
 export async function publish(args: string[]) {
-  const selected = await interactive(parseArgs(args));
+  const options = parseArgs(args);
+  checkWranglerAuthentication();
+  const selected = await interactive(options, registryHasChanges());
   if (!selected) return;
   await execute(selected);
 }
@@ -245,7 +251,7 @@ async function execute(plan: ReleasePlan) {
       );
     }
 
-    if (binaryIds.length > 0 && !plan.skipDeploy) {
+    if (plan.deployRegistry) {
       run(["bunx", "wrangler", "deploy", "--config", wranglerConfig], {
         cwd: registryDirectory,
       });
@@ -254,6 +260,9 @@ async function execute(plan: ReleasePlan) {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 
+  if (plan.deployRegistry) {
+    console.log("\nRegistry Worker deployment completed successfully.");
+  }
   if (binaryIds.length > 0) {
     console.log("\nBinary publication completed successfully.");
   }

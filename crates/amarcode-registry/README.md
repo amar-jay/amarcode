@@ -267,3 +267,20 @@ optional absolute CA bundle path on the connector host. The response echoes
 Legacy requests without origin settings retain HTTP loopback ingress. Deploy this
 worker before enabling origin TLS in a daemon. Cloudflare still terminates public
 client TLS; see [daemon TLS deployment](../daemon/TLS.md).
+
+## Publish preflight and registry changes
+
+`bun run publish` checks `wrangler whoami --json` before opening the release
+menu or changing versions. If authentication fails, log in with
+`bunx wrangler login` and retry.
+
+The product menu contains daemon, ACP, and desktop app. Registry deployment is a
+separate yes/no question, shown only when Git reports staged, unstaged, or
+untracked changes under `crates/amarcode-registry`. Answering yes includes
+`wrangler deploy` in the release; answering no skips it. Binary publication alone
+does not redeploy the Worker. This checks pending worktree changes, not changes
+already committed before starting the publisher.
+
+For non-interactive publication with registry changes, use `--deploy-registry`
+to answer yes or `--skip-deploy` to answer no. `--dry-run` still checks
+authentication and prepares the release plan, but does not commit or deploy.

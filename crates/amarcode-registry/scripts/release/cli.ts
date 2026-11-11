@@ -32,6 +32,7 @@ export type ParsedOptions = {
   overwrite: boolean;
   skipBuild: boolean;
   skipDeploy: boolean;
+  deployRegistry: boolean;
   dryRun: boolean;
   allowDirty: boolean;
   nonInteractive: boolean;
@@ -46,6 +47,7 @@ export type ReleasePlan = {
   overwrite: boolean;
   skipBuild: boolean;
   skipDeploy: boolean;
+  deployRegistry: boolean;
   dryRun: boolean;
   allowDirty: boolean;
   appPublication: AppPublicationPlan | null;
@@ -71,7 +73,8 @@ Options:
   --target <triple>         Rust target; repeat for multiple targets
   --bucket <name>           R2 bucket (default: amarcode-daemons)
   --skip-build              Publish already-built release binaries
-  --skip-deploy             Upload without deploying the registry Worker
+  --skip-deploy             Decline registry deployment when files changed
+  --deploy-registry         Accept registry deployment when files changed
   --dry-run                 Build and generate metadata without Cloudflare writes
   --allow-dirty             Allow production publish from a dirty worktree
   --non-interactive         Fail instead of opening the release TUI
@@ -96,6 +99,7 @@ export function parseArgs(
         "--overwrite",
         "--skip-build",
         "--skip-deploy",
+        "--deploy-registry",
         "--dry-run",
         "--allow-dirty",
         "--non-interactive",
@@ -166,6 +170,9 @@ export function parseArgs(
     versionsProvided.acp = true;
   }
 
+  if (flags.has("--deploy-registry") && flags.has("--skip-deploy")) {
+    throw new Error("--deploy-registry and --skip-deploy cannot be combined");
+  }
   const commitMessage = values.get("--commit-message") ?? null;
   const appPublication =
     products.includes("app") && flags.has("--push")
@@ -182,6 +189,7 @@ export function parseArgs(
     overwrite: flags.has("--overwrite"),
     skipBuild: flags.has("--skip-build"),
     skipDeploy: flags.has("--skip-deploy"),
+    deployRegistry: flags.has("--deploy-registry"),
     dryRun: flags.has("--dry-run"),
     allowDirty: flags.has("--allow-dirty"),
     nonInteractive: flags.has("--non-interactive"),
@@ -254,8 +262,26 @@ async function inquireAppPublication(): Promise<
   return { commitMessage: null, push: true };
 }
 
+export async function inquireRegistryDeployment(
+  options: Pick<ParsedOptions, "skipDeploy" | "deployRegistry">,
+  changed: boolean,
+  confirm: () => Promise<boolean | symbol> = () =>
+    prompts.confirm({
+      message:
+        "Files in crates/amarcode-registry changed. Deploy the registry Worker?",
+      initialValue: false,
+    }),
+): Promise<boolean | null> {
+  if (!changed || options.skipDeploy) return false;
+  if (options.deployRegistry) return true;
+  const answer = await confirm();
+  if (prompts.isCancel(answer)) return cancelled(answer);
+  return answer;
+}
+
 export async function interactive(
   options: ParsedOptions,
+  registryChanged = false,
 ): Promise<ReleasePlan | null> {
   const tty = process.stdin.isTTY && process.stdout.isTTY;
   const binarySelected = options.products.filter(
@@ -264,22 +290,36 @@ export async function interactive(
   const missingVersions = binarySelected.filter(
     (id) => !options.versionsProvided[id],
   );
+  const needsRegistryAnswer =
+    registryChanged && !options.skipDeploy && !options.deployRegistry;
   const needsTui =
+    needsRegistryAnswer ||
     !options.productsProvided ||
     missingVersions.length > 0 ||
     (options.products.includes("app") && !options.appPublication);
 
   if (!needsTui) {
-    return finalize(options);
+    return finalize({
+      ...options,
+      deployRegistry: registryChanged && options.deployRegistry,
+    });
   }
   if (!tty || options.nonInteractive) {
     throw new Error(
-      "no interactive terminal; supply --products and product versions, or omit --non-interactive",
+      needsRegistryAnswer
+        ? "registry files changed; supply --deploy-registry or --skip-deploy for non-interactive publication"
+        : "no interactive terminal; supply --products and product versions, or omit --non-interactive",
     );
   }
 
   prompts.intro("Amarcode release");
   prompts.note(`Git commit: ${gitCommit()}`, "Release source");
+
+  const deployRegistry = await inquireRegistryDeployment(
+    options,
+    registryChanged,
+  );
+  if (deployRegistry === null) return null;
 
   let products = options.products;
   if (!options.productsProvided) {
@@ -359,6 +399,7 @@ export async function interactive(
         : binaryProductIds,
       versions,
     )}`,
+    `Registry Worker: ${deployRegistry ? "deploy" : "skip"}`,
     `Desktop app: ${products.includes("app") ? "publish last" : "skip"}`,
     ...(appPublication?.commitMessage
       ? [`Commit: ${appPublication.commitMessage}`]
@@ -384,6 +425,7 @@ export async function interactive(
     versionsProvided: { daemon: true, acp: true },
     targets,
     overwrite,
+    deployRegistry,
     appPublication,
   });
 }
@@ -418,6 +460,7 @@ function finalize(options: ParsedOptions): ReleasePlan {
     overwrite: options.overwrite,
     skipBuild: options.skipBuild,
     skipDeploy: options.skipDeploy,
+    deployRegistry: options.deployRegistry,
     dryRun: options.dryRun,
     allowDirty: options.allowDirty,
     appPublication: options.products.includes("app")

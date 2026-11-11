@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseArgs } from "./cli";
+import { parseArgs, interactive, inquireRegistryDeployment } from "./cli";
 import { parseGitPorcelain } from "./commands";
 import { releaseCommitMessage } from "./products";
 
@@ -62,5 +62,72 @@ describe("version release commit", () => {
         acp: "0.1.1",
       }),
     ).toBe("chore: release amarcode-daemon 0.6.13, amarcode-acp 0.1.1");
+  });
+});
+
+describe("registry deployment decision", () => {
+  test("registry remains outside the product list", () => {
+    expect(() => parseArgs(["registry"])).toThrow(/unknown product/);
+    expect(parseArgs(["all"]).products).toEqual(["daemon", "acp", "app"]);
+  });
+
+  test("does not deploy unchanged registry during binary publication", async () => {
+    const plan = await interactive(
+      parseArgs(["acp", "--version", "1.2.3", "--non-interactive"]),
+      false,
+    );
+    expect(plan?.deployRegistry).toBe(false);
+  });
+
+  test("changed registry needs an explicit decision without a terminal", async () => {
+    await expect(
+      interactive(
+        parseArgs(["acp", "--version", "1.2.3", "--non-interactive"]),
+        true,
+      ),
+    ).rejects.toThrow(/--deploy-registry or --skip-deploy/);
+  });
+
+  test("non-interactive flags supply either answer", async () => {
+    for (const [flag, expected] of [
+      ["--deploy-registry", true],
+      ["--skip-deploy", false],
+    ] as const) {
+      const plan = await interactive(
+        parseArgs(["acp", "--version", "1.2.3", "--non-interactive", flag]),
+        true,
+      );
+      expect(plan?.deployRegistry).toBe(expected);
+    }
+    expect(() => parseArgs(["--deploy-registry", "--skip-deploy"])).toThrow(
+      /cannot be combined/,
+    );
+  });
+
+  test("asks yes/no only for changed files and respects both answers", async () => {
+    const options = { skipDeploy: false, deployRegistry: false };
+    for (const answer of [true, false]) {
+      let calls = 0;
+      const confirm = async () => {
+        calls++;
+        return answer;
+      };
+      expect(await inquireRegistryDeployment(options, true, confirm)).toBe(
+        answer,
+      );
+      expect(calls).toBe(1);
+      expect(await inquireRegistryDeployment(options, false, confirm)).toBe(
+        false,
+      );
+      expect(calls).toBe(1);
+      expect(
+        await inquireRegistryDeployment(
+          { ...options, skipDeploy: true },
+          true,
+          confirm,
+        ),
+      ).toBe(false);
+      expect(calls).toBe(1);
+    }
   });
 });
