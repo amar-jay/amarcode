@@ -70,7 +70,14 @@ selector. Results are cached for one hour. `provider.model` remains the default
 and is the fallback if discovery fails. Model selections are scoped to each
 session and persisted with it. Vercel's catalog is filtered to language models.
 Discovery also reads each model's `context_length` (or Vercel's `context_window`)
-and output token limit. Before every provider
+and output token limit.
+
+`provider.model` may be `"default"`, which stores the alias in the session and
+resolves it per request against the discovered catalog: the gateway's free
+router (`openrouter/free`) is preferred, then the first advertised model. If
+discovery fails, the alias is omitted from the request so the service applies
+its own default. This keeps sessions following the service default while every
+request still carries a concrete model ID, which some gateways require. Before every provider
 call the adapter estimates prompt size with a bytes/4 heuristic, prunes large
 tool results while retaining their beginning and end, then summarizes older
 exchanges if necessary. The original request and latest user request stay

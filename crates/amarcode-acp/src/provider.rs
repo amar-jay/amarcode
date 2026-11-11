@@ -67,6 +67,22 @@ pub struct DiscoveredModel {
     pub max_completion_tokens: Option<u64>,
 }
 
+/// Alias meaning "let the service pick its default model". Sessions may store
+/// this; it is resolved to a concrete advertised model ID before use.
+pub const DEFAULT_MODEL_ALIAS: &str = "default";
+
+/// Concrete model backing the "default" alias, taken from the models catalog.
+/// Prefers the gateway's own free router entry when advertised, so requests
+/// carry a stable, valid model ID instead of the alias. Falls back to the
+/// first catalog entry when there is no router entry.
+pub fn resolve_default_model(models: &[DiscoveredModel]) -> Option<String> {
+    models
+        .iter()
+        .find(|model| model.id == "openrouter/free")
+        .or_else(|| models.first())
+        .map(|model| model.id.clone())
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ModelTurn {
     pub text: String,
@@ -334,7 +350,10 @@ pub async fn stream_completion(
     Ok(Completion::Completed(turn))
 }
 
-// The free service selects its model and never receives a saved custom key.
+// The free service never receives a saved custom key. Model selection is
+// forwarded once it is a concrete catalog ID, but the unresolved "default"
+// alias is dropped so the service applies its own default instead of
+// rejecting an unknown model ID.
 // Apply this to streaming, fallback, and compaction requests alike.
 fn completion_request(
     client: &HttpClient,
@@ -344,7 +363,16 @@ fn completion_request(
     let mut body = body.clone();
     if config.provider.is_amarcode_free() {
         if let Some(object) = body.as_object_mut() {
-            object.remove("model");
+            let unresolved = object
+                .get("model")
+                .and_then(Value::as_str)
+                .is_some_and(|model| {
+                    let model = model.trim();
+                    model.is_empty() || model == DEFAULT_MODEL_ALIAS
+                });
+            if unresolved {
+                object.remove("model");
+            }
         }
     }
     let mut request = client.post(config.provider.endpoint()).json(&body);
@@ -651,13 +679,6 @@ pub async fn fetch_models(
     client: &HttpClient,
     config: &Config,
 ) -> Result<Vec<DiscoveredModel>, String> {
-    if config.provider.is_amarcode_free() {
-        return Ok(vec![DiscoveredModel {
-            id: config.provider.model.clone(),
-            context_length: None,
-            max_completion_tokens: None,
-        }]);
-    }
     let response = client
         .get(config.provider.models_endpoint())
         .bearer_auth(&config.provider.api_key)
@@ -1017,7 +1038,8 @@ mod tests {
         .unwrap();
         let http = reqwest::Client::new();
         for stream in [true, false] {
-            let body = json!({"model":"old-custom-model","stream":stream,"messages":[]});
+            // The unresolved alias must not leak to the service.
+            let body = json!({"model":"default","stream":stream,"messages":[]});
             let request = completion_request(&http, &config, &body).build().unwrap();
             assert_eq!(
                 request.url().as_str(),
@@ -1028,6 +1050,14 @@ mod tests {
                 serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
             assert!(sent.get("model").is_none());
             assert_eq!(sent["stream"], stream);
+
+            // A resolved catalog model is forwarded so selection is honored.
+            let body = json!({"model":"openrouter/free","stream":stream,"messages":[]});
+            let request = completion_request(&http, &config, &body).build().unwrap();
+            assert!(!request.headers().contains_key("authorization"));
+            let sent: Value =
+                serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+            assert_eq!(sent["model"], "openrouter/free");
         }
         config.provider.base_url = "https://provider.example/v1".into();
         let request = completion_request(&http, &config, &json!({"model":"custom"}))
@@ -1042,19 +1072,30 @@ mod tests {
         assert_eq!(sent["model"], "custom");
     }
 
-    #[tokio::test]
-    async fn free_model_discovery_keeps_the_service_default() {
-        let config: Config = serde_json::from_value(json!({
-            "name":"test", "provider": {
-                "base_url":"https://free.amarcode.amarjay.com", "model":"default"
-            }
-        }))
-        .unwrap();
-        let models = fetch_models(&reqwest::Client::new(), &config)
-            .await
-            .unwrap();
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].id, "default");
+    #[test]
+    fn default_alias_resolves_to_an_advertised_model() {
+        let catalog = |ids: &[&str]| {
+            ids.iter()
+                .map(|id| DiscoveredModel {
+                    id: (*id).to_owned(),
+                    context_length: None,
+                    max_completion_tokens: None,
+                })
+                .collect::<Vec<_>>()
+        };
+        // The gateway's free router entry is preferred over catalog order.
+        let models = catalog(&["vendor/expensive", "openrouter/free", "vendor/other"]);
+        assert_eq!(
+            resolve_default_model(&models).as_deref(),
+            Some("openrouter/free")
+        );
+        // Without a router entry, any concrete ID beats the alias.
+        let models = catalog(&["vendor/expensive", "vendor/other"]);
+        assert_eq!(
+            resolve_default_model(&models).as_deref(),
+            Some("vendor/expensive")
+        );
+        assert_eq!(resolve_default_model(&[]), None);
     }
 
     use super::*;

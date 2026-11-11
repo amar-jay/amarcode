@@ -128,6 +128,8 @@ struct ModelCache {
     ids: Vec<String>,
     context_lengths: HashMap<String, u64>,
     max_completion_tokens: HashMap<String, u64>,
+    /// Concrete model backing the configured "default" alias, when known.
+    default_model: Option<String>,
 }
 
 struct Session {
@@ -402,6 +404,12 @@ impl Runtime {
     async fn model_limits(&self, model: &str) -> ModelLimits {
         self.refresh_models().await;
         let cache = self.models.lock().await;
+        // Limits are advertised per concrete model, not per alias.
+        let model = if model == provider::DEFAULT_MODEL_ALIAS {
+            cache.default_model.as_deref().unwrap_or(model)
+        } else {
+            model
+        };
         ModelLimits {
             context_length: self
                 .config
@@ -411,6 +419,24 @@ impl Runtime {
                 .unwrap_or(provider::DEFAULT_CONTEXT_LENGTH),
             max_completion_tokens: cache.max_completion_tokens.get(model).copied(),
         }
+    }
+
+    /// Resolve the configured "default" alias to a concrete advertised model.
+    ///
+    /// Sessions keep storing the alias so they follow the service default, but
+    /// requests need a real ID: some gateways reject or mis-handle "default".
+    /// The resolved ID is cached alongside the model catalog.
+    async fn effective_model(&self, model: &str) -> String {
+        if model != provider::DEFAULT_MODEL_ALIAS {
+            return model.to_owned();
+        }
+        self.refresh_models().await;
+        self.models
+            .lock()
+            .await
+            .default_model
+            .clone()
+            .unwrap_or_else(|| model.to_owned())
     }
 
     async fn refresh_models(&self) {
@@ -429,8 +455,10 @@ impl Runtime {
         let mut ids = vec![configured.clone()];
         let mut context_lengths = HashMap::new();
         let mut max_completion_tokens = HashMap::new();
+        let mut default_model = None;
         match provider::fetch_models(&self.http, &self.config).await {
             Ok(models) => {
+                default_model = provider::resolve_default_model(&models);
                 ids = models.iter().map(|model| model.id.clone()).collect();
                 for model in models {
                     if let Some(context_length) = model.context_length {
@@ -453,6 +481,7 @@ impl Runtime {
         cache.ids = ids;
         cache.context_lengths = context_lengths;
         cache.max_completion_tokens = max_completion_tokens;
+        cache.default_model = default_model;
     }
 
     async fn set_model(
@@ -881,6 +910,13 @@ async fn run_agent_turn(
         }
         let _ = relay_cancel.send(true);
     }));
+    // Sessions store the configured alias; requests need the concrete model.
+    let model = tokio::select! {
+        model = runtime.effective_model(&model) => model,
+        _ = execution_cancellation.changed() => {
+            return cancelled_or_limited(history, &expired, &cancellation_observer, &connection, &session_id);
+        }
+    };
     let limits = tokio::select! {
         limits = runtime.model_limits(&model) => limits,
         _ = execution_cancellation.changed() => {

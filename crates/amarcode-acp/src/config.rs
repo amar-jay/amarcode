@@ -229,6 +229,11 @@ impl ProviderConfig {
     }
 
     pub fn models_endpoint(&self) -> String {
+        // The free gateway mounts the API under /v1 even when the configured
+        // base URL omits it; /models alone answers 404.
+        if self.is_amarcode_free() {
+            return "https://free.amarcode.amarjay.com/v1/models".into();
+        }
         format!("{}/models", self.base_url)
     }
 
@@ -272,6 +277,15 @@ mod tests {
         let config = Config::from_file(&path).unwrap();
         assert!(config.provider.api_key.is_empty());
         assert!(config.provider.is_amarcode_free());
+        // Both endpoints live under /v1 on the free gateway, whatever the base URL.
+        assert_eq!(
+            config.provider.endpoint(),
+            "https://free.amarcode.amarjay.com/v1/chat/completions"
+        );
+        assert_eq!(
+            config.provider.models_endpoint(),
+            "https://free.amarcode.amarjay.com/v1/models"
+        );
         let mut value = value;
         value["provider"]["base_url"] = json!("https://custom.example/v1");
         std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
