@@ -6,10 +6,9 @@ export interface TunnelEnv {
   TUNNEL_CF_ZONE_ID?: string;
   TUNNEL_DOMAIN?: string;
   TUNNEL_CAPACITY?: string;
+  // Presence of this secret enables enrollment-code enforcement; removing it
+  // restores the previous open-enrollment behavior.
   TUNNEL_ENROLLMENT_CODE?: string;
-  // Staged rollout: enforcement stays dormant until released daemons can send
-  // the code, so deploying this Worker cannot lock out existing installations.
-  TUNNEL_ENROLLMENT_ENFORCE?: string;
 }
 type OriginTls = { server_name: string; ca_pool?: string };
 type Installation = {
@@ -462,17 +461,15 @@ export class Allocator {
           if (request.method === "DELETE")
             return reply({ error: "Installation not found." }, 404);
           // Reclaimed owners already authenticated above via credentialHash.
-          if (!record && env.TUNNEL_ENROLLMENT_ENFORCE === "true") {
-            // New installation IDs require the operator enrollment code.
+          if (!record) {
+            // Configured code means new installation IDs must present it.
             const expected = env.TUNNEL_ENROLLMENT_CODE ?? "";
-            if (!expected)
-              return reply(
-                { error: "Tunnel enrollment is not configured." },
-                503,
-              );
-            const presented = request.headers.get(ENROLLMENT_CODE_HEADER) ?? "";
-            if (!enrollmentCodesMatch(presented, expected))
-              return reply({ error: "Invalid enrollment code." }, 403);
+            if (expected) {
+              const presented =
+                request.headers.get(ENROLLMENT_CODE_HEADER) ?? "";
+              if (!enrollmentCodesMatch(presented, expected))
+                return reply({ error: "Invalid enrollment code." }, 403);
+            }
           }
           const capacity = Number(env.TUNNEL_CAPACITY ?? "5");
           if (!Number.isInteger(capacity) || capacity < 1)

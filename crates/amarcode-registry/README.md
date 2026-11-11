@@ -200,8 +200,7 @@ Configure these on the existing Worker before enabling named tunnels:
 | `TUNNEL_CF_ZONE_ID` | DNS zone for machine hostnames |
 | `TUNNEL_DOMAIN` | Parent domain; production uses `amarjay.com`, producing `<8-hex-characters>.amarjay.com` |
 | `TUNNEL_CAPACITY` | Positive integer, default `20` in Wrangler configuration |
-| `TUNNEL_ENROLLMENT_CODE` | Shared operator code required to enroll a new installation ID |
-| `TUNNEL_ENROLLMENT_ENFORCE` | Set to `true` to require the enrollment code; any other value keeps the previous open-enrollment behavior |
+| `TUNNEL_ENROLLMENT_CODE` | Shared operator code required to enroll a new installation ID; setting the secret enforces it, removing it restores open enrollment |
 
 Use Worker secrets for the API token and the enrollment code. Other settings may be
 Worker variables or secrets. For example, run `bunx wrangler secret put
@@ -231,21 +230,20 @@ Back up each daemon's private `named-installation.json`. If it is lost, the dail
 cleanup eventually reclaims its disconnected resources. A new identity cannot
 take ownership of the old hostname or credential record.
 
-With `TUNNEL_ENROLLMENT_ENFORCE=true`, first-time allocation additionally
-requires the shared operator enrollment code (`X-Amarcode-Enrollment-Code`
-header). Reconnects, updates, and deletion with an existing installation ID
-authenticate with the private installation credential only, so the code is never
-needed to recover an existing installation. Enforcement fails closed when
-`TUNNEL_ENROLLMENT_CODE` is unset (`503`); a wrong or missing code fails with
-`403` before capacity is checked, so rejected enrollments consume no slots and
-make no Cloudflare calls.
+When `TUNNEL_ENROLLMENT_CODE` is configured, first-time allocation also requires
+that shared operator code in the `X-Amarcode-Enrollment-Code` header. There is no
+separate switch: the secret's presence is the enforcement. A wrong or missing
+code fails with `403` before capacity is checked, so rejected enrollments consume
+no slots and make no Cloudflare calls. Removing the secret restores the previous
+open-enrollment behavior.
 
-Enforcement is gated by `TUNNEL_ENROLLMENT_ENFORCE` because deployed daemons
-must be able to send the header. Roll out in this order: deploy this Worker with
-enforcement dormant, publish a daemon release that sends the code (set
-`AMARCODE_TUNNEL_ENROLLMENT_CODE` or pass `--enrollment-code` to `install.sh`),
-then set `TUNNEL_ENROLLMENT_ENFORCE=true`. Flipping it earlier rejects every new
-installation until clients are upgraded.
+Reconnects, updates, and deletion with an existing installation ID authenticate
+with the private installation credential only, so the code is never needed to
+recover an existing installation. Daemons supply it from
+`AMARCODE_TUNNEL_ENROLLMENT_CODE` or the private `remote.json`
+(`install.sh --enrollment-code`). Because deployed daemons must be able to send
+the header, publish a daemon release before setting the secret; setting it first
+rejects every new installation until clients are upgraded.
 
 ### Daemon enrollment
 

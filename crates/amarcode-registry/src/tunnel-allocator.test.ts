@@ -30,7 +30,6 @@ function fixture(
     TUNNEL_DOMAIN: "example.com",
     TUNNEL_CAPACITY: capacity,
     TUNNEL_ENROLLMENT_CODE: "enrollment-code",
-    TUNNEL_ENROLLMENT_ENFORCE: "true",
   };
   const tunnels = new Map<string, { id: string; name: string }>();
   const deletedTunnels = new Map<
@@ -420,9 +419,10 @@ describe("persistent tunnel allocation", () => {
       .fetch(request(id, { method: "DELETE", enrollmentCode: null }));
     expect(removal.status).toBe(200);
   });
-  test("new enrollment fails closed when enforcement is on without a code", async () => {
+  test("removing the configured code restores open enrollment for new installs", async () => {
     const f = fixture();
-    const unconfigured = new Allocator(
+    // No TUNNEL_ENROLLMENT_CODE means the code is not required (rollback path).
+    const open = new Allocator(
       f.storage,
       {
         TUNNEL_CF_API_TOKEN: "account-secret",
@@ -430,37 +430,29 @@ describe("persistent tunnel allocation", () => {
         TUNNEL_CF_ZONE_ID: "zone",
         TUNNEL_DOMAIN: "example.com",
         TUNNEL_CAPACITY: "5",
-        TUNNEL_ENROLLMENT_ENFORCE: "true",
       },
-      fetch,
+      f.fetcher,
     );
-    const response = await unconfigured.fetch(request(crypto.randomUUID()));
-    expect(response.status).toBe(503);
-    expect(await response.text()).toContain("not configured");
-  });
-  test("enforcement stays dormant until enabled so existing installs keep working", async () => {
-    const f = fixture();
-    const lenient = (environ: TunnelEnv) =>
-      new Allocator(f.storage, environ, f.fetcher);
-    const base: TunnelEnv = {
-      TUNNEL_CF_API_TOKEN: "account-secret",
-      TUNNEL_CF_ACCOUNT_ID: "account",
-      TUNNEL_CF_ZONE_ID: "zone",
-      TUNNEL_DOMAIN: "example.com",
-      TUNNEL_CAPACITY: "5",
-      TUNNEL_ENROLLMENT_CODE: "enrollment-code",
-    };
-    // Absent or non-"true" values preserve the previous open-enrollment behavior.
-    for (const flag of [undefined, "", "false", "TRUE", "1"]) {
-      const allocator = lenient({
-        ...base,
-        ...(flag === undefined ? {} : { TUNNEL_ENROLLMENT_ENFORCE: flag }),
-      });
-      const response = await allocator.fetch(
-        request(crypto.randomUUID(), { enrollmentCode: null }),
-      );
-      expect(response.status, `flag=${flag}`).toBe(200);
-    }
+    const response = await open.fetch(
+      request(crypto.randomUUID(), { enrollmentCode: null }),
+    );
+    expect(response.status).toBe(200);
+    // A configured code is enforced without any additional flag.
+    const enforced = await f
+      .restart()
+      .fetch(request(crypto.randomUUID(), { enrollmentCode: null }));
+    expect(enforced.status).toBe(403);
+    // Leading/trailing whitespace is trimmed by the runtime, so it is not a mismatch.
+    for (const wrong of ["", "wrong-code", "enrollment-cod", "ENROLLMENT-CODE"])
+      expect(
+        (
+          await f.restart().fetch(
+            request(crypto.randomUUID(), {
+              enrollmentCode: wrong === "" ? null : wrong,
+            }),
+          )
+        ).status,
+      ).toBe(403);
   });
   test("simultaneous enrollment cannot overallocate; offline installations retain capacity", async () => {
     const f = fixture("1");
