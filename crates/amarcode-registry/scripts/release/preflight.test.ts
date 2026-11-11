@@ -95,9 +95,8 @@ describe("Wrangler authentication preflight", () => {
         },
       );
       expect(result.exitCode).toBe(0);
-      expect(result.stdout.toString()).toContain(
-        "Cloudflare authentication verified",
-      );
+      // A successful check is silent; only failures report the fix.
+      expect(result.stdout.toString()).not.toContain("Cloudflare authentication");
       expect(result.stdout.toString()).toContain("Dry run complete");
     } finally {
       rmSync(directory, { recursive: true, force: true });
