@@ -560,10 +560,7 @@ mod append_tests {
             id,
             start + std::time::Duration::from_millis(10)
         ));
-        assert!(stream_notice_due(
-            id,
-            start + STREAM_NOTICE_INTERVAL
-        ));
+        assert!(stream_notice_due(id, start + STREAM_NOTICE_INTERVAL));
     }
 
     #[test]
