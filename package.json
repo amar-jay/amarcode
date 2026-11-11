@@ -24,7 +24,7 @@
     "worker:test": "bun run --cwd crates/amarcode-registry test",
     "gateway:dev": "bun run --cwd crates/model-gateway dev",
     "gateway:deploy": "bun run --cwd crates/model-gateway deploy",
-    "gateway:typecheck": "bun run --cwd crates/model-gateway typecheck",
+    "gateway:check": "bun run --cwd crates/model-gateway check",
     "protocol:generate": "cargo run -p amarcode-protocol --bin generate-protocol-types",
     "protocol:check": "cargo test -p amarcode-protocol checked_in_typescript_bindings_are_current",
     "tsc": "bun run --cwd crates/application tsc",

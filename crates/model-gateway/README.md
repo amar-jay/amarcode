@@ -83,7 +83,7 @@ Account, credits, key administration, and unlisted routes are blocked. Only Acce
 ## Checks
 
 ```sh
-bun run typecheck
+bun run check
 bun run build
 bun run cf-typegen
 ```
