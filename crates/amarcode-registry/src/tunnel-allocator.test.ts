@@ -230,7 +230,6 @@ const request = (
     headers: {
       authorization: `Bearer ${options.secret ?? "a".repeat(64)}`,
       "content-type": "application/json",
-      "x-amarcode-tunnel-hostnames": "short-v2",
       ...(options.enrollmentCode === null
         ? {}
         : {
@@ -467,21 +466,14 @@ describe("persistent tunnel allocation", () => {
     }
   });
 
-  test("older daemons get compatible first-level names and newer ones can migrate to short names", async () => {
+  test("hostnames are always short labels, never legacy m- names", async () => {
     const f = fixture();
     const id = crypto.randomUUID();
-    const old = request(id);
-    old.headers.delete("x-amarcode-tunnel-hostnames");
-    const response = await f.allocator.fetch(old);
+    const response = await f.allocator.fetch(request(id));
     expect(response.status).toBe(200);
-    expect(((await response.json()) as { hostname: string }).hostname).toBe(
-      `m-${id}.example.com`,
-    );
-    const upgraded = await f.restart().fetch(request(id));
-    expect(upgraded.status).toBe(200);
-    expect(((await upgraded.json()) as { hostname: string }).hostname).toMatch(
-      /^[a-f0-9]{8}\.example\.com$/,
-    );
+    const { hostname } = (await response.json()) as { hostname: string };
+    expect(hostname).toMatch(/^[a-f0-9]{8}\.example\.com$/);
+    expect(hostname).not.toContain(`m-${id}`);
     expect(f.records.size).toBe(1);
     expect(f.tunnels.size).toBe(1);
   });
@@ -631,8 +623,8 @@ describe("persistent tunnel allocation", () => {
     ).toBe(200);
     const fresh = await f.restart().fetch(request(crypto.randomUUID()));
     expect(fresh.status).toBe(200);
-    expect(((await fresh.json()) as { hostname: string }).hostname).not.toBe(
-      `m-${id}.example.com`,
+    expect(((await fresh.json()) as { hostname: string }).hostname).toMatch(
+      /^[a-f0-9]{8}\.example\.com$/,
     );
   });
   test("recovers a lost DNS creation response without duplicate records", async () => {

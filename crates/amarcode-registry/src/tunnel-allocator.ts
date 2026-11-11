@@ -562,18 +562,15 @@ export class Allocator {
           request.method === "PUT" &&
           ["ready", "provisioning"].includes(record.status)
         ) {
-          // Older daemons only accept m-<full installation ID> names. Keep them
-          // operational while newer daemons opt in to short hostnames.
-          const shortNames =
-            request.headers.get("x-amarcode-tunnel-hostnames") === "short-v2";
+          // Hostnames are always short labels. Records still holding a legacy
+          // m-<installation-id> name migrate here, retaining the old DNS name
+          // until the new route is configured.
           const label = record.hostname.endsWith(`.${domain}`)
             ? record.hostname.slice(0, -domain.length - 1)
             : "";
-          const desired = shortNames
-            ? /^[a-f0-9]{8}$/.test(label)
-              ? record.hostname
-              : newHostname(db, domain)
-            : `m-${id}.${domain}`;
+          const desired = /^[a-f0-9]{8}$/.test(label)
+            ? record.hostname
+            : newHostname(db, domain);
           if (record.hostname !== desired && !record.previousHostname) {
             record.retiredHostnames = [
               ...(record.retiredHostnames ?? []),

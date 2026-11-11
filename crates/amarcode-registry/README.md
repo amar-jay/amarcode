@@ -211,13 +211,13 @@ Object binding and `tunnel-allocator-v1` SQLite migration.
 
 Production uses first-level names under `amarjay.com`, covered by the zone's
 Universal SSL. Do not switch to nested names without provisioning matching edge
-certificates. Short names are random eight-character hex labels, checked against
-retained installations, migration history, and tombstones. Updated daemons send
-`X-Amarcode-Tunnel-Hostnames: short-v2`; older daemons receive compatible
-`m-<installation-id>.amarjay.com` names. Existing nested or UUID allocations
+certificates. Names are random eight-character hex labels, checked against
+retained installations, migration history, and tombstones. The legacy
+`m-<installation-id>.amarjay.com` scheme is retired: records still holding one
 migrate on authenticated reconnect without losing the installation credential or
-consuming another slot. Migration persists both DNS names until the new route is
-configured and the old DNS record has been removed; interrupted migrations retry.
+consuming another slot, and daemons reject an assignment that is not a short
+label. Migration persists both DNS names until the new route is configured and
+the old DNS record has been removed; interrupted migrations retry.
 DNS records are proxied CNAMEs targeting each installation's own
 `<tunnel-id>.cfargotunnel.com`. No unrelated installations share tunnel tokens.
 The allocator does not proxy application traffic or receive daemon access tokens.
