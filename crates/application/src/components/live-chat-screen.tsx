@@ -51,6 +51,7 @@ import {
 import { UserMessage } from "./user-message";
 
 import { LiveChatHeader, type ConversationView } from "./live-chat-header";
+import { chatSearchVisibleAtom } from "@/state/chat-header";
 
 function searchableBlockText(block: ChatBlock): string {
   if (block.kind === "user") return block.item.message.content;
@@ -259,10 +260,16 @@ export function LiveChatScreen() {
     [matchingBlockKeys.length],
   );
 
+  const setSearchVisible = useSetAtom(chatSearchVisibleAtom);
   useEffect(() => {
     if (!showSearch || workspaceMaximized) return;
     searchInputRef.current?.focus();
   }, [showSearch, workspaceMaximized]);
+
+  useEffect(() => {
+    setSearchVisible(showSearch);
+    return () => setSearchVisible(false);
+  }, [setSearchVisible, showSearch]);
 
   useEffect(() => {
     if (!activeMatchKey) return;

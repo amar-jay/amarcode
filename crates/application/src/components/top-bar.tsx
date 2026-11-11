@@ -1,4 +1,4 @@
-import { chatHeaderHostAtom } from "@/state/chat-header";
+import { chatHeaderHostAtom, chatSearchVisibleAtom } from "@/state/chat-header";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { isWeb } from "@/lib/platform";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -38,6 +38,7 @@ export function TopBar() {
   const workspacePath = useAtomValue(workspacePathAtom);
   const live = useAtomValue(liveChatAtom);
   const isWorking = useAtomValue(liveChatIsWorkingAtom);
+  const searchVisible = useAtomValue(chatSearchVisibleAtom);
 
   const toggleWorkspacePanel = () => {
     if (sheetOpen) {
@@ -75,7 +76,7 @@ export function TopBar() {
           data-tauri-drag-region
           className="flex h-full min-w-0 flex-1 items-center"
         />
-        {live && (
+        {live && !searchVisible && (
           <div className="pointer-events-none absolute inset-y-0 left-1/2 flex max-w-[30vw] -translate-x-1/2 items-center justify-center bg-sidebar px-2 select-none">
             <ChatStateIndicators
               loading={live.loading}
