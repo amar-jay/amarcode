@@ -1,7 +1,11 @@
 ---
-title: Set up a remote host
-description: Install Amarcode on Linux and connect from the desktop.
+title: Host setup options
+description: Enrollment, containers, services, and private-network setup for remote hosts.
 ---
+
+For your first connection, follow [Get started](/docs/remote/overview/).
+This reference covers additional host setup options. You do not need to read it
+for a standard installation.
 
 Install the daemon on a Linux machine when you want its projects in Amarcode. Files, chats, agents, and credentials stay on that machine.
 

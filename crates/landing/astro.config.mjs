@@ -135,30 +135,30 @@ export default defineConfig({
         {
           label: "Remote daemon",
           items: [
-            { label: "Choose a connection", slug: "docs/remote/overview" },
-            { label: "Set up a remote host", slug: "docs/remote/setup" },
-            { label: "Connect to your host", slug: "docs/remote/connect" },
+            { label: "Get started", slug: "docs/remote/overview" },
+            { label: "Keep it running", slug: "docs/remote/standalone" },
+            { label: "Troubleshooting", slug: "docs/remote/troubleshooting" },
             {
-              label: "Run without the desktop",
-              slug: "docs/remote/standalone",
-            },
-            { label: "Remote terminal", slug: "docs/remote/ssh" },
-            { label: "Encryption and trust", slug: "docs/remote/security" },
-            {
-              label: "Certificates and direct TLS",
-              slug: "docs/remote/certificates",
-            },
-            {
-              label: "Paired end-to-end encryption",
-              slug: "docs/remote/end-to-end",
-            },
-            {
-              label: "Company policy and revocation",
-              slug: "docs/remote/administration",
-            },
-            {
-              label: "Updates and troubleshooting",
-              slug: "docs/remote/troubleshooting",
+              label: "Advanced",
+              collapsed: true,
+              items: [
+                { label: "Host setup options", slug: "docs/remote/setup" },
+                { label: "Connection reference", slug: "docs/remote/connect" },
+                { label: "Remote terminal and SSH", slug: "docs/remote/ssh" },
+                { label: "Encryption and trust", slug: "docs/remote/security" },
+                {
+                  label: "Certificates and direct TLS",
+                  slug: "docs/remote/certificates",
+                },
+                {
+                  label: "Paired end-to-end encryption",
+                  slug: "docs/remote/end-to-end",
+                },
+                {
+                  label: "Company policy and revocation",
+                  slug: "docs/remote/administration",
+                },
+              ],
             },
           ],
         },

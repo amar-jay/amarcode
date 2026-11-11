@@ -1,64 +1,78 @@
 ---
-title: Choose a remote connection
-description: Decide how to run Amarcode on another computer and which connection is right for you.
+title: Get started with a remote daemon
+description: Install Amarcode on another computer and connect to its projects.
 ---
 
-Run the daemon on the computer that has your project. Connect to it from the
-Amarcode desktop, a supported browser, or `amarcoded ssh`. The desktop does not
-need to be installed or open on the remote computer.
+Run the daemon on the Linux computer that has your project, then connect from
+Amarcode on your own computer. Files, agents, and chats stay on the remote host.
+The desktop app does not need to be installed there.
 
-Files, Git operations, agents, chat history, and provider settings belong to that
-remote computer. Closing the desktop disconnects your view; it does not stop a
-running daemon or its agent work.
+## Install on the remote host
 
-## Start here
+You need Bash, Python 3, `curl`, OpenSSL with Ed25519 support, and internet access.
+Install Git for project Git operations and the agent catalog.
 
-| What you want                                                           | Follow this guide                                                                        |
-| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Use a Linux server, Codespace, or development container                 | [Set up a remote host](/docs/remote/setup/)                                              |
-| Keep the daemon running without the desktop or after closing a terminal | [Run without the desktop](/docs/remote/standalone/)                                      |
-| Connect your desktop or browser to a running host                       | [Connect to your host](/docs/remote/connect/)                                            |
-| Use an existing SSH account instead of a public tunnel                  | [SSH port forwarding](/docs/remote/ssh/#connect-the-desktop-through-ssh-port-forwarding) |
-| Connect through a company VPN or private network                        | [Certificates and direct TLS](/docs/remote/certificates/#run-a-direct-tls-daemon)        |
-| Keep the relay from reading project traffic                             | [Paired end-to-end encryption](/docs/remote/end-to-end/)                                 |
-| Apply company restrictions or revoke a device                           | [Company policy and revocation](/docs/remote/administration/)                            |
-
-## The usual setup
-
-On a Linux host, [install the daemon](/docs/remote/setup/), then run:
-
-```sh
-amarcoded --remote
+```bash
+curl -fsSL https://amarcode.amarjay.com/install.sh | bash
 ```
 
-A new installation may need the operator's
-[enrollment code](/docs/remote/setup/#enrollment-code) before it can register a
-public hostname. Ask for it if enrollment is refused; later starts do not need it.
+If your tunnel service requires an enrollment code, ask its operator for one and
+pass it to the installer:
 
-Keep that process running. It prints a Remote URL and access token. In the desktop,
-open **Settings → Connection**, select **Remote daemon**, and use those values.
-You do not need to generate certificates for the default Cloudflare tunnel.
+```bash
+curl -fsSL https://amarcode.amarjay.com/install.sh | bash -s -- --enrollment-code '<code>'
+```
 
-`amarcoded` and `amarcode-daemon` refer to the daemon executable. `amarcode` is the
-desktop application; use `amarcoded --remote` for the remote-host commands in
-these guides.
+The enrollment code is only needed for a new installation. It is different from
+the access token you will use to connect.
 
-## Understand the connection you choose
+## Start the daemon
 
-| Connection                                      | What protects the connection?                                                    | Browser access                                        |
-| ----------------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Default Cloudflare tunnel                       | Public TLS and an encrypted tunnel; Cloudflare can read traffic                  | Yes, with a browser-enabled daemon                    |
-| SSH port forwarding                             | Your existing SSH connection; the forwarded daemon listener stays on loopback    | Use the native desktop or CLI                         |
-| Direct TLS or mTLS                              | A verified server certificate; mTLS also requires a client certificate           | Requires browser/OS certificate setup when applicable |
-| Paired E2EE through a tunnel or direct endpoint | An additional authenticated TLS 1.3 session between the native client and daemon | Not supported                                         |
+On the remote host:
 
-See [encryption and trust](/docs/remote/security/) before choosing a mode for
-company projects. A public `wss://` URL alone does not mean the relay cannot read
-the traffic.
+```sh
+amarcoded --remote /path/to/project
+```
 
-:::note[Advanced security features]
-Paired E2EE and automatic CRL checks require daemon and native-client builds that
-include those features. If your downloaded release does not include them yet,
-use the matching build supplied by your administrator. Configuring environment
-variables on an older build does not add encryption support.
+Replace `/path/to/project` with an existing folder, or omit it and choose a
+project after connecting. If `amarcoded` is not found, use the full start command
+printed by the installer or open a new terminal. `amarcode-daemon` is the same
+executable.
+
+Leave this command running. It prints a **Remote URL** and **access token**.
+
+## Connect from your computer
+
+1. Open Amarcode and go to **Settings → Connection**.
+2. Choose **Remote daemon**.
+3. Paste the Remote URL and access token printed on the host.
+4. Select **Verify and apply**.
+
+Choose a project using its path on the remote host, such as
+`/home/me/projects/my-app`. Your laptop's folders are not available there.
+
+You can also use [Amarcode remote](https://remote.amarcode.amarjay.com) in a
+browser with an up-to-date, browser-enabled daemon. Enter the same URL and token.
+Company certificate or paired-encryption profiles may require the native app;
+follow your administrator's instructions instead.
+
+:::caution[Keep the token private]
+Anyone with the token can access the daemon in the default connection mode.
+The default tunnel needs no certificate setup, but Cloudflare can read the
+traffic it relays. For sensitive company projects, use your approved connection
+profile; see [encryption and trust](/docs/remote/security/).
 :::
+
+## Keep working
+
+Closing the desktop leaves the remote daemon and its agent work running.
+**Ctrl+C in the host's daemon terminal stops it.** Closing that terminal can
+also stop it. Follow [Keep it running](/docs/remote/standalone/) to survive a
+disconnected terminal or use a service.
+
+To return to your own computer's projects, save any editor drafts, select
+**Local daemon** in connection settings, and choose **Verify and apply**.
+
+If something fails, see [Troubleshooting](/docs/remote/troubleshooting/).
+For SSH, private networks, and company security settings, expand **Advanced** in
+the sidebar. Those options are not required for the default setup.

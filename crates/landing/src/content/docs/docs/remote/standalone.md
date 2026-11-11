@@ -1,5 +1,5 @@
 ---
-title: Run without the desktop
+title: Keep it running
 description: Keep a foreground or service-managed remote daemon running independently of the Amarcode window.
 ---
 
@@ -8,7 +8,7 @@ laptop connects to it when needed; the remote process owns the chats and agents.
 
 ## Run in the foreground
 
-First [install on the host](/docs/remote/setup/). Then, on that host:
+First [install on the host](/docs/remote/overview/). Then, on that host:
 
 ```sh
 amarcoded --remote /home/me/projects/my-app
@@ -30,6 +30,7 @@ because the desktop is closed.
 
 ## Keep it running with tmux
 
+Install `tmux` if needed (`sudo apt-get install tmux` on Debian or Ubuntu).
 On the remote host:
 
 ```sh
@@ -73,6 +74,19 @@ manager; use foreground mode there.
 Do not start a foreground daemon alongside a service using the same data directory
 or port. Stop the existing instance first. Do not remove its data just to free a
 port.
+
+## Restart without losing the installation
+
+Restart with the same root, data directory, identity files, and security settings.
+The desktop can reconnect to its existing chats. A named tunnel normally reuses
+its hostname; after inactivity cleanup, recovery is subject to available capacity.
+
+Keep the data directory, access token, and installation identity private. Do not
+delete them during a routine restart. If your administrator supplied security
+settings, keep using them when restarting.
+
+<details>
+<summary>Advanced: separate instances</summary>
 
 ## Keep a genuinely separate instance
 
@@ -123,11 +137,11 @@ standard installation, not an arbitrary isolated root. Ask your administrator to
 prepare that configuration rather than copying another machine's private tunnel
 identity. Loopback-only mode above does not need it.
 
-## Restart without losing the installation
 
-Restart with the same root, data directory, identity files, and security settings.
-The desktop can reconnect to its existing chats. A named tunnel normally reuses
-its hostname; after inactivity cleanup, recovery is subject to available capacity.
+</details>
+
+<details>
+<summary>Advanced: tunnel assignment cache and security settings</summary>
 
 With a matching updated registry worker, the daemon privately caches the named
 tunnel assignment for up to 24 hours. Restarting with the same installation,
@@ -146,3 +160,5 @@ Treat the data directory, access token, and `named-installation.json` as private
 Do not delete them during a routine restart. E2EE, certificates, and CRL settings
 apply to standalone instances too; set them in the environment that actually
 launches the remote process. See [paired E2EE](/docs/remote/end-to-end/).
+
+</details>
