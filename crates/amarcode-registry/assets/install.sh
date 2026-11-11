@@ -555,6 +555,7 @@ def main():
     parser.add_argument('--bun-version', help='Official Bun release tag; default: latest')
     parser.add_argument('--uv-version', help='Official uv release tag; default: latest')
     parser.add_argument('--bin-dir', type=Path, help='Optional additional command alias directory; the managed command always lives in the instance daemon/bin directory')
+    parser.add_argument('--enrollment-code', help='Operator code required by the registry to enroll a new tunnel installation; also read from AMARCODE_TUNNEL_ENROLLMENT_CODE')
     parser.add_argument('--verbose', action='store_true', help='Show download details and installation paths')
     parser.add_argument('--start', action='store_true', help='Start the daemon after installation and print its remote connection URL (loopback-only with --no-tunnel)')
     parser.add_argument('--tunnel', action='store_true', help=argparse.SUPPRESS)
@@ -577,6 +578,11 @@ def main():
     for label, value in [('Bun', args.bun_version), ('uv', args.uv_version)]:
         if value and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]{0,127}', value):
             parser.error('Invalid ' + label + ' version')
+    enrollment_code = (args.enrollment_code or os.environ.get('AMARCODE_TUNNEL_ENROLLMENT_CODE', '')).strip()
+    if enrollment_code and (len(enrollment_code) > 512 or any(ord(c) < 32 or ord(c) == 127 for c in enrollment_code)):
+        parser.error('Invalid enrollment code: use 1-512 printable characters')
+    if enrollment_code and args.ssh_only:
+        parser.error('--enrollment-code is not used with --no-tunnel (loopback-only access does not enroll)')
     manifest_url = REGISTRY + ('/v1/daemon/' + args.version + '/manifest.json' if args.version else '/v1/daemon/latest.json')
     data_home = Path(os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local/share')))
     legacy = data_home / 'amarcode-remote'
@@ -686,6 +692,13 @@ def main():
     settings.update({'enabled': True, 'tool_bin_dirs': tool_bin_dirs})
     if cloudflared is not None:
         settings['cloudflared'] = str(cloudflared)
+    # Stored in the private (0600) settings file so service restarts and
+    # `tunnel.sh` keep enrolling without repeating the flag. Only sent for new
+    # installation IDs; reconnects use the installation credential alone.
+    if enrollment_code:
+        settings['enrollment_code'] = enrollment_code
+    elif args.ssh_only:
+        settings.pop('enrollment_code', None)
     private_write(settings_path, json.dumps(settings) + '\n')
     persist_command_path(Path.home(), bin_dir)
     for name, directory in [('bun', bun_bin), ('bunx', bun_bin), ('uv', uv_bin), ('uvx', uv_bin)]:

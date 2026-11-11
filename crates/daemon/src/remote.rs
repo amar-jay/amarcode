@@ -28,6 +28,10 @@ pub struct Setup {
     pub cloudflared: Option<PathBuf>,
     #[serde(default)]
     pub tool_bin_dirs: Vec<PathBuf>,
+    /// Shared operator code for first-time enrollment. Never logged or persisted
+    /// into the connector command; reconnects do not resend it.
+    #[serde(default)]
+    pub enrollment_code: Option<String>,
 }
 
 pub fn instance_root() -> Result<PathBuf> {
@@ -678,6 +682,30 @@ fn client() -> Result<reqwest::Client> {
         .build()
         .map_err(|_| Error::msg("Cannot initialize tunnel HTTP client"))
 }
+/// Reject empty, oversized, or control-character codes before they reach a header.
+fn valid_enrollment_code(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
+        return None;
+    }
+    Some(value.to_string())
+}
+fn enrollment_code_at(root: &std::path::Path) -> Option<String> {
+    let bytes = fs::read(root.join("remote.json")).ok()?;
+    let setup: Setup = serde_json::from_slice(&bytes).ok()?;
+    valid_enrollment_code(setup.enrollment_code.as_deref()?)
+}
+/// Shared operator code for first-time enrollment. Read from the environment
+/// first so it can be supplied per run, then from the private remote settings.
+fn enrollment_code() -> Option<String> {
+    if let Some(code) = env::var("AMARCODE_TUNNEL_ENROLLMENT_CODE")
+        .ok()
+        .and_then(|value| valid_enrollment_code(&value))
+    {
+        return Some(code);
+    }
+    enrollment_code_at(&remote_root().ok()?)
+}
 async fn request(
     method: reqwest::Method,
     identity: &Identity,
@@ -691,6 +719,11 @@ async fn request(
         .bearer_auth(&identity.credential)
         .header("x-amarcode-tunnel-hostnames", "short-v2");
     if let Some((port, origin_tls)) = enrollment {
+        // The allocator only validates this for previously unknown installation
+        // IDs, so sending it on reconnect is harmless and covers allocator resets.
+        if let Some(code) = enrollment_code() {
+            request = request.header("x-amarcode-enrollment-code", code);
+        }
         let mut body = serde_json::json!({"port": port});
         if let Some(tls) = origin_tls {
             body["origin_tls"] = serde_json::to_value(tls)?;
@@ -707,14 +740,14 @@ async fn request(
         200..=299 => Ok(response),
         401 => Err(Error::msg("Named installation credential rejected")),
         403 => Err(Error::msg(
-            "Named tunnel allocation was denied by the server",
+            "Named tunnel enrollment was denied; set AMARCODE_TUNNEL_ENROLLMENT_CODE to the operator enrollment code",
         )),
         409 => Err(Error::msg("Named tunnel installation capacity reached")),
         410 => Err(Error::msg(
             "Named installation was removed; run amarcoded tunnel --rm to reset local enrollment",
         )),
         503 => Err(Error::msg(
-            "Named tunnel allocator is not configured on the server",
+            "Named tunnel allocator or enrollment code is not configured on the server",
         )),
         _ => Err(Error::msg(
             "Named tunnel provisioning failed; retry with the same installation identity",
@@ -1262,6 +1295,38 @@ mod tests {
         assert!(cached_assignment(&path, &identity, 43721, &None, now).is_none());
         fs::write(&path, b"interrupted or corrupt cache").unwrap();
         assert!(cached_assignment(&path, &identity, 43721, &None, now).is_none());
+    }
+
+    #[test]
+    fn enrollment_codes_are_validated_and_read_from_private_settings() {
+        assert_eq!(
+            valid_enrollment_code("  operator-code  ").as_deref(),
+            Some("operator-code")
+        );
+        for invalid in ["", "   ", "bad\ncode", "bad\r\ncode", &"a".repeat(513)] {
+            assert!(valid_enrollment_code(invalid).is_none(), "{invalid:?}");
+        }
+        assert!(valid_enrollment_code(&"a".repeat(512)).is_some());
+
+        let directory = tempfile::tempdir().unwrap();
+        assert!(enrollment_code_at(directory.path()).is_none());
+        let path = directory.path().join("remote.json");
+        fs::write(&path, br#"{"enabled":true}"#).unwrap();
+        assert!(enrollment_code_at(directory.path()).is_none());
+        fs::write(
+            &path,
+            br#"{"enabled":true,"enrollment_code":"secret-code"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            enrollment_code_at(directory.path()).as_deref(),
+            Some("secret-code")
+        );
+        // An unusable stored value is a miss, never a malformed header.
+        fs::write(&path, br#"{"enabled":true,"enrollment_code":"  "}"#).unwrap();
+        assert!(enrollment_code_at(directory.path()).is_none());
+        fs::write(&path, b"not json").unwrap();
+        assert!(enrollment_code_at(directory.path()).is_none());
     }
 
     #[tokio::test]
