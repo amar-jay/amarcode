@@ -11,13 +11,12 @@ bun install
 cp .dev.vars.example .dev.vars
 ```
 
-Set your real model ID, OpenRouter token, and a separate strong proxy key in `.dev.vars` (ignored by Git). Start locally with `bun run dev`.
+Set your model IDs and OpenRouter token in `.dev.vars` (ignored by Git). Start locally with `bun run dev`.
 
 For production, set `OPENROUTER_MODEL` and `OPENROUTER_TRANSCRIPTION_MODEL` in `wrangler.jsonc`, then configure secrets and deploy:
 
 ```sh
 bunx wrangler secret put OPENROUTER_API_KEY
-bunx wrangler secret put PROXY_API_KEY
 bun run deploy
 ```
 
@@ -25,11 +24,10 @@ bun run deploy
 
 ## Clients
 
-Set your client's OpenAI-compatible base URL to `https://<worker-host>/v1` and API key to your **proxy key**. `/api/v1` is also supported for clients expecting an OpenRouter-style base URL.
+Set your client's OpenAI-compatible base URL to `https://<worker-host>/v1` with no proxy authentication. If your SDK requires an API key, use any placeholder such as `unused`. `/api/v1` is also supported for clients expecting an OpenRouter-style base URL.
 
 ```sh
 curl http://localhost:8787/v1/chat/completions \
-  -H "Authorization: Bearer $PROXY_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"Hello"}],"stream":true}'
 ```
@@ -39,7 +37,7 @@ OpenAI-compatible JavaScript client configuration (in your client project):
 ```js
 const client = new OpenAI({
   baseURL: 'https://<worker-host>/v1',
-  apiKey: process.env.PROXY_API_KEY,
+  apiKey: 'unused', // SDK placeholder; the proxy does not require authentication.
 });
 const result = await client.chat.completions.create({
   model: 'worker-configured-model', // Overridden by OPENROUTER_MODEL.
@@ -53,7 +51,6 @@ Send audio to `/v1/audio/transcriptions` (or `/api/v1/audio/transcriptions`) to 
 
 ```sh
 curl http://localhost:8787/v1/audio/transcriptions \
-  -H "Authorization: Bearer $PROXY_API_KEY" \
   -F 'model=openai/whisper-large-v3-turbo' \
   -F 'file=@dictation.wav' \
   -F 'language=en'
@@ -77,7 +74,7 @@ Both `/v1` and `/api/v1` support:
 | GET | `/providers` |
 | GET | `/models/{author}/{slug}/endpoints` |
 
-The current handler does not validate incoming proxy keys, despite the `PROXY_API_KEY` configuration field. It replaces upstream authorization with `OPENROUTER_API_KEY`. Browser OPTIONS preflights are unauthenticated, and CORS permits any origin.
+The proxy does not require client authentication. Upstream requests use the server’s `OPENROUTER_API_KEY`. Browser OPTIONS preflights are unauthenticated, and CORS permits any origin.
 
 Inference requests accept JSON objects with `Content-Type: application/json`. Transcriptions also accept `multipart/form-data`. The Worker assigns `OPENROUTER_TRANSCRIPTION_MODEL` for transcription and `OPENROUTER_MODEL` for the other inference routes, overriding `model` and removing `models`. Other fields, including tools, multimodal content, provider options, and streaming options, pass through. The chosen model must support the requested capability. Catalog responses describe OpenRouter’s catalog.
 

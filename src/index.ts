@@ -2,7 +2,6 @@ export interface ProxyEnv {
 	OPENROUTER_MODEL: string;
 	OPENROUTER_TRANSCRIPTION_MODEL: string;
 	OPENROUTER_API_KEY: string;
-	PROXY_API_KEY: string;
 }
 
 const inferencePaths = new Set(['/chat/completions', '/completions', '/responses', '/embeddings', '/audio/transcriptions']);

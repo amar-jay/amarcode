@@ -4,11 +4,25 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-23",
   "observability": {
-    "enabled": true
+    "enabled": true,
   },
   "upload_source_maps": true,
   "vars": {
-    "OPENROUTER_MODEL": "deepseek/deepseek-v4.1-flash-1017",
-    "OPENROUTER_TRANSCRIPTION_MODEL": "openai/whisper-large-v3-turbo"
-  }
+    "OPENROUTER_MODEL": "openai/gpt-oss-safeguard-20b",
+    "OPENROUTER_TRANSCRIPTION_MODEL": "openai/whisper-large-v3-turbo",
+  },
+  "routes": [
+    {
+      "pattern": "model-gateway.amarcode.amarjay.com",
+      "zone_name": "amarjay.com",
+      "custom_domain": true,
+    },
+    {
+      "pattern": "free.amarcode.amarjay.com",
+      "zone_name": "amarjay.com",
+      "custom_domain": true,
+    },
+  ],
+  "workers_dev": true,
+  "preview_urls": true,
 }
