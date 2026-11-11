@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "model-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-23",
+  "observability": {
+    "enabled": true,
+  },
+  "upload_source_maps": true,
+  "vars": {
+    "OPENROUTER_MODEL": "openai/gpt-oss-safeguard-20b",
+    "OPENROUTER_TRANSCRIPTION_MODEL": "openai/whisper-large-v3-turbo",
+  },
+  "routes": [
+    {
+      "pattern": "model-gateway.amarcode.amarjay.com",
+      "zone_name": "amarjay.com",
+      "custom_domain": true,
+    },
+    {
+      "pattern": "free.amarcode.amarjay.com",
+      "zone_name": "amarjay.com",
+      "custom_domain": true,
+    },
+  ],
+  "workers_dev": true,
+  "preview_urls": true,
+}

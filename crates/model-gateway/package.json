@@ -1,0 +1,19 @@
+{
+  "name": "openrouter-worker-proxy",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "build": "wrangler deploy --dry-run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "wrangler": "^4.153.0",
+    "typescript": "^5.9.3"
+  }
+}
