@@ -18,6 +18,23 @@ fn private_file(path: &Path, contents: &[u8]) {
     }
 }
 
+/// Run a repository script, reporting its output when it fails.
+///
+/// These tests shell out to Python and OpenSSL, which behave differently per
+/// platform. A bare exit status leaves nothing to act on, so surface both
+/// streams in the failure message.
+fn run_script(command: &mut std::process::Command) -> std::process::Output {
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "script failed ({})\nstdout: {}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    output
+}
+
 fn test_config() -> Config {
     Config {
         transport: crate::config::DaemonTransport::Tcp,
@@ -527,14 +544,12 @@ async fn mutual_tls_requires_trusted_client_cert_and_valid_server_identity() {
     let root = tempfile::tempdir().unwrap();
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-certificates.py");
     for name in ["trusted", "untrusted"] {
-        assert!(std::process::Command::new("python3")
-            .arg(&script)
-            .args(["dev-ca", "--hostname", "localhost", "--output"])
-            .arg(root.path().join(name))
-            .output()
-            .unwrap()
-            .status
-            .success());
+        run_script(
+            std::process::Command::new("python3")
+                .arg(&script)
+                .args(["dev-ca", "--hostname", "localhost", "--output"])
+                .arg(root.path().join(name)),
+        );
     }
     let trusted = root.path().join("trusted");
     for (identity, server_name, expected) in [
@@ -616,14 +631,12 @@ async fn encrypted_fixture() -> (
 ) {
     let root = tempfile::tempdir().unwrap();
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-certificates.py");
-    assert!(std::process::Command::new("python3")
-        .arg(script)
-        .args(["dev-ca", "--hostname", "localhost", "--output"])
-        .arg(root.path().join("tls"))
-        .output()
-        .unwrap()
-        .status
-        .success());
+    run_script(
+        std::process::Command::new("python3")
+            .arg(script)
+            .args(["dev-ca", "--hostname", "localhost", "--output"])
+            .arg(root.path().join("tls")),
+    );
     let mut config = test_config();
     config.transport = crate::config::DaemonTransport::WebSocket;
     config.app_dir = root.path().join("data");
@@ -801,15 +814,13 @@ async fn encrypted_rpc_rejects_unpaired_legacy_and_revoked_clients_without_resta
     // CRL changes are picked up by the existing server; no restart or cached
     // TLS session can bypass revocation.
     let revoke = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-crl.py");
-    assert!(std::process::Command::new("python3")
-        .arg(revoke)
-        .arg("--ca-directory")
-        .arg(root.path().join("tls"))
-        .args(["--revoke", "client-cert.pem"])
-        .output()
-        .unwrap()
-        .status
-        .success());
+    run_script(
+        std::process::Command::new("python3")
+            .arg(revoke)
+            .arg("--ca-directory")
+            .arg(root.path().join("tls"))
+            .args(["--revoke", "client-cert.pem"]),
+    );
     assert!(amarcode_transport::encrypted::connect_with(
         &url,
         &"a".repeat(64),
@@ -1067,15 +1078,13 @@ async fn direct_mutual_tls_reloads_crls_and_disconnects_revoked_clients() {
         .unwrap()
         .contains("ok"));
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-crl.py");
-    assert!(std::process::Command::new("python3")
-        .arg(script)
-        .arg("--ca-directory")
-        .arg(root.path().join("tls"))
-        .args(["--revoke", "client-cert.pem"])
-        .output()
-        .unwrap()
-        .status
-        .success());
+    run_script(
+        std::process::Command::new("python3")
+            .arg(script)
+            .arg("--ca-directory")
+            .arg(root.path().join("tls"))
+            .args(["--revoke", "client-cert.pem"]),
+    );
     assert!(
         amarcode_transport::encrypted::connect_with(&url, &"a".repeat(64), 4096, None, outer)
             .await
@@ -1189,15 +1198,13 @@ async fn revocation_watchdog_closes_the_socket_while_handler_is_blocked() {
     });
     ready.await.unwrap();
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-crl.py");
-    assert!(std::process::Command::new("python3")
-        .arg(script)
-        .arg("--ca-directory")
-        .arg(root.path().join("tls"))
-        .args(["--revoke", "client-cert.pem"])
-        .output()
-        .unwrap()
-        .status
-        .success());
+    run_script(
+        std::process::Command::new("python3")
+            .arg(script)
+            .arg("--ca-directory")
+            .arg(root.path().join("tls"))
+            .args(["--revoke", "client-cert.pem"]),
+    );
     let read = tokio::task::block_in_place(|| client.read(&mut [0]));
     assert!(
         matches!(read, Ok(0))
@@ -1240,15 +1247,13 @@ async fn paired_clients_check_server_revocation_on_each_new_connection() {
     .unwrap();
     drop(socket);
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/tls-crl.py");
-    assert!(std::process::Command::new("python3")
-        .arg(script)
-        .arg("--ca-directory")
-        .arg(root.path().join("tls"))
-        .args(["--revoke", "server-cert.pem"])
-        .output()
-        .unwrap()
-        .status
-        .success());
+    run_script(
+        std::process::Command::new("python3")
+            .arg(script)
+            .arg("--ca-directory")
+            .arg(root.path().join("tls"))
+            .args(["--revoke", "server-cert.pem"]),
+    );
     assert!(amarcode_transport::encrypted::connect_with(
         &url,
         &"a".repeat(64),

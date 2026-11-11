@@ -36,7 +36,10 @@ def main():
         os.close(descriptor)
         try:
             subprocess.run(["openssl", "ca", "-config", "ca.cnf", "-gencrl", "-crldays", str(args.days), "-out", temporary, "-batch"], cwd=root, check=True)
-            with open(temporary, "rb") as signed:
+            # Flush the signed CRL before publishing it. Windows implements this
+            # with FlushFileBuffers, which needs a writable handle, so the file
+            # must not be opened read-only.
+            with open(temporary, "rb+") as signed:
                 os.fsync(signed.fileno())
             os.replace(temporary, root / "clients.crl.pem")
         finally:
