@@ -1,6 +1,8 @@
 import { describe, expect, test, spyOn } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   Allocator,
+  DEFAULT_CAPACITY,
   TUNNEL_IDLE_GRACE_MS,
   TUNNEL_REUSE_MS,
   cleanupTunnelAllocations,
@@ -49,6 +51,8 @@ function fixture(
   let failDisconnect = false;
   let redirectApi = false;
   let tunnelStatus = "inactive";
+  // Queued upstream responses, consumed one per request before normal handling.
+  const failures: Response[] = [];
   let failStatus: boolean | string = false;
   let failDnsDelete = false;
   let reconnectOnDelete = false;
@@ -69,6 +73,8 @@ function fixture(
     expect(new Headers(init?.headers).get("authorization")).toBe(
       "Bearer account-secret",
     );
+    const scripted = failures.shift();
+    if (scripted) return scripted;
     if (redirectApi)
       return new Response(null, {
         status: 302,
@@ -193,6 +199,9 @@ function fixture(
     redirectApi: () => {
       redirectApi = true;
     },
+    fail: (...responses: Response[]) => {
+      failures.push(...responses);
+    },
     loseDns: () => {
       loseDnsResponse = true;
     },
@@ -234,6 +243,123 @@ const request = (
         ? undefined
         : JSON.stringify({ port: options.port ?? 43721 }),
   });
+
+describe("upstream failure handling", () => {
+  const apiError = (status: number, headers?: HeadersInit) =>
+    new Response(JSON.stringify({ success: false, errors: [{ code: 1000 }] }), {
+      status,
+      headers: { "content-type": "application/json", ...headers },
+    });
+
+  test("capacity default tracks the deployed Wrangler configuration", () => {
+    const config = readFileSync(
+      new URL("../wrangler.jsonc", import.meta.url),
+      "utf8",
+    );
+    const parsed = JSON.parse(config.replace(/,(?=\s*[}\]])/g, "")) as {
+      vars: { TUNNEL_CAPACITY: string };
+    };
+    expect(Number(parsed.vars.TUNNEL_CAPACITY)).toBe(DEFAULT_CAPACITY);
+  });
+
+  test("an unset capacity uses the default instead of a smaller legacy value", async () => {
+    const f = fixture();
+    const allocator = new Allocator(
+      f.storage,
+      {
+        TUNNEL_CF_API_TOKEN: "account-secret",
+        TUNNEL_CF_ACCOUNT_ID: "account",
+        TUNNEL_CF_ZONE_ID: "zone",
+        TUNNEL_DOMAIN: "example.com",
+        TUNNEL_ENROLLMENT_CODE: "enrollment-code",
+      },
+      f.fetcher,
+    );
+    // The previous fallback of 5 would reject the sixth installation.
+    for (let index = 0; index < 6; index++)
+      expect(
+        (await allocator.fetch(request(crypto.randomUUID()))).status,
+        `installation ${index + 1}`,
+      ).toBe(200);
+  });
+
+  test("replays rate-limited requests after honoring Retry-After", async () => {
+    const f = fixture();
+    f.fail(apiError(429, { "retry-after": "0" }));
+    const response = await f.allocator.fetch(request(crypto.randomUUID()));
+    expect(response.status).toBe(200);
+    expect(
+      f.calls.filter(
+        (call) => call === "GET /client/v4/accounts/account/cfd_tunnel",
+      ),
+    ).toHaveLength(2);
+    expect(f.tunnels.size).toBe(1);
+  });
+
+  test("replays a rate-limited tunnel creation but never a failed one", async () => {
+    const ok = (result: unknown) =>
+      new Response(JSON.stringify({ success: true, result }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    const create = "POST /client/v4/accounts/account/cfd_tunnel";
+
+    // Let the recovery lookup succeed so the failure lands on the create.
+    const rateLimited = fixture();
+    rateLimited.fail(ok([]), apiError(429, { "retry-after": "0" }));
+    const created = await rateLimited.allocator.fetch(
+      request(crypto.randomUUID()),
+    );
+    expect(created.status).toBe(200);
+    expect(rateLimited.calls.filter((call) => call === create)).toHaveLength(2);
+    expect(rateLimited.tunnels.size).toBe(1);
+
+    // A 5xx may have created the tunnel, so replaying POST could duplicate it.
+    const failed = fixture();
+    failed.fail(ok([]), apiError(500));
+    const rejected = await failed.allocator.fetch(request(crypto.randomUUID()));
+    expect(rejected.status).toBe(502);
+    expect(failed.calls.filter((call) => call === create)).toHaveLength(1);
+    expect(failed.tunnels.size).toBe(0);
+  });
+
+  test("gives up instead of retrying when upstream asks for a long wait", async () => {
+    const f = fixture();
+    f.fail(apiError(429, { "retry-after": "120" }));
+    const response = await f.allocator.fetch(request(crypto.randomUUID()));
+    expect(response.status).toBe(502);
+    const body = (await response.json()) as {
+      upstream_status: number;
+      upstream_codes: number[];
+    };
+    expect(body.upstream_status).toBe(429);
+    expect(body.upstream_codes).toEqual([1000]);
+    expect(f.calls).toHaveLength(1);
+    expect(f.tunnels.size).toBe(0);
+  });
+
+  test("does not retry client errors", async () => {
+    const f = fixture();
+    f.fail(apiError(400));
+    const response = await f.allocator.fetch(request(crypto.randomUUID()));
+    expect(response.status).toBe(502);
+    expect(f.calls).toHaveLength(1);
+  });
+
+  test("retries transient 5xx reads without duplicating resources", async () => {
+    const f = fixture();
+    f.fail(apiError(503), apiError(502));
+    const response = await f.allocator.fetch(request(crypto.randomUUID()));
+    expect(response.status).toBe(200);
+    expect(
+      f.calls.filter(
+        (call) => call === "GET /client/v4/accounts/account/cfd_tunnel",
+      ),
+    ).toHaveLength(3);
+    expect(f.tunnels.size).toBe(1);
+    expect(f.records.size).toBe(1);
+  });
+});
 
 describe("persistent tunnel allocation", () => {
   test("rejects Cloudflare API redirects without forwarding credentials", async () => {

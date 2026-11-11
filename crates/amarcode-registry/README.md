@@ -193,13 +193,13 @@ endpoint. Logs contain only reclaimed and failed counts.
 
 Configure these on the existing Worker before enabling named tunnels:
 
-| Setting | Purpose |
-| --- | --- |
-| `TUNNEL_CF_API_TOKEN` | Scoped Cloudflare API token with Tunnel Write on the account and DNS Write on the selected zone |
-| `TUNNEL_CF_ACCOUNT_ID` | Account holding the tunnels and DNS zone |
-| `TUNNEL_CF_ZONE_ID` | DNS zone for machine hostnames |
-| `TUNNEL_DOMAIN` | Parent domain; production uses `amarjay.com`, producing `<8-hex-characters>.amarjay.com` |
-| `TUNNEL_CAPACITY` | Positive integer, default `20` in Wrangler configuration |
+| Setting                  | Purpose                                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `TUNNEL_CF_API_TOKEN`    | Scoped Cloudflare API token with Tunnel Write on the account and DNS Write on the selected zone                                     |
+| `TUNNEL_CF_ACCOUNT_ID`   | Account holding the tunnels and DNS zone                                                                                            |
+| `TUNNEL_CF_ZONE_ID`      | DNS zone for machine hostnames                                                                                                      |
+| `TUNNEL_DOMAIN`          | Parent domain; production uses `amarjay.com`, producing `<8-hex-characters>.amarjay.com`                                            |
+| `TUNNEL_CAPACITY`        | Positive integer, default `20` in Wrangler configuration                                                                            |
 | `TUNNEL_ENROLLMENT_CODE` | Shared operator code required to enroll a new installation ID; setting the secret enforces it, removing it restores open enrollment |
 
 Use Worker secrets for the API token and the enrollment code. Other settings may be
@@ -224,7 +224,16 @@ The allocator does not proxy application traffic or receive daemon access tokens
 
 Provisioning is not a single Cloudflare transaction. The allocator recovers lost
 create responses by finding its deterministic tunnel name and hostname. Retry
-failed operations with the same local identity. Do not delete the Durable Object
+failed operations with the same local identity.
+
+Upstream throttling and transient failures are retried in the allocator: `429`
+and `5xx` responses are replayed up to three attempts, honoring `Retry-After` up
+to five seconds and bounded by a 20-second budget. Only a rejected `429` is
+replayed for `POST`; a `5xx` on a create is ambiguous and is surfaced instead, so
+the deterministic-name recovery above handles it. Connection and timeout
+failures are likewise surfaced rather than replayed. When upstream asks for a
+longer wait than the budget allows, the request fails immediately with the
+upstream status and error codes so the caller can report a rate limit. Do not delete the Durable Object
 storage while provisioned resources exist: it holds ownership and capacity state.
 Back up each daemon's private `named-installation.json`. If it is lost, the daily
 cleanup eventually reclaims its disconnected resources. A new identity cannot

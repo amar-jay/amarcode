@@ -109,6 +109,48 @@ class CloudflareApiError extends Error {
     super("Cloudflare API failed");
   }
 }
+// Kept in step with TUNNEL_CAPACITY in wrangler.jsonc so an unset variable
+// cannot silently shrink the deployment; a test asserts the two agree.
+export const DEFAULT_CAPACITY = 20;
+const API_TIMEOUT_MS = 10_000;
+const API_ATTEMPTS = 3;
+// Bounded so a single allocation still fits inside the daemon's request budget.
+const API_RETRY_BUDGET_MS = 20_000;
+const API_RETRY_AFTER_CAP_MS = 5_000;
+const API_BACKOFF_MS = 250;
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+function retryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+/**
+ * Replay safety. A rejected 429 made no change, so any method may retry. Other
+ * upstream failures are ambiguous for creates: a POST that fails after the
+ * tunnel exists would provision a second one, so only replay non-creating
+ * methods and rely on name recovery for the rest.
+ */
+function canReplay(method: string, status?: number): boolean {
+  return status === 429 || method !== "POST";
+}
+/** Returns the wait, or undefined when upstream asked for more than we will wait. */
+function retryDelay(
+  response: Response | undefined,
+  attempt: number,
+): number | undefined {
+  const header = response?.headers.get("retry-after");
+  if (header) {
+    const seconds = Number(header);
+    const wait = Number.isFinite(seconds)
+      ? seconds * 1000
+      : Date.parse(header) - Date.now();
+    if (Number.isFinite(wait)) {
+      if (wait > API_RETRY_AFTER_CAP_MS) return undefined;
+      return Math.max(wait, 0);
+    }
+  }
+  const backoff = API_BACKOFF_MS * 2 ** attempt;
+  return backoff + Math.random() * API_BACKOFF_MS;
+}
 // Enrollment is tiny ({port}); bound actual streamed bytes, not Content-Length.
 const ENROLLMENT_BODY_LIMIT = 1024;
 const ENROLLMENT_BODY_TIMEOUT_MS = 5_000;
@@ -349,37 +391,62 @@ export class Allocator {
     body?: unknown,
     allowMissing = false,
   ): Promise<T> {
-    return this.network(async () => {
-      // Use the global receiver when invoking native Workers fetch.
-      const response = await this.fetcher.call(
-        globalThis,
-        `https://api.cloudflare.com/client/v4${path}`,
-        {
-          method,
-          headers: {
-            authorization: `Bearer ${this.env.TUNNEL_CF_API_TOKEN}`,
-            "content-type": "application/json",
-            "user-agent": "amarcode-tunnel-allocator/1.0",
+    const operation = `${method} ${path.split("?")[0]}`;
+    const started = Date.now();
+    for (let attempt = 0; ; attempt++) {
+      const budgetLeft = () =>
+        attempt + 1 < API_ATTEMPTS &&
+        Date.now() - started < API_RETRY_BUDGET_MS;
+      // A dropped connection or timeout is ambiguous: the resource may already
+      // exist. Surface it and let the caller's existing recovery path decide.
+      // Only explicit retryable statuses below are replayed.
+      const response = await this.network(() =>
+        this.fetcher.call(
+          globalThis,
+          `https://api.cloudflare.com/client/v4${path}`,
+          {
+            method,
+            headers: {
+              authorization: `Bearer ${this.env.TUNNEL_CF_API_TOKEN}`,
+              "content-type": "application/json",
+              "user-agent": "amarcode-tunnel-allocator/1.0",
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+            signal: AbortSignal.timeout(API_TIMEOUT_MS),
+            redirect: "manual",
           },
-          body: body === undefined ? undefined : JSON.stringify(body),
-          signal: AbortSignal.timeout(10_000),
-          redirect: "manual",
-        },
+        ),
       );
       if ((method === "DELETE" || allowMissing) && response.status === 404)
         return undefined as T;
-      const operation = `${method} ${path.split("?")[0]}`;
-      const value = (await response.json().catch(() => {
-        throw new CloudflareApiError(response.status, [], operation);
-      })) as { success: boolean; result: T; errors?: { code: number }[] };
-      if (!response.ok || !value.success)
-        throw new CloudflareApiError(
+      let value:
+        | { success: boolean; result: T; errors?: { code: number }[] }
+        | undefined;
+      try {
+        value = await response.json();
+      } catch {
+        value = undefined;
+      }
+      if (!response.ok || !value || !value.success) {
+        const error = new CloudflareApiError(
           response.status,
-          (value.errors ?? []).map((e) => e.code),
+          (value?.errors ?? []).map((e) => e.code),
           operation,
         );
+        if (
+          !retryableStatus(response.status) ||
+          !canReplay(method, response.status) ||
+          !budgetLeft()
+        )
+          throw error;
+        const wait = retryDelay(response, attempt);
+        // Upstream asked for a longer wait than this request can afford.
+        if (wait === undefined) throw error;
+        await sleep(wait);
+        continue;
+      }
       return value.result;
-    });
+    }
   }
   private async handle(
     request: Request,
@@ -471,7 +538,7 @@ export class Allocator {
                 return reply({ error: "Invalid enrollment code." }, 403);
             }
           }
-          const capacity = Number(env.TUNNEL_CAPACITY ?? "5");
+          const capacity = Number(env.TUNNEL_CAPACITY ?? DEFAULT_CAPACITY);
           if (!Number.isInteger(capacity) || capacity < 1)
             return reply({ error: "Invalid capacity configuration." }, 503);
           if (
