@@ -6,6 +6,10 @@ export interface TunnelEnv {
   TUNNEL_CF_ZONE_ID?: string;
   TUNNEL_DOMAIN?: string;
   TUNNEL_CAPACITY?: string;
+  TUNNEL_ENROLLMENT_CODE?: string;
+  // Staged rollout: enforcement stays dormant until released daemons can send
+  // the code, so deploying this Worker cannot lock out existing installations.
+  TUNNEL_ENROLLMENT_ENFORCE?: string;
 }
 type OriginTls = { server_name: string; ca_pool?: string };
 type Installation = {
@@ -60,6 +64,19 @@ function newHostname(db: Database, domain: string): string {
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SECRET = /^[a-f0-9]{64}$/;
+// Admission control for first-time enrollment. Existing installations
+// authenticate with their stored credential hash; only new installation IDs
+// must present this shared operator code.
+const ENROLLMENT_CODE_HEADER = "x-amarcode-enrollment-code";
+function enrollmentCodesMatch(presented: string, expected: string): boolean {
+  if (!presented || !expected) return false;
+  const a = new TextEncoder().encode(presented);
+  const b = new TextEncoder().encode(expected);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
 const reply = (body: unknown, status = 200) =>
   Response.json(body, {
     status,
@@ -444,6 +461,19 @@ export class Allocator {
         ) {
           if (request.method === "DELETE")
             return reply({ error: "Installation not found." }, 404);
+          // Reclaimed owners already authenticated above via credentialHash.
+          if (!record && env.TUNNEL_ENROLLMENT_ENFORCE === "true") {
+            // New installation IDs require the operator enrollment code.
+            const expected = env.TUNNEL_ENROLLMENT_CODE ?? "";
+            if (!expected)
+              return reply(
+                { error: "Tunnel enrollment is not configured." },
+                503,
+              );
+            const presented = request.headers.get(ENROLLMENT_CODE_HEADER) ?? "";
+            if (!enrollmentCodesMatch(presented, expected))
+              return reply({ error: "Invalid enrollment code." }, 403);
+          }
           const capacity = Number(env.TUNNEL_CAPACITY ?? "5");
           if (!Number.isInteger(capacity) || capacity < 1)
             return reply({ error: "Invalid capacity configuration." }, 503);

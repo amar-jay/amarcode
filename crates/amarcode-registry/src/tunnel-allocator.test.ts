@@ -29,6 +29,8 @@ function fixture(
     TUNNEL_CF_ZONE_ID: "zone",
     TUNNEL_DOMAIN: "example.com",
     TUNNEL_CAPACITY: capacity,
+    TUNNEL_ENROLLMENT_CODE: "enrollment-code",
+    TUNNEL_ENROLLMENT_ENFORCE: "true",
   };
   const tunnels = new Map<string, { id: string; name: string }>();
   const deletedTunnels = new Map<
@@ -166,6 +168,7 @@ function fixture(
   const restart = () => new Allocator(storage, env, fetcher);
   return {
     allocator: restart(),
+    fetcher,
     storage,
     setStatus: (value: string) => {
       tunnelStatus = value;
@@ -211,6 +214,7 @@ const request = (
     method?: string;
     secret?: string;
     port?: number;
+    enrollmentCode?: string | null;
   } = {},
 ) =>
   new Request(`https://allocator.example/v1/tunnels/${id}`, {
@@ -219,6 +223,12 @@ const request = (
       authorization: `Bearer ${options.secret ?? "a".repeat(64)}`,
       "content-type": "application/json",
       "x-amarcode-tunnel-hostnames": "short-v2",
+      ...(options.enrollmentCode === null
+        ? {}
+        : {
+            "x-amarcode-enrollment-code":
+              options.enrollmentCode ?? "enrollment-code",
+          }),
     },
     body:
       options.method === "DELETE"
@@ -384,6 +394,73 @@ describe("persistent tunnel allocation", () => {
         ).status,
       ).toBe(401);
     expect(f.calls.length).toBe(count);
+  });
+  test("new installations require the enrollment code; reconnects do not", async () => {
+    const f = fixture();
+    const id = crypto.randomUUID();
+    const missing = await f.allocator.fetch(
+      request(crypto.randomUUID(), { enrollmentCode: null }),
+    );
+    expect(missing.status).toBe(403);
+    expect(await missing.text()).toContain("enrollment code");
+    const wrong = await f.allocator.fetch(
+      request(crypto.randomUUID(), { enrollmentCode: "wrong-code" }),
+    );
+    expect(wrong.status).toBe(403);
+    // Rejected enrollments consume no capacity and make no Cloudflare calls.
+    expect(f.calls).toHaveLength(0);
+    const first = await f.allocator.fetch(request(id));
+    expect(first.status).toBe(200);
+    const reconnect = await f
+      .restart()
+      .fetch(request(id, { enrollmentCode: null }));
+    expect(reconnect.status).toBe(200);
+    const removal = await f
+      .restart()
+      .fetch(request(id, { method: "DELETE", enrollmentCode: null }));
+    expect(removal.status).toBe(200);
+  });
+  test("new enrollment fails closed when enforcement is on without a code", async () => {
+    const f = fixture();
+    const unconfigured = new Allocator(
+      f.storage,
+      {
+        TUNNEL_CF_API_TOKEN: "account-secret",
+        TUNNEL_CF_ACCOUNT_ID: "account",
+        TUNNEL_CF_ZONE_ID: "zone",
+        TUNNEL_DOMAIN: "example.com",
+        TUNNEL_CAPACITY: "5",
+        TUNNEL_ENROLLMENT_ENFORCE: "true",
+      },
+      fetch,
+    );
+    const response = await unconfigured.fetch(request(crypto.randomUUID()));
+    expect(response.status).toBe(503);
+    expect(await response.text()).toContain("not configured");
+  });
+  test("enforcement stays dormant until enabled so existing installs keep working", async () => {
+    const f = fixture();
+    const lenient = (environ: TunnelEnv) =>
+      new Allocator(f.storage, environ, f.fetcher);
+    const base: TunnelEnv = {
+      TUNNEL_CF_API_TOKEN: "account-secret",
+      TUNNEL_CF_ACCOUNT_ID: "account",
+      TUNNEL_CF_ZONE_ID: "zone",
+      TUNNEL_DOMAIN: "example.com",
+      TUNNEL_CAPACITY: "5",
+      TUNNEL_ENROLLMENT_CODE: "enrollment-code",
+    };
+    // Absent or non-"true" values preserve the previous open-enrollment behavior.
+    for (const flag of [undefined, "", "false", "TRUE", "1"]) {
+      const allocator = lenient({
+        ...base,
+        ...(flag === undefined ? {} : { TUNNEL_ENROLLMENT_ENFORCE: flag }),
+      });
+      const response = await allocator.fetch(
+        request(crypto.randomUUID(), { enrollmentCode: null }),
+      );
+      expect(response.status, `flag=${flag}`).toBe(200);
+    }
   });
   test("simultaneous enrollment cannot overallocate; offline installations retain capacity", async () => {
     const f = fixture("1");

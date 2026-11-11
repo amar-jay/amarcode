@@ -15,7 +15,7 @@
     { "tag": "tunnel-allocator-v1", "new_sqlite_classes": ["TunnelAllocator"] },
   ],
   "vars": {
-    "TUNNEL_CAPACITY": "5",
+    "TUNNEL_CAPACITY": "20",
     "TUNNEL_CF_ACCOUNT_ID": "e1558dbdffc3158233b76ff148601171",
     "TUNNEL_CF_ZONE_ID": "32d36ac968d68fa97a307c9a54e2ee7a",
     "TUNNEL_DOMAIN": "amarjay.com",
