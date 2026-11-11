@@ -139,6 +139,35 @@ pub fn compaction_plan(
     }))
 }
 
+/// Explicit compaction summarizes all exchanges after the original task, even
+/// when the conversation is below the automatic context-window threshold.
+pub fn manual_compaction_plan(
+    history: &[Value],
+    budget: usize,
+    summary_tokens: u64,
+) -> Result<Option<Compaction>, String> {
+    if history.len() < 2 {
+        return Ok(None);
+    }
+    let first = history
+        .first()
+        .filter(|message| message["role"] == "user")
+        .ok_or("conversation must begin with a user request")?;
+    let available = budget
+        .saturating_sub(history_tokens(&history[..1]))
+        .saturating_sub(64);
+    let summary_budget = (summary_tokens as usize).min(available / 2);
+    if summary_budget < 64 {
+        return Err("context window has insufficient room for a conversation summary".into());
+    }
+    Ok(Some(Compaction {
+        pinned: vec![first.clone()],
+        older: history[1..].to_vec(),
+        recent: vec![],
+        summary_budget,
+    }))
+}
+
 impl Compaction {
     pub fn finish(self, summary: &str) -> Vec<Value> {
         let mut history = vec![self.pinned[0].clone()];

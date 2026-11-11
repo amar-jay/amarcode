@@ -152,6 +152,27 @@ keeps it available until its TTL expires, while deleting removes it immediately.
 Image prompts are advertised and translated to OpenAI-compatible image content.
 Authentication, audio, embedded context, and MCP capabilities are not advertised.
 
+## Slash commands
+
+The adapter advertises `/help` and `/compact` through ACP
+`available_commands_update` notifications on session creation, load, and resume.
+Send commands as the first text block of a normal `session/prompt` request.
+
+- `/help` lists commands locally without a provider request.
+- `/compact` summarizes conversation history using the session's selected model,
+  even below the automatic compaction threshold. It preserves the original user
+  request verbatim and replaces later exchanges with a bounded summary. The
+  summary is persisted and used on subsequent turns; compaction does not run
+  tools or continue the task. An empty session reports that there is nothing to
+  compact. Provider usage and cost are reported normally.
+
+Both commands take no arguments or attachments. Unknown commands and invalid
+arguments return invalid-params errors. Command text and help/status output are
+excluded from model history. Additional text blocks supplied by the host for
+history restoration are not interpreted as command arguments. Compaction uses
+the existing cancellation, deadline, batching, and cost limits; failed or
+cancelled summaries leave the previous conversation context intact.
+
 ## Tools
 
 OpenAI-compatible function calling is executed as an iterative model → tool →

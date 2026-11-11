@@ -1701,3 +1701,191 @@ fn transcript_request_cancellation_kills_and_releases_an_active_terminal() {
     );
     fs::remove_dir_all(workspace).unwrap();
 }
+
+fn assert_command_advertisement(messages: &[Value], session: &str) {
+    let update = messages
+        .iter()
+        .find(|message| {
+            message.pointer("/params/update/sessionUpdate")
+                == Some(&json!("available_commands_update"))
+        })
+        .expect("command advertisement");
+    assert_eq!(update["params"]["sessionId"], session);
+    let commands = update["params"]["update"]["availableCommands"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        commands
+            .iter()
+            .map(|command| command["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["help", "compact"]
+    );
+    assert!(commands.iter().all(
+        |command| !command["description"].as_str().unwrap().is_empty()
+            && command.get("input").is_none()
+    ));
+}
+
+#[test]
+fn transcript_advertises_commands_on_new_load_and_resume_and_handles_help_locally() {
+    let mut agent = AgentProcess::spawn("http://127.0.0.1:9/v1");
+    initialize(&mut agent);
+    agent.send(json!({"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/workspace","mcpServers":[]}}));
+    let (response, messages) = agent.response_with_messages(2);
+    let session = response["result"]["sessionId"].as_str().unwrap().to_owned();
+    assert_command_advertisement(&messages, &session);
+    for (id, method) in [(3, "session/load"), (4, "session/resume")] {
+        agent.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":{"sessionId":session,"cwd":"/workspace","mcpServers":[]}}));
+        let (response, messages) = agent.response_with_messages(id);
+        assert!(response.get("error").is_none(), "{response}");
+        assert_command_advertisement(&messages, &session);
+    }
+    for (id, text, expected) in [(5, "/help", "/compact"), (6, "/compact", "Not enough")] {
+        prompt(&mut agent, id, &session, text);
+        let (response, messages) = agent.response_with_messages(id);
+        assert_eq!(response["result"]["stopReason"], "end_turn");
+        assert!(messages.iter().any(|message| message
+            .pointer("/params/update/content/text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.contains(expected))));
+    }
+    for (id, text) in [(7, "/help extra"), (8, "/compact extra"), (9, "/unknown")] {
+        prompt(&mut agent, id, &session, text);
+        assert_eq!(agent.response(id)["error"]["code"], -32602);
+    }
+    let saved = fs::read_to_string(&agent.session_store_path).unwrap();
+    assert!(!saved.contains("/help") && !saved.contains("/compact") && !saved.contains("/unknown"));
+}
+
+#[test]
+fn transcript_manual_compaction_summarizes_small_history_and_persists_without_an_agent_turn() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        provider_request(&mut socket);
+        write_sse(&mut socket, "data: {\"choices\":[{\"delta\":{\"content\":\"original assistant detail\"}}]}\n\ndata: [DONE]\n\n");
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        let request = provider_request(&mut socket);
+        assert_eq!(request["stream"], false);
+        assert!(request.get("tools").is_none());
+        assert!(request["messages"]
+            .to_string()
+            .contains("original assistant detail"));
+        assert!(!request["messages"].to_string().contains("/compact"));
+        write_json_response(
+            &mut socket,
+            "200 OK",
+            "",
+            json!({"choices":[{"message":{"content":"Summary: preserve invariant ZEBRA."}}]}),
+        );
+        // Only an explicit follow-up should trigger another model turn.
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        let request = provider_request(&mut socket);
+        let text = request["messages"].to_string();
+        assert!(
+            text.contains("original objective")
+                && text.contains("Summary: preserve invariant ZEBRA.")
+                && text.contains("continue")
+        );
+        assert!(
+            !text.contains("original assistant detail")
+                && !text.contains("/compact")
+                && !text.contains("/help")
+        );
+        write_sse(
+            &mut socket,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"continued\"}}]}\n\ndata: [DONE]\n\n",
+        );
+    });
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "original objective");
+    assert_eq!(agent.response(3)["result"]["stopReason"], "end_turn");
+    prompt(&mut agent, 4, &session, "/compact");
+    assert_eq!(agent.response(4)["result"]["stopReason"], "end_turn");
+    let saved = fs::read_to_string(&agent.session_store_path).unwrap();
+    assert!(
+        saved.contains("original objective")
+            && saved.contains("Summary: preserve invariant ZEBRA.")
+    );
+    assert!(!saved.contains("original assistant detail") && !saved.contains("/compact"));
+    prompt(&mut agent, 5, &session, "/help");
+    assert_eq!(agent.response(5)["result"]["stopReason"], "end_turn");
+    prompt(&mut agent, 6, &session, "continue");
+    assert_eq!(agent.response(6)["result"]["stopReason"], "end_turn");
+    server.join().unwrap();
+}
+
+#[test]
+fn transcript_failed_manual_compaction_preserves_history_and_releases_active_turn() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        provider_request(&mut socket);
+        write_sse(&mut socket, "data: {\"choices\":[{\"delta\":{\"content\":\"keep this detail\"}}]}\n\ndata: [DONE]\n\n");
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        provider_request(&mut socket);
+        write_json_response(
+            &mut socket,
+            "401 Unauthorized",
+            "",
+            json!({"error":{"message":"test summary failure"}}),
+        );
+    });
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "original objective");
+    assert_eq!(agent.response(3)["result"]["stopReason"], "end_turn");
+    prompt(&mut agent, 4, &session, "/compact");
+    assert!(agent.response(4).get("error").is_some());
+    let saved = fs::read_to_string(&agent.session_store_path).unwrap();
+    assert!(saved.contains("original objective") && saved.contains("keep this detail"));
+    assert!(!saved.contains("/compact"));
+    prompt(&mut agent, 5, &session, "/help");
+    assert_eq!(agent.response(5)["result"]["stopReason"], "end_turn");
+    server.join().unwrap();
+}
+
+#[test]
+fn transcript_cancelled_manual_compaction_preserves_history() {
+    let Some(listener) = provider_listener() else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    let (started, received) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        provider_request(&mut socket);
+        write_sse(&mut socket, "data: {\"choices\":[{\"delta\":{\"content\":\"keep this detail\"}}]}\n\ndata: [DONE]\n\n");
+        let (mut socket, _) = accept_chat(&listener).unwrap();
+        provider_request(&mut socket);
+        started.send(()).unwrap();
+        let _ = wait.recv_timeout(TIMEOUT);
+    });
+    let mut agent = AgentProcess::spawn(&format!("http://{address}/v1"));
+    initialize(&mut agent);
+    let session = new_session(&mut agent, 2, "/workspace");
+    prompt(&mut agent, 3, &session, "original objective");
+    assert_eq!(agent.response(3)["result"]["stopReason"], "end_turn");
+    prompt(&mut agent, 4, &session, "/compact");
+    received.recv_timeout(TIMEOUT).unwrap();
+    agent.send(json!({"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":session}}));
+    assert_eq!(agent.response(4)["result"]["stopReason"], "cancelled");
+    let saved = fs::read_to_string(&agent.session_store_path).unwrap();
+    assert!(saved.contains("original objective") && saved.contains("keep this detail"));
+    assert!(!saved.contains("/compact"));
+    prompt(&mut agent, 5, &session, "/help");
+    assert_eq!(agent.response(5)["result"]["stopReason"], "end_turn");
+    release.send(()).unwrap();
+    server.join().unwrap();
+}

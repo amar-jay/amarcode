@@ -8,15 +8,16 @@ use std::{
 use agent_client_protocol::{
     schema::{
         v1::{
-            AgentCapabilities, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-            ContentBlock, ContentChunk, Cost, DeleteSessionRequest, DeleteSessionResponse,
-            Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
-            ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, MessageId,
-            NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest,
-            PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
-            SessionCloseCapabilities, SessionConfigOption, SessionConfigOptionCategory,
-            SessionConfigOptionValue, SessionDeleteCapabilities, SessionId, SessionInfo,
-            SessionListCapabilities, SessionNotification, SessionResumeCapabilities, SessionUpdate,
+            AgentCapabilities, AvailableCommand, AvailableCommandsUpdate, CancelNotification,
+            CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Cost,
+            DeleteSessionRequest, DeleteSessionResponse, Implementation, InitializeRequest,
+            InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+            LoadSessionResponse, MessageId, NewSessionRequest, NewSessionResponse,
+            PromptCapabilities, PromptRequest, PromptResponse, ResumeSessionRequest,
+            ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
+            SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
+            SessionDeleteCapabilities, SessionId, SessionInfo, SessionListCapabilities,
+            SessionNotification, SessionResumeCapabilities, SessionUpdate,
             SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason, TextContent,
             UsageUpdate,
         },
@@ -37,6 +38,80 @@ use crate::{
 // Fixed per-turn limits; configuration cannot override these.
 const MAX_TOOL_ROUNDS: usize = 1_000;
 const MAX_TOOL_CALLS: usize = 1_000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SlashCommand {
+    Help,
+    Compact,
+}
+
+fn slash_command(prompt: &[ContentBlock]) -> agent_client_protocol::Result<Option<SlashCommand>> {
+    let Some(ContentBlock::Text(first)) = prompt.first() else {
+        return Ok(None);
+    };
+    let text = first.text.trim();
+    let Some(name) = text
+        .split_whitespace()
+        .next()
+        .filter(|name| name.starts_with('/'))
+    else {
+        return Ok(None);
+    };
+    let command = match name {
+        "/help" => SlashCommand::Help,
+        "/compact" => SlashCommand::Compact,
+        _ => {
+            return Err(Error::invalid_params()
+                .data("Unknown command. Use /help to list available commands."))
+        }
+    };
+    if text != name
+        || prompt
+            .iter()
+            .any(|block| !matches!(block, ContentBlock::Text(_)))
+    {
+        return Err(Error::invalid_params().data("This command takes no arguments or attachments."));
+    }
+    Ok(Some(command))
+}
+
+fn advertise_commands(
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+) -> agent_client_protocol::Result<()> {
+    connection.send_notification(SessionNotification::new(
+        session_id.clone(),
+        SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(vec![
+            AvailableCommand::new("help", "List available slash commands"),
+            AvailableCommand::new(
+                "compact",
+                "Summarize conversation context while preserving the original task",
+            ),
+        ])),
+    ))
+}
+
+fn command_reply(
+    history: Vec<serde_json::Value>,
+    text: &str,
+    connection: &ConnectionTo<Client>,
+    session_id: &SessionId,
+) -> Result<Completion<TurnOutcome>, String> {
+    connection
+        .send_notification(SessionNotification::new(
+            session_id.clone(),
+            SessionUpdate::AgentMessageChunk(
+                ContentChunk::new(ContentBlock::Text(TextContent::new(text)))
+                    .message_id(MessageId::new(Uuid::new_v4().to_string())),
+            ),
+        ))
+        .map_err(|error| format!("ACP write failed: {error}"))?;
+    // Command output is UI feedback, not conversation context for the model.
+    Ok(Completion::Completed(TurnOutcome {
+        history,
+        stop_reason: StopReason::EndTurn,
+    }))
+}
 
 #[derive(Clone)]
 struct Runtime {
@@ -433,6 +508,7 @@ impl Runtime {
         Arc<crate::tools::PermissionState>,
         watch::Receiver<bool>,
     )> {
+        let command = slash_command(&request.prompt)?;
         let prompt = provider_prompt_content(&request.prompt)?;
         let mut sessions = self.sessions.lock().await;
         let session = sessions
@@ -441,9 +517,11 @@ impl Runtime {
         if session.active_turn.is_some() {
             return Err(Error::invalid_request().data("session already has an active turn"));
         }
-        session
-            .history
-            .push(serde_json::json!({ "role": "user", "content": prompt }));
+        if command.is_none() {
+            session
+                .history
+                .push(serde_json::json!({ "role": "user", "content": prompt }));
+        }
         let history = session.history.clone();
         let turn_id = Uuid::new_v4();
         let (cancel, cancellation) = watch::channel(false);
@@ -560,8 +638,10 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |request: NewSessionRequest, responder, _connection| {
-                responder.respond(new_session_runtime.new_session(request).await)
+            async move |request: NewSessionRequest, responder, connection: ConnectionTo<Client>| {
+                let response = new_session_runtime.new_session(request).await;
+                advertise_commands(&connection, &response.session_id)?;
+                responder.respond(response)
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -584,6 +664,7 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                             .clone()
                     };
                     replay_history(&connection, &request.session_id, &history)?;
+                    advertise_commands(&connection, &request.session_id)?;
                     let options = load_session_runtime
                         .session_config_options(&request.session_id)
                         .await?;
@@ -595,7 +676,9 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |request: ResumeSessionRequest, responder, _connection| {
+            async move |request: ResumeSessionRequest,
+                        responder,
+                        connection: ConnectionTo<Client>| {
                 let result = async {
                     resume_session_runtime
                         .restore(&request.session_id, &request.cwd)
@@ -603,6 +686,7 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                     let options = resume_session_runtime
                         .session_config_options(&request.session_id)
                         .await?;
+                    advertise_commands(&connection, &request.session_id)?;
                     Ok(ResumeSessionResponse::new().config_options(options))
                 }
                 .await;
@@ -674,6 +758,10 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
             async move |request: PromptRequest,
                         responder: Responder<PromptResponse>,
                         connection: ConnectionTo<Client>| {
+                let command = match slash_command(&request.prompt) {
+                    Ok(command) => command,
+                    Err(error) => return responder.respond_with_error(error),
+                };
                 let (turn_id, cwd, model, history, permissions, cancellation) =
                     match prompt_runtime.begin_turn(&request).await {
                         Ok(turn) => turn,
@@ -687,6 +775,7 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
                 connection.clone().spawn(async move {
                     let turn = run_agent_turn(
                         &runtime,
+                        command,
                         history,
                         cwd,
                         model,
@@ -751,6 +840,7 @@ fn build_agent(runtime: Runtime) -> impl agent_client_protocol::ConnectTo<Client
 )]
 async fn run_agent_turn(
     runtime: &Runtime,
+    command: Option<SlashCommand>,
     mut history: Vec<serde_json::Value>,
     cwd: PathBuf,
     model: String,
@@ -760,6 +850,17 @@ async fn run_agent_turn(
     connection: ConnectionTo<Client>,
     cancellation: watch::Receiver<bool>,
 ) -> Result<Completion<TurnOutcome>, String> {
+    if command == Some(SlashCommand::Help) {
+        return command_reply(history, "Available commands:\n\n/help — Show this help.\n/compact — Summarize conversation context, preserving the original task. Uses the selected model; no tools are run.\n\nThese commands take no arguments.", &connection, &session_id);
+    }
+    if command == Some(SlashCommand::Compact) && history.len() < 2 {
+        return command_reply(
+            history,
+            "Not enough conversation history to compact yet.",
+            &connection,
+            &session_id,
+        );
+    }
     let settings = &runtime.config.agent;
     let deadline = tokio::time::Instant::now()
         .checked_add(Duration::from_secs(settings.max_turn_seconds))
@@ -838,11 +939,20 @@ async fn run_agent_turn(
             &history,
             runtime.config.context.max_tool_result_bytes,
         );
-        if let Some(plan) = crate::context::compaction_plan(
-            &pruned,
-            history_budget,
-            runtime.config.context.summary_tokens,
-        )? {
+        let plan = if command == Some(SlashCommand::Compact) {
+            crate::context::manual_compaction_plan(
+                &pruned,
+                history_budget,
+                runtime.config.context.summary_tokens,
+            )?
+        } else {
+            crate::context::compaction_plan(
+                &pruned,
+                history_budget,
+                runtime.config.context.summary_tokens,
+            )?
+        };
+        if let Some(plan) = plan {
             let mut summary = String::new();
             let summary_batches = provider::summary_batches(
                 &plan.older,
@@ -912,6 +1022,14 @@ async fn run_agent_turn(
                 session.history = history.clone();
                 runtime.persist(&session_id, session);
             }
+        }
+        if command == Some(SlashCommand::Compact) {
+            return command_reply(
+                history,
+                "Conversation context compacted. The original task and a summary are retained.",
+                &connection,
+                &session_id,
+            );
         }
         let request_history = crate::context::prune_tool_results(
             &history,
