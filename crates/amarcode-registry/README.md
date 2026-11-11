@@ -128,7 +128,8 @@ binary elsewhere. Use `bun run daemon:cli status --json`, `daemon:cli stop`, or
 
 For CI publishing, store the private PEM as an encrypted secret, write it to a
 temporary file with restricted permissions, set `AMARCODE_DAEMON_SIGNING_KEY`
-to that path, and run `bun run publish -- daemon --version <version> --non-interactive`.
+to that path, and run `bun run publish -- daemon --version <version> --non-interactive --skip-deploy`.
+Use `--deploy-registry` instead when that release should also deploy the Worker.
 
 ## ACP publishing
 

@@ -201,7 +201,9 @@ async function inquireVersion(
   product: BinaryProductId,
 ): Promise<{ version: string; overwriteHint: boolean } | null> {
   const current = packageVersion(binaryProducts[product]);
-  const kind = await prompts.select({
+  const kind = await prompts.select<
+    "patch" | "minor" | "major" | "custom" | "current"
+  >({
     message: `${binaryProducts[product].label} version`,
     initialValue: "patch",
     options: [
@@ -222,7 +224,7 @@ async function inquireVersion(
       message: "Custom release version",
       placeholder: current,
       validate: (value) =>
-        /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(value)
+        /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(value ?? "")
           ? undefined
           : "Enter a valid release version.",
     });

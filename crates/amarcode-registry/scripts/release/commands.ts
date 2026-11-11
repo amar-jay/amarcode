@@ -9,18 +9,26 @@ export const registryDirectory = join(
 export const wranglerConfig = join(registryDirectory, "wrangler.jsonc");
 export const cargoLockPath = join(projectRoot, "Cargo.lock");
 
+type RunOptions = { cwd?: string; quiet?: boolean; allowFailure?: boolean };
+
 export function run(
   command: string[],
-  options: { cwd?: string; quiet?: boolean; allowFailure?: boolean } = {},
-) {
+  options: RunOptions & { quiet: true },
+): Bun.SyncSubprocess<"pipe", "pipe">;
+export function run(
+  command: string[],
+  options?: RunOptions,
+): Bun.SyncSubprocess<"pipe" | "inherit", "pipe" | "inherit">;
+export function run(command: string[], options: RunOptions = {}) {
   if (!options.quiet) console.log(`$ ${command.join(" ")}`);
-  const result = Bun.spawnSync(command, {
-    cwd: options.cwd ?? projectRoot,
-    stdout: options.quiet ? "pipe" : "inherit",
-    stderr: options.quiet ? "pipe" : "inherit",
-  });
+  const cwd = options.cwd ?? projectRoot;
+  const result = options.quiet
+    ? Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe" })
+    : Bun.spawnSync(command, { cwd, stdout: "inherit", stderr: "inherit" });
   if (!result.success && !options.allowFailure) {
-    const detail = options.quiet ? `\n${result.stderr.toString().trim()}` : "";
+    const detail = options.quiet
+      ? `\n${result.stderr?.toString().trim() ?? ""}`
+      : "";
     throw new Error(
       `command failed (${result.exitCode}): ${command.join(" ")}${detail}`,
     );
