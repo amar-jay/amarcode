@@ -1,5 +1,5 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "model-gateway",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-23",
@@ -25,4 +25,7 @@
   ],
   "workers_dev": true,
   "preview_urls": true,
+  "secrets": {
+    "required": ["OPENROUTER_API_KEY"],
+  },
 }
