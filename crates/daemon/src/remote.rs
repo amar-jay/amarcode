@@ -1,6 +1,7 @@
 //! Foreground remote mode, with named Cloudflare access or private loopback access.
 use crate::{App, Config, Error, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     env, fs,
     io::{IsTerminal, Write},
@@ -519,7 +520,7 @@ fn origin_tls(config: &Config) -> Result<Option<OriginTls>> {
         ca_pool: ca_pool.map(|p| p.to_string_lossy().into_owned()),
     }))
 }
-#[derive(Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Assignment {
     installation_id: String,
     hostname: String,
@@ -530,6 +531,80 @@ struct Assignment {
     origin_tls: Option<OriginTls>,
     #[serde(default)]
     dns_ready_after: Option<u64>,
+    #[serde(default)]
+    reuse_until: Option<u64>,
+}
+
+const ASSIGNMENT_CACHE_FILE: &str = "named-assignment.json";
+const ASSIGNMENT_REUSE_MS: u64 = 24 * 60 * 60 * 1000;
+
+#[derive(Serialize, Deserialize)]
+struct CachedAssignment {
+    version: u8,
+    allocator: String,
+    credential_hash: String,
+    assignment: Assignment,
+}
+
+fn now_ms() -> u64 {
+    chrono::Utc::now().timestamp_millis().max(0) as u64
+}
+
+fn credential_hash(identity: &Identity) -> String {
+    format!("{:x}", Sha256::digest(identity.credential.as_bytes()))
+}
+
+fn cached_assignment(
+    path: &std::path::Path,
+    identity: &Identity,
+    port: u16,
+    origin: &Option<OriginTls>,
+    now: u64,
+) -> Option<Assignment> {
+    // A damaged, obsolete, insecure, or foreign cache is a miss. The private
+    // installation identity remains authoritative and is never reset here.
+    let cached: CachedAssignment = serde_json::from_slice(&private_read(path).ok()?).ok()?;
+    let expires = cached.assignment.reuse_until?;
+    if cached.version != 1
+        || cached.allocator != REMOTE_ALLOCATOR_ORIGIN
+        || cached.credential_hash != credential_hash(identity)
+        || expires <= now
+        || expires > now.saturating_add(ASSIGNMENT_REUSE_MS)
+        || &cached.assignment.origin_tls != origin
+        || validate_assignment(&cached.assignment, identity, port).is_err()
+    {
+        return None;
+    }
+    Some(cached.assignment)
+}
+
+fn cache_assignment(
+    path: &std::path::Path,
+    identity: &Identity,
+    assignment: &Assignment,
+) -> Result<()> {
+    let cached = CachedAssignment {
+        version: 1,
+        allocator: REMOTE_ALLOCATOR_ORIGIN.into(),
+        credential_hash: credential_hash(identity),
+        assignment: assignment.clone(),
+    };
+    // Atomic replacement and private permissions, including while writing.
+    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+    temporary.write_all(&serde_json::to_vec(&cached)?)?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path).map_err(|error| error.error)?;
+    #[cfg(unix)]
+    fs::File::open(path.parent().unwrap())?.sync_all()?;
+    Ok(())
+}
+
+fn invalidate_assignment(path: &std::path::Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 fn remote_root() -> Result<PathBuf> {
     std::env::var_os("AMARCODE_REMOTE_ROOT")
@@ -646,8 +721,59 @@ async fn request(
         )),
     }
 }
-async fn allocate(port: u16, origin: Option<OriginTls>) -> Result<Assignment> {
+async fn allocate(port: u16, origin: Option<OriginTls>, reuse: bool) -> Result<(Assignment, bool)> {
     let identity = identity(true)?;
+    let path = remote_root()?.join(ASSIGNMENT_CACHE_FILE);
+    assignment_with_cache(&path, &identity, port, origin.clone(), reuse, || {
+        fetch_assignment(&identity, port, origin)
+    })
+    .await
+}
+
+async fn assignment_with_cache<F, Fut>(
+    path: &std::path::Path,
+    identity: &Identity,
+    port: u16,
+    origin: Option<OriginTls>,
+    reuse: bool,
+    fetch: F,
+) -> Result<(Assignment, bool)>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Assignment>>,
+{
+    if reuse {
+        if let Some(assignment) = cached_assignment(path, identity, port, &origin, now_ms()) {
+            return Ok((assignment, true));
+        }
+    }
+    // Do not leave a usable old token behind if refresh is rejected or fails.
+    invalidate_assignment(path)?;
+    let assignment = fetch().await?;
+    validate_assignment(&assignment, identity, port)?;
+    if assignment.origin_tls != origin {
+        return Err(Error::msg(
+            "Allocator did not confirm the requested origin TLS settings; refusing tunnel startup",
+        ));
+    }
+    // Older allocators do not grant reuse. Continue normally without caching.
+    if assignment.reuse_until.is_some_and(|expires| {
+        expires > now_ms() && expires <= now_ms().saturating_add(ASSIGNMENT_REUSE_MS)
+    }) {
+        if cache_assignment(path, identity, &assignment).is_err() {
+            tracing::warn!(
+                "Could not persist named tunnel assignment; next start will enroll again"
+            );
+        }
+    }
+    Ok((assignment, false))
+}
+
+async fn fetch_assignment(
+    identity: &Identity,
+    port: u16,
+    origin: Option<OriginTls>,
+) -> Result<Assignment> {
     let assignment: Assignment = serde_json::from_slice(
         &request(
             reqwest::Method::PUT,
@@ -703,6 +829,9 @@ fn validate_assignment(value: &Assignment, identity: &Identity, port: u16) -> Re
 /// Permanently revoke this installation's named tunnel and reset local enrollment.
 pub async fn remove_named() -> Result<()> {
     let identity = identity(false)?;
+    // Invalidate before the request: even a failed removal must not leave a
+    // cached connector credential available for the next startup.
+    invalidate_assignment(&remote_root()?.join(ASSIGNMENT_CACHE_FILE))?;
     request(reqwest::Method::DELETE, &identity, None).await?;
     fs::remove_file(identity_path()?)?;
     println!("Named tunnel removed. Its hostname will never be reassigned.");
@@ -792,7 +921,25 @@ async fn run_named(
     crate::security::Policy::load()?.require_tunnel_allowed()?;
     let progress = TunnelProgress::new();
     progress.set("Reserving your tunnel…");
-    let assignment = allocate(address.port(), origin_tls(config)?).await?;
+    let origin = origin_tls(config)?;
+    let (assignment, reused) = allocate(address.port(), origin.clone(), true).await?;
+    let result = run_assignment(config, cloudflared, token, server, &progress, assignment).await;
+    if result.is_err() && reused && !server.is_finished() {
+        progress.set("Refreshing your tunnel assignment…");
+        let (assignment, _) = allocate(address.port(), origin, false).await?;
+        return run_assignment(config, cloudflared, token, server, &progress, assignment).await;
+    }
+    result
+}
+
+async fn run_assignment(
+    config: &Config,
+    cloudflared: &std::path::Path,
+    token: &str,
+    server: &mut tokio::task::JoinHandle<Result<()>>,
+    progress: &TunnelProgress,
+    assignment: Assignment,
+) -> Result<()> {
     progress.set("Connecting to Cloudflare…");
     // Token never appears in process arguments or logs. File is deleted on exit.
     let mut token_file = tempfile::NamedTempFile::new_in(remote_root()?)?;
@@ -999,6 +1146,170 @@ async fn supervise_connector(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assignment_fixture() -> (tempfile::TempDir, Identity, Assignment) {
+        let directory = tempfile::tempdir().unwrap();
+        let identity = Identity {
+            id: uuid::Uuid::new_v4().to_string(),
+            credential: "a".repeat(64),
+        };
+        let assignment = Assignment {
+            installation_id: identity.id.clone(),
+            hostname: "a7c42e19.amarjay.com".into(),
+            url: "wss://a7c42e19.amarjay.com/rpc".into(),
+            tunnel_token: "private-connector-token".into(),
+            port: 43721,
+            origin_tls: None,
+            dns_ready_after: Some(now_ms()),
+            reuse_until: Some(now_ms() + ASSIGNMENT_REUSE_MS - 1000),
+        };
+        (directory, identity, assignment)
+    }
+
+    #[tokio::test]
+    async fn unchanged_assignment_restarts_without_contacting_allocator() {
+        let (directory, identity, assignment) = assignment_fixture();
+        let path = directory.path().join(ASSIGNMENT_CACHE_FILE);
+        let calls = std::cell::Cell::new(0);
+        let fetch = || {
+            calls.set(calls.get() + 1);
+            std::future::ready(Ok(assignment.clone()))
+        };
+        let (_, reused) = assignment_with_cache(&path, &identity, 43721, None, true, fetch)
+            .await
+            .unwrap();
+        assert!(!reused);
+        let (cached, reused) = assignment_with_cache(&path, &identity, 43721, None, true, fetch)
+            .await
+            .unwrap();
+        assert!(reused);
+        assert_eq!(cached.tunnel_token, assignment.tunnel_token);
+        assert_eq!(calls.get(), 1);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        // A failed cached connector forces exactly one authoritative refresh.
+        let (_, reused) = assignment_with_cache(&path, &identity, 43721, None, false, || {
+            assert!(!path.exists());
+            fetch()
+        })
+        .await
+        .unwrap();
+        assert!(!reused);
+        assert_eq!(calls.get(), 2);
+
+        let result = assignment_with_cache(&path, &identity, 43721, None, false, || {
+            std::future::ready(Err(Error::msg("installation removed")))
+        })
+        .await;
+        assert!(result.is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn cached_assignments_are_bound_to_identity_settings_and_expiry() {
+        let (directory, identity, assignment) = assignment_fixture();
+        let path = directory.path().join(ASSIGNMENT_CACHE_FILE);
+        let now = now_ms();
+        cache_assignment(&path, &identity, &assignment).unwrap();
+        assert!(cached_assignment(&path, &identity, 43721, &None, now).is_some());
+        assert!(cached_assignment(&path, &identity, 43722, &None, now).is_none());
+        assert!(cached_assignment(
+            &path,
+            &identity,
+            43721,
+            &Some(OriginTls {
+                server_name: "localhost".into(),
+                ca_pool: None,
+            }),
+            now
+        )
+        .is_none());
+        let changed = Identity {
+            id: identity.id.clone(),
+            credential: "b".repeat(64),
+        };
+        assert!(cached_assignment(&path, &changed, 43721, &None, now).is_none());
+        let changed = Identity {
+            id: uuid::Uuid::new_v4().to_string(),
+            credential: identity.credential.clone(),
+        };
+        assert!(cached_assignment(&path, &changed, 43721, &None, now).is_none());
+        assert!(cached_assignment(
+            &path,
+            &identity,
+            43721,
+            &None,
+            assignment.reuse_until.unwrap()
+        )
+        .is_none());
+
+        for expiry in [None, Some(now), Some(now + ASSIGNMENT_REUSE_MS + 1)] {
+            let mut invalid = assignment.clone();
+            invalid.reuse_until = expiry;
+            cache_assignment(&path, &identity, &invalid).unwrap();
+            assert!(cached_assignment(&path, &identity, 43721, &None, now).is_none());
+        }
+        let mut invalid = assignment.clone();
+        invalid.url = "wss://attacker.example/rpc".into();
+        cache_assignment(&path, &identity, &invalid).unwrap();
+        assert!(cached_assignment(&path, &identity, 43721, &None, now).is_none());
+        fs::write(&path, b"interrupted or corrupt cache").unwrap();
+        assert!(cached_assignment(&path, &identity, 43721, &None, now).is_none());
+    }
+
+    #[tokio::test]
+    async fn expired_cache_refreshes_and_older_allocators_do_not_enable_reuse() {
+        let (directory, identity, mut assignment) = assignment_fixture();
+        let path = directory.path().join(ASSIGNMENT_CACHE_FILE);
+        assignment.reuse_until = Some(now_ms() - 1);
+        cache_assignment(&path, &identity, &assignment).unwrap();
+        assignment.reuse_until = None;
+        let (_, reused) = assignment_with_cache(&path, &identity, 43721, None, true, || {
+            std::future::ready(Ok(assignment.clone()))
+        })
+        .await
+        .unwrap();
+        assert!(!reused);
+        assert!(!path.exists());
+        assignment.origin_tls = Some(OriginTls {
+            server_name: "localhost".into(),
+            ca_pool: None,
+        });
+        assert!(
+            assignment_with_cache(&path, &identity, 43721, None, true, || {
+                std::future::ready(Ok(assignment))
+            })
+            .await
+            .is_err()
+        );
+        assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cached_connector_credentials_reject_public_files_and_symlinks() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let (directory, identity, assignment) = assignment_fixture();
+        let path = directory.path().join(ASSIGNMENT_CACHE_FILE);
+        cache_assignment(&path, &identity, &assignment).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(cached_assignment(&path, &identity, 43721, &None, now_ms()).is_none());
+        let link = directory.path().join("link.json");
+        symlink(&path, &link).unwrap();
+        assert!(cached_assignment(&link, &identity, 43721, &None, now_ms()).is_none());
+        cache_assignment(&path, &identity, &assignment).unwrap();
+        assert!(cached_assignment(&path, &identity, 43721, &None, now_ms()).is_some());
+        invalidate_assignment(&path).unwrap();
+        assert!(!path.exists());
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn connector_exit_before_readiness_is_reported() {
@@ -1275,6 +1586,7 @@ mod tests {
             hostname,
             port: 43721,
             dns_ready_after: None,
+            reuse_until: None,
             tunnel_token: "connector-secret".into(),
             origin_tls: None,
         };

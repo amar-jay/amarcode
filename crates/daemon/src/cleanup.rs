@@ -60,6 +60,7 @@ fn purge<C: ServiceController>(
             "access-token",
             "remote.json",
             "named-installation.json",
+            "named-assignment.json",
             "run.sh",
             "tunnel.sh",
         ] {
@@ -235,6 +236,7 @@ mod tests {
             "access-token",
             "remote.json",
             "named-installation.json",
+            "named-assignment.json",
             "run.sh",
             "tunnel.sh",
         ] {
@@ -247,6 +249,7 @@ mod tests {
             "access-token",
             "remote.json",
             "named-installation.json",
+            "named-assignment.json",
             "run.sh",
             "tunnel.sh",
         ] {

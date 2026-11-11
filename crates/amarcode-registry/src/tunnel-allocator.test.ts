@@ -2,6 +2,7 @@ import { describe, expect, test, spyOn } from "bun:test";
 import {
   Allocator,
   TUNNEL_IDLE_GRACE_MS,
+  TUNNEL_REUSE_MS,
   cleanupTunnelAllocations,
   routeTunnelAllocation,
   type AllocationStorage,
@@ -17,7 +18,10 @@ class Memory implements AllocationStorage {
     this.values.set(key, structuredClone(value));
   }
 }
-function fixture(capacity = "5") {
+function fixture(
+  capacity = "5",
+  before?: (url: URL, method: string) => Promise<void>,
+) {
   const storage = new Memory();
   const env: TunnelEnv = {
     TUNNEL_CF_API_TOKEN: "account-secret",
@@ -60,6 +64,7 @@ function fixture(capacity = "5") {
     const method = init?.method ?? "GET";
     const path = url.pathname;
     calls.push(`${method} ${path}`);
+    await before?.(url, method);
     expect(new Headers(init?.headers).get("authorization")).toBe(
       "Bearer account-secret",
     );
@@ -241,6 +246,7 @@ describe("persistent tunnel allocation", () => {
       url: string;
       tunnel_token: string;
       dns_ready_after: number;
+      reuse_until?: number;
     };
     expect(assignment.url).toMatch(/^wss:\/\/[a-f0-9]{8}\.example\.com\/rpc$/);
     expect(assignment.tunnel_token).toBe("connector-token");
@@ -248,7 +254,14 @@ describe("persistent tunnel allocation", () => {
     expect(assignment.dns_ready_after).toBeLessThanOrEqual(Date.now() + 15_000);
     expect(first.headers.get("cache-control")).toBe("no-store");
     const reconnect = await f.restart().fetch(request(id, {}));
-    expect((await reconnect.json()) as typeof assignment).toEqual(assignment);
+    const reconnected = (await reconnect.json()) as typeof assignment;
+    expect(reconnected.reuse_until).toBeGreaterThan(Date.now());
+    expect(reconnected.reuse_until!).toBeLessThanOrEqual(
+      Date.now() + TUNNEL_REUSE_MS,
+    );
+    delete assignment.reuse_until;
+    delete reconnected.reuse_until;
+    expect(reconnected).toEqual(assignment);
     expect(f.tunnels.size).toBe(1);
     expect(f.records.size).toBe(1);
   });
@@ -897,5 +910,179 @@ describe("verified origin TLS", () => {
       expect((await f.allocator.fetch(req)).status).toBe(400);
       expect(f.calls).toEqual([]);
     }
+  });
+});
+
+function gate() {
+  let release!: () => void;
+  const wait = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { wait, release };
+}
+async function promptly<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Unrelated installation was blocked")),
+          1000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+describe("independent provisioning", () => {
+  test("stalled provisioning does not block other installations, capacity checks, or deletion", async () => {
+    const stalled = crypto.randomUUID();
+    const entered = gate();
+    const blocked = gate();
+    const f = fixture("2", async (url) => {
+      if (url.searchParams.get("name") === `amarcode-${stalled}`) {
+        entered.release();
+        await blocked.wait;
+      }
+    });
+    const pending = f.allocator.fetch(request(stalled));
+    await promptly(entered.wait);
+    const other = crypto.randomUUID();
+    const replacement = crypto.randomUUID();
+    try {
+      expect((await promptly(f.allocator.fetch(request(other)))).status).toBe(
+        200,
+      );
+      expect(
+        (await promptly(f.allocator.fetch(request(replacement)))).status,
+      ).toBe(409);
+      expect(
+        (
+          await promptly(
+            f.allocator.fetch(request(other, { method: "DELETE" })),
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (await promptly(f.allocator.fetch(request(replacement)))).status,
+      ).toBe(200);
+    } finally {
+      blocked.release();
+    }
+    expect((await pending).status).toBe(200);
+    const db =
+      await f.storage.get<Record<string, { status: string }>>("installations");
+    expect(db![stalled].status).toBe("ready");
+    expect(db![other].status).toBe("deleted");
+    expect(db![replacement].status).toBe("ready");
+    expect(f.tunnels.size).toBe(2);
+    // All independent commits survive an allocator restart.
+    expect((await f.restart().fetch(request(stalled))).status).toBe(200);
+    expect(f.tunnels.size).toBe(2);
+  });
+
+  test("concurrent operations on one installation run in order, including after failure", async () => {
+    const id = crypto.randomUUID();
+    const entered = gate();
+    const blocked = gate();
+    const f = fixture("2", async (url) => {
+      if (url.searchParams.get("name") === `amarcode-${id}`) {
+        entered.release();
+        await blocked.wait;
+      }
+    });
+    f.failConfiguration();
+    const first = f.allocator.fetch(request(id));
+    await promptly(entered.wait);
+    const second = f.allocator.fetch(request(id, { port: 43722 }));
+    const third = f.allocator.fetch(request(id, { port: 43723 }));
+    blocked.release();
+    expect((await first).status).toBe(502);
+    expect((await second).status).toBe(200);
+    expect((await third).status).toBe(200);
+    expect(f.services).toEqual([
+      "http://127.0.0.1:43722",
+      "http://127.0.0.1:43723",
+    ]);
+    expect(
+      (await f.allocator.fetch(request(id, { method: "DELETE" }))).status,
+    ).toBe(200);
+    expect(
+      f.calls.filter(
+        (call) => call === "POST /client/v4/accounts/account/cfd_tunnel",
+      ),
+    ).toHaveLength(1);
+    expect(f.tunnels.size).toBe(0);
+    expect((await f.allocator.fetch(request(id))).status).toBe(410);
+  });
+
+  test("a stalled cleanup does not block unrelated enrollment or overwrite its state", async () => {
+    const entered = gate();
+    const blocked = gate();
+    let stallStatus = false;
+    const f = fixture("2", async (url, method) => {
+      if (
+        stallStatus &&
+        method === "GET" &&
+        /\/cfd_tunnel\/[^/]+$/.test(url.pathname)
+      ) {
+        entered.release();
+        await blocked.wait;
+      }
+    });
+    const old = crypto.randomUUID();
+    expect((await f.allocator.fetch(request(old))).status).toBe(200);
+    stallStatus = true;
+    const cleanup = f.allocator.cleanup(
+      Date.now() + TUNNEL_IDLE_GRACE_MS + 1000,
+    );
+    await promptly(entered.wait);
+    const fresh = crypto.randomUUID();
+    try {
+      expect((await promptly(f.allocator.fetch(request(fresh)))).status).toBe(
+        200,
+      );
+    } finally {
+      blocked.release();
+    }
+    expect(await cleanup).toEqual({ reclaimed: 1, failed: 0 });
+    const db =
+      await f.storage.get<Record<string, { status: string }>>("installations");
+    expect(db![old].status).toBe("reclaimed");
+    expect(db![fresh].status).toBe("ready");
+    expect(f.tunnels.size).toBe(1);
+  });
+
+  test("limits upstream concurrency while allowing independent requests to progress", async () => {
+    const blocked = gate();
+    const fourStarted = gate();
+    let active = 0;
+    let maximum = 0;
+    let starts = 0;
+    const f = fixture("8", async () => {
+      active++;
+      maximum = Math.max(maximum, active);
+      if (++starts === 4) fourStarted.release();
+      await blocked.wait;
+      active--;
+    });
+    const requests = Array.from({ length: 8 }, () =>
+      f.allocator.fetch(request(crypto.randomUUID())),
+    );
+    try {
+      await promptly(fourStarted.wait);
+      expect(starts).toBe(4);
+      expect(maximum).toBe(4);
+    } finally {
+      blocked.release();
+    }
+    expect((await Promise.all(requests)).map((r) => r.status)).toEqual(
+      Array(8).fill(200),
+    );
+    expect(maximum).toBeLessThanOrEqual(4);
+    expect(f.tunnels.size).toBe(8);
   });
 });

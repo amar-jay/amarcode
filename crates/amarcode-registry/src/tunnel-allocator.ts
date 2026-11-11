@@ -33,6 +33,9 @@ export interface AllocationStorage {
   put(key: string, value: unknown): Promise<void>;
 }
 export const TUNNEL_IDLE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+// Shorter than the idle grace period: a cached assignment cannot outlive the
+// reservation that protects its tunnel from idle reclamation.
+export const TUNNEL_REUSE_MS = 24 * 60 * 60 * 1000;
 const CLEANUP_PATH = "/internal/cleanup";
 function newHostname(db: Database, domain: string): string {
   const reserved = new Set(
@@ -137,22 +140,68 @@ async function enrollmentBody(request: Request): Promise<unknown> {
   }
 }
 export class Allocator {
-  private queue: Promise<unknown> = Promise.resolve();
+  private stateQueue: Promise<unknown> = Promise.resolve();
+  private installations = new Map<string, Promise<unknown>>();
+  private active = 0;
+  private waiters: (() => void)[] = [];
   constructor(
     private storage: AllocationStorage,
     private env: TunnelEnv,
     private fetcher: typeof fetch = fetch,
   ) {}
 
-  // Read untrusted bodies outside the queue. Only state-dependent work and
-  // provisioning are serialized, so a slow upload cannot block other clients.
+  // Only short storage operations share a global lock. Work is ordered per
+  // installation, with at most four upstream API calls in flight.
+  private state<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.stateQueue.then(work);
+    this.stateQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  private async installation<T>(
+    id: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const next = (this.installations.get(id) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(work);
+    this.installations.set(id, next);
+    try {
+      return await next;
+    } finally {
+      if (this.installations.get(id) === next) this.installations.delete(id);
+    }
+  }
+
+  private async network<T>(work: () => Promise<T>): Promise<T> {
+    if (this.active >= 4)
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    else this.active++;
+    try {
+      return await work();
+    } finally {
+      const next = this.waiters.shift();
+      if (next) next();
+      else this.active--;
+    }
+  }
+
+  private save(id: string, record: Installation): Promise<void> {
+    return this.state(async () => {
+      // Merge only this installation into the latest snapshot. Another
+      // installation may have committed while this one's API call was pending.
+      const db = (await this.storage.get<Database>("installations")) ?? {};
+      db[id] = record;
+      await this.storage.put("installations", db);
+    });
+  }
+
   fetch(request: Request): Promise<Response> {
     return (async () => {
       const body =
         request.method === "PUT" ? await enrollmentBody(request) : undefined;
-      const next = this.queue.then(() => this.handle(request, body));
-      this.queue = next.catch(() => undefined);
-      return next;
+      const id = new URL(request.url).pathname.slice("/v1/tunnels/".length);
+      return this.installation(id, () => this.handle(request, body));
     })().catch((error) =>
       reply(
         {
@@ -178,11 +227,9 @@ export class Allocator {
       ),
     );
   }
-  // Share the same queue as enrollment/removal so capacity and cleanup cannot race.
+  // Cleanup shares installation locks, not a global network queue.
   cleanup(now = Date.now()) {
-    const next = this.queue.then(() => this.sweep(now));
-    this.queue = next.catch(() => undefined);
-    return next;
+    return this.sweep(now);
   }
 
   private async sweep(now: number) {
@@ -193,62 +240,70 @@ export class Allocator {
       !this.env.TUNNEL_CF_ZONE_ID
     )
       throw new Error("Named tunnels are not configured");
-    const db = (await this.storage.get<Database>("installations")) ?? {};
+    const ids = await this.state(async () =>
+      Object.keys((await this.storage.get<Database>("installations")) ?? {}),
+    );
     const account = `/accounts/${this.env.TUNNEL_CF_ACCOUNT_ID}/cfd_tunnel`;
-    for (const [id, record] of Object.entries(db)) {
-      if (["deleted", "deleting", "reclaimed"].includes(record.status))
-        continue;
-      try {
-        if (!record.tunnelId) {
-          const tunnels = await this.api<{ id: string; name: string }[]>(
-            `${account}?name=amarcode-${id}&is_deleted=false`,
-          );
-          record.tunnelId = tunnels.find(
-            (t) => t.name === `amarcode-${id}`,
-          )?.id;
-        }
-        const tunnel = record.tunnelId
-          ? await this.api<{ status: string; deleted_at?: string | null }>(
-              `${account}/${record.tunnelId}`,
-              "GET",
-              undefined,
-              true,
-            )
-          : undefined;
-        // Unknown/degraded status is never evidence of disconnection.
-        if (
-          tunnel &&
-          !tunnel.deleted_at &&
-          tunnel.status !== "down" &&
-          tunnel.status !== "inactive"
-        ) {
+    for (const id of ids) {
+      await this.installation(id, async () => {
+        const record = await this.state(
+          async () => (await this.storage.get<Database>("installations"))?.[id],
+        );
+        if (!record) return;
+        if (["deleted", "deleting", "reclaimed"].includes(record.status))
+          return;
+        try {
+          if (!record.tunnelId) {
+            const tunnels = await this.api<{ id: string; name: string }[]>(
+              `${account}?name=amarcode-${id}&is_deleted=false`,
+            );
+            record.tunnelId = tunnels.find(
+              (t) => t.name === `amarcode-${id}`,
+            )?.id;
+          }
+          const tunnel = record.tunnelId
+            ? await this.api<{ status: string; deleted_at?: string | null }>(
+                `${account}/${record.tunnelId}`,
+                "GET",
+                undefined,
+                true,
+              )
+            : undefined;
+          // Unknown/degraded status is never evidence of disconnection.
+          if (
+            tunnel &&
+            !tunnel.deleted_at &&
+            tunnel.status !== "down" &&
+            tunnel.status !== "inactive"
+          ) {
+            delete record.disconnectedSince;
+            if (record.status === "reclaiming") record.status = "ready";
+            await this.save(id, record);
+            return;
+          }
+          record.disconnectedSince ??= now;
+          await this.save(id, record);
+          if (now - record.disconnectedSince < TUNNEL_IDLE_GRACE_MS) return;
+          record.status = "reclaiming";
+          await this.save(id, record);
+          // Do not force-disconnect or rotate credentials here. Cloudflare refuses
+          // ordinary tunnel deletion if a connector raced us and reconnected.
+          if (record.tunnelId && !tunnel?.deleted_at)
+            await this.api(`${account}/${record.tunnelId}`, "DELETE");
+          await this.removeDns(record);
+          delete record.tunnelId;
+          delete record.dnsId;
+          delete record.dnsReadyAfter;
+          delete record.previousHostname;
           delete record.disconnectedSince;
-          if (record.status === "reclaiming") record.status = "ready";
-          await this.storage.put("installations", db);
-          continue;
+          record.status = "reclaimed";
+          await this.save(id, record);
+          summary.reclaimed++;
+        } catch {
+          // Preserve capacity and retry partial deletions on the next daily run.
+          summary.failed++;
         }
-        record.disconnectedSince ??= now;
-        await this.storage.put("installations", db);
-        if (now - record.disconnectedSince < TUNNEL_IDLE_GRACE_MS) continue;
-        record.status = "reclaiming";
-        await this.storage.put("installations", db);
-        // Do not force-disconnect or rotate credentials here. Cloudflare refuses
-        // ordinary tunnel deletion if a connector raced us and reconnected.
-        if (record.tunnelId && !tunnel?.deleted_at)
-          await this.api(`${account}/${record.tunnelId}`, "DELETE");
-        await this.removeDns(record);
-        delete record.tunnelId;
-        delete record.dnsId;
-        delete record.dnsReadyAfter;
-        delete record.previousHostname;
-        delete record.disconnectedSince;
-        record.status = "reclaimed";
-        await this.storage.put("installations", db);
-        summary.reclaimed++;
-      } catch {
-        // Preserve capacity and retry partial deletions on the next daily run.
-        summary.failed++;
-      }
+      });
     }
     return summary;
   }
@@ -278,35 +333,37 @@ export class Allocator {
     body?: unknown,
     allowMissing = false,
   ): Promise<T> {
-    // Use the global receiver when invoking native Workers fetch.
-    const response = await this.fetcher.call(
-      globalThis,
-      `https://api.cloudflare.com/client/v4${path}`,
-      {
-        method,
-        headers: {
-          authorization: `Bearer ${this.env.TUNNEL_CF_API_TOKEN}`,
-          "content-type": "application/json",
-          "user-agent": "amarcode-tunnel-allocator/1.0",
+    return this.network(async () => {
+      // Use the global receiver when invoking native Workers fetch.
+      const response = await this.fetcher.call(
+        globalThis,
+        `https://api.cloudflare.com/client/v4${path}`,
+        {
+          method,
+          headers: {
+            authorization: `Bearer ${this.env.TUNNEL_CF_API_TOKEN}`,
+            "content-type": "application/json",
+            "user-agent": "amarcode-tunnel-allocator/1.0",
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(10_000),
+          redirect: "manual",
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(10_000),
-        redirect: "manual",
-      },
-    );
-    if ((method === "DELETE" || allowMissing) && response.status === 404)
-      return undefined as T;
-    const operation = `${method} ${path.split("?")[0]}`;
-    const value = (await response.json().catch(() => {
-      throw new CloudflareApiError(response.status, [], operation);
-    })) as { success: boolean; result: T; errors?: { code: number }[] };
-    if (!response.ok || !value.success)
-      throw new CloudflareApiError(
-        response.status,
-        (value.errors ?? []).map((e) => e.code),
-        operation,
       );
-    return value.result;
+      if ((method === "DELETE" || allowMissing) && response.status === 404)
+        return undefined as T;
+      const operation = `${method} ${path.split("?")[0]}`;
+      const value = (await response.json().catch(() => {
+        throw new CloudflareApiError(response.status, [], operation);
+      })) as { success: boolean; result: T; errors?: { code: number }[] };
+      if (!response.ok || !value.success)
+        throw new CloudflareApiError(
+          response.status,
+          (value.errors ?? []).map((e) => e.code),
+          operation,
+        );
+      return value.result;
+    });
   }
   private async handle(
     request: Request,
@@ -337,133 +394,140 @@ export class Allocator {
     if (!SECRET.test(secret))
       return reply({ error: "Invalid installation credential." }, 401);
     const credentialHash = await hash(secret);
-    const db = (await this.storage.get<Database>("installations")) ?? {};
-    let record = db[id];
-    if (record && record.credentialHash !== credentialHash)
-      return reply({ error: "Invalid installation credential." }, 401);
-    let port: number | undefined;
-    let originTls: OriginTls | undefined;
-    if (request.method === "PUT") {
-      const body = enrollment as {
-        port?: unknown;
-        origin_tls?: unknown;
-      } | null;
-      if (
-        !body ||
-        !Number.isInteger(body.port) ||
-        Number(body.port) < 1 ||
-        Number(body.port) > 65535
-      )
-        return reply({ error: "Invalid listener port." }, 400);
-      port = Number(body.port);
-      if (body.origin_tls !== undefined) {
-        const tls = body.origin_tls as Partial<OriginTls> | null;
+    const prepared = await this.state(
+      async (): Promise<Installation | Response> => {
+        const db = (await this.storage.get<Database>("installations")) ?? {};
+        let record = db[id];
+        if (record && record.credentialHash !== credentialHash)
+          return reply({ error: "Invalid installation credential." }, 401);
+        let port: number | undefined;
+        let originTls: OriginTls | undefined;
+        if (request.method === "PUT") {
+          const body = enrollment as {
+            port?: unknown;
+            origin_tls?: unknown;
+          } | null;
+          if (
+            !body ||
+            !Number.isInteger(body.port) ||
+            Number(body.port) < 1 ||
+            Number(body.port) > 65535
+          )
+            return reply({ error: "Invalid listener port." }, 400);
+          port = Number(body.port);
+          if (body.origin_tls !== undefined) {
+            const tls = body.origin_tls as Partial<OriginTls> | null;
+            if (
+              !tls ||
+              typeof tls !== "object" ||
+              typeof tls.server_name !== "string" ||
+              tls.server_name.length > 253 ||
+              !/^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(
+                tls.server_name,
+              ) ||
+              (tls.ca_pool !== undefined &&
+                (typeof tls.ca_pool !== "string" ||
+                  tls.ca_pool.length > 512 ||
+                  !/^(?:\/|[A-Za-z]:[\\/])/.test(tls.ca_pool) ||
+                  /[\r\n\0]/.test(tls.ca_pool)))
+            )
+              return reply({ error: "Invalid origin TLS settings." }, 400);
+            originTls = {
+              server_name: tls.server_name,
+              ...(tls.ca_pool !== undefined ? { ca_pool: tls.ca_pool } : {}),
+            };
+          }
+        }
         if (
-          !tls ||
-          typeof tls !== "object" ||
-          typeof tls.server_name !== "string" ||
-          tls.server_name.length > 253 ||
-          !/^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(
-            tls.server_name,
-          ) ||
-          (tls.ca_pool !== undefined &&
-            (typeof tls.ca_pool !== "string" ||
-              tls.ca_pool.length > 512 ||
-              !/^(?:\/|[A-Za-z]:[\\/])/.test(tls.ca_pool) ||
-              /[\r\n\0]/.test(tls.ca_pool)))
-        )
-          return reply({ error: "Invalid origin TLS settings." }, 400);
-        originTls = {
-          server_name: tls.server_name,
-          ...(tls.ca_pool !== undefined ? { ca_pool: tls.ca_pool } : {}),
-        };
-      }
-    }
-    if (
-      !record ||
-      (record.status === "reclaimed" && request.method === "PUT")
-    ) {
-      if (request.method === "DELETE")
-        return reply({ error: "Installation not found." }, 404);
-      const capacity = Number(env.TUNNEL_CAPACITY ?? "5");
-      if (!Number.isInteger(capacity) || capacity < 1)
-        return reply({ error: "Invalid capacity configuration." }, 503);
-      if (
-        Object.values(db).filter(
-          (r) => !["deleted", "reclaimed"].includes(r.status),
-        ).length >= capacity
-      )
-        return reply({ error: "Installation capacity reached." }, 409);
-      record = db[id] = {
-        credentialHash,
-        hostname: record?.hostname ?? newHostname(db, domain),
-        retiredHostnames: record?.retiredHostnames,
-        port: port!,
-        originTls,
-        status: "provisioning",
-        disconnectedSince: Date.now(),
-      };
-      await this.storage.put("installations", db); // Reserve capacity BEFORE provisioning.
-    }
-    if (
-      request.method === "PUT" &&
-      ["ready", "provisioning"].includes(record.status)
-    ) {
-      // Older daemons only accept m-<full installation ID> names. Keep them
-      // operational while newer daemons opt in to short hostnames.
-      const shortNames =
-        request.headers.get("x-amarcode-tunnel-hostnames") === "short-v2";
-      const label = record.hostname.endsWith(`.${domain}`)
-        ? record.hostname.slice(0, -domain.length - 1)
-        : "";
-      const desired = shortNames
-        ? /^[a-f0-9]{8}$/.test(label)
-          ? record.hostname
-          : newHostname(db, domain)
-        : `m-${id}.${domain}`;
-      if (record.hostname !== desired && !record.previousHostname) {
-        record.retiredHostnames = [
-          ...(record.retiredHostnames ?? []),
-          record.hostname,
-        ];
-        record.previousHostname = record.hostname;
-        record.hostname = desired;
-        record.status = "provisioning";
-        delete record.dnsReadyAfter;
-        await this.storage.put("installations", db);
-      }
-    }
-    if (
-      port !== undefined &&
-      record.port !== port &&
-      (record.status === "ready" || record.status === "provisioning")
-    ) {
-      record.port = port;
-      record.status = "provisioning";
-      await this.storage.put("installations", db);
-    }
-    if (
-      request.method === "PUT" &&
-      ["ready", "provisioning"].includes(record.status) &&
-      JSON.stringify(record.originTls) !== JSON.stringify(originTls)
-    ) {
-      record.originTls = originTls;
-      record.status = "provisioning";
-      await this.storage.put("installations", db);
-    }
-    if (request.method === "PUT" && record.status === "reclaiming")
-      return reply(
-        { error: "Tunnel cleanup is pending; retry after daily cleanup." },
-        409,
-      );
-    if (
-      request.method === "PUT" &&
-      ["ready", "provisioning"].includes(record.status)
-    ) {
-      // Authenticated reconnects receive a full grace period to start cloudflared.
-      record.disconnectedSince = Date.now();
-      await this.storage.put("installations", db);
-    }
+          !record ||
+          (record.status === "reclaimed" && request.method === "PUT")
+        ) {
+          if (request.method === "DELETE")
+            return reply({ error: "Installation not found." }, 404);
+          const capacity = Number(env.TUNNEL_CAPACITY ?? "5");
+          if (!Number.isInteger(capacity) || capacity < 1)
+            return reply({ error: "Invalid capacity configuration." }, 503);
+          if (
+            Object.values(db).filter(
+              (r) => !["deleted", "reclaimed"].includes(r.status),
+            ).length >= capacity
+          )
+            return reply({ error: "Installation capacity reached." }, 409);
+          record = db[id] = {
+            credentialHash,
+            hostname: record?.hostname ?? newHostname(db, domain),
+            retiredHostnames: record?.retiredHostnames,
+            port: port!,
+            originTls,
+            status: "provisioning",
+            disconnectedSince: Date.now(),
+          };
+          await this.storage.put("installations", db); // Reserve capacity BEFORE provisioning.
+        }
+        if (
+          request.method === "PUT" &&
+          ["ready", "provisioning"].includes(record.status)
+        ) {
+          // Older daemons only accept m-<full installation ID> names. Keep them
+          // operational while newer daemons opt in to short hostnames.
+          const shortNames =
+            request.headers.get("x-amarcode-tunnel-hostnames") === "short-v2";
+          const label = record.hostname.endsWith(`.${domain}`)
+            ? record.hostname.slice(0, -domain.length - 1)
+            : "";
+          const desired = shortNames
+            ? /^[a-f0-9]{8}$/.test(label)
+              ? record.hostname
+              : newHostname(db, domain)
+            : `m-${id}.${domain}`;
+          if (record.hostname !== desired && !record.previousHostname) {
+            record.retiredHostnames = [
+              ...(record.retiredHostnames ?? []),
+              record.hostname,
+            ];
+            record.previousHostname = record.hostname;
+            record.hostname = desired;
+            record.status = "provisioning";
+            delete record.dnsReadyAfter;
+            await this.storage.put("installations", db);
+          }
+        }
+        if (
+          port !== undefined &&
+          record.port !== port &&
+          (record.status === "ready" || record.status === "provisioning")
+        ) {
+          record.port = port;
+          record.status = "provisioning";
+          await this.storage.put("installations", db);
+        }
+        if (
+          request.method === "PUT" &&
+          ["ready", "provisioning"].includes(record.status) &&
+          JSON.stringify(record.originTls) !== JSON.stringify(originTls)
+        ) {
+          record.originTls = originTls;
+          record.status = "provisioning";
+          await this.storage.put("installations", db);
+        }
+        if (request.method === "PUT" && record.status === "reclaiming")
+          return reply(
+            { error: "Tunnel cleanup is pending; retry after daily cleanup." },
+            409,
+          );
+        if (
+          request.method === "PUT" &&
+          ["ready", "provisioning"].includes(record.status)
+        ) {
+          // Authenticated reconnects receive a full grace period to start cloudflared.
+          record.disconnectedSince = Date.now();
+          await this.storage.put("installations", db);
+        }
+        return record;
+      },
+    );
+    if (prepared instanceof Response) return prepared;
+    const record = prepared;
     const account = `/accounts/${env.TUNNEL_CF_ACCOUNT_ID}/cfd_tunnel`;
     const dns = `/zones/${env.TUNNEL_CF_ZONE_ID}/dns_records`;
     const name = `amarcode-${id}`;
@@ -473,12 +537,12 @@ export class Allocator {
         `${account}?name=${name}&is_deleted=false`,
       );
       record.tunnelId = existing.find((t) => t.name === name)?.id;
-      if (record.tunnelId) await this.storage.put("installations", db);
+      if (record.tunnelId) await this.save(id, record);
     }
     if (request.method === "DELETE") {
       if (record.status === "deleted") return reply({ status: "deleted" });
       record.status = "deleting";
-      await this.storage.put("installations", db);
+      await this.save(id, record);
       await this.removeDns(record);
       if (record.tunnelId) {
         // Stop old credentials from reconnecting between disconnection and deletion.
@@ -495,7 +559,7 @@ export class Allocator {
         await this.api(`${account}/${record.tunnelId}`, "DELETE");
       }
       record.status = "deleted";
-      await this.storage.put("installations", db); // Tombstone: hostname is never reused.
+      await this.save(id, record); // Tombstone: hostname is never reused.
       return reply({ status: "deleted" });
     }
     if (record.status === "deleted" || record.status === "deleting")
@@ -509,7 +573,7 @@ export class Allocator {
         config_src: "cloudflare",
       });
       record.tunnelId = tunnel.id;
-      await this.storage.put("installations", db);
+      await this.save(id, record);
     }
     if (record.status !== "ready") {
       await this.api(`${account}/${record.tunnelId}/configurations`, "PUT", {
@@ -564,7 +628,7 @@ export class Allocator {
         delete record.previousHostname;
       }
       record.status = "ready";
-      await this.storage.put("installations", db);
+      await this.save(id, record);
     }
     const token = await this.api<string>(`${account}/${record.tunnelId}/token`);
     return reply({
@@ -575,6 +639,7 @@ export class Allocator {
       port: record.port,
       dns_ready_after: record.dnsReadyAfter,
       origin_tls: record.originTls,
+      reuse_until: record.disconnectedSince! + TUNNEL_REUSE_MS,
     });
   }
 }

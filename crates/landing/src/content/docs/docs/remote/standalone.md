@@ -129,6 +129,19 @@ Restart with the same root, data directory, identity files, and security setting
 The desktop can reconnect to its existing chats. A named tunnel normally reuses
 its hostname; after inactivity cleanup, recovery is subject to available capacity.
 
+With a matching updated registry worker, the daemon privately caches the named
+tunnel assignment for up to 24 hours. Restarting with the same installation,
+listener port, and origin TLS settings can start the connector without another
+allocation request. Expired or changed settings require enrollment again. If a
+cached connector fails, the daemon refreshes the assignment once and retries.
+An older registry worker continues to work but does not enable this reuse.
+
+The cache is `named-assignment.json` beside `named-installation.json`. It contains
+a connector credential: keep it private, just like the installation identity.
+You can remove only the cache file while the connector is stopped to force a
+fresh allocation on the next start. `amarcoded tunnel --rm` invalidates the cache
+and revokes the remote installation; deleting the cache alone does not revoke it.
+
 Treat the data directory, access token, and `named-installation.json` as private.
 Do not delete them during a routine restart. E2EE, certificates, and CRL settings
 apply to standalone instances too; set them in the environment that actually
