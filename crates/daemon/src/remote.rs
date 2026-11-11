@@ -207,17 +207,29 @@ pub async fn run_shared(local: Config, setup: Setup, no_tunnel: bool) -> Result<
 
 /// Attach Cloudflare to a live authenticated listener; never opens a database.
 pub async fn tunnel(local: Config, setup: Setup) -> Result<()> {
-    let remote = access_config(&local, &setup)?;
-    validate(&remote, false)?;
-    check_health(&remote).await?;
-    finish(
-        remote,
-        setup,
-        false,
-        tokio::spawn(std::future::pending()),
-        None,
-    )
-    .await
+    // Install the termination handler before any setup work: a detached tunnel
+    // must stop cleanly when it is signalled, rather than dying by signal after
+    // handing the daemon its own lifetime.
+    let shutdown = crate::rpc::server::shutdown_signal();
+    tokio::pin!(shutdown);
+    let work = async {
+        let remote = access_config(&local, &setup)?;
+        validate(&remote, false)?;
+        check_health(&remote).await?;
+        finish(
+            remote,
+            setup,
+            false,
+            tokio::spawn(std::future::pending()),
+            None,
+        )
+        .await
+    };
+    tokio::select! {
+        biased;
+        _ = &mut shutdown => Ok(()),
+        result = work => result,
+    }
 }
 
 async fn check_health(remote: &Config) -> Result<()> {
@@ -716,8 +728,7 @@ async fn request(
             method,
             format!("{REMOTE_ALLOCATOR_ORIGIN}/v1/tunnels/{}", identity.id),
         )
-        .bearer_auth(&identity.credential)
-        .header("x-amarcode-tunnel-hostnames", "short-v2");
+        .bearer_auth(&identity.credential);
     if let Some((port, origin_tls)) = enrollment {
         // The allocator only validates this for previously unknown installation
         // IDs, so sending it on reconnect is harmless and covers allocator resets.
@@ -829,6 +840,8 @@ async fn fetch_assignment(
 fn validate_assignment(value: &Assignment, identity: &Identity, port: u16) -> Result<()> {
     let url =
         reqwest::Url::parse(&value.url).map_err(|_| Error::msg("Invalid allocated tunnel URL"))?;
+    // Only short labels are issued now; the legacy m-<installation-id> names
+    // are retired.
     let short_hostname = [".amarjay.com", ".amarcode.amarjay.com"]
         .iter()
         .any(|suffix| {
@@ -839,7 +852,6 @@ fn validate_assignment(value: &Assignment, identity: &Identity, port: u16) -> Re
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
             })
         });
-    let legacy_hostname = value.hostname.starts_with(&format!("m-{}.", identity.id));
     if value.installation_id != identity.id
         || value.port != port
         || url.scheme() != "wss"
@@ -850,7 +862,7 @@ fn validate_assignment(value: &Assignment, identity: &Identity, port: u16) -> Re
         || !url.username().is_empty()
         || url.password().is_some()
         || url.port().is_some()
-        || !(short_hostname || legacy_hostname)
+        || !short_hostname
         || value.tunnel_token.is_empty()
         || value.tunnel_token.len() > 8192
     {
@@ -1644,7 +1656,7 @@ mod tests {
             id: uuid::Uuid::new_v4().to_string(),
             credential: "a".repeat(64),
         };
-        let hostname = format!("m-{}.example.com", identity.id);
+        let hostname = "a7c42e19.amarjay.com".to_owned();
         let mut assignment = Assignment {
             installation_id: identity.id.clone(),
             url: format!("wss://{hostname}/rpc"),
@@ -1656,16 +1668,14 @@ mod tests {
             origin_tls: None,
         };
         assert!(validate_assignment(&assignment, &identity, 43721).is_ok());
-        assignment.hostname = "a7c42e19.amarjay.com".into();
-        assignment.url = format!("wss://{}/rpc", assignment.hostname);
-        assert!(validate_assignment(&assignment, &identity, 43721).is_ok());
         for invalid in [
-            "a7c42e19.evil.example",
-            "a7c42e19.amarjay.com.evil.example",
-            "a7c42e1.amarjay.com",
+            format!("m-{}.amarjay.com", identity.id),
+            "a7c42e19.evil.example".to_owned(),
+            "a7c42e19.amarjay.com.evil.example".to_owned(),
+            "a7c42e1.amarjay.com".to_owned(),
         ] {
-            assignment.hostname = invalid.into();
-            assignment.url = format!("wss://{invalid}/rpc");
+            assignment.hostname = invalid;
+            assignment.url = format!("wss://{}/rpc", assignment.hostname);
             assert!(validate_assignment(&assignment, &identity, 43721).is_err());
         }
         assignment.hostname = "a7c42e19.amarjay.com".into();

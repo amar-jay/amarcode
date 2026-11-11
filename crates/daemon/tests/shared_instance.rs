@@ -188,13 +188,65 @@ async fn cloudflare_attaches_without_owning_the_daemon_lifetime() {
         .success());
     let connector = root.join("cloudflared");
     let marker = root.join("connector-started");
-    std::fs::write(&connector, format!("#!/usr/bin/env python3\nimport pathlib, time\npathlib.Path({:?}).touch()\ntime.sleep(120)\n", marker.to_str().unwrap())).unwrap();
+    // A POSIX shell stub keeps this portable: `python3` is not installed
+    // everywhere, and a missing interpreter exits before the marker exists.
+    // `exec` leaves no child behind, so signaling the connector stops it.
+    let marker_path = marker.to_string_lossy().replace('\'', r"'\''");
+    std::fs::write(
+        &connector,
+        format!("#!/bin/sh\n: > '{marker_path}'\nexec sleep 120\n"),
+    )
+    .unwrap();
     std::fs::set_permissions(&connector, std::fs::Permissions::from_mode(0o700)).unwrap();
     std::fs::write(
         root.join("remote.json"),
         json!({"enabled":true,"cloudflared":connector}).to_string(),
     )
     .unwrap();
+    // Seed a valid installation and cached assignment so the tunnel attaches
+    // without reaching the allocator (or the network at all). Attaching to a
+    // live daemon is what this test covers; enrollment is covered by the
+    // allocator's own tests and must never depend on production here.
+    let installation_id = uuid::Uuid::new_v4().to_string();
+    let installation_credential = "c".repeat(64);
+    let identity_path = root.join("named-installation.json");
+    std::fs::write(
+        &identity_path,
+        json!({"id": installation_id, "credential": installation_credential}).to_string(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&identity_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    // Short hostnames are the only scheme now; a legacy m-<id> name is rejected.
+    let hostname = "a7c42e19.amarjay.com".to_owned();
+    let credential_hash = {
+        use sha2::Digest;
+        format!(
+            "{:x}",
+            sha2::Sha256::digest(installation_credential.as_bytes())
+        )
+    };
+    let assignment_path = root.join("named-assignment.json");
+    std::fs::write(
+        &assignment_path,
+        json!({
+            "version": 1,
+            "allocator": "https://updates.amarcode.amarjay.com",
+            "credential_hash": credential_hash,
+            "assignment": {
+                "installation_id": installation_id,
+                "hostname": hostname,
+                "url": format!("wss://{hostname}/rpc"),
+                "tunnel_token": "test-connector-token",
+                "port": remote.split(':').nth(1).unwrap().parse::<u16>().unwrap(),
+                "origin_tls": null,
+                "dns_ready_after": null,
+                "reuse_until": chrono::Utc::now().timestamp_millis().max(0) as u64 + 3_600_000,
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&assignment_path, std::fs::Permissions::from_mode(0o600)).unwrap();
     let mut daemon = Process(command(base.path(), &local, &remote).spawn().unwrap());
     ready(&mut daemon, &local).await;
     let mut tunnel = Process(
@@ -216,7 +268,8 @@ async fn cloudflare_attaches_without_owning_the_daemon_lifetime() {
         nix::sys::signal::Signal::SIGTERM,
     )
     .unwrap();
-    assert!(tunnel.0.wait().unwrap().success());
+    let status = tunnel.0.wait().unwrap();
+    assert!(status.success(), "tunnel exited with {status}");
     assert!(daemon.0.try_wait().unwrap().is_none());
     assert_eq!(
         tcp(&local, json!({"method":"health"})).await["result"]["status"],
@@ -439,6 +492,10 @@ async fn ssh_cli_prompts_for_hidden_token_and_runs_a_real_remote_shell() {
                 phase = 1;
             }
             if phase == 1 && output.contains("Daemon access token:") {
+                // rpassword prints the prompt before disarming echo, so answering
+                // the instant it appears can echo a pasted token. Give the
+                // disarming call a moment to land before typing.
+                tokio::time::sleep(Duration::from_millis(150)).await;
                 writer.write_all(format!("{token}\n").as_bytes()).unwrap();
                 phase = 2;
             }
