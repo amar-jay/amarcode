@@ -36,23 +36,3 @@ export function checkWranglerAuthentication(): void {
   requireAuthenticatedWrangler(result.stdout?.toString() ?? "");
   console.log("Cloudflare authentication verified.");
 }
-
-export function registryHasChanges(): boolean {
-  return (
-    run(
-      [
-        "git",
-        "status",
-        "--porcelain",
-        "--untracked-files=all",
-        "--",
-        "crates/amarcode-registry",
-      ],
-      {
-        quiet: true,
-      },
-    )
-      .stdout!.toString()
-      .trim().length > 0
-  );
-}

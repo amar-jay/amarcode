@@ -71,19 +71,10 @@ describe("registry deployment decision", () => {
     expect(parseArgs(["all"]).products).toEqual(["daemon", "acp", "app"]);
   });
 
-  test("does not deploy unchanged registry during binary publication", async () => {
-    const plan = await interactive(
-      parseArgs(["acp", "--version", "1.2.3", "--non-interactive"]),
-      false,
-    );
-    expect(plan?.deployRegistry).toBe(false);
-  });
-
-  test("changed registry needs an explicit decision without a terminal", async () => {
+  test("requires a deployment decision without a terminal regardless of Git changes", async () => {
     await expect(
       interactive(
         parseArgs(["acp", "--version", "1.2.3", "--non-interactive"]),
-        true,
       ),
     ).rejects.toThrow(/--deploy-registry or --skip-deploy/);
   });
@@ -95,7 +86,6 @@ describe("registry deployment decision", () => {
     ] as const) {
       const plan = await interactive(
         parseArgs(["acp", "--version", "1.2.3", "--non-interactive", flag]),
-        true,
       );
       expect(plan?.deployRegistry).toBe(expected);
     }
@@ -104,7 +94,7 @@ describe("registry deployment decision", () => {
     );
   });
 
-  test("asks yes/no only for changed files and respects both answers", async () => {
+  test("always asks yes/no unless a flag supplies the answer", async () => {
     const options = { skipDeploy: false, deployRegistry: false };
     for (const answer of [true, false]) {
       let calls = 0;
@@ -112,21 +102,21 @@ describe("registry deployment decision", () => {
         calls++;
         return answer;
       };
-      expect(await inquireRegistryDeployment(options, true, confirm)).toBe(
-        answer,
-      );
-      expect(calls).toBe(1);
-      expect(await inquireRegistryDeployment(options, false, confirm)).toBe(
-        false,
-      );
+      expect(await inquireRegistryDeployment(options, confirm)).toBe(answer);
       expect(calls).toBe(1);
       expect(
         await inquireRegistryDeployment(
           { ...options, skipDeploy: true },
-          true,
           confirm,
         ),
       ).toBe(false);
+      expect(calls).toBe(1);
+      expect(
+        await inquireRegistryDeployment(
+          { ...options, deployRegistry: true },
+          confirm,
+        ),
+      ).toBe(true);
       expect(calls).toBe(1);
     }
   });

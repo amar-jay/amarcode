@@ -33,16 +33,13 @@ import {
   releaseCommitMessage,
   type BinaryProductId,
 } from "./release/products";
-import {
-  checkWranglerAuthentication,
-  registryHasChanges,
-} from "./release/preflight";
+import { checkWranglerAuthentication } from "./release/preflight";
 import { loadRemoteManifest, upload } from "./release/r2";
 
 export async function publish(args: string[]) {
   const options = parseArgs(args);
   checkWranglerAuthentication();
-  const selected = await interactive(options, registryHasChanges());
+  const selected = await interactive(options);
   if (!selected) return;
   await execute(selected);
 }

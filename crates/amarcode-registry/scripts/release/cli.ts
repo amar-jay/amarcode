@@ -73,8 +73,8 @@ Options:
   --target <triple>         Rust target; repeat for multiple targets
   --bucket <name>           R2 bucket (default: amarcode-daemons)
   --skip-build              Publish already-built release binaries
-  --skip-deploy             Decline registry deployment when files changed
-  --deploy-registry         Accept registry deployment when files changed
+  --skip-deploy             Skip registry Worker deployment
+  --deploy-registry         Deploy the registry Worker
   --dry-run                 Build and generate metadata without Cloudflare writes
   --allow-dirty             Allow production publish from a dirty worktree
   --non-interactive         Fail instead of opening the release TUI
@@ -264,15 +264,13 @@ async function inquireAppPublication(): Promise<
 
 export async function inquireRegistryDeployment(
   options: Pick<ParsedOptions, "skipDeploy" | "deployRegistry">,
-  changed: boolean,
   confirm: () => Promise<boolean | symbol> = () =>
     prompts.confirm({
-      message:
-        "Files in crates/amarcode-registry changed. Deploy the registry Worker?",
+      message: "Deploy the registry Worker?",
       initialValue: false,
     }),
 ): Promise<boolean | null> {
-  if (!changed || options.skipDeploy) return false;
+  if (options.skipDeploy) return false;
   if (options.deployRegistry) return true;
   const answer = await confirm();
   if (prompts.isCancel(answer)) return cancelled(answer);
@@ -281,7 +279,6 @@ export async function inquireRegistryDeployment(
 
 export async function interactive(
   options: ParsedOptions,
-  registryChanged = false,
 ): Promise<ReleasePlan | null> {
   const tty = process.stdin.isTTY && process.stdout.isTTY;
   const binarySelected = options.products.filter(
@@ -290,8 +287,7 @@ export async function interactive(
   const missingVersions = binarySelected.filter(
     (id) => !options.versionsProvided[id],
   );
-  const needsRegistryAnswer =
-    registryChanged && !options.skipDeploy && !options.deployRegistry;
+  const needsRegistryAnswer = !options.skipDeploy && !options.deployRegistry;
   const needsTui =
     needsRegistryAnswer ||
     !options.productsProvided ||
@@ -301,13 +297,13 @@ export async function interactive(
   if (!needsTui) {
     return finalize({
       ...options,
-      deployRegistry: registryChanged && options.deployRegistry,
+      deployRegistry: options.deployRegistry,
     });
   }
   if (!tty || options.nonInteractive) {
     throw new Error(
       needsRegistryAnswer
-        ? "registry files changed; supply --deploy-registry or --skip-deploy for non-interactive publication"
+        ? "supply --deploy-registry or --skip-deploy for non-interactive publication"
         : "no interactive terminal; supply --products and product versions, or omit --non-interactive",
     );
   }
@@ -315,10 +311,7 @@ export async function interactive(
   prompts.intro("Amarcode release");
   prompts.note(`Git commit: ${gitCommit()}`, "Release source");
 
-  const deployRegistry = await inquireRegistryDeployment(
-    options,
-    registryChanged,
-  );
+  const deployRegistry = await inquireRegistryDeployment(options);
   if (deployRegistry === null) return null;
 
   let products = options.products;
