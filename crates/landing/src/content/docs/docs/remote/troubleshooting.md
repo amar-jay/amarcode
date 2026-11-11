@@ -121,6 +121,24 @@ This is expected for an E2EE-required daemon. Use the
 certificate environment settings do not configure browser trust or provide
 browser E2EE.
 
+## Tunnel enrollment is denied
+
+`Named tunnel enrollment was denied; set AMARCODE_TUNNEL_ENROLLMENT_CODE to the operator enrollment code`
+
+or the equivalent `403` from the allocator means this machine does not have the
+enrollment code, or has the wrong one. First registration needs it; later starts
+reuse the saved identity and do not.
+
+1. Ask the service operator for the current code.
+2. Export it, or store it in `remote.json` as `enrollment_code` with `0600`
+   permissions.
+3. Start the daemon again. A rejected attempt reserves no capacity, so retrying
+   costs nothing.
+
+The code is not the access token. If the operator serves an allocator with no
+code configured, nothing needs to be set and this error should not appear. See
+[enrollment code](/docs/remote/setup/#enrollment-code).
+
 ## Company policy rejects startup or tunnel enrollment
 
 The machine policy is an administrator-controlled file, not a desktop preference.

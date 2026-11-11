@@ -31,6 +31,10 @@ On a Linux host, [install the daemon](/docs/remote/setup/), then run:
 amarcoded --remote
 ```
 
+A new installation may need the operator's
+[enrollment code](/docs/remote/setup/#enrollment-code) before it can register a
+public hostname. Ask for it if enrollment is refused; later starts do not need it.
+
 Keep that process running. It prints a Remote URL and access token. In the desktop,
 open **Settings → Connection**, select **Remote daemon**, and use those values.
 You do not need to generate certificates for the default Cloudflare tunnel.

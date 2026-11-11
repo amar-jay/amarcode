@@ -89,6 +89,39 @@ Stopping the connector leaves the custom daemon running. If
 `allow_managed_tunnels` is `false`, this command is rejected rather than falling
 back to another public route.
 
+## Control tunnel enrollment
+
+Anyone who can reach the public installer can otherwise register an installation
+and consume one of the allocator's slots. The tunnel Worker gates new
+registrations with a shared enrollment code:
+
+```sh
+bunx wrangler secret put TUNNEL_ENROLLMENT_CODE --name amarcode-registry
+```
+
+| State of the secret | Behavior                                                    |
+| ------------------- | ----------------------------------------------------------- |
+| Set                 | New installation IDs return `403` without the matching code |
+| Deleted             | Enrollment is open again                                    |
+
+Enforcement is exactly the presence of the secret; there is no separate switch.
+Existing installations reconnect, update, and delete using their private
+installation credential, so setting or rotating the code never locks out a
+machine that already registered. Rejected attempts are refused before capacity
+is reserved, so they consume no slots and make no Cloudflare API calls.
+
+Give the code to whoever installs machines, and pass it with
+`install.sh --enrollment-code` or `AMARCODE_TUNNEL_ENROLLMENT_CODE`. It is stored
+per machine in `remote.json` (`0600`). Distribute it the way you would a shared
+password, not in project files or shell history.
+
+Before enabling enforcement, make sure the daemons you support can send it:
+releases older than the ones that read the code fail with `403` on first
+enrollment. Rotating the value is safe because no client keeps it — every
+machine reads its own copy from `remote.json` or the environment at enrollment
+time. To retire the control entirely, delete the secret and new installs enroll
+freely again.
+
 ## Persist settings in the right process
 
 Exporting variables in a terminal affects programs launched from that shell. It

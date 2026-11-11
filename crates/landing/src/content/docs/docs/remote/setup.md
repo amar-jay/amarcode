@@ -22,13 +22,52 @@ This prepares remote access. It does not start the daemon.
 
 Use the start command printed by the installer; it works in your current terminal. If `amarcoded` is not found yet, open a new terminal or use that full command path. `amarcode-daemon` is the same command.
 
+## Enrollment code
+
+Registering a new installation requires an **enrollment code** issued by whoever
+runs the tunnel service. Ask for it before you start. It is not the access token,
+and it is not needed on later starts.
+
+Pass it to the installer with `--enrollment-code`:
+
+```bash
+curl -fsSL https://amarcode.amarjay.com/install.sh | bash -s -- --enrollment-code '<code>'
+```
+
+The installer stores it in `remote.json` under the instance directory with
+`0600` permissions, so restarts, the service, and `amarcoded tunnel` keep working
+without repeating the flag. To supply it another way, set
+`AMARCODE_TUNNEL_ENROLLMENT_CODE` in the environment of the daemon or connector
+instead; the environment takes precedence over the stored value.
+
+| Mode                                | Enrollment code needed |
+| ----------------------------------- | ---------------------- |
+| First start of a new installation   | Yes                    |
+| Later starts with the same identity | No                     |
+| `--no-tunnel` loopback mode         | No                     |
+
+A rejected code prints
+`Named tunnel enrollment was denied; set AMARCODE_TUNNEL_ENROLLMENT_CODE to the operator enrollment code`
+and returns `403` before any capacity is reserved, so retrying with the correct
+code does not consume a slot. See
+[troubleshooting](/docs/remote/troubleshooting/#tunnel-enrollment-is-denied).
+
+:::caution[Keep the code private]
+The code admits anyone who can reach the public installer to consume an
+installation slot. Treat it like a shared password, and rotate it if it leaks.
+:::
+
+If no code is configured by the service operator, enrollment is open and the
+installer needs no flag.
+
 ## Start and connect
 
 Public remote access uses a persistent named hostname. First-time registration
-is automatic for the standard setup; no enrollment code or certificate setup is
-needed. Your private installation identity is saved on this machine; later starts reuse the same
-hostname. If the service reports that named tunnels are unavailable or full,
-contact the service operator; local TLS certificates do not fix allocation errors.
+needs the [enrollment code](#enrollment-code) described above; certificate setup
+is not required. Your private installation identity is saved on this machine;
+later starts reuse the same hostname and do not resend the code. If the service
+reports that named tunnels are unavailable or full, contact the service operator;
+local TLS certificates do not fix allocation errors.
 
 ```sh
 amarcoded --remote
